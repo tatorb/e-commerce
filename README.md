@@ -20,6 +20,7 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
 | Publicación | `Publication` | El producto armado para una tienda: título, descripción, atributos, precio, ID externo, link, estado. |
 | Catálogo | (pantalla) | La lista de todas las publicaciones, en `/publicaciones`. Desde ahí se eligen las que entran al pipeline. |
 | Pipeline | `Publication.pipelineStatus` | La etapa que se ve de cada publicación: Sin tocar, En pipeline (con su paso), Corregida o Descartada (con su motivo). Solo entran las que tienen código del canal. |
+| Tablero | (pantalla) | La sección Pipeline: una columna por paso, con una tarjeta por publicación. Al tocarla se abre su paso, con los botones para volver, avanzar, marcarla como corregida o sacarla del pipeline. |
 | Paso del pipeline | `PipelineStep` | Información, Título, Imágenes, Videos, Organización de multimedia, Descripción y Publicación, en ese orden. Al sacar una publicación se conserva el paso, para retomar ahí. |
 | Movimiento del pipeline | `PipelineMovement` | Cuándo entró y salió una publicación de cada paso, quién la movió y por qué salió: avanzó, volvió, se sacó o terminó. |
 | Título bloqueado | (se calcula) | Cuando el canal no deja cambiar el título. Lo dicen las ventas de la última medición, con la regla de cada canal; si no hay datos, se marca a mano en la publicación. |

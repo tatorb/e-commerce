@@ -89,6 +89,16 @@ function Checkbox({
   );
 }
 
+/** La etiqueta del pipeline; si está en el pipeline, lleva a su paso. */
+function PipelineCell({ accountSlug, row }: { accountSlug: string; row: CatalogRow }) {
+  if (row.pipelineStatus !== 'IN_PIPELINE') return <PipelineBadge state={row} />;
+  return (
+    <Link href={`/a/${accountSlug}/pipeline/${row.id}`} className="rounded-full hover:opacity-80" title="Abrir su paso">
+      <PipelineBadge state={row} />
+    </Link>
+  );
+}
+
 function rowHint(r: CatalogRow): string {
   if (!r.externalId) return 'Sin código del canal: no puede entrar al pipeline.';
   if (r.pipelineStatus === 'IN_PIPELINE') return 'Ya está en el pipeline.';
@@ -184,7 +194,7 @@ export function CatalogTable({ accountSlug, rows }: { accountSlug: string; rows:
                   <ScoreBadge score={p.score} className="shrink-0" />
                 </div>
                 <div className="flex flex-wrap gap-1.5">
-                  <PipelineBadge state={p} />
+                  <PipelineCell accountSlug={accountSlug} row={p} />
                   <ChannelStatusBadge status={p.channelStatus} />
                 </div>
                 <div className="text-xs text-muted-foreground truncate">
@@ -252,7 +262,7 @@ export function CatalogTable({ accountSlug, rows }: { accountSlug: string; rows:
                     <ChannelStatusBadge status={p.channelStatus} />
                   </TableCell>
                   <TableCell>
-                    <PipelineBadge state={p} />
+                    <PipelineCell accountSlug={accountSlug} row={p} />
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
                     <Count value={p.visits} />

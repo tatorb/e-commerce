@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db';
+import type { Prisma } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
 import { parseMetrics } from '@/domain/measurements';
 import { resolveTitleLock } from '@/domain/title-lock';
@@ -26,17 +27,18 @@ export async function loadRulesByChannel(accountId: string): Promise<Map<string,
 
 export type ScoredPublication = Awaited<ReturnType<typeof listScoredPublications>>[number];
 
-export async function listScoredPublications(accountId: string) {
+export async function listScoredPublications(accountId: string, where: Prisma.PublicationWhereInput = {}) {
   const [rules, publications] = await Promise.all([
     loadRulesByChannel(accountId),
     prisma.publication.findMany({
-      where: { product: { accountId } },
+      where: { ...where, product: { accountId } },
       select: {
         id: true,
         title: true,
         description: true,
         attributes: true,
         externalId: true,
+        url: true,
         channelStatus: true,
         stage: true,
         pipelineStatus: true,
@@ -73,8 +75,10 @@ export async function listScoredPublications(accountId: string) {
       title: p.title ?? p.product.name,
       productId: p.product.id,
       externalId: p.externalId,
+      url: p.url,
       skus: p.product.variants.map((v) => v.sku).filter((s): s is string => Boolean(s)),
       storeName: p.store.name,
+      channelName: channel.name,
       channelStatus: p.channelStatus,
       stage: p.stage,
       pipelineStatus: p.pipelineStatus,

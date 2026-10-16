@@ -1,5 +1,9 @@
 import { notFound } from 'next/navigation';
-import { ExternalLink } from 'lucide-react';
+import Link from 'next/link';
+import { ExternalLink, KanbanSquare } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { AddToPipelineButton } from '@/components/pipeline/AddToPipelineButton';
+import { PipelineHistory } from '@/components/pipeline/PipelineHistory';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Breadcrumb } from '@/components/navigation/Breadcrumb';
@@ -154,7 +158,29 @@ export default async function ProductPage({ params }: { params: Promise<{ cuenta
                     </div>
                   </div>
                   {pub.externalId ? (
-                    <TitleLockControl accountSlug={account.slug} publicationId={pub.id} lock={titleLock} />
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                      {pub.pipelineStatus === 'IN_PIPELINE' ? (
+                        <Button size="sm" variant="outline" asChild>
+                          <Link href={`/a/${account.slug}/pipeline/${pub.id}`}>
+                            <KanbanSquare className="h-4 w-4" />
+                            Abrir en el pipeline
+                          </Link>
+                        </Button>
+                      ) : (
+                        <AddToPipelineButton
+                          accountSlug={account.slug}
+                          publicationId={pub.id}
+                          label={
+                            pub.pipelineStatus === 'CORRECTED'
+                              ? 'Volver a corregirla'
+                              : pub.pipelineStatus === 'DISCARDED'
+                                ? 'Volver a agregarla al pipeline'
+                                : 'Agregar al pipeline'
+                          }
+                        />
+                      )}
+                      <TitleLockControl accountSlug={account.slug} publicationId={pub.id} lock={titleLock} />
+                    </div>
                   ) : null}
                   {pub.url ? (
                     <a
@@ -217,6 +243,12 @@ export default async function ProductPage({ params }: { params: Promise<{ cuenta
                             </li>
                           ))}
                       </ul>
+                    </div>
+                  ) : null}
+                  {pub.pipelineMovements.length > 0 ? (
+                    <div className="space-y-2">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Historial del pipeline</p>
+                      <PipelineHistory movements={pub.pipelineMovements} timeZone={account.timezone} />
                     </div>
                   ) : null}
                   <PublicationProposal

@@ -57,6 +57,10 @@ export async function getProduct(accountId: string, productId: string) {
             orderBy: { enteredAt: 'desc' },
             include: { user: { select: { name: true } } },
           },
+          pipelineMovements: {
+            orderBy: { enteredAt: 'desc' },
+            include: { exitedBy: { select: { name: true } } },
+          },
           measurements: { orderBy: { takenAt: 'desc' } },
           // La vigente, o la última que se decidió.
           proposals: {
