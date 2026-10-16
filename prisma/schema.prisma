@@ -29,6 +29,8 @@ model User {
   sessions       Session[]
   authAccounts   AuthAccount[]
   stageMovements StageMovement[]
+  importRuns     ImportRun[]
+  importMappings ImportMapping[]
 
   @@map("users")
 }
@@ -92,8 +94,10 @@ model Account {
   timezone  String    @default("America/Argentina/Buenos_Aires")
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
-  stores    Store[]
-  products  Product[]
+  stores         Store[]
+  products       Product[]
+  importMappings ImportMapping[]
+  importRuns     ImportRun[]
 
   @@map("accounts")
 }
@@ -135,6 +139,7 @@ model Store {
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
   publications     Publication[]
+  importRuns       ImportRun[]
 
   @@unique([accountId, channelId, name])
   @@map("stores")
@@ -165,6 +170,9 @@ model Product {
   specs           Json            @default("[]")
   notes           String?
   source          RecordSource    @default(MANUAL)
+  // Importación que lo creó, para poder deshacerla.
+  importRunId     String?
+  importRun       ImportRun?      @relation(fields: [importRunId], references: [id], onDelete: SetNull)
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
   variants        ProductVariant[]
@@ -173,6 +181,7 @@ model Product {
   publications    Publication[]
 
   @@index([accountId])
+  @@index([importRunId])
   @@map("products")
 }
 
@@ -264,12 +273,17 @@ model Publication {
   channelStatus  ChannelStatus   @default(ACTIVE)
   stage          Stage           @default(IMPORTED)
   source         RecordSource    @default(MANUAL)
+  // Importación que la creó, para poder deshacerla.
+  importRunId    String?
+  importRun      ImportRun?      @relation(fields: [importRunId], references: [id], onDelete: SetNull)
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   stageMovements StageMovement[]
+  measurements   Measurement[]
 
   @@unique([storeId, externalId])
   @@index([productId])
+  @@index([importRunId])
   @@map("publications")
 }
 
@@ -287,4 +301,92 @@ model StageMovement {
 
   @@index([publicationId, enteredAt])
   @@map("stage_movements")
+}
+
+// ───────────────────────────── Mediciones ─────────────────────────────
+
+// Medición: foto de cómo estaba una publicación en el canal en una fecha.
+// Sirve como "antes" para comparar con el "después" de aplicar los cambios.
+// Las métricas son una lista abierta (src/domain/measurements.ts) para no
+// rehacer la tabla cada vez que se mide algo nuevo.
+model Measurement {
+  id            String       @id @default(cuid())
+  publicationId String
+  publication   Publication  @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  takenAt       DateTime     @db.Date
+  source        RecordSource @default(MANUAL)
+  metrics       Json         @default("{}")
+  importRunId   String?
+  importRun     ImportRun?   @relation(fields: [importRunId], references: [id], onDelete: SetNull)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@unique([publicationId, takenAt])
+  @@index([importRunId])
+  @@map("measurements")
+}
+
+// ───────────────────────────── Importador ─────────────────────────────
+
+// Relación guardada entre las columnas de un archivo y los campos de la app.
+model ImportMapping {
+  id          String      @id @default(cuid())
+  accountId   String
+  account     Account     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  name        String
+  // Encabezados del archivo con el que se armó, para reconocerlo después.
+  headers     Json        @default("[]")
+  // Encabezado → campo de la app.
+  fields      Json        @default("{}")
+  createdById String?
+  createdBy   User?       @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  importRuns  ImportRun[]
+
+  @@unique([accountId, name])
+  @@map("import_mappings")
+}
+
+enum ImportStatus {
+  RUNNING
+  DONE
+  FAILED
+  UNDONE
+}
+
+// Una importación: quién, cuándo, qué archivo y qué resultó.
+model ImportRun {
+  id                   String         @id @default(cuid())
+  accountId            String
+  account              Account        @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  storeId              String
+  store                Store          @relation(fields: [storeId], references: [id])
+  mappingId            String?
+  mapping              ImportMapping? @relation(fields: [mappingId], references: [id], onDelete: SetNull)
+  userId               String?
+  user                 User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  fileName             String
+  sheetName            String
+  dataDate             DateTime       @db.Date
+  status               ImportStatus   @default(RUNNING)
+  rowsTotal            Int
+  rowsProcessed        Int            @default(0)
+  productsCreated      Int            @default(0)
+  publicationsCreated  Int            @default(0)
+  publicationsLinked   Int            @default(0)
+  publicationsExisting Int            @default(0)
+  measurementsSaved    Int            @default(0)
+  rowsWithErrors       Int            @default(0)
+  // Primeros errores, para mostrarlos: lista de { row, message }.
+  errors               Json           @default("[]")
+  startedAt            DateTime       @default(now())
+  finishedAt           DateTime?
+  undoneAt             DateTime?
+  products             Product[]
+  publications         Publication[]
+  measurements         Measurement[]
+
+  @@index([accountId, startedAt])
+  @@map("import_runs")
 }

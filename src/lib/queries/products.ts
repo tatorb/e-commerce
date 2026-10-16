@@ -50,6 +50,7 @@ export async function getProduct(accountId: string, productId: string) {
             orderBy: { enteredAt: 'desc' },
             include: { user: { select: { name: true } } },
           },
+          measurements: { orderBy: { takenAt: 'desc' } },
         },
       },
     },

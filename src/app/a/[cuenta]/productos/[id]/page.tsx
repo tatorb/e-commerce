@@ -12,6 +12,7 @@ import { NewPublicationDialog } from '@/components/publications/NewPublicationDi
 import { ChannelStatusBadge, StageBadge } from '@/components/stages/StageBadge';
 import { channelInfo } from '@/channels';
 import { parseNameValueList } from '@/domain/name-value';
+import { METRICS, METRIC_KEYS, formatMetric, parseMetrics } from '@/domain/measurements';
 import { getAccountBySlug } from '@/lib/queries/accounts';
 import { getProduct, listStores, type ProductDetail } from '@/lib/queries/products';
 import { formatDateTime, formatDuration } from '@/lib/format';
@@ -180,6 +181,35 @@ export default async function ProductPage({ params }: { params: Promise<{ cuenta
                       ))}
                     </ul>
                   </div>
+                  {pub.measurements.length > 0 ? (
+                    <div className="space-y-2">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Mediciones</p>
+                      <div className="space-y-3">
+                        {pub.measurements.map((m) => {
+                          const metrics = parseMetrics(m.metrics);
+                          const keys = METRIC_KEYS.filter((k) => metrics[k] !== undefined);
+                          return (
+                            <div key={m.id} className="rounded-md border px-4 py-3 space-y-2">
+                              <p className="text-sm font-medium">
+                                Datos del {new Intl.DateTimeFormat('es-AR', { dateStyle: 'medium', timeZone: 'UTC' }).format(m.takenAt)}
+                                <span className="text-muted-foreground font-normal">
+                                  {m.source === 'IMPORT' ? ' · importados' : ''}
+                                </span>
+                              </p>
+                              <dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+                                {keys.map((k) => (
+                                  <div key={k} className="flex items-baseline justify-between gap-3">
+                                    <dt className="text-muted-foreground">{METRICS[k].label}</dt>
+                                    <dd className="tabular-nums">{formatMetric(k, metrics[k]!)}</dd>
+                                  </div>
+                                ))}
+                              </dl>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
                 </CardContent>
               </Card>
             );

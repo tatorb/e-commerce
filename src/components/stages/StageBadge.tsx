@@ -1,13 +1,13 @@
 import { cn } from '@/lib/utils/cn';
-import type { ChannelStatus, Stage } from '@/generated/prisma/enums';
+import type { ChannelStatus, ImportStatus, Stage } from '@/generated/prisma/enums';
 import { STAGE_LABEL } from '@/domain/stages';
-import { CHANNEL_STATUS_LABEL } from '@/domain/publications';
+import { CHANNEL_STATUS_LABEL } from '@/domain/channel-status';
 
 // Badge de estado con punto de color, el mismo de los estados de secuencia
 // en app.studiomrb.com. Los colores salen de ahí: gris (borrador),
 // ámbar (pausada), verde (activa), zinc (terminada), y el teal primario.
 
-type Cfg = { cls: string; dot: string };
+export type Cfg = { cls: string; dot: string };
 
 const NEUTRAL: Cfg = { cls: 'border-border bg-muted text-muted-foreground', dot: 'bg-muted-foreground' };
 const AMBER: Cfg = {
@@ -37,7 +37,7 @@ const CHANNEL_STATUS_CONFIG: Record<ChannelStatus, Cfg> = {
   UNPUBLISHED: NEUTRAL,
 };
 
-function DotBadge({ cfg, label, compact }: { cfg: Cfg; label: string; compact?: boolean }) {
+export function DotBadge({ cfg, label, compact }: { cfg: Cfg; label: string; compact?: boolean }) {
   if (compact) {
     return (
       <span
@@ -66,4 +66,15 @@ export function StageBadge({ stage, compact }: { stage: Stage; compact?: boolean
 
 export function ChannelStatusBadge({ status }: { status: ChannelStatus }) {
   return <DotBadge cfg={CHANNEL_STATUS_CONFIG[status]} label={CHANNEL_STATUS_LABEL[status]} />;
+}
+
+const IMPORT_STATUS: Record<ImportStatus, { cfg: Cfg; label: string }> = {
+  RUNNING: { cfg: AMBER, label: 'En curso' },
+  DONE: { cfg: EMERALD, label: 'Terminada' },
+  FAILED: { cfg: NEUTRAL, label: 'Cortada' },
+  UNDONE: { cfg: DONE, label: 'Deshecha' },
+};
+
+export function ImportStatusBadge({ status }: { status: ImportStatus }) {
+  return <DotBadge cfg={IMPORT_STATUS[status].cfg} label={IMPORT_STATUS[status].label} />;
 }

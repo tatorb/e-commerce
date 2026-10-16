@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { PrismaClient } from '@/generated/prisma/client';
+import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { RecordSource } from '@/generated/prisma/enums';
 import { compactNameValues, nameValueSchema } from './name-value';
 
@@ -93,15 +93,27 @@ export function dropEmptyRows(input: ProductInput): ProductInput {
   };
 }
 
+type Tx = Prisma.TransactionClient;
+
+type SaveArgs = {
+  accountId: string;
+  productId: string | null;
+  data: ProductData;
+  source?: RecordSource;
+  importRunId?: string | null;
+};
+
 /**
  * Crea o actualiza un producto con todas sus partes. Las medidas,
  * compatibilidades y activos se reemplazan enteros: lo que llega es la
  * versión completa.
  */
-export async function saveProduct(
-  db: PrismaClient,
-  args: { accountId: string; productId: string | null; data: ProductData; source?: RecordSource },
-): Promise<{ id: string }> {
+export async function saveProduct(db: PrismaClient, args: SaveArgs): Promise<{ id: string }> {
+  return db.$transaction((tx) => writeProduct(tx, args));
+}
+
+/** Lo mismo que saveProduct, dentro de una transacción que ya está abierta. */
+export async function writeProduct(tx: Tx, args: SaveArgs): Promise<{ id: string }> {
   const { accountId, productId, data } = args;
   const fields = {
     name: data.name,
@@ -117,39 +129,42 @@ export async function saveProduct(
     specs: data.specs,
   };
 
-  return db.$transaction(async (tx) => {
-    let id: string;
-    if (productId) {
-      const existing = await tx.product.findFirst({ where: { id: productId, accountId }, select: { id: true } });
-      if (!existing) throw new Error('El producto no existe en esta cuenta.');
-      id = existing.id;
-      await tx.product.update({ where: { id }, data: fields });
-      await tx.productVariant.deleteMany({ where: { productId: id } });
-      await tx.compatibility.deleteMany({ where: { productId: id } });
-      await tx.asset.deleteMany({ where: { productId: id } });
-    } else {
-      const created = await tx.product.create({
-        data: { ...fields, accountId, source: args.source ?? RecordSource.MANUAL },
-        select: { id: true },
-      });
-      id = created.id;
-    }
+  let id: string;
+  if (productId) {
+    const existing = await tx.product.findFirst({ where: { id: productId, accountId }, select: { id: true } });
+    if (!existing) throw new Error('El producto no existe en esta cuenta.');
+    id = existing.id;
+    await tx.product.update({ where: { id }, data: fields });
+    await tx.productVariant.deleteMany({ where: { productId: id } });
+    await tx.compatibility.deleteMany({ where: { productId: id } });
+    await tx.asset.deleteMany({ where: { productId: id } });
+  } else {
+    const created = await tx.product.create({
+      data: {
+        ...fields,
+        accountId,
+        source: args.source ?? RecordSource.MANUAL,
+        importRunId: args.importRunId ?? null,
+      },
+      select: { id: true },
+    });
+    id = created.id;
+  }
 
-    if (data.variants.length > 0) {
-      await tx.productVariant.createMany({
-        data: data.variants.map((v, position) => ({ ...v, productId: id, position })),
-      });
-    }
-    if (data.compatibilities.length > 0) {
-      await tx.compatibility.createMany({
-        data: data.compatibilities.map((c, position) => ({ ...c, productId: id, position })),
-      });
-    }
-    if (data.assets.length > 0) {
-      await tx.asset.createMany({
-        data: data.assets.map((a, position) => ({ ...a, productId: id, position })),
-      });
-    }
-    return { id };
-  });
+  if (data.variants.length > 0) {
+    await tx.productVariant.createMany({
+      data: data.variants.map((v, position) => ({ ...v, productId: id, position })),
+    });
+  }
+  if (data.compatibilities.length > 0) {
+    await tx.compatibility.createMany({
+      data: data.compatibilities.map((c, position) => ({ ...c, productId: id, position })),
+    });
+  }
+  if (data.assets.length > 0) {
+    await tx.asset.createMany({
+      data: data.assets.map((a, position) => ({ ...a, productId: id, position })),
+    });
+  }
+  return { id };
 }

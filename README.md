@@ -20,6 +20,9 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
 | Publicación | `Publication` | El producto armado para una tienda: título, descripción, atributos, precio, ID externo, link, estado. |
 | Etapa | `Stage` | Importado, Propuesta generada, En revisión, Aprobado, Aplicado en canal, Medido. Vive en la publicación. |
 | Movimiento de etapa | `StageMovement` | Cuándo entró y salió una publicación de cada etapa, y quién la movió. |
+| Medición | `Measurement` | Cómo estaba una publicación en una fecha: visitas, ventas y lo que tenía cargado. Es el "antes" para comparar. |
+| Importación | `ImportRun` | Quién importó qué archivo, cuándo y qué resultó. Se puede deshacer. |
+| Relación de columnas | `ImportMapping` | Qué columna de un archivo va a qué campo. Se guarda para reusarla. |
 
 ## Cómo está ordenado
 
@@ -27,7 +30,10 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
   `moveToStage` es la única forma de cambiar de etapa.
 - `src/channels/`: lo único que sabe de cada canal (formato del ID, link, largo del título).
   El resto de la app usa la interfaz `ChannelAdapter`.
-- `src/importers/`: llega en la Fase 2. Es el único lugar que sabe leer archivos.
+- `src/importers/`: el único lugar que sabe leer archivos. Lee Excel y CSV en el navegador,
+  propone qué columna va a qué campo, traba las columnas confidenciales y traduce cada fila a
+  producto, publicación y medición. Al importar vincula por ID de publicación o por SKU, nunca
+  pisa lo que ya está en la app y anota de qué importación vino cada cosa para poder deshacerla.
 - `src/components/ui/` y `src/components/dashboard/`: componentes y estructura de pantalla
   copiados de app.studiomrb.com (`tatorb/LGM-processor`). El estilo no se inventa: si hace
   falta algo nuevo, se toma de allá.

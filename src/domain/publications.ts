@@ -1,19 +1,14 @@
 import { z } from 'zod';
 import type { PrismaClient } from '@/generated/prisma/client';
 import { Prisma } from '@/generated/prisma/client';
-import { ChannelStatus, RecordSource, Stage } from '@/generated/prisma/enums';
+import { RecordSource, Stage } from '@/generated/prisma/enums';
 import { compactNameValues, nameValueSchema } from './name-value';
 import { moveToStage } from './stages';
 
 // Publicación: el producto armado para una tienda. Este módulo no conoce el
 // formato de ningún canal: el ID externo y el link llegan ya limpios.
 
-export const CHANNEL_STATUS_LABEL: Record<ChannelStatus, string> = {
-  ACTIVE: 'Activa',
-  PAUSED: 'Pausada',
-  INACTIVE: 'Inactiva',
-  UNPUBLISHED: 'Sin publicar',
-};
+export { CHANNEL_STATUS_LABEL } from './channel-status';
 
 const text = (max: number) =>
   z
@@ -56,36 +51,40 @@ function toRow(data: PublicationData) {
   };
 }
 
+type CreateArgs = {
+  productId: string;
+  storeId: string;
+  data: PublicationData;
+  userId: string | null;
+  source?: RecordSource;
+  importRunId?: string | null;
+};
+
 /** Crea la publicación y la deja en la etapa "Importado", con su registro. */
-export async function createPublication(
-  db: PrismaClient,
-  args: {
-    productId: string;
-    storeId: string;
-    data: PublicationData;
-    userId: string | null;
-    source?: RecordSource;
-  },
-): Promise<{ id: string }> {
+export async function createPublication(db: PrismaClient, args: CreateArgs): Promise<{ id: string }> {
   try {
-    return await db.$transaction(async (tx) => {
-      const publication = await tx.publication.create({
-        data: {
-          ...toRow(args.data),
-          productId: args.productId,
-          storeId: args.storeId,
-          source: args.source ?? RecordSource.MANUAL,
-          stage: Stage.IMPORTED,
-        },
-        select: { id: true },
-      });
-      await moveToStage(tx, { publicationId: publication.id, stage: Stage.IMPORTED, userId: args.userId });
-      return publication;
-    });
+    return await db.$transaction((tx) => insertPublication(tx, args));
   } catch (e) {
     if (isUniqueViolation(e)) throw new DuplicateExternalIdError();
     throw e;
   }
+}
+
+/** Lo mismo que createPublication, dentro de una transacción que ya está abierta. */
+export async function insertPublication(tx: Prisma.TransactionClient, args: CreateArgs): Promise<{ id: string }> {
+  const publication = await tx.publication.create({
+    data: {
+      ...toRow(args.data),
+      productId: args.productId,
+      storeId: args.storeId,
+      source: args.source ?? RecordSource.MANUAL,
+      importRunId: args.importRunId ?? null,
+      stage: Stage.IMPORTED,
+    },
+    select: { id: true },
+  });
+  await moveToStage(tx, { publicationId: publication.id, stage: Stage.IMPORTED, userId: args.userId });
+  return publication;
 }
 
 /** Actualiza los datos de la publicación. No cambia la etapa. */
