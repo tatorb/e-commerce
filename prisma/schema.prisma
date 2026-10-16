@@ -1,0 +1,290 @@
+// Modelo de datos de E-commerce Studio MRB.
+//
+// La regla central: el producto es la fuente única de verdad. Un canal
+// (Mercado Libre, tienda web) solo muestra el producto a través de una
+// Publicación. Nunca se guardan datos del producto "dentro" de la publicación
+// salvo lo que es propio del canal (título, descripción y atributos tal como
+// se muestran ahí, precio, ID externo).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────────────────────── Login (Better Auth) ─────────────────────────────
+// Los usuarios son del equipo del estudio y ven todas las cuentas.
+
+model User {
+  id             String          @id
+  name           String
+  email          String          @unique
+  emailVerified  Boolean         @default(false)
+  image          String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @default(now()) @updatedAt
+  sessions       Session[]
+  authAccounts   AuthAccount[]
+  stageMovements StageMovement[]
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+// Credenciales de login de cada usuario. Better Auth lo llama "account"; acá
+// se renombra para no confundirlo con Account, que es la cuenta del cliente.
+model AuthAccount {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("auth_accounts")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @default(now()) @updatedAt
+
+  @@index([identifier])
+  @@map("verifications")
+}
+
+// ───────────────────────────── Cuentas y canales ─────────────────────────────
+
+// Cuenta: el cliente del estudio. Todo dato pertenece a una cuenta.
+model Account {
+  id        String    @id @default(cuid())
+  slug      String    @unique
+  name      String
+  timezone  String    @default("America/Argentina/Buenos_Aires")
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  stores    Store[]
+  products  Product[]
+
+  @@map("accounts")
+}
+
+enum ChannelKind {
+  MERCADOLIBRE
+  WEB_STORE
+}
+
+// Canal: lista fija de lugares donde se puede mostrar un producto.
+model Channel {
+  id     String      @id @default(cuid())
+  kind   ChannelKind @unique
+  name   String
+  stores Store[]
+
+  @@map("channels")
+}
+
+// Forma de llevar una publicación aprobada al canal. Hoy es manual; mañana
+// puede ser una planilla masiva o la API del canal, sin tocar el resto.
+enum ApplyMethod {
+  MANUAL
+  SPREADSHEET
+  API
+}
+
+// Tienda: la presencia de una cuenta en un canal. Por ejemplo, Insur en
+// Mercado Libre es la tienda INSURMOTOR.
+model Store {
+  id               String        @id @default(cuid())
+  accountId        String
+  account          Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  channelId        String
+  channel          Channel       @relation(fields: [channelId], references: [id])
+  name             String
+  externalSellerId String?
+  applyMethod      ApplyMethod   @default(MANUAL)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  publications     Publication[]
+
+  @@unique([accountId, channelId, name])
+  @@map("stores")
+}
+
+// ───────────────────────────── Producto (ficha maestra) ─────────────────────────────
+
+// De dónde vino un registro: cargado a mano o por el importador.
+enum RecordSource {
+  MANUAL
+  IMPORT
+}
+
+model Product {
+  id              String          @id @default(cuid())
+  accountId       String
+  account         Account         @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  name            String
+  brand           String?         // marca del repuesto
+  partNumber      String?         // nº de pieza u OEM
+  productType     String?         // tipo de producto, por ejemplo "Kit de embrague"
+  engineSystem    String?         // sistema del motor, por ejemplo "Distribución"
+  line            String?         // línea, por ejemplo "Liviano nafta"
+  origin          String?         // país de origen
+  warranty        String?
+  kitContents     String?
+  // Ficha técnica: lista de { name, value }.
+  specs           Json            @default("[]")
+  notes           String?
+  source          RecordSource    @default(MANUAL)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  variants        ProductVariant[]
+  compatibilities Compatibility[]
+  assets          Asset[]
+  publications    Publication[]
+
+  @@index([accountId])
+  @@map("products")
+}
+
+// Variante por medida, por ejemplo STD, 0.25 o 0.50, cada una con su SKU.
+model ProductVariant {
+  id        String  @id @default(cuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  measure   String?
+  sku       String?
+  position  Int     @default(0)
+
+  @@index([productId])
+  @@map("product_variants")
+}
+
+model Compatibility {
+  id           String  @id @default(cuid())
+  productId    String
+  product      Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  vehicleBrand String?
+  model        String?
+  engine       String?
+  yearFrom     Int?
+  yearTo       Int?
+  note         String?
+  position     Int     @default(0)
+
+  @@index([productId])
+  @@map("compatibilities")
+}
+
+enum AssetKind {
+  PHOTO
+  VIDEO
+}
+
+// Activo: foto o video del producto. En el MVP solo se guarda el link.
+model Asset {
+  id        String    @id @default(cuid())
+  productId String
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  kind      AssetKind
+  url       String
+  position  Int       @default(0)
+  createdAt DateTime  @default(now())
+
+  @@index([productId])
+  @@map("assets")
+}
+
+// ───────────────────────────── Publicación y etapas ─────────────────────────────
+
+// Estado de la publicación dentro del canal.
+enum ChannelStatus {
+  ACTIVE
+  PAUSED
+  INACTIVE
+  UNPUBLISHED
+}
+
+// Etapas del pipeline. Viven en la publicación porque "Aplicado en canal"
+// depende del canal.
+enum Stage {
+  IMPORTED
+  PROPOSAL_GENERATED
+  IN_REVIEW
+  APPROVED
+  APPLIED
+  MEASURED
+}
+
+// Publicación: el producto armado para una tienda puntual.
+model Publication {
+  id             String          @id @default(cuid())
+  productId      String
+  product        Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  storeId        String
+  store          Store           @relation(fields: [storeId], references: [id])
+  externalId     String?         // por ejemplo MLA123456
+  url            String?
+  title          String?
+  description    String?
+  // Atributos tal como se cargan en el canal: lista de { name, value }.
+  attributes     Json            @default("[]")
+  // Precio público del canal. Nunca costos ni listas de proveedor.
+  price          Decimal?        @db.Decimal(14, 2)
+  currency       String          @default("ARS")
+  channelStatus  ChannelStatus   @default(ACTIVE)
+  stage          Stage           @default(IMPORTED)
+  source         RecordSource    @default(MANUAL)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  stageMovements StageMovement[]
+
+  @@unique([storeId, externalId])
+  @@index([productId])
+  @@map("publications")
+}
+
+// Registro de cuándo entra y sale una publicación de cada etapa. Una sola
+// fila abierta (exitedAt nulo) por publicación: la etapa actual.
+model StageMovement {
+  id            String      @id @default(cuid())
+  publicationId String
+  publication   Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  stage         Stage
+  enteredAt     DateTime    @default(now())
+  exitedAt      DateTime?
+  userId        String?
+  user          User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([publicationId, enteredAt])
+  @@map("stage_movements")
+}

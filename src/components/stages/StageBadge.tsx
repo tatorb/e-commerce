@@ -1,0 +1,69 @@
+import { cn } from '@/lib/utils/cn';
+import type { ChannelStatus, Stage } from '@/generated/prisma/enums';
+import { STAGE_LABEL } from '@/domain/stages';
+import { CHANNEL_STATUS_LABEL } from '@/domain/publications';
+
+// Badge de estado con punto de color, el mismo de los estados de secuencia
+// en app.studiomrb.com. Los colores salen de ahí: gris (borrador),
+// ámbar (pausada), verde (activa), zinc (terminada), y el teal primario.
+
+type Cfg = { cls: string; dot: string };
+
+const NEUTRAL: Cfg = { cls: 'border-border bg-muted text-muted-foreground', dot: 'bg-muted-foreground' };
+const AMBER: Cfg = {
+  cls: 'border-amber-500/40 bg-amber-500/10 text-amber-700',
+  dot: 'bg-amber-500',
+};
+const EMERALD: Cfg = {
+  cls: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700',
+  dot: 'bg-emerald-500',
+};
+const DONE: Cfg = { cls: 'border-border bg-background text-muted-foreground', dot: 'bg-zinc-400' };
+const PRIMARY: Cfg = { cls: 'border-primary/40 bg-primary/10 text-primary', dot: 'bg-primary' };
+
+const STAGE_CONFIG: Record<Stage, Cfg> = {
+  IMPORTED: NEUTRAL,
+  PROPOSAL_GENERATED: DONE,
+  IN_REVIEW: AMBER,
+  APPROVED: PRIMARY,
+  APPLIED: EMERALD,
+  MEASURED: DONE,
+};
+
+const CHANNEL_STATUS_CONFIG: Record<ChannelStatus, Cfg> = {
+  ACTIVE: EMERALD,
+  PAUSED: AMBER,
+  INACTIVE: DONE,
+  UNPUBLISHED: NEUTRAL,
+};
+
+function DotBadge({ cfg, label, compact }: { cfg: Cfg; label: string; compact?: boolean }) {
+  if (compact) {
+    return (
+      <span
+        className={cn('inline-block h-2 w-2 rounded-full', cfg.dot)}
+        title={label}
+        aria-label={label}
+      />
+    );
+  }
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide font-semibold whitespace-nowrap',
+        cfg.cls,
+      )}
+    >
+      <span className={cn('inline-block h-1.5 w-1.5 rounded-full', cfg.dot)} />
+      {label}
+    </span>
+  );
+}
+
+export function StageBadge({ stage, compact }: { stage: Stage; compact?: boolean }) {
+  return <DotBadge cfg={STAGE_CONFIG[stage]} label={STAGE_LABEL[stage]} compact={compact} />;
+}
+
+export function ChannelStatusBadge({ status }: { status: ChannelStatus }) {
+  return <DotBadge cfg={CHANNEL_STATUS_CONFIG[status]} label={CHANNEL_STATUS_LABEL[status]} />;
+}

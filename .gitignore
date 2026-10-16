@@ -1,0 +1,23 @@
+# dependencias
+/node_modules
+
+# Next.js
+/.next/
+/out/
+next-env.d.ts
+*.tsbuildinfo
+
+# cliente de Prisma generado
+/src/generated/
+
+# variables de entorno, nunca se suben
+.env
+.env*.local
+
+# Vercel
+.vercel
+
+# varios
+.DS_Store
+npm-debug.log*
+/coverage
