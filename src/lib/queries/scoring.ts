@@ -1,7 +1,9 @@
 import { prisma } from '@/lib/db';
 import { parseMetrics } from '@/domain/measurements';
-import { parseNameValueList } from '@/domain/name-value';
-import { scorePublication, type RuleConfig, type ScoreInput, type ScoreResult } from '@/domain/standard';
+import { scorePublication, type RuleConfig, type ScoreResult } from '@/domain/standard';
+import { toScoreInput } from './score-input';
+
+export { toScoreInput } from './score-input';
 
 // Arma lo que necesita el puntaje y lo calcula. El puntaje no se guarda:
 // se calcula cada vez, con las reglas y los datos de ese momento.
@@ -18,45 +20,6 @@ export async function loadRulesByChannel(accountId: string): Promise<Map<string,
     byChannel.set(r.channelId, list);
   }
   return byChannel;
-}
-
-type ProductForScore = {
-  warranty: string | null;
-  kitContents: string | null;
-  partNumber: string | null;
-  specs: unknown;
-  variants: { measure: string | null }[];
-  compatibilities: { vehicleBrand: string | null; model: string | null; engine: string | null }[];
-  assets: { kind: 'PHOTO' | 'VIDEO' }[];
-};
-
-type PublicationForScore = {
-  title: string | null;
-  description: string | null;
-  attributes: unknown;
-  measurements: { takenAt: Date; metrics: unknown }[];
-};
-
-export function toScoreInput(product: ProductForScore, publication: PublicationForScore): ScoreInput {
-  // La medición más reciente: viene ordenada de la más nueva a la más vieja.
-  const last = publication.measurements[0];
-  return {
-    product: {
-      warranty: product.warranty,
-      kitContents: product.kitContents,
-      partNumber: product.partNumber,
-      specs: parseNameValueList(product.specs),
-      variants: product.variants,
-      compatibilities: product.compatibilities,
-      assets: product.assets,
-    },
-    publication: {
-      title: publication.title,
-      description: publication.description,
-      attributes: parseNameValueList(publication.attributes),
-    },
-    measurement: last ? { takenAt: last.takenAt, metrics: parseMetrics(last.metrics) } : null,
-  };
 }
 
 export type ScoredPublication = Awaited<ReturnType<typeof listScoredPublications>>[number];

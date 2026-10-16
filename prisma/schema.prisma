@@ -31,6 +31,7 @@ model User {
   stageMovements StageMovement[]
   importRuns     ImportRun[]
   importMappings ImportMapping[]
+  proposals      Proposal[]
 
   @@map("users")
 }
@@ -284,6 +285,7 @@ model Publication {
   stageMovements StageMovement[]
   measurements   Measurement[]
   importChanges  ImportChange[]
+  proposals      Proposal[]
 
   @@unique([storeId, externalId])
   @@index([productId])
@@ -451,4 +453,38 @@ model ImportChange {
   @@index([importRunId])
   @@index([productId])
   @@map("import_changes")
+}
+
+// ───────────────────────────── Propuestas de la IA ─────────────────────────────
+
+enum ProposalStatus {
+  ACTIVE // la vigente de la publicación, una sola a la vez
+  SUPERSEDED // reemplazada por otra más nueva
+  APPROVED
+  REJECTED
+}
+
+// Propuesta de la IA para una publicación: qué cambiaría, campo por campo.
+// No cambia nada por sí sola: se revisa y se aprueba aparte.
+model Proposal {
+  id            String         @id @default(cuid())
+  publicationId String
+  publication   Publication    @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  status        ProposalStatus @default(ACTIVE)
+  summary       String
+  // Campos que cambian: lista de { field, before, after, reason, toConfirm, placeholders }.
+  fields        Json
+  // Cómo estaba el contenido cuando se generó, para comparar en la revisión.
+  baseline      Json
+  // Avisos generales, por ejemplo una medida de un SKU que no está en el producto.
+  notes         Json           @default("[]")
+  model         String
+  // Tokens y costo aproximado en dólares.
+  usage         Json
+  createdById   String?
+  createdBy     User?          @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt     DateTime       @default(now())
+
+  @@index([publicationId, status])
+  @@map("proposals")
 }

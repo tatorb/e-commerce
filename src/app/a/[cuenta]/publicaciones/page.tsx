@@ -19,6 +19,9 @@ import { SortSelect } from '@/components/filters/SortSelect';
 import { ChannelStatusBadge, StageBadge } from '@/components/stages/StageBadge';
 import { ScoreBadge } from '@/components/stages/ScoreBadge';
 import { ContentSheetInstructions } from '@/components/import/ContentSheetInstructions';
+import { BulkProposalDialog } from '@/components/proposals/BulkProposalDialog';
+import { AI_NOT_CONFIGURED, isAiConfigured } from '@/ai/claude';
+import { needsProposal } from '@/domain/proposals';
 import { STAGES, STAGE_LABEL } from '@/domain/stages';
 import { CHANNEL_STATUS_LABEL } from '@/domain/channel-status';
 import { contentSheetInstructions } from '@/importers/content-sheet';
@@ -38,6 +41,11 @@ import { plural } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
 
 export const dynamic = 'force-dynamic';
+// Cada propuesta de la tanda es un pedido que puede tardar más de un minuto.
+export const maxDuration = 300;
+
+// Propuestas por tanda.
+const BULK_LIMIT = 50;
 
 export async function generateMetadata({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
@@ -86,6 +94,7 @@ export default async function PublicationsPage({
   ]);
   const items = filterPublications(all, filters);
   const channelNames = [...new Set(stores.map((s) => s.channel.name))];
+  const ready = items.filter((p) => needsProposal(p.stage));
 
   const scored = items.filter((p) => p.score !== null);
   const average = scored.length ? Math.round(scored.reduce((s, p) => s + p.score!, 0) / scored.length) : null;
@@ -124,6 +133,13 @@ export default async function PublicationsPage({
           </Button>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <BulkProposalDialog
+            accountSlug={account.slug}
+            items={ready.slice(0, BULK_LIMIT).map((p) => ({ id: p.id, title: p.title }))}
+            readyTotal={ready.length}
+            viewing={items.length}
+            disabledReason={isAiConfigured() ? null : AI_NOT_CONFIGURED}
+          />
           <Button size="sm" variant="outline" asChild>
             <a href={sheetHref} download>
               <Download className="h-4 w-4" />

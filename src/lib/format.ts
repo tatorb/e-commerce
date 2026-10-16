@@ -48,3 +48,10 @@ export function formatDuration(from: Date, to: Date): string {
 export function plural(n: number, singular: string, pluralForm = `${singular}s`): string {
   return `${n} ${n === 1 ? singular : pluralForm}`;
 }
+
+const USD = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** Dólares con la costumbre argentina, por ejemplo US$ 0,08. */
+export function formatUsd(amount: number): string {
+  return USD.format(amount);
+}

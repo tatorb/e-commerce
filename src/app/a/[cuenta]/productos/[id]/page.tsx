@@ -19,8 +19,13 @@ import { METRICS, METRIC_KEYS, formatMetric, parseMetrics } from '@/domain/measu
 import { getAccountBySlug } from '@/lib/queries/accounts';
 import { getProduct, listStores, type ProductDetail } from '@/lib/queries/products';
 import { formatDateTime, formatDuration } from '@/lib/format';
+import { PublicationProposal } from '@/components/proposals/PublicationProposal';
+import { isAiConfigured } from '@/ai/claude';
 
 export const dynamic = 'force-dynamic';
+// Generar una propuesta con IA puede tardar más de un minuto.
+export const maxDuration = 300;
+
 
 export async function generateMetadata({ params }: { params: Promise<{ cuenta: string; id: string }> }) {
   const { cuenta, id } = await params;
@@ -73,6 +78,7 @@ export default async function ProductPage({ params }: { params: Promise<{ cuenta
     loadRulesByChannel(account.id),
   ]);
   if (!product) notFound();
+  const aiReady = isAiConfigured();
 
   const base = `/a/${account.slug}/productos`;
   const storeOptions = stores.map((s) => ({
@@ -204,6 +210,15 @@ export default async function ProductPage({ params }: { params: Promise<{ cuenta
                       </ul>
                     </div>
                   ) : null}
+                  <PublicationProposal
+                    accountSlug={account.slug}
+                    timeZone={account.timezone}
+                    publicationId={pub.id}
+                    stage={pub.stage}
+                    proposal={pub.proposals[0] ?? null}
+                    proposalCount={pub._count.proposals}
+                    aiReady={aiReady}
+                  />
                   <div className="space-y-2">
                     <p className="text-xs uppercase tracking-wide text-muted-foreground">Historial de etapas</p>
                     <ul className="divide-y rounded-md border">
