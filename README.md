@@ -23,6 +23,15 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
 | Tablero | (pantalla) | La sección Pipeline: una columna por paso, con una tarjeta por publicación. Al tocarla se abre su paso, con los botones para volver, avanzar, marcarla como corregida o sacarla del pipeline. |
 | Paso del pipeline | `PipelineStep` | Información, Título, Imágenes, Videos, Organización de multimedia, Descripción y Publicación, en ese orden. Al sacar una publicación se conserva el paso, para retomar ahí. |
 | Movimiento del pipeline | `PipelineMovement` | Cuándo entró y salió una publicación de cada paso, quién la movió y por qué salió: avanzó, volvió, se sacó o terminó. |
+| Paso Información | (pantalla) | Muestra y edita los datos de la ficha que usa el título (tipo, marca, número de pieza, línea, medidas y compatibilidades con cilindrada y combustible) y guarda la competencia. Lo que se edita queda en la ficha. |
+| Competencia | `CompetitorListing` | De 3 a 5 publicaciones de otros vendedores que más venden, cargadas a mano: link, título y vendidos. Sus títulos suman palabras al mapa. |
+| Reglas de título | `TitleRuleSet` | Largo máximo, signos y palabras no permitidas, y estructura sugerida por familia, por cuenta y canal. Sin reglas propias valen las del canal. Se editan en Ajustes. |
+| Semilla | `TitleWork.seeds` | Lo que se escribe en el buscador del canal para ver qué sugiere. La app las arma con la ficha y se pueden cambiar. |
+| Sugerencias del buscador | `SearchSuggestion` | Lo que completa el buscador para una semilla, leído por la app o pegado a mano, con fecha. Son de la cuenta: sirven para todas las publicaciones con la misma semilla. |
+| Mapa de palabras | (se calcula) | Las palabras de las sugerencias y de la competencia, con de dónde salen y cuántas veces aparecen. Cada una se tilda o se descarta (`TitleWork.words`). |
+| Posición | `SearchPosition` | En qué página y posición aparece la publicación en una búsqueda principal, con fecha. Es la foto del antes. |
+| Título aprobado | `TitleApproval` | El título que quedó, el que tenía, la propuesta de la IA que se eligió, si se editó y si se escribió en la publicación, quedó para la copia con cuotas o se mantuvo. |
+| Prueba de conexión | `ChannelProbe` | Si la app puede leer sola las sugerencias y las posiciones del canal. Se corre en Ajustes, Conexión, y habilita la lectura automática. |
 | Título bloqueado | (se calcula) | Cuando el canal no deja cambiar el título. Lo dicen las ventas de la última medición, con la regla de cada canal; si no hay datos, se marca a mano en la publicación. |
 | Estado de la propuesta | `Stage` | Sin propuesta, Propuesta generada, En revisión, Aprobado, Aplicado en canal, Medido. Es el recorrido de la propuesta completa con IA, no la etapa de la publicación. |
 | Movimiento de la propuesta | `StageMovement` | Cuándo entró y salió una publicación de cada estado de la propuesta, y quién la movió. |
@@ -44,11 +53,14 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
   por campo, y decide qué se completa o se reemplaza. `moveToStage` es la única forma de cambiar de etapa. `standard.ts` tiene las
   revisiones que puede hacer una regla y el cálculo del puntaje: primero mira la ficha y la
   publicación, y si la app todavía no tiene ese dato usa la última medición.
-- `src/ai/`: el pedido a Claude. Recibe la ficha, la publicación, el estándar y lo que falta, y
-  devuelve la propuesta con una forma fija. No sabe de archivos ni de canales, y nunca recibe
+- `src/ai/`: los pedidos a Claude, la propuesta completa y las 3 propuestas de título. Reciben la
+  ficha, la publicación y lo necesario de cada caso, y devuelven una respuesta con forma fija. No sabe de archivos ni de canales, y nunca recibe
   precios, visitas ni ventas. El modelo y los precios están en `claude.ts`.
 - `src/channels/`: lo único que sabe de cada canal (formato del ID, link, largo del título, cuándo
-  el título está bloqueado y la guía para aplicar a mano, con los datos en el orden del formulario del canal).
+  el título está bloqueado, reglas de título iniciales, link de búsqueda y la guía para aplicar a mano,
+  con los datos en el orden del formulario del canal). `research.ts` es lo que se lee del canal desde el
+  servidor: sugerencias del buscador, posición y la prueba de conexión. Para probar sin el canal real,
+  `MERCADOLIBRE_SUGGEST_URL`, `MERCADOLIBRE_API_URL` y `MERCADOLIBRE_LISTING_URL` cambian las direcciones.
   El resto de la app usa la interfaz `ChannelAdapter`.
 - `src/importers/`: el único lugar que sabe leer archivos. Lee Excel y CSV en el navegador,
   propone qué columna va a qué campo, traba las columnas confidenciales y traduce cada fila a

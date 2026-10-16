@@ -23,7 +23,7 @@ interface MobileTopBarProps {
 function backHrefFor(pathname: string): string | null {
   const parts = pathname.split('/').filter(Boolean);
   const i = parts.length - 2;
-  if (i >= 0 && parts[i] === 'productos') return '/' + parts.slice(0, i + 1).join('/');
+  if (i >= 0 && (parts[i] === 'productos' || parts[i] === 'pipeline')) return '/' + parts.slice(0, i + 1).join('/');
   return null;
 }
 
@@ -38,10 +38,9 @@ function useDocumentTitle(): string {
       setTitle(t === APP_NAME ? '' : t.endsWith(suffix) ? t.slice(0, -suffix.length) : t);
     };
     read();
-    const el = document.querySelector('title');
-    if (!el) return;
+    // Al navegar, Next puede reemplazar el elemento <title> entero: se mira todo el <head>.
     const obs = new MutationObserver(read);
-    obs.observe(el, { childList: true, characterData: true, subtree: true });
+    obs.observe(document.head, { childList: true, characterData: true, subtree: true });
     return () => obs.disconnect();
   }, []);
   return title;

@@ -3,6 +3,7 @@ import { CONTENT_FIELD_KIND, CONTENT_FIELD_LABEL, CONTENT_FIELDS, type ContentSn
 import type { ApplySection, ChannelAdapter } from './types';
 import { mercadolibre } from './mercadolibre';
 import { compatText } from './shared/apply-format';
+import { EMPTY_TITLE_RULES } from '@/domain/title-rules';
 
 export type { ApplyItem, ApplySection, ChannelAdapter } from './types';
 
@@ -53,6 +54,8 @@ function genericAdapter(kind: ChannelKind, name: string): ChannelAdapter {
     publicationUrl: () => null,
     applyGuide: genericApplyGuide,
     titleLock: () => null,
+    titleRules: EMPTY_TITLE_RULES,
+    searchUrl: () => null,
   };
 }
 

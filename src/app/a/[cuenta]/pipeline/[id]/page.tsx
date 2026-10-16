@@ -16,9 +16,17 @@ import { titleLockText } from '@/domain/title-lock';
 import type { PipelineStep } from '@/generated/prisma/enums';
 import { getAccountBySlug } from '@/lib/queries/accounts';
 import { getPipelinePublication } from '@/lib/queries/pipeline';
+import { loadTitleContext } from '@/lib/queries/title-step';
+import { autoAvailable } from '@/lib/research';
+import { prisma } from '@/lib/db';
+import { AI_NOT_CONFIGURED, isAiConfigured } from '@/ai/claude';
+import { InfoStep } from '@/components/pipeline/info/InfoStep';
+import { TitleStep } from '@/components/pipeline/title/TitleStep';
 import { formatDateTime, formatDuration, plural } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
+// Leer el buscador letra por letra o pedir títulos a la IA puede tardar.
+export const maxDuration = 300;
 
 export async function generateMetadata({ params }: { params: Promise<{ cuenta: string; id: string }> }) {
   const { cuenta, id } = await params;
@@ -27,7 +35,7 @@ export async function generateMetadata({ params }: { params: Promise<{ cuenta: s
   return { title: pub ? `${pub.title} · Pipeline` : 'Pipeline' };
 }
 
-// Lo que se hace en cada paso. Por ahora ninguno tiene contenido: se arman de a uno.
+// Los pasos que todavía no tienen contenido.
 function StepContent({ step }: { step: PipelineStep }) {
   return (
     <div className="space-y-1">
@@ -50,6 +58,11 @@ export default async function PipelineStepPage({ params }: { params: Promise<{ c
   const inPipeline = pub.pipelineStatus === 'IN_PIPELINE' && pub.pipelineStep !== null;
   const open = pub.movements.find((m) => m.exitedAt === null) ?? null;
   const lock = pub.titleLock.locked ? titleLockText(pub.titleLock) : null;
+  // Información y Título usan la ficha, la competencia y lo leído del buscador.
+  const ctx =
+    inPipeline && (pub.pipelineStep === 'INFO' || pub.pipelineStep === 'TITLE')
+      ? await loadTitleContext(prisma, account.id, pub.id)
+      : null;
 
   return (
     <>
@@ -98,17 +111,29 @@ export default async function PipelineStepPage({ params }: { params: Promise<{ c
       <PageBody className="max-w-5xl">
         {inPipeline && pub.pipelineStep ? (
           <>
-            <Card>
-              <CardContent className="space-y-4 p-6">
-                <StepContent step={pub.pipelineStep} />
-                {open ? (
-                  <p className="text-xs text-muted-foreground">
-                    En este paso desde el {formatDateTime(open.enteredAt, account.timezone)}, hace{' '}
-                    {formatDuration(open.enteredAt, new Date())}.
-                  </p>
-                ) : null}
-              </CardContent>
-            </Card>
+            {open ? (
+              <p className="text-xs text-muted-foreground">
+                En {PIPELINE_STEP_LABEL[pub.pipelineStep]} desde el {formatDateTime(open.enteredAt, account.timezone)}, hace{' '}
+                {formatDuration(open.enteredAt, new Date())}.
+              </p>
+            ) : null}
+            {ctx && pub.pipelineStep === 'INFO' ? (
+              <InfoStep accountSlug={account.slug} timeZone={account.timezone} ctx={ctx} />
+            ) : ctx && pub.pipelineStep === 'TITLE' ? (
+              <TitleStep
+                accountSlug={account.slug}
+                timeZone={account.timezone}
+                ctx={ctx}
+                auto={await autoAvailable(prisma, ctx.channel)}
+                aiDisabledReason={isAiConfigured() ? null : AI_NOT_CONFIGURED}
+              />
+            ) : (
+              <Card>
+                <CardContent className="space-y-4 p-6">
+                  <StepContent step={pub.pipelineStep} />
+                </CardContent>
+              </Card>
+            )}
             <StepActions accountSlug={account.slug} publicationId={pub.id} title={pub.title} step={pub.pipelineStep} />
           </>
         ) : (

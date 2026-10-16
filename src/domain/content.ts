@@ -1,4 +1,5 @@
 import type { Prisma } from '@/generated/prisma/client';
+import { parseEngine } from './engine';
 import { parseNameValueList, type NameValue } from './name-value';
 
 // Contenido de una publicación y de su ficha maestra, campo por campo. Lo usan
@@ -322,9 +323,30 @@ export async function writeContentField(
       return;
     case 'compatibilities': {
       const list = value as Compat[];
+      // La cilindrada y el combustible no viajan en el contenido: se conservan
+      // los que ya tenía el mismo vehículo, o se sacan del motor.
+      const previous = await tx.compatibility.findMany({
+        where: { productId },
+        select: { vehicleBrand: true, model: true, engine: true, displacement: true, fuel: true },
+      });
+      const key = (c: { vehicleBrand: string | null; model: string | null; engine: string | null }) =>
+        [c.vehicleBrand, c.model, c.engine].map((v) => (v ?? '').trim().toLowerCase()).join('|');
+      const kept = new Map(previous.map((p) => [key(p), p]));
       await tx.compatibility.deleteMany({ where: { productId } });
       if (list.length > 0) {
-        await tx.compatibility.createMany({ data: list.map((c, position) => ({ ...c, productId, position })) });
+        await tx.compatibility.createMany({
+          data: list.map((c, position) => {
+            const before = kept.get(key(c));
+            const parsed = parseEngine(c.engine);
+            return {
+              ...c,
+              displacement: before ? before.displacement : parsed.displacement,
+              fuel: before ? before.fuel : parsed.fuel,
+              productId,
+              position,
+            };
+          }),
+        });
       }
       return;
     }

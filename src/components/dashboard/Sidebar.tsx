@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { cookies } from 'next/headers';
-import { KanbanSquare, ListChecks, Package, SlidersHorizontal, Upload, Users } from 'lucide-react';
+import { KanbanSquare, ListChecks, Package, PlugZap, SlidersHorizontal, Type, Upload, Users } from 'lucide-react';
 import { NavLink } from '@/components/dashboard/NavLink';
 import { SidebarShell } from '@/components/dashboard/SidebarShell';
 import { SidebarToggle } from '@/components/dashboard/SidebarToggle';
@@ -78,6 +78,12 @@ export async function Sidebar({
           </p>
           <NavLink href={`${accountHome}/estandar`} label="Estándar">
             <SlidersHorizontal className="h-4 w-4" />
+          </NavLink>
+          <NavLink href={`${accountHome}/reglas-titulo`} label="Reglas de título">
+            <Type className="h-4 w-4" />
+          </NavLink>
+          <NavLink href={`${accountHome}/conexion`} label="Conexión">
+            <PlugZap className="h-4 w-4" />
           </NavLink>
           <p className="mt-3 mb-1 px-3 text-[10px] uppercase tracking-wide text-muted-foreground font-medium md:group-data-[collapsed=true]:hidden">
             Estudio

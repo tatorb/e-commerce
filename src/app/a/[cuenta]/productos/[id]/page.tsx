@@ -58,6 +58,8 @@ function toFormValues(p: ProductDetail): ProductFormValues {
       vehicleBrand: s(c.vehicleBrand),
       model: s(c.model),
       engine: s(c.engine),
+      displacement: s(c.displacement),
+      fuel: s(c.fuel),
       yearFrom: c.yearFrom?.toString() ?? '',
       yearTo: c.yearTo?.toString() ?? '',
       note: s(c.note),

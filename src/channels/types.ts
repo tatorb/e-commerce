@@ -1,6 +1,7 @@
 import type { ChannelKind } from '@/generated/prisma/enums';
 import type { ContentField, ContentSnapshot } from '@/domain/content';
 import type { Metrics } from '@/domain/measurements';
+import type { TitleRules } from '@/domain/title-rules';
 
 /** Un dato para pasar al canal a mano. */
 export type ApplyItem = {
@@ -49,4 +50,8 @@ export interface ChannelAdapter {
    * bloqueado, false libre, null si no hay datos para saberlo.
    */
   titleLock(metrics: Metrics): boolean | null;
+  /** Reglas de título con las que arranca cada cuenta. */
+  titleRules: TitleRules;
+  /** Link para ver una búsqueda en el canal, si el canal tiene buscador. */
+  searchUrl(query: string): string | null;
 }

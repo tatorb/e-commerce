@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { RecordSource } from '@/generated/prisma/enums';
+import { withEngineData } from './engine';
 import { compactNameValues, nameValueSchema } from './name-value';
 
 // Ficha maestra del producto. Este módulo no sabe nada de canales ni de
@@ -12,6 +13,14 @@ const text = (max: number) =>
     .trim()
     .max(max, `Máximo ${max} caracteres.`)
     .transform((v) => (v === '' ? null : v));
+
+const optionalText = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max, `Máximo ${max} caracteres.`)
+    .optional()
+    .transform((v) => (v ? v : undefined));
 
 const year = z
   .union([z.string(), z.number(), z.null()])
@@ -56,6 +65,9 @@ export const productInputSchema = z.object({
           vehicleBrand: text(200),
           model: text(200),
           engine: text(200),
+          // Vacíos o sin venir, se sacan del motor.
+          displacement: optionalText(20),
+          fuel: optionalText(40),
           yearFrom: year,
           yearTo: year,
           note: text(500),
@@ -87,7 +99,7 @@ export function dropEmptyRows(input: ProductInput): ProductInput {
     specs: compactNameValues(input.specs.map((s) => ({ name: s.name.trim(), value: s.value.trim() }))),
     variants: input.variants.filter((v) => filled([v.measure, v.sku])),
     compatibilities: input.compatibilities.filter((c) =>
-      filled([c.vehicleBrand, c.model, c.engine, c.yearFrom, c.yearTo, c.note]),
+      filled([c.vehicleBrand, c.model, c.engine, c.displacement, c.fuel, c.yearFrom, c.yearTo, c.note]),
     ),
     assets: input.assets.filter((a) => filled([a.url])),
   };
@@ -158,7 +170,7 @@ export async function writeProduct(tx: Tx, args: SaveArgs): Promise<{ id: string
   }
   if (data.compatibilities.length > 0) {
     await tx.compatibility.createMany({
-      data: data.compatibilities.map((c, position) => ({ ...c, productId: id, position })),
+      data: data.compatibilities.map((c, position) => ({ ...withEngineData(c), productId: id, position })),
     });
   }
   if (data.assets.length > 0) {

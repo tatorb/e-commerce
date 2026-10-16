@@ -36,6 +36,9 @@ model User {
   applications     ChannelApplication[]
   pipelineEntries  PipelineMovement[]   @relation("PipelineMovedIn")
   pipelineExits    PipelineMovement[]   @relation("PipelineMovedOut")
+  titleLockChoices TitleWork[]
+  titleApprovals   TitleApproval[]
+  titleRuleSets    TitleRuleSet[]
 
   @@map("users")
 }
@@ -93,17 +96,19 @@ model Verification {
 
 // Cuenta: el cliente del estudio. Todo dato pertenece a una cuenta.
 model Account {
-  id             String          @id @default(cuid())
-  slug           String          @unique
+  id             String             @id @default(cuid())
+  slug           String             @unique
   name           String
-  timezone       String          @default("America/Argentina/Buenos_Aires")
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  timezone       String             @default("America/Argentina/Buenos_Aires")
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
   stores         Store[]
   products       Product[]
   importMappings ImportMapping[]
   importRuns     ImportRun[]
   standardRules  StandardRule[]
+  titleRuleSets  TitleRuleSet[]
+  suggestions    SearchSuggestion[]
 
   @@map("accounts")
 }
@@ -115,11 +120,14 @@ enum ChannelKind {
 
 // Canal: lista fija de lugares donde se puede mostrar un producto.
 model Channel {
-  id            String         @id @default(cuid())
-  kind          ChannelKind    @unique
+  id            String             @id @default(cuid())
+  kind          ChannelKind        @unique
   name          String
   stores        Store[]
   standardRules StandardRule[]
+  titleRuleSets TitleRuleSet[]
+  suggestions   SearchSuggestion[]
+  probes        ChannelProbe[]
 
   @@map("channels")
 }
@@ -213,6 +221,9 @@ model Compatibility {
   vehicleBrand String?
   model        String?
   engine       String?
+  // Cilindrada, por ejemplo "1.9", y combustible, por ejemplo "Diesel".
+  displacement String?
+  fuel         String?
   yearFrom     Int?
   yearTo       Int?
   note         String?
@@ -301,6 +312,10 @@ model Publication {
   proposals         Proposal[]
   applications      ChannelApplication[]
   pipelineMovements PipelineMovement[]
+  competitors       CompetitorListing[]
+  titleWork         TitleWork?
+  titleApprovals    TitleApproval[]
+  positions         SearchPosition[]
 
   @@unique([storeId, externalId])
   @@index([pipelineStatus])
@@ -589,4 +604,167 @@ model PipelineMovement {
 
   @@index([publicationId, enteredAt])
   @@map("pipeline_movements")
+}
+
+// ───────────────────────────── Paso Información ─────────────────────────────
+
+// Publicación de la competencia que vende mucho, cargada a mano. Sus títulos
+// suman palabras al mapa del paso Título.
+model CompetitorListing {
+  id            String      @id @default(cuid())
+  publicationId String
+  publication   Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  url           String?
+  title         String
+  soldQuantity  Int?
+  position      Int         @default(0)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([publicationId])
+  @@map("competitor_listings")
+}
+
+// ───────────────────────────── Paso Título ─────────────────────────────
+
+// Reglas de título por cuenta y canal. Sin fila, valen las del canal
+// (src/channels/<canal>/).
+model TitleRuleSet {
+  id             String   @id @default(cuid())
+  accountId      String
+  account        Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  channelId      String
+  channel        Channel  @relation(fields: [channelId], references: [id])
+  maxLength      Int?
+  // Signos no permitidos, todos juntos, por ejemplo "!¡*$".
+  forbiddenChars String   @default("")
+  // Palabras o frases no permitidas: lista de textos.
+  forbiddenWords Json     @default("[]")
+  // Estructura sugerida por familia: lista de { family, structure }. La
+  // familia vacía vale para todas.
+  structures     Json     @default("[]")
+  updatedById    String?
+  updatedBy      User?    @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+  updatedAt      DateTime @updatedAt
+
+  @@unique([accountId, channelId])
+  @@map("title_rule_sets")
+}
+
+// Qué hacer con un título bloqueado por ventas.
+enum TitleLockDecision {
+  KEEP // mantener el título: el paso se completa sin cambios
+  TRY_IN_COPY // probar el título nuevo en la copia con cuotas
+}
+
+// El trabajo del paso Título de una publicación: semillas, palabras elegidas,
+// búsquedas principales y propuestas de la IA.
+model TitleWork {
+  id              String             @id @default(cuid())
+  publicationId   String             @unique
+  publication     Publication        @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  lockDecision    TitleLockDecision?
+  lockDecidedAt   DateTime?
+  lockDecidedById String?
+  lockDecidedBy   User?              @relation(fields: [lockDecidedById], references: [id], onDelete: SetNull)
+  // Lo que se busca en el canal: lista de textos.
+  seeds           Json?
+  // Palabra → "use" o "discard".
+  words           Json               @default("{}")
+  // Búsquedas principales para medir la posición: lista de textos.
+  mainSearches    Json               @default("[]")
+  // Propuestas de la IA: lista de { title, reason }.
+  proposals       Json               @default("[]")
+  proposalsAt     DateTime?
+  proposalUsage   Json?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@map("title_works")
+}
+
+enum TitleOutcome {
+  KEPT // se mantuvo el título
+  WRITTEN // el título nuevo quedó en la publicación
+  COPY // el título nuevo es para la copia con cuotas
+}
+
+// Cada título aprobado: cómo estaba, qué quedó, qué propuso la IA y si la
+// persona lo cambió.
+model TitleApproval {
+  id            String       @id @default(cuid())
+  publicationId String
+  publication   Publication  @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  outcome       TitleOutcome
+  before        String?
+  title         String?
+  // La propuesta de la IA que se eligió, si se eligió una.
+  aiTitle       String?
+  // Las propuestas que había: lista de { title, reason }.
+  aiProposals   Json         @default("[]")
+  edited        Boolean      @default(false)
+  userId        String?
+  user          User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt     DateTime     @default(now())
+
+  @@index([publicationId, createdAt])
+  @@map("title_approvals")
+}
+
+enum CaptureSource {
+  AUTO // leído por la app
+  MANUAL // pegado o cargado a mano
+}
+
+// Sugerencias del buscador del canal para lo que se escribió, con fecha. Son
+// de la cuenta: sirven para todas las publicaciones con la misma semilla.
+model SearchSuggestion {
+  id            String        @id @default(cuid())
+  accountId     String
+  account       Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  channelId     String
+  channel       Channel       @relation(fields: [channelId], references: [id])
+  // La semilla y lo que se escribió en el buscador: la semilla, o la semilla
+  // más una letra.
+  seed          String
+  query         String
+  // Lista de textos, en el orden del buscador.
+  suggestions   Json
+  source        CaptureSource
+  publicationId String?
+  capturedAt    DateTime      @default(now())
+
+  @@index([accountId, channelId, seed])
+  @@map("search_suggestions")
+}
+
+// En qué página y posición aparece la publicación al buscar algo, con fecha.
+// Sin página: no aparece en las páginas revisadas.
+model SearchPosition {
+  id            String        @id @default(cuid())
+  publicationId String
+  publication   Publication   @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  query         String
+  page          Int?
+  position      Int?
+  pagesChecked  Int           @default(3)
+  source        CaptureSource
+  checkedAt     DateTime      @default(now())
+
+  @@index([publicationId, checkedAt])
+  @@map("search_positions")
+}
+
+// Prueba de conexión con un canal: si la app puede leer cada cosa.
+model ChannelProbe {
+  id        String   @id @default(cuid())
+  channelId String
+  channel   Channel  @relation(fields: [channelId], references: [id])
+  check     String
+  ok        Boolean
+  detail    String
+  checkedAt DateTime @default(now())
+
+  @@index([channelId, check, checkedAt])
+  @@map("channel_probes")
 }
