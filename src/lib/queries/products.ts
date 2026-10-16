@@ -59,6 +59,11 @@ export async function getProduct(accountId: string, productId: string) {
             include: { createdBy: { select: { name: true } }, decidedBy: { select: { name: true } } },
           },
           _count: { select: { proposals: true } },
+          applications: {
+            orderBy: { appliedAt: 'desc' },
+            take: 1,
+            include: { createdBy: { select: { name: true } } },
+          },
         },
       },
     },

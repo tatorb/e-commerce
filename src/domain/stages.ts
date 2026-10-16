@@ -55,3 +55,29 @@ export async function moveToStage(
   await tx.publication.update({ where: { id: publicationId }, data: { stage } });
   return { changed: true };
 }
+
+/**
+ * Deshace el último cambio de etapa, para corregir un error: borra la etapa
+ * abierta y vuelve a abrir la anterior, como si el cambio no hubiera pasado.
+ * Solo si la etapa abierta es la esperada.
+ */
+export async function revertLastStage(
+  tx: Tx,
+  input: { publicationId: string; expected: Stage },
+): Promise<{ stage: Stage }> {
+  const locked = await tx.$queryRaw<{ id: string }[]>`
+    SELECT id FROM publications WHERE id = ${input.publicationId} FOR UPDATE`;
+  if (locked.length === 0) throw new Error('La publicación no existe.');
+  const [open, previous] = await tx.stageMovement.findMany({
+    where: { publicationId: input.publicationId },
+    orderBy: { enteredAt: 'desc' },
+    take: 2,
+  });
+  if (!open || open.exitedAt !== null || open.stage !== input.expected || !previous) {
+    throw new Error('La etapa cambió mientras tanto. Recargá la página.');
+  }
+  await tx.stageMovement.delete({ where: { id: open.id } });
+  await tx.stageMovement.update({ where: { id: previous.id }, data: { exitedAt: null } });
+  await tx.publication.update({ where: { id: input.publicationId }, data: { stage: previous.stage } });
+  return { stage: previous.stage };
+}

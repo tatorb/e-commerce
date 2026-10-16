@@ -1,8 +1,42 @@
 import type { ChannelKind } from '@/generated/prisma/enums';
-import type { ChannelAdapter } from './types';
+import { CONTENT_FIELD_KIND, CONTENT_FIELD_LABEL, CONTENT_FIELDS, type ContentSnapshot } from '@/domain/content';
+import type { ApplySection, ChannelAdapter } from './types';
 import { mercadolibre } from './mercadolibre';
+import { compatText } from './shared/apply-format';
 
-export type { ChannelAdapter } from './types';
+export type { ApplyItem, ApplySection, ChannelAdapter } from './types';
+
+/** Sin un orden propio del canal: un dato por campo, en el orden de la ficha. */
+function genericApplyGuide(c: ContentSnapshot, changed: ReadonlySet<string>): ApplySection[] {
+  return CONTENT_FIELDS.filter((f) => f !== 'notes').map((field) => {
+    const value = c[field];
+    const kind = CONTENT_FIELD_KIND[field];
+    const text =
+      kind === 'specs'
+        ? c.specs.map((s) => `${s.name}: ${s.value}`).join('\n')
+        : kind === 'compatibilities'
+          ? c.compatibilities.map(compatText).join('\n')
+          : kind === 'measures'
+            ? c.measures.map((m) => `${m.sku ?? 'Sin SKU'}: ${m.measure ?? ''}`).join('\n')
+            : kind === 'links'
+              ? (value as string[]).join('\n')
+              : ((value as string | null) ?? '');
+    return {
+      key: field,
+      title: CONTENT_FIELD_LABEL[field],
+      hint: null,
+      items: [
+        {
+          label: CONTENT_FIELD_LABEL[field],
+          value: text,
+          kind: 'copy' as const,
+          changed: changed.has(field),
+          multiline: kind !== 'short',
+        },
+      ],
+    };
+  });
+}
 
 // Canal sin reglas propias todavía, por ejemplo la tienda web: el ID es texto
 // libre y no se arma link.
@@ -17,6 +51,7 @@ function genericAdapter(kind: ChannelKind, name: string): ChannelAdapter {
       return value ? { ok: true, value } : { ok: false, error: 'Falta el ID.' };
     },
     publicationUrl: () => null,
+    applyGuide: genericApplyGuide,
   };
 }
 

@@ -19,20 +19,21 @@ datasource db {
 // Los usuarios son del equipo del estudio y ven todas las cuentas.
 
 model User {
-  id               String          @id
+  id               String               @id
   name             String
-  email            String          @unique
-  emailVerified    Boolean         @default(false)
+  email            String               @unique
+  emailVerified    Boolean              @default(false)
   image            String?
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @default(now()) @updatedAt
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @default(now()) @updatedAt
   sessions         Session[]
   authAccounts     AuthAccount[]
   stageMovements   StageMovement[]
   importRuns       ImportRun[]
   importMappings   ImportMapping[]
-  proposals        Proposal[]      @relation("ProposalCreatedBy")
-  decidedProposals Proposal[]      @relation("ProposalDecidedBy")
+  proposals        Proposal[]           @relation("ProposalCreatedBy")
+  decidedProposals Proposal[]           @relation("ProposalDecidedBy")
+  applications     ChannelApplication[]
 
   @@map("users")
 }
@@ -261,32 +262,33 @@ enum Stage {
 
 // Publicación: el producto armado para una tienda puntual.
 model Publication {
-  id             String          @id @default(cuid())
+  id             String               @id @default(cuid())
   productId      String
-  product        Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product        Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
   storeId        String
-  store          Store           @relation(fields: [storeId], references: [id])
+  store          Store                @relation(fields: [storeId], references: [id])
   externalId     String? // por ejemplo MLA123456
   url            String?
   title          String?
   description    String?
   // Atributos tal como se cargan en el canal: lista de { name, value }.
-  attributes     Json            @default("[]")
+  attributes     Json                 @default("[]")
   // Precio público del canal. Nunca costos ni listas de proveedor.
-  price          Decimal?        @db.Decimal(14, 2)
-  currency       String          @default("ARS")
-  channelStatus  ChannelStatus   @default(ACTIVE)
-  stage          Stage           @default(IMPORTED)
-  source         RecordSource    @default(MANUAL)
+  price          Decimal?             @db.Decimal(14, 2)
+  currency       String               @default("ARS")
+  channelStatus  ChannelStatus        @default(ACTIVE)
+  stage          Stage                @default(IMPORTED)
+  source         RecordSource         @default(MANUAL)
   // Importación que la creó, para poder deshacerla.
   importRunId    String?
-  importRun      ImportRun?      @relation(fields: [importRunId], references: [id], onDelete: SetNull)
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  importRun      ImportRun?           @relation(fields: [importRunId], references: [id], onDelete: SetNull)
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
   stageMovements StageMovement[]
   measurements   Measurement[]
   importChanges  ImportChange[]
   proposals      Proposal[]
+  applications   ChannelApplication[]
 
   @@unique([storeId, externalId])
   @@index([productId])
@@ -468,31 +470,54 @@ enum ProposalStatus {
 // Propuesta de la IA para una publicación: qué cambiaría, campo por campo.
 // No cambia nada por sí sola: se revisa y se aprueba aparte.
 model Proposal {
-  id            String         @id @default(cuid())
+  id            String               @id @default(cuid())
   publicationId String
-  publication   Publication    @relation(fields: [publicationId], references: [id], onDelete: Cascade)
-  status        ProposalStatus @default(ACTIVE)
+  publication   Publication          @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  status        ProposalStatus       @default(ACTIVE)
   summary       String
   // Campos que cambian: lista de { field, before, after, reason, toConfirm, placeholders }.
   fields        Json
   // Cómo estaba el contenido cuando se generó, para comparar en la revisión.
   baseline      Json
   // Avisos generales, por ejemplo una medida de un SKU que no está en el producto.
-  notes         Json           @default("[]")
+  notes         Json                 @default("[]")
   model         String
   // Tokens y costo aproximado en dólares.
   usage         Json
   createdById   String?
-  createdBy     User?          @relation("ProposalCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  createdAt     DateTime       @default(now())
+  createdBy     User?                @relation("ProposalCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt     DateTime             @default(now())
   // Revisión: mientras se revisa, el borrador; al decidir, qué quedó en cada
   // campo, qué había propuesto la IA, si se editó y cómo estaba antes.
   review        Json?
   decidedAt     DateTime?
   decidedById   String?
-  decidedBy     User?          @relation("ProposalDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+  decidedBy     User?                @relation("ProposalDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
   rejectReason  String?
+  applications  ChannelApplication[]
 
   @@index([publicationId, status])
   @@map("proposals")
+}
+
+// ───────────────────────────── Aplicación en el canal ─────────────────────────────
+
+// Cada vez que lo aprobado se aplicó en el canal: cuándo, cómo y qué campos.
+// La fecha es el punto de partida para medir el antes y el después.
+model ChannelApplication {
+  id            String      @id @default(cuid())
+  publicationId String
+  publication   Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  proposalId    String?
+  proposal      Proposal?   @relation(fields: [proposalId], references: [id], onDelete: SetNull)
+  method        ApplyMethod
+  appliedAt     DateTime
+  // Campos aplicados: lista de claves, por ejemplo ["title", "specs"].
+  fields        Json        @default("[]")
+  createdById   String?
+  createdBy     User?       @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt     DateTime    @default(now())
+
+  @@index([publicationId, appliedAt])
+  @@map("channel_applications")
 }

@@ -26,6 +26,7 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
 | Cambio de importación | `ImportChange` | Un campo que una importación completó o reemplazó en algo que ya estaba: cómo estaba y cómo quedó. Es lo que permite deshacerla. |
 | Propuesta | `Proposal` | Lo que la IA propone cambiar en una publicación, campo por campo, con el motivo y lo que hay que confirmar. No cambia nada hasta que se aprueba. Guarda cómo estaba todo al generarla. |
 | Revisión | `Proposal.review` | Donde una persona corrige la propuesta, campo por campo, y la aprueba o la rechaza. Al aprobar se escribe en la ficha y la publicación, y queda qué propuso la IA, qué quedó y qué se editó. No deja aprobar con marcas [A CONFIRMAR: …] ni con un título más largo que el del canal. |
+| Aplicación | `ChannelApplication` | Cuándo lo aprobado quedó aplicado en el canal, de qué forma (a mano, por planilla o por API) y qué campos. Es el punto de partida para medir el antes y el después. |
 | Planilla de contenido | (archivo) | CSV que se baja desde Publicaciones, con una fila por publicación y lo que la app ya sabe. Se completa a mano o con IA y se vuelve a importar. |
 | Regla del estándar | `StandardRule` | Qué tiene que tener una publicación correcta, por cuenta y canal: qué revisa, con qué valor y cuánto pesa. |
 | Puntaje | (se calcula) | De 0 a 100: lo que suman las reglas cumplidas sobre lo que suman las que aplican. No se guarda, se calcula cada vez. |
@@ -40,7 +41,8 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
 - `src/ai/`: el pedido a Claude. Recibe la ficha, la publicación, el estándar y lo que falta, y
   devuelve la propuesta con una forma fija. No sabe de archivos ni de canales, y nunca recibe
   precios, visitas ni ventas. El modelo y los precios están en `claude.ts`.
-- `src/channels/`: lo único que sabe de cada canal (formato del ID, link, largo del título).
+- `src/channels/`: lo único que sabe de cada canal (formato del ID, link, largo del título y la
+  guía para aplicar a mano, con los datos en el orden del formulario del canal).
   El resto de la app usa la interfaz `ChannelAdapter`.
 - `src/importers/`: el único lugar que sabe leer archivos. Lee Excel y CSV en el navegador,
   propone qué columna va a qué campo, traba las columnas confidenciales y traduce cada fila a

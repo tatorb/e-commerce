@@ -217,6 +217,8 @@ export default async function ProductPage({ params }: { params: Promise<{ cuenta
                     proposal={pub.proposals[0] ?? null}
                     proposalCount={pub._count.proposals}
                     aiReady={aiReady}
+                    channelName={channel.name}
+                    application={pub.applications[0] ?? null}
                   />
                   <div className="space-y-2">
                     <p className="text-xs uppercase tracking-wide text-muted-foreground">Historial de etapas</p>

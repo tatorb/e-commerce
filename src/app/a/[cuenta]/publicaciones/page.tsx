@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ClipboardCheck, Download, SlidersHorizontal } from 'lucide-react';
+import { ClipboardCheck, Download, Send, SlidersHorizontal } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -96,6 +96,7 @@ export default async function PublicationsPage({
   const channelNames = [...new Set(stores.map((s) => s.channel.name))];
   const ready = items.filter((p) => needsProposal(p.stage));
   const toReview = all.filter((p) => p.stage === 'PROPOSAL_GENERATED' || p.stage === 'IN_REVIEW').length;
+  const toApply = all.filter((p) => p.stage === 'APPROVED').length;
 
   const scored = items.filter((p) => p.score !== null);
   const average = scored.length ? Math.round(scored.reduce((s, p) => s + p.score!, 0) / scored.length) : null;
@@ -139,6 +140,14 @@ export default async function PublicationsPage({
               <Link href="?etapa=PROPOSAL_GENERATED,IN_REVIEW">
                 <ClipboardCheck className="h-4 w-4" />
                 Para revisar · {toReview}
+              </Link>
+            </Button>
+          ) : null}
+          {toApply > 0 ? (
+            <Button size="sm" asChild>
+              <Link href="?etapa=APPROVED">
+                <Send className="h-4 w-4" />
+                Para aplicar · {toApply}
               </Link>
             </Button>
           ) : null}

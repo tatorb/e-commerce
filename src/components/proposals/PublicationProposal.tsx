@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ClipboardCheck } from 'lucide-react';
+import { ClipboardCheck, Send } from 'lucide-react';
 import { AI_NOT_CONFIGURED, PROPOSAL_MODEL } from '@/ai/claude';
 import { Button } from '@/components/ui/button';
 import { canGenerateProposal, parseNotes, parseProposalFields, parseReview, ProposalStageError } from '@/domain/proposals';
@@ -8,6 +8,7 @@ import { formatDateTime, formatUsd } from '@/lib/format';
 import { GenerateProposalButton } from './GenerateProposalButton';
 import { ProposalView } from './ProposalView';
 import { StartReviewButton } from './StartReviewButton';
+import { UndoAppliedButton } from '@/components/apply/UndoAppliedButton';
 
 // La sección "Propuesta de la IA" de una publicación, en la ficha del producto.
 
@@ -25,6 +26,14 @@ type StoredProposal = {
   decidedAt: Date | null;
   decidedBy: { name: string } | null;
   rejectReason: string | null;
+};
+
+type StoredApplication = { appliedAt: Date; method: 'MANUAL' | 'SPREADSHEET' | 'API'; createdBy: { name: string } | null };
+
+const METHOD_LABEL: Record<StoredApplication['method'], string> = {
+  MANUAL: 'a mano',
+  SPREADSHEET: 'por planilla',
+  API: 'por API',
 };
 
 function costOf(usage: unknown): number | null {
@@ -52,6 +61,8 @@ export function PublicationProposal({
   proposal,
   proposalCount,
   aiReady,
+  channelName,
+  application,
 }: {
   accountSlug: string;
   timeZone: string;
@@ -61,10 +72,15 @@ export function PublicationProposal({
   proposal: StoredProposal | null;
   proposalCount: number;
   aiReady: boolean;
+  channelName: string;
+  // La última vez que se aplicó en el canal.
+  application: StoredApplication | null;
 }) {
   const active = proposal?.status === 'ACTIVE' ? proposal : null;
   const decided = proposal && proposal.status !== 'ACTIVE' ? proposal : null;
   const reviewUrl = `/a/${accountSlug}/publicaciones/${publicationId}/revision`;
+  const applyUrl = `/a/${accountSlug}/publicaciones/${publicationId}/aplicar`;
+  const applied = (stage === 'APPLIED' || stage === 'MEASURED') && application ? application : null;
   const previous = proposalCount - (active ? 1 : 0);
   const disabledReason = !aiReady ? AI_NOT_CONFIGURED : canGenerateProposal(stage) ? null : new ProposalStageError().message;
   const cost = active ? costOf(active.usage) : null;
@@ -91,6 +107,12 @@ export function PublicationProposal({
             </p>
           ) : null}
           {decided ? <p className="text-sm">{decisionText(decided, timeZone)}</p> : null}
+          {applied ? (
+            <p className="text-sm">
+              Aplicada en {channelName} el {formatDateTime(applied.appliedAt, timeZone)} por{' '}
+              {applied.createdBy?.name ?? '—'}, {METHOD_LABEL[applied.method]}.
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-wrap items-start gap-2">
           {active && stage === 'PROPOSAL_GENERATED' ? (
@@ -103,6 +125,22 @@ export function PublicationProposal({
                 Seguir revisando
               </Link>
             </Button>
+          ) : null}
+          {stage === 'APPROVED' ? (
+            <Button size="sm" asChild>
+              <Link href={applyUrl}>
+                <Send className="h-4 w-4" />
+                Aplicar en {channelName}
+              </Link>
+            </Button>
+          ) : null}
+          {applied ? (
+            <>
+              <Button size="sm" variant="outline" asChild>
+                <Link href={applyUrl}>Ver lo aplicado</Link>
+              </Button>
+              {stage === 'APPLIED' ? <UndoAppliedButton accountSlug={accountSlug} publicationId={publicationId} /> : null}
+            </>
           ) : null}
           {canGenerateProposal(stage) ? (
             <GenerateProposalButton

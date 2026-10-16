@@ -1,4 +1,5 @@
 import type { ChannelAdapter } from '../types';
+import { mercadolibreApplyGuide } from './apply';
 
 // Mercado Libre Argentina. Los IDs de publicación tienen la forma MLA + números.
 // La gente suele pegar el link entero, que puede venir de dos maneras:
@@ -30,4 +31,5 @@ export const mercadolibre: ChannelAdapter = {
     const match = externalId.match(ITEM_ID);
     return match ? `https://articulo.mercadolibre.com.ar/MLA-${match[1]}` : null;
   },
+  applyGuide: mercadolibreApplyGuide,
 };
