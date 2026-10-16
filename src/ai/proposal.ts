@@ -21,17 +21,22 @@ export type ProposalInput = {
   listing: { photoCount: number | null; hasVideo: boolean | null; channelQuality: number | null; channelGoals: string | null };
 };
 
+// La respuesta no usa campos que puedan ser "null o un valor": la API tiene
+// un límite bajo para ese tipo de campos y rechaza el pedido si se pasa. Un
+// texto vacío o una lista vacía quiere decir "sin cambios", y un año 0, "no se
+// sabe".
+
 const textField = (what: string) =>
   z.object({
-    value: z.string().nullable().describe(`${what} propuesto completo, o null si no hay nada que mejorar.`),
-    reason: z.string().describe('Por qué cambia, en una oración simple. Vacío si value es null.'),
+    value: z.string().describe(`${what} propuesto completo, o vacío si no hay nada que mejorar.`),
+    reason: z.string().describe('Por qué cambia, en una oración simple. Vacío si no cambia.'),
     toConfirm: z.array(z.string()).describe('Qué hay que confirmar antes de publicar. Vacía si no hay nada.'),
   });
 
 const listField = <T extends z.ZodType>(item: T, what: string) =>
   z.object({
-    items: z.array(item).nullable().describe(`${what} completa propuesta, o null si no hay nada que mejorar.`),
-    reason: z.string().describe('Por qué cambia, en una oración simple. Vacío si items es null.'),
+    items: z.array(item).describe(`${what} completa propuesta, o vacía si no hay nada que mejorar.`),
+    reason: z.string().describe('Por qué cambia, en una oración simple. Vacío si no cambia.'),
     toConfirm: z.array(z.string()).describe('Qué hay que confirmar antes de publicar. Vacía si no hay nada.'),
   });
 
@@ -44,18 +49,18 @@ export const proposalOutputSchema = z.object({
   kitContents: textField('Contenido del kit'),
   warranty: textField('Garantía'),
   measures: listField(
-    z.object({ sku: z.string().nullable(), measure: z.string() }),
+    z.object({ sku: z.string().describe('Vacío si el producto no tiene SKU.'), measure: z.string() }),
     'Lista de medidas, una por SKU,',
   ),
   specs: listField(z.object({ name: z.string(), value: z.string() }), 'Ficha técnica'),
   compatibilities: listField(
     z.object({
-      vehicleBrand: z.string().nullable(),
-      model: z.string().nullable(),
-      engine: z.string().nullable(),
-      yearFrom: z.number().int().nullable(),
-      yearTo: z.number().int().nullable(),
-      note: z.string().nullable(),
+      vehicleBrand: z.string().describe('Vacío si no se sabe.'),
+      model: z.string().describe('Vacío si no se sabe.'),
+      engine: z.string().describe('Vacío si no se sabe.'),
+      yearFrom: z.number().int().describe('0 si no se sabe.'),
+      yearTo: z.number().int().describe('0 si no se sabe.'),
+      note: z.string().describe('Vacío si no hay nota.'),
     }),
     'Lista de compatibilidades',
   ),
@@ -76,7 +81,7 @@ Regla principal: no inventes datos técnicos.
 - Si deducís algo muy probable pero no seguro, por ejemplo que "0.50" en un cojinete es 0,50 mm, proponelo y agregá a "toConfirm" qué hay que verificar.
 
 Cómo responder cada campo:
-- Si no tenés nada que mejorar, devolvé value o items en null, reason vacío y toConfirm vacía.
+- Si no tenés nada que mejorar, devolvé value vacío o items como lista vacía, reason vacío y toConfirm vacía.
 - Si proponés un cambio, devolvé el valor completo, no solo la parte que cambia.
 - "reason" es una oración simple que explica por qué cambia.
 
@@ -91,7 +96,7 @@ Descripción:
 - Si el estándar pide un mínimo de caracteres, cumplilo con información útil, nunca con relleno.
 
 Ficha técnica: un dato por fila, con nombre corto y valor con unidad. Usá nombres consistentes, como "Diámetro", "Material" o "Cantidad de piezas".
-Compatibilidades: una fila por vehículo, con marca, modelo y motor por separado. Los años solo si figuran en los datos. Si no, dejalos en null y pedí confirmarlos.
+Compatibilidades: una fila por vehículo, con marca, modelo y motor por separado. Los años solo si figuran en los datos. Si no, dejalos en 0 y pedí confirmarlos.
 Medidas: una por SKU, con unidad en mm o pulgadas, o "STD". Si la medida actual no tiene unidad, proponé la más probable y pedí confirmarla.
 Marca del repuesto, número de pieza, contenido del kit y garantía: solo si surgen de los datos.
 Fotos y video: no los podés generar. No los menciones en la propuesta.
@@ -166,7 +171,7 @@ export function buildProposalRequest(input: ProposalInput) {
   };
 }
 
-const year = (n: number | null): number | null => (n !== null && Number.isInteger(n) && n >= 1900 && n <= 2100 ? n : null);
+const year = (n: number): number | null => (Number.isInteger(n) && n >= 1900 && n <= 2100 ? n : null);
 
 /** Traduce la respuesta de Claude a campos de la app. Lo que viene vacío o mal formado se descarta. */
 export function toDraft(output: ProposalOutput): ProposalDraft {
@@ -184,20 +189,20 @@ export function toDraft(output: ProposalOutput): ProposalDraft {
   }
 
   note('measures', output.measures);
-  const measures = (output.measures.items ?? [])
+  const measures = output.measures.items
     .map((m) => ({ sku: cleanText(m.sku), measure: cleanText(m.measure) ?? '' }))
     .filter((m) => m.measure !== '');
   if (measures.length > 0) content.measures = measures;
 
   note('specs', output.specs);
-  const specs = (output.specs.items ?? []).flatMap((s) => {
+  const specs = output.specs.items.flatMap((s) => {
     const parsed = nameValueSchema.safeParse({ name: s.name, value: s.value });
     return parsed.success && parsed.data.name && parsed.data.value ? [parsed.data] : [];
   });
   if (specs.length > 0) content.specs = specs;
 
   note('compatibilities', output.compatibilities);
-  const compatibilities = (output.compatibilities.items ?? [])
+  const compatibilities = output.compatibilities.items
     .map(
       (c): Compat => ({
         vehicleBrand: cleanText(c.vehicleBrand),
@@ -235,11 +240,15 @@ export async function requestProposal(input: ProposalInput): Promise<ProposalRes
   try {
     response = await claude().beta.messages.create(request);
   } catch (e) {
-    const retryable =
-      e instanceof Anthropic.RateLimitError ||
-      e instanceof Anthropic.InternalServerError ||
-      e instanceof Anthropic.APIConnectionError;
-    throw new ProposalError(apiErrorMessage(e), null, retryable);
+    // Si el reintento ante rechazos no está disponible para esta cuenta, se
+    // pide igual sin él.
+    if (!(e instanceof Anthropic.BadRequestError && /fallback|anthropic-beta/i.test(apiDetail(e)))) throw toProposalError(e);
+    console.error('Claude no aceptó el reintento ante rechazos:', apiDetail(e));
+    try {
+      response = await claude().beta.messages.create({ ...request, betas: undefined, fallbacks: undefined });
+    } catch (e2) {
+      throw toProposalError(e2);
+    }
   }
 
   const usage = usageOf(response.model, response.usage);
@@ -260,13 +269,30 @@ export async function requestProposal(input: ProposalInput): Promise<ProposalRes
   return { output, usage, model: response.model };
 }
 
+/** El motivo que da la API, sin datos del pedido. */
+function apiDetail(e: unknown): string {
+  if (!(e instanceof Anthropic.APIError)) return e instanceof Error ? e.name : 'error desconocido';
+  const body = e.error as { error?: { message?: unknown } } | undefined;
+  return typeof body?.error?.message === 'string' ? body.error.message : e.message;
+}
+
+function toProposalError(e: unknown): ProposalError {
+  // Solo el código y el motivo: nunca el contenido de la publicación.
+  console.error('Error de la API de Claude:', e instanceof Anthropic.APIError ? e.status : '', apiDetail(e));
+  const retryable =
+    e instanceof Anthropic.RateLimitError ||
+    e instanceof Anthropic.InternalServerError ||
+    e instanceof Anthropic.APIConnectionError;
+  return new ProposalError(apiErrorMessage(e), null, retryable);
+}
+
 function apiErrorMessage(e: unknown): string {
   if (e instanceof Anthropic.AuthenticationError) return 'La clave de la API de Claude no es válida. Revisala en Vercel.';
   if (e instanceof Anthropic.PermissionDeniedError) return 'La clave de la API de Claude no tiene permiso para usar este modelo.';
   if (e instanceof Anthropic.RateLimitError) return 'Claude está recibiendo demasiados pedidos. Probá de nuevo en un minuto.';
   if (e instanceof Anthropic.BadRequestError) {
-    if (/credit balance/i.test(e.message)) return 'La cuenta de la API de Claude no tiene saldo. Cargale crédito en console.anthropic.com.';
-    return 'Claude no aceptó el pedido. Avisale a Studio MRB.';
+    if (/credit balance/i.test(apiDetail(e))) return 'La cuenta de la API de Claude no tiene saldo. Cargale crédito en console.anthropic.com.';
+    return `Claude no aceptó el pedido. Motivo: ${apiDetail(e)}`;
   }
   if (e instanceof Anthropic.APIConnectionTimeoutError) return 'Claude tardó demasiado en responder. Probá de nuevo.';
   if (e instanceof Anthropic.APIConnectionError) return 'No se pudo conectar con Claude. Probá de nuevo.';

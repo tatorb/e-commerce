@@ -12,8 +12,8 @@ import { generateProposal } from '@/lib/proposals';
 
 const url = process.env.TEST_DATABASE_URL;
 
-const none = { value: null, reason: '', toConfirm: [] };
-const noList = { items: null, reason: '', toConfirm: [] };
+const none = { value: '', reason: '', toConfirm: [] };
+const noList = { items: [], reason: '', toConfirm: [] };
 const answer: ProposalOutput = {
   summary: 'Suma garantía a confirmar y ordena el título.',
   title: { value: 'Kit de prueba Marca A Modelo 1 1.6 STD', reason: 'Más claro.', toConfirm: [] },

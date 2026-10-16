@@ -36,7 +36,7 @@ const input: ProposalInput = {
   listing: { photoCount: 4, hasVideo: false, channelQuality: 0.5, channelGoals: 'Sumar fotos' },
 };
 
-const empty = { value: null, reason: '', toConfirm: [] };
+const empty = { value: '', reason: '', toConfirm: [] };
 const output: ProposalOutput = {
   summary: ' Ordena el título y suma compatibilidades. ',
   title: { value: 'Kit Prueba Marca A Modelo 1 1.6 Medidas STD y 0,50 mm Repuesto Completo', reason: 'Más claro.', toConfirm: [] },
@@ -44,11 +44,14 @@ const output: ProposalOutput = {
   brand: { value: 'Marca X', reason: '', toConfirm: [] },
   partNumber: empty,
   kitContents: empty,
-  warranty: { value: null, reason: '', toConfirm: ['Plazo de garantía'] },
-  measures: { items: [{ sku: 'ABC-2', measure: '0,50 mm' }, { sku: 'ZZZ', measure: 'STD' }], reason: 'Unidad.', toConfirm: ['Que sea mm'] },
+  warranty: { value: '', reason: '', toConfirm: ['Plazo de garantía'] },
+  measures: { items: [{ sku: 'ABC-2', measure: '0,50 mm' }, { sku: 'ZZZ', measure: 'STD' }, { sku: '', measure: '' }], reason: 'Unidad.', toConfirm: ['Que sea mm'] },
   specs: { items: [{ name: ' Material ', value: 'acero' }, { name: '', value: 'x' }], reason: 'Ficha.', toConfirm: [] },
   compatibilities: {
-    items: [{ vehicleBrand: 'Marca A', model: 'Modelo 1', engine: '1.6', yearFrom: 1800, yearTo: 2150, note: null }],
+    items: [
+      { vehicleBrand: 'Marca A', model: 'Modelo 1', engine: '1.6', yearFrom: 1800, yearTo: 0, note: '' },
+      { vehicleBrand: '', model: '', engine: '', yearFrom: 0, yearTo: 0, note: '' },
+    ],
     reason: 'Del título.',
     toConfirm: ['Años'],
   },
@@ -67,6 +70,16 @@ describe('pedido a la IA', () => {
     // Las instrucciones fijas no cambian entre publicaciones.
     const other = buildProposalRequest({ ...input, content: { ...content, title: 'Otro' } });
     expect(other.system).toEqual(r.system);
+  });
+
+  it('la forma de la respuesta no tiene campos "null o valor" ni opcionales', () => {
+    // La API rechaza el pedido si hay demasiados campos de ese tipo.
+    const schema = JSON.stringify(buildProposalRequest(input).output_config.format.schema);
+    expect(schema).not.toContain('"anyOf"');
+    expect(schema).not.toMatch(/"type":\[/);
+    const objects = [...schema.matchAll(/"properties":\{/g)].length;
+    const required = [...schema.matchAll(/"required":\[/g)].length;
+    expect(required).toBe(objects);
   });
 
   it('no manda IDs internos', () => {
