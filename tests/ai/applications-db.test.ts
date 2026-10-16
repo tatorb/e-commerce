@@ -122,6 +122,8 @@ describe.skipIf(!url)('marcar como aplicada', () => {
     expect(app.proposalId).not.toBeNull();
     const pub = await db.publication.findUniqueOrThrow({ where: { id: publicationId } });
     expect(pub.stage).toBe('APPLIED');
+    // Fuera del pipeline, aplicar la propuesta también la deja corregida.
+    expect(pub.pipelineStatus).toBe('CORRECTED');
     const applied = await db.stageMovement.findFirstOrThrow({ where: { publicationId, stage: 'APPLIED' } });
     expect(applied.enteredAt).toEqual(now);
 
@@ -137,7 +139,9 @@ describe.skipIf(!url)('marcar como aplicada', () => {
     await db.$transaction((tx) => markApplied(tx, { publicationId, userId, method: 'MANUAL', day, timeZone }));
     await db.$transaction((tx) => undoApplied(tx, { publicationId }));
     expect(await stages()).toEqual(before);
-    expect((await db.publication.findUniqueOrThrow({ where: { id: publicationId } })).stage).toBe('APPROVED');
+    const pub = await db.publication.findUniqueOrThrow({ where: { id: publicationId } });
+    expect(pub.stage).toBe('APPROVED');
+    expect(pub.pipelineStatus).toBe('UNTOUCHED');
     expect(await db.channelApplication.count()).toBe(0);
   });
 

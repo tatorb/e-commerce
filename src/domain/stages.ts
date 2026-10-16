@@ -1,7 +1,8 @@
 import type { Prisma } from '@/generated/prisma/client';
 import { Stage } from '@/generated/prisma/enums';
 
-// Etapas del pipeline, en orden. La etapa vive en la publicación.
+// Estados del recorrido de la propuesta completa con IA, en orden. No es la
+// etapa de la publicación: esa es la del pipeline (src/domain/pipeline.ts).
 export const STAGES: Stage[] = [
   Stage.IMPORTED,
   Stage.PROPOSAL_GENERATED,
@@ -12,7 +13,7 @@ export const STAGES: Stage[] = [
 ];
 
 export const STAGE_LABEL: Record<Stage, string> = {
-  IMPORTED: 'Importado',
+  IMPORTED: 'Sin propuesta',
   PROPOSAL_GENERATED: 'Propuesta generada',
   IN_REVIEW: 'En revisión',
   APPROVED: 'Aprobado',

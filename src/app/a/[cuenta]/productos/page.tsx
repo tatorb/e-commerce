@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/table';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
-import { StageBadge } from '@/components/stages/StageBadge';
+import { PipelineBadge } from '@/components/stages/StageBadge';
 import { getAccountBySlug } from '@/lib/queries/accounts';
 import { listProducts, type ProductListItem } from '@/lib/queries/products';
 import { formatRelativeDate, plural } from '@/lib/format';
@@ -27,7 +27,7 @@ export async function generateMetadata({ params }: { params: Promise<{ cuenta: s
   return { title: account ? `Productos · ${account.name}` : 'Productos' };
 }
 
-// Etapa de cada publicación del producto. Con una sola tienda es una sola.
+// Dónde está cada publicación del producto en el pipeline. Con una sola tienda es una sola.
 function Stages({ item }: { item: ProductListItem }) {
   if (item.publications.length === 0) {
     return <span className="text-muted-foreground">—</span>;
@@ -35,7 +35,7 @@ function Stages({ item }: { item: ProductListItem }) {
   return (
     <div className="flex flex-wrap gap-1">
       {item.publications.map((p) => (
-        <StageBadge key={p.id} stage={p.stage} />
+        <PipelineBadge key={p.id} state={p} />
       ))}
     </div>
   );

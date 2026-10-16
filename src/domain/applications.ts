@@ -1,6 +1,7 @@
 import type { Prisma } from '@/generated/prisma/client';
 import type { ApplyMethod, Stage } from '@/generated/prisma/enums';
 import { isContentField, type ContentField } from './content';
+import { markCorrectedOutsidePipeline, undoCorrectedOutsidePipeline } from './pipeline';
 import { parseReview } from './proposals';
 import { moveToStage, revertLastStage } from './stages';
 
@@ -107,6 +108,7 @@ export async function markApplied(
     select: { id: true },
   });
   await moveToStage(tx, { publicationId: args.publicationId, stage: 'APPLIED', userId: args.userId, at: appliedAt });
+  await markCorrectedOutsidePipeline(tx, args.publicationId);
   return { id: application.id, appliedAt };
 }
 
@@ -132,6 +134,7 @@ export async function undoApplied(tx: Tx, args: { publicationId: string }): Prom
   } catch (e) {
     throw new ApplicationError(e instanceof Error ? e.message : 'No se pudo volver atrás.');
   }
+  await undoCorrectedOutsidePipeline(tx, args.publicationId);
 }
 
 export function parseAppliedFields(raw: unknown): ContentField[] {

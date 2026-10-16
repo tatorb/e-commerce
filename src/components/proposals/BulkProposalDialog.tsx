@@ -131,7 +131,7 @@ export function BulkProposalDialog({
             ) : total === 0 ? (
               <p>
                 Ninguna de las publicaciones que estás viendo está lista para una propuesta nueva. Se generan para las que
-                están en Importado o Medido.
+                no tienen una propuesta en curso.
               </p>
             ) : (
               <>

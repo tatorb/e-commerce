@@ -52,6 +52,7 @@ function genericAdapter(kind: ChannelKind, name: string): ChannelAdapter {
     },
     publicationUrl: () => null,
     applyGuide: genericApplyGuide,
+    titleLock: () => null,
   };
 }
 

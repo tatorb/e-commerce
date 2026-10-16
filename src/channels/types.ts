@@ -1,5 +1,6 @@
 import type { ChannelKind } from '@/generated/prisma/enums';
 import type { ContentField, ContentSnapshot } from '@/domain/content';
+import type { Metrics } from '@/domain/measurements';
 
 /** Un dato para pasar al canal a mano. */
 export type ApplyItem = {
@@ -43,4 +44,9 @@ export interface ChannelAdapter {
    * el orden del formulario del canal, marcando los que cambiaron.
    */
   applyGuide(content: ContentSnapshot, changed: ReadonlySet<ContentField>): ApplySection[];
+  /**
+   * Si el canal no deja cambiar el título, según la última medición: true
+   * bloqueado, false libre, null si no hay datos para saberlo.
+   */
+  titleLock(metrics: Metrics): boolean | null;
 }

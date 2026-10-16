@@ -9,11 +9,13 @@ import { ProductForm, type ProductFormValues } from '@/components/products/Produ
 import { DeleteProductButton } from '@/components/products/DeleteProductButton';
 import { PublicationForm } from '@/components/publications/PublicationForm';
 import { NewPublicationDialog } from '@/components/publications/NewPublicationDialog';
-import { ChannelStatusBadge, StageBadge } from '@/components/stages/StageBadge';
+import { ChannelStatusBadge, PipelineBadge, StageBadge } from '@/components/stages/StageBadge';
+import { TitleLockControl } from '@/components/publications/TitleLockControl';
+import { resolveTitleLock } from '@/domain/title-lock';
 import { ScoreBadge, ScoreDot } from '@/components/stages/ScoreBadge';
 import { scorePublication } from '@/domain/standard';
 import { loadRulesByChannel, toScoreInput } from '@/lib/queries/scoring';
-import { channelInfo } from '@/channels';
+import { channelInfo, getChannelAdapter } from '@/channels';
 import { parseNameValueList } from '@/domain/name-value';
 import { METRICS, METRIC_KEYS, formatMetric, parseMetrics } from '@/domain/measurements';
 import { getAccountBySlug } from '@/lib/queries/accounts';
@@ -130,6 +132,11 @@ export default async function ProductPage({ params }: { params: Promise<{ cuenta
           product.publications.map((pub) => {
             const channel = channelInfo(pub.store.channel.kind, pub.store.channel.name);
             const score = scorePublication(rules.get(pub.store.channelId) ?? [], toScoreInput(product, pub));
+            const lastMetrics = pub.measurements[0] ? parseMetrics(pub.measurements[0].metrics) : {};
+            const titleLock = resolveTitleLock(
+              getChannelAdapter(pub.store.channel.kind, pub.store.channel.name).titleLock(lastMetrics),
+              pub.titleLockedManual,
+            );
             return (
               <Card key={pub.id}>
                 <CardHeader className="space-y-3">
@@ -142,10 +149,13 @@ export default async function ProductPage({ params }: { params: Promise<{ cuenta
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       <ScoreBadge score={score.score} />
-                      <StageBadge stage={pub.stage} />
+                      <PipelineBadge state={pub} />
                       <ChannelStatusBadge status={pub.channelStatus} />
                     </div>
                   </div>
+                  {pub.externalId ? (
+                    <TitleLockControl accountSlug={account.slug} publicationId={pub.id} lock={titleLock} />
+                  ) : null}
                   {pub.url ? (
                     <a
                       href={pub.url}
@@ -220,27 +230,32 @@ export default async function ProductPage({ params }: { params: Promise<{ cuenta
                     channelName={channel.name}
                     application={pub.applications[0] ?? null}
                   />
-                  <div className="space-y-2">
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Historial de etapas</p>
-                    <ul className="divide-y rounded-md border">
-                      {pub.stageMovements.map((m) => (
-                        <li key={m.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-sm">
-                          <div className="w-40 shrink-0">
-                            <StageBadge stage={m.stage} />
-                          </div>
-                          <span className="tabular-nums text-muted-foreground">
-                            {formatDateTime(m.enteredAt, account.timezone)}
-                            {' → '}
-                            {m.exitedAt ? formatDateTime(m.exitedAt, account.timezone) : 'etapa actual'}
-                          </span>
-                          <span className="tabular-nums text-muted-foreground">
-                            {formatDuration(m.enteredAt, m.exitedAt ?? now)}
-                          </span>
-                          <span className="text-muted-foreground sm:ml-auto">{m.user?.name ?? '—'}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
+                  {/* Sin propuestas todavía, el historial es solo el comienzo: no se muestra. */}
+                  {pub.stageMovements.length > 1 ? (
+                    <div className="space-y-2">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                        Historial de la propuesta con IA
+                      </p>
+                      <ul className="divide-y rounded-md border">
+                        {pub.stageMovements.map((m) => (
+                          <li key={m.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-sm">
+                            <div className="w-40 shrink-0">
+                              <StageBadge stage={m.stage} />
+                            </div>
+                            <span className="tabular-nums text-muted-foreground">
+                              {formatDateTime(m.enteredAt, account.timezone)}
+                              {' → '}
+                              {m.exitedAt ? formatDateTime(m.exitedAt, account.timezone) : 'estado actual'}
+                            </span>
+                            <span className="tabular-nums text-muted-foreground">
+                              {formatDuration(m.enteredAt, m.exitedAt ?? now)}
+                            </span>
+                            <span className="text-muted-foreground sm:ml-auto">{m.user?.name ?? '—'}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
                   {pub.measurements.length > 0 ? (
                     <div className="space-y-2">
                       <p className="text-xs uppercase tracking-wide text-muted-foreground">Mediciones</p>

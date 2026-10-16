@@ -27,7 +27,14 @@ export async function listProducts(accountId: string, q?: string) {
       _count: { select: { variants: true } },
       publications: {
         orderBy: { createdAt: 'asc' },
-        select: { id: true, stage: true, externalId: true, store: { select: { name: true } } },
+        select: {
+          id: true,
+          pipelineStatus: true,
+          pipelineStep: true,
+          pipelineRemoval: true,
+          externalId: true,
+          store: { select: { name: true } },
+        },
       },
     },
   });

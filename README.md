@@ -18,8 +18,13 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
 | Canal | `Channel` | Mercado Libre, tienda web, etc. |
 | Tienda | `Store` | La presencia de una cuenta en un canal, por ejemplo INSURMOTOR. Guarda la forma de aplicar: manual, planilla o API. |
 | Publicación | `Publication` | El producto armado para una tienda: título, descripción, atributos, precio, ID externo, link, estado. |
-| Etapa | `Stage` | Importado, Propuesta generada, En revisión, Aprobado, Aplicado en canal, Medido. Vive en la publicación. |
-| Movimiento de etapa | `StageMovement` | Cuándo entró y salió una publicación de cada etapa, y quién la movió. |
+| Catálogo | (pantalla) | La lista de todas las publicaciones, en `/publicaciones`. Desde ahí se eligen las que entran al pipeline. |
+| Pipeline | `Publication.pipelineStatus` | La etapa que se ve de cada publicación: Sin tocar, En pipeline (con su paso), Corregida o Descartada (con su motivo). Solo entran las que tienen código del canal. |
+| Paso del pipeline | `PipelineStep` | Información, Título, Imágenes, Videos, Organización de multimedia, Descripción y Publicación, en ese orden. Al sacar una publicación se conserva el paso, para retomar ahí. |
+| Movimiento del pipeline | `PipelineMovement` | Cuándo entró y salió una publicación de cada paso, quién la movió y por qué salió: avanzó, volvió, se sacó o terminó. |
+| Título bloqueado | (se calcula) | Cuando el canal no deja cambiar el título. Lo dicen las ventas de la última medición, con la regla de cada canal; si no hay datos, se marca a mano en la publicación. |
+| Estado de la propuesta | `Stage` | Sin propuesta, Propuesta generada, En revisión, Aprobado, Aplicado en canal, Medido. Es el recorrido de la propuesta completa con IA, no la etapa de la publicación. |
+| Movimiento de la propuesta | `StageMovement` | Cuándo entró y salió una publicación de cada estado de la propuesta, y quién la movió. |
 | Medición | `Measurement` | Cómo estaba una publicación en una fecha: visitas, ventas y lo que tenía cargado. Es el "antes" para comparar. |
 | Importación | `ImportRun` | Quién importó qué archivo, cuándo y qué resultó. Se puede deshacer. |
 | Relación de columnas | `ImportMapping` | Qué columna de un archivo va a qué campo. Se guarda para reusarla. |
@@ -27,22 +32,22 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
 | Propuesta | `Proposal` | Lo que la IA propone cambiar en una publicación, campo por campo, con el motivo y lo que hay que confirmar. No cambia nada hasta que se aprueba. Guarda cómo estaba todo al generarla. |
 | Revisión | `Proposal.review` | Donde una persona corrige la propuesta, campo por campo, y la aprueba o la rechaza. Al aprobar se escribe en la ficha y la publicación, y queda qué propuso la IA, qué quedó y qué se editó. No deja aprobar con marcas [A CONFIRMAR: …] ni con un título más largo que el del canal. |
 | Aplicación | `ChannelApplication` | Cuándo lo aprobado quedó aplicado en el canal, de qué forma (a mano, por planilla o por API) y qué campos. Es el punto de partida para medir el antes y el después. |
-| Planilla de contenido | (archivo) | CSV que se baja desde Publicaciones, con una fila por publicación y lo que la app ya sabe. Se completa a mano o con IA y se vuelve a importar. |
+| Planilla de contenido | (archivo) | CSV que se baja desde el Catálogo, con una fila por publicación y lo que la app ya sabe. Se completa a mano o con IA y se vuelve a importar. |
 | Regla del estándar | `StandardRule` | Qué tiene que tener una publicación correcta, por cuenta y canal: qué revisa, con qué valor y cuánto pesa. |
 | Puntaje | (se calcula) | De 0 a 100: lo que suman las reglas cumplidas sobre lo que suman las que aplican. No se guarda, se calcula cada vez. |
 
 ## Cómo está ordenado
 
-- `src/domain/`: producto, publicación, etapas, mediciones, estándar, contenido, propuestas y revisión. No sabe nada
-  de canales ni de archivos. `content.ts` compara el contenido que llega con el que hay, campo
+- `src/domain/`: producto, publicación, pipeline, etapas, mediciones, estándar, contenido, propuestas y revisión. No sabe nada
+  de canales ni de archivos. `pipeline.ts` agrega, mueve y saca publicaciones del pipeline, y avisa las repetidas. `content.ts` compara el contenido que llega con el que hay, campo
   por campo, y decide qué se completa o se reemplaza. `moveToStage` es la única forma de cambiar de etapa. `standard.ts` tiene las
   revisiones que puede hacer una regla y el cálculo del puntaje: primero mira la ficha y la
   publicación, y si la app todavía no tiene ese dato usa la última medición.
 - `src/ai/`: el pedido a Claude. Recibe la ficha, la publicación, el estándar y lo que falta, y
   devuelve la propuesta con una forma fija. No sabe de archivos ni de canales, y nunca recibe
   precios, visitas ni ventas. El modelo y los precios están en `claude.ts`.
-- `src/channels/`: lo único que sabe de cada canal (formato del ID, link, largo del título y la
-  guía para aplicar a mano, con los datos en el orden del formulario del canal).
+- `src/channels/`: lo único que sabe de cada canal (formato del ID, link, largo del título, cuándo
+  el título está bloqueado y la guía para aplicar a mano, con los datos en el orden del formulario del canal).
   El resto de la app usa la interfaz `ChannelAdapter`.
 - `src/importers/`: el único lugar que sabe leer archivos. Lee Excel y CSV en el navegador,
   propone qué columna va a qué campo, traba las columnas confidenciales y traduce cada fila a

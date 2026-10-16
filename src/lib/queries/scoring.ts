@@ -1,5 +1,7 @@
 import { prisma } from '@/lib/db';
+import { getChannelAdapter } from '@/channels';
 import { parseMetrics } from '@/domain/measurements';
+import { resolveTitleLock } from '@/domain/title-lock';
 import { scorePublication, type RuleConfig, type ScoreResult } from '@/domain/standard';
 import { toScoreInput } from './score-input';
 
@@ -37,13 +39,18 @@ export async function listScoredPublications(accountId: string) {
         externalId: true,
         channelStatus: true,
         stage: true,
+        pipelineStatus: true,
+        pipelineStep: true,
+        pipelineRemoval: true,
+        titleLockedManual: true,
         updatedAt: true,
-        store: { select: { name: true, channelId: true } },
+        store: { select: { name: true, channelId: true, channel: { select: { kind: true, name: true } } } },
         measurements: { orderBy: { takenAt: 'desc' }, take: 1, select: { takenAt: true, metrics: true } },
         product: {
           select: {
             id: true,
             name: true,
+            productType: true,
             warranty: true,
             kitContents: true,
             partNumber: true,
@@ -60,6 +67,7 @@ export async function listScoredPublications(accountId: string) {
   return publications.map((p) => {
     const result: ScoreResult = scorePublication(rules.get(p.store.channelId) ?? [], toScoreInput(p.product, p));
     const metrics = p.measurements[0] ? parseMetrics(p.measurements[0].metrics) : {};
+    const channel = getChannelAdapter(p.store.channel.kind, p.store.channel.name);
     return {
       id: p.id,
       title: p.title ?? p.product.name,
@@ -69,7 +77,13 @@ export async function listScoredPublications(accountId: string) {
       storeName: p.store.name,
       channelStatus: p.channelStatus,
       stage: p.stage,
+      pipelineStatus: p.pipelineStatus,
+      pipelineStep: p.pipelineStep,
+      pipelineRemoval: p.pipelineRemoval,
+      titleLock: resolveTitleLock(channel.titleLock(metrics), p.titleLockedManual),
+      family: p.product.productType?.trim() || null,
       visits: typeof metrics.visits_90d === 'number' ? metrics.visits_90d : null,
+      sales: typeof metrics.sales_90d === 'number' ? metrics.sales_90d : null,
       score: result.score,
       missing: result.missing,
     };

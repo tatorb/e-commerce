@@ -1,6 +1,7 @@
 import { cn } from '@/lib/utils/cn';
-import type { ChannelStatus, ImportStatus, Stage } from '@/generated/prisma/enums';
+import type { ChannelStatus, ImportStatus, PipelineStatus, Stage } from '@/generated/prisma/enums';
 import { STAGE_LABEL } from '@/domain/stages';
+import { pipelineLabel, type PipelineState } from '@/domain/pipeline';
 import { CHANNEL_STATUS_LABEL } from '@/domain/channel-status';
 
 // Badge de estado con punto de color, el mismo de los estados de secuencia
@@ -62,6 +63,18 @@ export function DotBadge({ cfg, label, compact }: { cfg: Cfg; label: string; com
 
 export function StageBadge({ stage, compact }: { stage: Stage; compact?: boolean }) {
   return <DotBadge cfg={STAGE_CONFIG[stage]} label={STAGE_LABEL[stage]} compact={compact} />;
+}
+
+const PIPELINE_CONFIG: Record<PipelineStatus, Cfg> = {
+  UNTOUCHED: NEUTRAL,
+  IN_PIPELINE: PRIMARY,
+  CORRECTED: EMERALD,
+  DISCARDED: DONE,
+};
+
+/** Dónde está la publicación en el pipeline: la etapa que se ve en listas y fichas. */
+export function PipelineBadge({ state }: { state: PipelineState }) {
+  return <DotBadge cfg={PIPELINE_CONFIG[state.pipelineStatus]} label={pipelineLabel(state)} />;
 }
 
 export function ChannelStatusBadge({ status }: { status: ChannelStatus }) {

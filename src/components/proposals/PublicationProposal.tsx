@@ -9,6 +9,7 @@ import { GenerateProposalButton } from './GenerateProposalButton';
 import { ProposalView } from './ProposalView';
 import { StartReviewButton } from './StartReviewButton';
 import { UndoAppliedButton } from '@/components/apply/UndoAppliedButton';
+import { StageBadge } from '@/components/stages/StageBadge';
 
 // La sección "Propuesta de la IA" de una publicación, en la ficha del producto.
 
@@ -99,7 +100,10 @@ export function PublicationProposal({
     <div className="space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">Propuesta de la IA</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">Propuesta de la IA</p>
+            {stage !== 'IMPORTED' ? <StageBadge stage={stage} /> : null}
+          </div>
           {!active && !decided ? (
             <p className="text-sm text-muted-foreground">
               La IA propone cómo mejorar esta publicación según el estándar, sin inventar datos. No cambia nada hasta

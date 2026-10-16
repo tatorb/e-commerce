@@ -24,7 +24,7 @@ import { PublicationForm } from '@/components/publications/PublicationForm';
 export type StoreOption = { id: string; name: string; channel: ChannelInfo };
 
 // "Agregar publicación": elige la tienda (si hay más de una) y carga los
-// datos básicos. La publicación nueva entra en la etapa Importado.
+// datos básicos. La publicación nueva empieza sin tocar.
 export function NewPublicationDialog({
   accountSlug,
   productId,
@@ -56,8 +56,8 @@ export function NewPublicationDialog({
         <DialogHeader>
           <DialogTitle>Nueva publicación</DialogTitle>
           <DialogDescription>
-            La publicación de <strong>{productName}</strong> en una tienda. Entra en la etapa
-            Importado.
+            La publicación de <strong>{productName}</strong> en una tienda. Empieza sin tocar, lista para
+            agregarla al pipeline.
           </DialogDescription>
         </DialogHeader>
         {stores.length > 1 ? (
