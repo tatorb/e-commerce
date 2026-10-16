@@ -51,11 +51,12 @@ export async function getProduct(accountId: string, productId: string) {
             include: { user: { select: { name: true } } },
           },
           measurements: { orderBy: { takenAt: 'desc' } },
+          // La vigente, o la última que se decidió.
           proposals: {
-            where: { status: 'ACTIVE' },
+            where: { status: { not: 'SUPERSEDED' } },
             orderBy: { createdAt: 'desc' },
             take: 1,
-            include: { createdBy: { select: { name: true } } },
+            include: { createdBy: { select: { name: true } }, decidedBy: { select: { name: true } } },
           },
           _count: { select: { proposals: true } },
         },

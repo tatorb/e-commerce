@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { Download, SlidersHorizontal } from 'lucide-react';
+import { ClipboardCheck, Download, SlidersHorizontal } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -95,6 +95,7 @@ export default async function PublicationsPage({
   const items = filterPublications(all, filters);
   const channelNames = [...new Set(stores.map((s) => s.channel.name))];
   const ready = items.filter((p) => needsProposal(p.stage));
+  const toReview = all.filter((p) => p.stage === 'PROPOSAL_GENERATED' || p.stage === 'IN_REVIEW').length;
 
   const scored = items.filter((p) => p.score !== null);
   const average = scored.length ? Math.round(scored.reduce((s, p) => s + p.score!, 0) / scored.length) : null;
@@ -133,6 +134,14 @@ export default async function PublicationsPage({
           </Button>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {toReview > 0 ? (
+            <Button size="sm" asChild>
+              <Link href="?etapa=PROPOSAL_GENERATED,IN_REVIEW">
+                <ClipboardCheck className="h-4 w-4" />
+                Para revisar · {toReview}
+              </Link>
+            </Button>
+          ) : null}
           <BulkProposalDialog
             accountSlug={account.slug}
             items={ready.slice(0, BULK_LIMIT).map((p) => ({ id: p.id, title: p.title }))}

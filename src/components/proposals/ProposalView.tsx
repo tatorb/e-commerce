@@ -9,7 +9,7 @@ import type { ProposalField } from '@/domain/proposals';
 const PLACEHOLDER = /(\[\s*A CONFIRMAR\s*:?[^\]]*\])/gi;
 
 /** Texto con las marcas [A CONFIRMAR: …] resaltadas. */
-function Highlighted({ text }: { text: string }) {
+export function Highlighted({ text }: { text: string }) {
   const parts = text.split(PLACEHOLDER);
   return (
     <>
@@ -58,7 +58,7 @@ function Lines({ lines }: { lines: string[] }) {
   );
 }
 
-function Value({ field, value }: { field: ProposalField['field']; value: unknown }) {
+export function Value({ field, value }: { field: ProposalField['field']; value: unknown }) {
   if (value === null || value === undefined) return <Empty />;
   switch (field) {
     case 'specs':
@@ -81,7 +81,7 @@ function Value({ field, value }: { field: ProposalField['field']; value: unknown
   }
 }
 
-function ToConfirm({ items, prefix = true }: { items: string[]; prefix?: boolean }) {
+export function ToConfirm({ items, prefix = true }: { items: string[]; prefix?: boolean }) {
   if (items.length === 0) return null;
   return (
     <ul className="space-y-1">

@@ -19,19 +19,20 @@ datasource db {
 // Los usuarios son del equipo del estudio y ven todas las cuentas.
 
 model User {
-  id             String          @id
-  name           String
-  email          String          @unique
-  emailVerified  Boolean         @default(false)
-  image          String?
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @default(now()) @updatedAt
-  sessions       Session[]
-  authAccounts   AuthAccount[]
-  stageMovements StageMovement[]
-  importRuns     ImportRun[]
-  importMappings ImportMapping[]
-  proposals      Proposal[]
+  id               String          @id
+  name             String
+  email            String          @unique
+  emailVerified    Boolean         @default(false)
+  image            String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @default(now()) @updatedAt
+  sessions         Session[]
+  authAccounts     AuthAccount[]
+  stageMovements   StageMovement[]
+  importRuns       ImportRun[]
+  importMappings   ImportMapping[]
+  proposals        Proposal[]      @relation("ProposalCreatedBy")
+  decidedProposals Proposal[]      @relation("ProposalDecidedBy")
 
   @@map("users")
 }
@@ -482,8 +483,15 @@ model Proposal {
   // Tokens y costo aproximado en dólares.
   usage         Json
   createdById   String?
-  createdBy     User?          @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdBy     User?          @relation("ProposalCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt     DateTime       @default(now())
+  // Revisión: mientras se revisa, el borrador; al decidir, qué quedó en cada
+  // campo, qué había propuesto la IA, si se editó y cómo estaba antes.
+  review        Json?
+  decidedAt     DateTime?
+  decidedById   String?
+  decidedBy     User?          @relation("ProposalDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+  rejectReason  String?
 
   @@index([publicationId, status])
   @@map("proposals")

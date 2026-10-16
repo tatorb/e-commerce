@@ -1,0 +1,78 @@
+import { describe, expect, it } from 'vitest';
+import { reviewFieldsInputSchema, toEditorValue, validateReview, wasEdited, type ReviewField } from '@/domain/review';
+
+// Datos inventados.
+const base: ReviewField[] = [
+  { field: 'title', value: 'Kit de prueba Marca A Modelo 1', included: true, fromAi: true },
+  { field: 'description', value: 'Kit de prueba.\n\nGarantía\n- 6 meses', included: true, fromAi: true },
+  { field: 'specs', value: [{ name: 'Material', value: 'acero' }, { name: '', value: '' }], included: true, fromAi: true },
+  {
+    field: 'compatibilities',
+    value: [{ vehicleBrand: 'Marca A', model: 'Modelo 1', engine: '1.6', yearFrom: '1995', yearTo: '2012', note: '' }],
+    included: true,
+    fromAi: true,
+  },
+  { field: 'measures', value: [{ id: 'v1', sku: 'ABC-1', measure: 'STD' }], included: true, fromAi: true },
+];
+
+const problems = (fields: ReviewField[], max: number | null = 60) =>
+  validateReview(fields, { titleMaxLength: max }).problems.map((p) => p.message);
+
+describe('validar la revisión', () => {
+  it('aprueba lo correcto y deja los valores listos para escribir', () => {
+    const r = validateReview(base, { titleMaxLength: 60 });
+    expect(r.problems).toEqual([]);
+    const byField = Object.fromEntries(r.fields.map((f) => [f.field, f.normalized]));
+    expect(byField.specs).toEqual([{ name: 'Material', value: 'acero' }]);
+    expect(byField.compatibilities).toEqual([
+      { vehicleBrand: 'Marca A', model: 'Modelo 1', engine: '1.6', yearFrom: 1995, yearTo: 2012, note: null },
+    ]);
+    expect(byField.measures).toEqual([{ id: 'v1', sku: 'ABC-1', measure: 'STD' }]);
+  });
+
+  it('frena marcas a confirmar, títulos largos, años inválidos y vacíos', () => {
+    const bad = base.map((f): ReviewField => {
+      if (f.field === 'title') return { ...f, value: 'x'.repeat(61) };
+      if (f.field === 'description') return { ...f, value: 'Garantía: [A CONFIRMAR: plazo]' };
+      if (f.field === 'compatibilities')
+        return { ...f, value: [{ vehicleBrand: 'A', model: '', engine: '', yearFrom: 'noventa', yearTo: '', note: '' }] };
+      if (f.field === 'specs') return { ...f, value: [{ name: 'Material', value: '' }] };
+      return f;
+    });
+    expect(problems(bad)).toEqual([
+      'Título: tiene 61 caracteres y el máximo del canal es 60.',
+      'Descripción: falta completar «plazo».',
+      'Ficha técnica: la fila 1 tiene el dato o el valor vacío.',
+      'Compatibilidades: fila 1: El año tiene que ser un número, por ejemplo 2012.',
+    ]);
+  });
+
+  it('lo que no se usa no frena, pero algo hay que usar', () => {
+    const off = base.map((f) => (f.field === 'description' ? { ...f, value: '[A CONFIRMAR: todo]', included: false } : f));
+    expect(problems(off)).toEqual([]);
+    expect(problems(base.map((f) => ({ ...f, included: false })))).toEqual(['No hay ningún cambio marcado para usar.']);
+  });
+
+  it('un campo de texto vacío no se puede usar', () => {
+    expect(problems([{ field: 'warranty', value: '  ', included: true, fromAi: false }])).toEqual([
+      'Garantía: está vacío. Completalo o destildá "Usar este cambio".',
+    ]);
+  });
+
+  it('sabe si la persona editó lo que propuso la IA', () => {
+    const ai = [{ vehicleBrand: 'Marca A', model: 'Modelo 1', engine: '1.6', yearFrom: 1995, yearTo: 2012, note: null }];
+    const same = validateReview([{ ...base[3] }], { titleMaxLength: null }).fields[0].normalized;
+    expect(wasEdited('compatibilities', same, ai)).toBe(false);
+    expect(wasEdited('title', 'Otro', 'Kit')).toBe(true);
+    expect(wasEdited('warranty', '6 meses', undefined)).toBe(true);
+    expect(toEditorValue('compatibilities', ai)).toEqual(base[3].value);
+  });
+
+  it('solo acepta de la pantalla campos conocidos, con la forma de su tipo', () => {
+    expect(reviewFieldsInputSchema.safeParse(base).success).toBe(true);
+    const wrong = [{ field: 'measures', value: [{ name: 'x', value: 'y' }], included: true, fromAi: true }];
+    expect(reviewFieldsInputSchema.safeParse(wrong).success).toBe(false);
+    expect(reviewFieldsInputSchema.safeParse([{ field: 'price', value: '1', included: true, fromAi: true }]).success).toBe(false);
+    expect(reviewFieldsInputSchema.safeParse([base[0], base[0]]).success).toBe(false);
+  });
+});

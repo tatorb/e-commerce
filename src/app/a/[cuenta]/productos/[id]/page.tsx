@@ -26,7 +26,6 @@ export const dynamic = 'force-dynamic';
 // Generar una propuesta con IA puede tardar más de un minuto.
 export const maxDuration = 300;
 
-
 export async function generateMetadata({ params }: { params: Promise<{ cuenta: string; id: string }> }) {
   const { cuenta, id } = await params;
   const account = await getAccountBySlug(cuenta);

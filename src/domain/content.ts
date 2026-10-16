@@ -46,6 +46,28 @@ export const CONTENT_FIELD_LABEL: Record<ContentField, string> = {
   videos: 'Video',
 };
 
+// Qué tipo de dato es cada campo: define cómo se edita y cómo se valida.
+export type ContentFieldKind = 'short' | 'long' | 'specs' | 'compatibilities' | 'measures' | 'links';
+
+export const CONTENT_FIELD_KIND: Record<ContentField, ContentFieldKind> = {
+  title: 'short',
+  description: 'long',
+  brand: 'short',
+  partNumber: 'short',
+  productType: 'short',
+  engineSystem: 'short',
+  line: 'short',
+  origin: 'short',
+  warranty: 'short',
+  kitContents: 'long',
+  notes: 'long',
+  measures: 'measures',
+  specs: 'specs',
+  compatibilities: 'compatibilities',
+  photos: 'links',
+  videos: 'links',
+};
+
 export function isContentField(value: string): value is ContentField {
   return (CONTENT_FIELDS as readonly string[]).includes(value);
 }
