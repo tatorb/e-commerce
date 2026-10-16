@@ -23,21 +23,26 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
 | Medición | `Measurement` | Cómo estaba una publicación en una fecha: visitas, ventas y lo que tenía cargado. Es el "antes" para comparar. |
 | Importación | `ImportRun` | Quién importó qué archivo, cuándo y qué resultó. Se puede deshacer. |
 | Relación de columnas | `ImportMapping` | Qué columna de un archivo va a qué campo. Se guarda para reusarla. |
+| Cambio de importación | `ImportChange` | Un campo que una importación completó o reemplazó en algo que ya estaba: cómo estaba y cómo quedó. Es lo que permite deshacerla. |
+| Planilla de contenido | (archivo) | CSV que se baja desde Publicaciones, con una fila por publicación y lo que la app ya sabe. Se completa a mano o con IA y se vuelve a importar. |
 | Regla del estándar | `StandardRule` | Qué tiene que tener una publicación correcta, por cuenta y canal: qué revisa, con qué valor y cuánto pesa. |
 | Puntaje | (se calcula) | De 0 a 100: lo que suman las reglas cumplidas sobre lo que suman las que aplican. No se guarda, se calcula cada vez. |
 
 ## Cómo está ordenado
 
-- `src/domain/`: producto, publicación, etapas, mediciones y estándar. No sabe nada de canales
-  ni de archivos. `moveToStage` es la única forma de cambiar de etapa. `standard.ts` tiene las
+- `src/domain/`: producto, publicación, etapas, mediciones, estándar y contenido. No sabe nada
+  de canales ni de archivos. `content.ts` compara el contenido que llega con el que hay, campo
+  por campo, y decide qué se completa o se reemplaza. `moveToStage` es la única forma de cambiar de etapa. `standard.ts` tiene las
   revisiones que puede hacer una regla y el cálculo del puntaje: primero mira la ficha y la
   publicación, y si la app todavía no tiene ese dato usa la última medición.
 - `src/channels/`: lo único que sabe de cada canal (formato del ID, link, largo del título).
   El resto de la app usa la interfaz `ChannelAdapter`.
 - `src/importers/`: el único lugar que sabe leer archivos. Lee Excel y CSV en el navegador,
   propone qué columna va a qué campo, traba las columnas confidenciales y traduce cada fila a
-  producto, publicación y medición. Al importar vincula por ID de publicación o por SKU, nunca
-  pisa lo que ya está en la app y anota de qué importación vino cada cosa para poder deshacerla.
+  producto, publicación y medición. Al importar vincula por ID de publicación o por SKU. A lo
+  que ya estaba solo le completa lo vacío, o también reemplaza si se elige; una celda vacía nunca
+  borra nada. Anota de qué importación vino cada cosa y cada cambio, para poder deshacerla.
+  También arma la planilla de contenido (`content-sheet.ts`).
 - `src/components/ui/` y `src/components/dashboard/`: componentes y estructura de pantalla
   copiados de app.studiomrb.com (`tatorb/LGM-processor`). El estilo no se inventa: si hace
   falta algo nuevo, se toma de allá.

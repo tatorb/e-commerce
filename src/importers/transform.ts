@@ -3,6 +3,8 @@ import type { ChannelStatus } from '@/generated/prisma/enums';
 import { parsePrice } from '@/domain/money';
 import { METRICS, type MetricKey, type Metrics } from '@/domain/measurements';
 import { productInputSchema, type ProductData } from '@/domain/products';
+import type { IncomingContent } from '@/domain/content';
+import { parseCompatibilities, parseLinks, parseMeasures, parseSpecs } from './cells';
 import { normalizeHeader, type FieldKey } from './fields';
 import type { RowInput } from './mapping';
 import type { Cell } from './spreadsheet';
@@ -24,6 +26,8 @@ export type ImportRecord = {
     channelStatus: ChannelStatus;
   };
   metrics: Metrics;
+  // Lo que la fila trae con dato, para completar lo que ya está en la app.
+  content: IncomingContent;
   warnings: string[];
   error: string | null;
 };
@@ -32,7 +36,7 @@ function text(v: Cell | undefined): string {
   if (v === null || v === undefined) return '';
   if (typeof v === 'number') return String(v);
   if (typeof v === 'boolean') return v ? 'Sí' : 'No';
-  return v.trim();
+  return v.replace(/\r\n?/g, '\n').trim();
 }
 
 function number(v: Cell | undefined): number | null | 'invalid' {
@@ -161,11 +165,54 @@ export function toRecord(row: RowInput, adapter: ChannelAdapter): ImportRecord {
 
   const warrantyText = text(get('product.warranty'));
   const warranty = NO_WARRANTY.has(normalizeHeader(warrantyText)) ? '' : warrantyText;
-  const skus = splitSkus(text(get('product.skus')));
+
+  // Celdas con varios datos.
+  const measures = parseMeasures(text(get('product.measures')));
+  const specs = parseSpecs(text(get('product.specs')));
+  const compatList = parseCompatibilities(text(get('compat.list')));
+  const photos = parseLinks(text(get('asset.photos')));
+  const videos = parseLinks(text(get('asset.videos')));
+  for (const [label, parsed] of [
+    ['Medidas', measures],
+    ['Ficha técnica', specs],
+    ['Compatibilidades', compatList],
+    ['Fotos', photos],
+    ['Video', videos],
+  ] as const) {
+    for (const w of parsed.warnings) warnings.push(`${label}: ${w}`);
+  }
+
+  // Los SKU de la columna SKU y los de las medidas.
+  const skus = [
+    ...new Set([...splitSkus(text(get('product.skus'))), ...measures.items.flatMap((m) => (m.sku ? [m.sku] : []))]),
+  ];
+  const measureFor = new Map<string, string>();
+  for (const m of measures.items) {
+    if (m.sku) measureFor.set(m.sku.toUpperCase(), m.measure);
+    else if (skus.length <= 1) measureFor.set((skus[0] ?? '').toUpperCase(), m.measure);
+    else warnings.push(`Medidas: «${m.measure}» no dice a qué SKU corresponde.`);
+  }
+  const variants = (skus.length > 0 ? skus : measureFor.has('') ? [''] : []).map((sku) => ({
+    sku,
+    measure: measureFor.get(sku.toUpperCase()) ?? '',
+  }));
 
   const vehicleBrand = text(get('compat.vehicleBrand'));
   const model = text(get('compat.model'));
   const engine = text(get('compat.engine'));
+  const compatibilities = [
+    ...(vehicleBrand || model || engine
+      ? [{ vehicleBrand, model, engine, yearFrom: null, yearTo: null, note: '' }]
+      : []),
+    ...compatList.items.map((c) => ({
+      vehicleBrand: c.vehicleBrand ?? '',
+      model: c.model ?? '',
+      engine: c.engine ?? '',
+      yearFrom: c.yearFrom,
+      yearTo: c.yearTo,
+      note: c.note ?? '',
+    })),
+  ];
 
   const publication = {
     externalId,
@@ -183,6 +230,7 @@ export function toRecord(row: RowInput, adapter: ChannelAdapter): ImportRecord {
       skus,
       publication,
       metrics,
+      content: {},
       warnings,
       error: 'Falta el título o el nombre del producto.',
     };
@@ -199,13 +247,13 @@ export function toRecord(row: RowInput, adapter: ChannelAdapter): ImportRecord {
     warranty,
     kitContents: text(get('product.kitContents')),
     notes: text(get('product.notes')),
-    specs: [],
-    variants: skus.map((sku) => ({ measure: '', sku })),
-    compatibilities:
-      vehicleBrand || model || engine
-        ? [{ vehicleBrand, model, engine, yearFrom: null, yearTo: null, note: '' }]
-        : [],
-    assets: [],
+    specs: specs.items,
+    variants,
+    compatibilities,
+    assets: [
+      ...photos.items.map((url) => ({ kind: 'PHOTO' as const, url })),
+      ...videos.items.map((url) => ({ kind: 'VIDEO' as const, url })),
+    ],
   });
 
   return {
@@ -214,7 +262,41 @@ export function toRecord(row: RowInput, adapter: ChannelAdapter): ImportRecord {
     skus,
     publication,
     metrics,
+    content: parsed.success ? toIncomingContent(parsed.data, publication, measures.items) : {},
     warnings,
     error: parsed.success ? null : (parsed.error.issues[0]?.message ?? 'Datos inválidos.'),
   };
+}
+
+/** Lo que la fila trae con dato, ya validado, para completar una ficha existente. */
+function toIncomingContent(
+  product: ProductData,
+  publication: ImportRecord['publication'],
+  measures: IncomingContent['measures'],
+): IncomingContent {
+  const content: IncomingContent = {};
+  const texts = {
+    title: publication.title,
+    description: publication.description,
+    brand: product.brand,
+    partNumber: product.partNumber,
+    productType: product.productType,
+    engineSystem: product.engineSystem,
+    line: product.line,
+    origin: product.origin,
+    warranty: product.warranty,
+    kitContents: product.kitContents,
+    notes: product.notes,
+  };
+  for (const [field, value] of Object.entries(texts) as [keyof typeof texts, string | null][]) {
+    if (value) content[field] = value;
+  }
+  if (measures && measures.length > 0) content.measures = measures;
+  if (product.specs.length > 0) content.specs = product.specs;
+  if (product.compatibilities.length > 0) content.compatibilities = product.compatibilities;
+  const photos = product.assets.filter((a) => a.kind === 'PHOTO').map((a) => a.url);
+  const videos = product.assets.filter((a) => a.kind === 'VIDEO').map((a) => a.url);
+  if (photos.length > 0) content.photos = photos;
+  if (videos.length > 0) content.videos = videos;
+  return content;
 }

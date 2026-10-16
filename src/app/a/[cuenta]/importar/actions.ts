@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/db';
 import { requireUser } from '@/lib/auth/session';
 import { getChannelAdapter } from '@/channels';
-import { applyRows, rowsInputSchema, undoImportRun } from '@/importers/apply';
+import { applyRows, previewRows, rowsInputSchema, undoImportRun, type RowPreview } from '@/importers/apply';
 import type { ExistingKeys } from '@/importers/classify';
 import { isConfidentialHeader, isFieldKey } from '@/importers/fields';
 
@@ -60,6 +60,28 @@ export async function lookupExistingAction(
   };
 }
 
+/** Qué cambiaría en lo que ya está en la app, por tandas de filas. No guarda nada. */
+export async function previewUpdatesAction(
+  accountSlug: string,
+  storeId: string,
+  rawRows: unknown,
+): Promise<Result<{ previews: RowPreview[] }>> {
+  await requireUser();
+  const accountId = await accountIdFor(accountSlug);
+  if (!accountId) return { ok: false, error: 'La cuenta no existe.' };
+  const store = await storeFor(accountId, storeId);
+  if (!store) return { ok: false, error: 'La tienda no existe en esta cuenta.' };
+  const rows = rowsInputSchema.safeParse(rawRows);
+  if (!rows.success) return { ok: false, error: 'Las filas que llegaron no tienen la forma esperada.' };
+
+  const previews = await previewRows(
+    prisma,
+    { accountId, storeId: store.id, adapter: getChannelAdapter(store.channel.kind, store.channel.name) },
+    rows.data,
+  );
+  return { ok: true, previews };
+}
+
 const mappingSchema = z.object({
   name: z.string().trim().min(1, 'Poné un nombre para la relación.').max(120),
   headers: z.array(z.string().max(300)).max(500),
@@ -99,6 +121,7 @@ const startSchema = z.object({
   dataDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'La fecha de los datos no es válida.'),
   mappingId: z.string().nullable(),
   rowsTotal: z.number().int().min(1).max(20000),
+  updateMode: z.enum(['FILL_EMPTY', 'REPLACE']),
 });
 
 export async function startImportAction(
@@ -126,6 +149,7 @@ export async function startImportAction(
       sheetName: parsed.data.sheetName,
       dataDate: new Date(`${parsed.data.dataDate}T00:00:00Z`),
       rowsTotal: parsed.data.rowsTotal,
+      updateMode: parsed.data.updateMode,
     },
     select: { id: true },
   });
@@ -162,6 +186,7 @@ export async function importBatchAction(
       runId: run.id,
       userId: user.id,
       dataDate: run.dataDate,
+      mode: run.updateMode,
     },
     rows.data,
   );
@@ -175,6 +200,8 @@ export async function importBatchAction(
       publicationsCreated: { increment: result.publicationsCreated },
       publicationsLinked: { increment: result.publicationsLinked },
       publicationsExisting: { increment: result.publicationsExisting },
+      publicationsUpdated: { increment: result.publicationsUpdated },
+      fieldsChanged: { increment: result.fieldsChanged },
       measurementsSaved: { increment: result.measurementsSaved },
       rowsWithErrors: { increment: result.errors.length },
       errors: [...previous, ...result.errors].slice(0, MAX_SAVED_ERRORS),
@@ -183,11 +210,22 @@ export async function importBatchAction(
   return { ok: true, processed: result.processed, errors: result.errors };
 }
 
+export type RunTotals = {
+  productsCreated: number;
+  publicationsCreated: number;
+  publicationsLinked: number;
+  publicationsExisting: number;
+  publicationsUpdated: number;
+  fieldsChanged: number;
+  measurementsSaved: number;
+  rowsWithErrors: number;
+};
+
 export async function finishImportAction(
   accountSlug: string,
   runId: string,
   failed = false,
-): Promise<Result<{ run: { productsCreated: number; publicationsCreated: number; publicationsLinked: number; publicationsExisting: number; measurementsSaved: number; rowsWithErrors: number } }>> {
+): Promise<Result<{ run: RunTotals }>> {
   await requireUser();
   const accountId = await accountIdFor(accountSlug);
   if (!accountId) return { ok: false, error: 'La cuenta no existe.' };
@@ -198,6 +236,7 @@ export async function finishImportAction(
     data: { status: failed ? 'FAILED' : 'DONE', finishedAt: new Date() },
   });
   revalidatePath(`/a/${accountSlug}/productos`);
+  revalidatePath(`/a/${accountSlug}/publicaciones`);
   revalidatePath(`/a/${accountSlug}/importar`);
   return { ok: true, run: updated };
 }
@@ -212,6 +251,7 @@ export async function undoImportAction(accountSlug: string, runId: string): Prom
     return { ok: false, error: e instanceof Error ? e.message : 'No se pudo deshacer.' };
   }
   revalidatePath(`/a/${accountSlug}/productos`);
+  revalidatePath(`/a/${accountSlug}/publicaciones`);
   revalidatePath(`/a/${accountSlug}/importar`);
   return { ok: true };
 }

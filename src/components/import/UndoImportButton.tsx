@@ -14,11 +14,13 @@ export function UndoImportButton({
   runId,
   productsCreated,
   publicationsCreated,
+  fieldsChanged,
 }: {
   accountSlug: string;
   runId: string;
   productsCreated: number;
   publicationsCreated: number;
+  fieldsChanged: number;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -59,9 +61,15 @@ export function UndoImportButton({
             Deshacer importación
           </h3>
           <p className="text-xs text-muted-foreground mt-1">
-            Vas a borrar {plural(productsCreated, 'producto')} y {plural(publicationsCreated, 'publicación', 'publicaciones')}{' '}
-            que creó esta importación, con su historial de etapas, sus mediciones y lo que les hayas cargado después.
-            Lo que ya estaba antes no se toca. Esto no se puede deshacer.
+            {productsCreated > 0 || publicationsCreated > 0 || fieldsChanged === 0
+              ? `Vas a borrar ${plural(productsCreated, 'producto')} y ${plural(publicationsCreated, 'publicación', 'publicaciones')} que creó esta importación, con su historial de etapas, sus mediciones y lo que les hayas cargado después. `
+              : ''}
+            {fieldsChanged > 0
+              ? fieldsChanged === 1
+                ? 'El campo que completó en lo que ya estaba vuelve a como estaba antes, salvo que lo hayas cambiado a mano después. '
+                : `Los ${fieldsChanged} campos que completó en lo que ya estaba vuelven a como estaban antes, salvo los que hayas cambiado a mano después. `
+              : 'Lo que ya estaba antes no se toca. '}
+            Esto no se puede deshacer.
           </p>
         </div>
         <div className="p-3 space-y-3">

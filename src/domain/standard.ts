@@ -159,7 +159,7 @@ export type ScoreResult = {
 const filled = (v: string | null | undefined) => !!v && v.trim() !== '';
 
 /** "a", "a y b", "a, b y c". */
-function joinEs(items: string[]): string {
+export function joinEs(items: string[]): string {
   return items.length <= 1 ? (items[0] ?? '') : `${items.slice(0, -1).join(', ')} y ${items[items.length - 1]}`;
 }
 

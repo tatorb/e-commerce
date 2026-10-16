@@ -43,37 +43,36 @@ import {
 import { readSpreadsheet, SpreadsheetError, type TableData } from '@/importers/spreadsheet';
 import { toRecord, type ImportRecord } from '@/importers/transform';
 import { classifyRecords, type Classification, type RowAction } from '@/importers/classify';
+import type { RowPreview } from '@/importers/apply';
+import { CONTENT_FIELD_LABEL, type ContentField, type UpdateMode } from '@/domain/content';
+import { joinEs } from '@/domain/standard';
 import { plural } from '@/lib/format';
 import {
   finishImportAction,
   importBatchAction,
   lookupExistingAction,
+  previewUpdatesAction,
   saveMappingAction,
   startImportAction,
+  type RunTotals,
 } from '@/app/a/[cuenta]/importar/actions';
 
 export type StoreInfo = { id: string; name: string; channelKind: ChannelKind; channelName: string };
 
 type Step = 'file' | 'columns' | 'review' | 'running' | 'done';
-type RunResult = {
-  productsCreated: number;
-  publicationsCreated: number;
-  publicationsLinked: number;
-  publicationsExisting: number;
-  measurementsSaved: number;
-  rowsWithErrors: number;
-};
+type DisplayAction = RowAction | 'update';
 
 const NONE = '__none__';
 const BATCH_SIZE = 50;
 
-const ACTION_BADGE: Record<RowAction, { label: string; cfg: Cfg }> = {
+const ACTION_BADGE: Record<DisplayAction, { label: string; cfg: Cfg }> = {
   new: { label: 'Producto nuevo', cfg: { cls: 'border-primary/40 bg-primary/10 text-primary', dot: 'bg-primary' } },
   link: {
     label: 'Se suma a uno existente',
     cfg: { cls: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700', dot: 'bg-emerald-500' },
   },
   existing: { label: 'Ya estaba', cfg: { cls: 'border-border bg-muted text-muted-foreground', dot: 'bg-muted-foreground' } },
+  update: { label: 'Se completa', cfg: { cls: 'border-amber-500/40 bg-amber-500/10 text-amber-700', dot: 'bg-amber-500' } },
   error: { label: 'Error', cfg: { cls: 'border-transparent bg-alert text-alert-foreground', dot: 'bg-[hsl(6_38%_73%)]' } },
 };
 
@@ -82,6 +81,30 @@ function StepTitle({ n, title, active }: { n: number; title: string; active: boo
     <CardTitle className={active ? '' : 'text-muted-foreground'}>
       {n}. {title}
     </CardTitle>
+  );
+}
+
+const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
+const fieldNames = (fields: ContentField[]) => joinEs(fields.map((f) => lowerFirst(CONTENT_FIELD_LABEL[f])));
+
+/** Qué campos cambian en una fila según el modo elegido. */
+function changesFor(preview: RowPreview | undefined, mode: UpdateMode): { fill: ContentField[]; replace: ContentField[] } {
+  if (!preview) return { fill: [], replace: [] };
+  return {
+    fill: preview.fill,
+    replace: mode === 'REPLACE' ? preview.replace.filter((f) => !preview.fill.includes(f)) : [],
+  };
+}
+
+function ChangeList({ preview, mode }: { preview: RowPreview | undefined; mode: UpdateMode }) {
+  const { fill, replace } = changesFor(preview, mode);
+  if (fill.length === 0 && replace.length === 0) return <span className="text-muted-foreground">—</span>;
+  return (
+    <span className="text-xs">
+      {fill.length > 0 ? `Completa ${fieldNames(fill)}.` : ''}
+      {fill.length > 0 && replace.length > 0 ? ' ' : ''}
+      {replace.length > 0 ? `Reemplaza ${fieldNames(replace)}.` : ''}
+    </span>
   );
 }
 
@@ -121,11 +144,13 @@ export function ImportWizard({
   const [rows, setRows] = useState<RowInput[]>([]);
   const [records, setRecords] = useState<ImportRecord[]>([]);
   const [classification, setClassification] = useState<Classification | null>(null);
+  const [previews, setPreviews] = useState<Map<number, RowPreview>>(new Map());
+  const [mode, setMode] = useState<UpdateMode>('FILL_EMPTY');
   const [reviewError, setReviewError] = useState<string | null>(null);
 
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [runErrors, setRunErrors] = useState<{ row: number; message: string }[]>([]);
-  const [result, setResult] = useState<RunResult | null>(null);
+  const [result, setResult] = useState<RunTotals | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -151,6 +176,8 @@ export function ImportWizard({
     setRecords([]);
     setRows([]);
     setClassification(null);
+    setPreviews(new Map());
+    setMode('FILL_EMPTY');
     setProgress({ done: 0, total: 0 });
     setRunErrors([]);
     setResult(null);
@@ -216,9 +243,32 @@ export function ImportWizard({
         setReviewError(lookup.error);
         return;
       }
+      const classified = classifyRecords(recs, lookup.existing);
+
+      // Lo que cambiaría en lo que ya está: lo calcula el servidor, por tandas.
+      const toPreview = extracted.filter(
+        (_, i) => classified.actions[i] === 'existing' || classified.actions[i] === 'link',
+      );
+      const found = new Map<number, RowPreview>();
+      for (let i = 0; i < toPreview.length; i += BATCH_SIZE) {
+        try {
+          const r = await previewUpdatesAction(accountSlug, store.id, toPreview.slice(i, i + BATCH_SIZE));
+          if (!r.ok) {
+            setReviewError(r.error);
+            return;
+          }
+          for (const p of r.previews) found.set(p.rowNumber, p);
+        } catch {
+          setReviewError('Se cortó la conexión con la app.');
+          return;
+        }
+      }
+
       setRows(extracted);
       setRecords(recs);
-      setClassification(classifyRecords(recs, lookup.existing));
+      setClassification(classified);
+      setPreviews(found);
+      setMode('FILL_EMPTY');
       setStep('review');
     });
   }
@@ -237,6 +287,7 @@ export function ImportWizard({
       dataDate,
       mappingId,
       rowsTotal: rows.length,
+      updateMode: mode,
     });
     if (!start.ok) {
       setRunError(start.error);
@@ -518,18 +569,53 @@ export function ImportWizard({
     );
 
   // ───────────────────────────── 3. Revisión e importación ─────────────────────────────
-  const notes = records.flatMap((r) => [
-    ...(r.error ? [{ row: r.rowNumber, message: r.error, error: true }] : []),
-    ...r.warnings.map((w) => ({ row: r.rowNumber, message: w, error: false })),
-  ]);
+  const notes = records.flatMap((r) => {
+    const own = [
+      ...(r.error ? [{ row: r.rowNumber, message: r.error, error: true }] : []),
+      ...r.warnings.map((w) => ({ row: r.rowNumber, message: w, error: false })),
+    ];
+    const fromPreview = (previews.get(r.rowNumber)?.warnings ?? [])
+      .map((w) => `Medidas: ${w}`)
+      .filter((w) => !r.warnings.includes(w))
+      .map((w) => ({ row: r.rowNumber, message: w, error: false }));
+    return [...own, ...fromPreview];
+  });
+  const rowsWithWarnings = new Set(notes.filter((n) => !n.error).map((n) => n.row)).size;
   const importable = classification ? records.length - classification.summary.errors : 0;
+
+  // Cuántas filas y campos cambian en lo que ya estaba, en cada modo.
+  const totals = (m: UpdateMode) => {
+    let changedRows = 0;
+    let fields = 0;
+    for (const p of previews.values()) {
+      const { fill, replace } = changesFor(p, m);
+      if (fill.length + replace.length > 0) {
+        changedRows++;
+        fields += fill.length + replace.length;
+      }
+    }
+    return { rows: changedRows, fields };
+  };
+  const fillTotals = totals('FILL_EMPTY');
+  const replaceTotals = totals('REPLACE');
+  const current = mode === 'REPLACE' ? replaceTotals : fillTotals;
+
+  const actionAt = (i: number): DisplayAction => {
+    const action = classification!.actions[i];
+    if (action !== 'existing') return action;
+    const { fill, replace } = changesFor(previews.get(records[i].rowNumber), mode);
+    return fill.length + replace.length > 0 ? 'update' : 'existing';
+  };
+  const existingUnchanged = classification
+    ? records.filter((_, i) => actionAt(i) === 'existing').length
+    : 0;
 
   const reviewCard =
     step === 'review' || step === 'running' || step === 'done' ? (
       <Card>
         <CardHeader>
           <StepTitle n={3} title="Revisión" active={step !== 'done'} />
-          <CardDescription>Lo que va a pasar al importar. Lo que ya está en la app no se pisa.</CardDescription>
+          <CardDescription>Lo que va a pasar al importar. Una celda vacía nunca borra lo que ya está en la app.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
           {classification ? (
@@ -544,10 +630,16 @@ export function ImportWizard({
                 {classification.summary.linked === 1 ? 'publicación se suma' : 'publicaciones se suman'} a un producto
                 que ya existe, por tener el mismo SKU.
               </li>
+              {current.rows > 0 ? (
+                <li>
+                  <strong className="tabular-nums">{current.rows}</strong>{' '}
+                  {current.rows === 1 ? 'fila completa' : 'filas completan'} datos de lo que ya estaba,{' '}
+                  {plural(current.fields, 'campo')} en total.
+                </li>
+              ) : null}
               <li>
-                <strong className="tabular-nums">{classification.summary.existing}</strong>{' '}
-                {classification.summary.existing === 1 ? 'publicación ya estaba' : 'publicaciones ya estaban'} y no se
-                tocan.
+                <strong className="tabular-nums">{existingUnchanged}</strong>{' '}
+                {existingUnchanged === 1 ? 'publicación ya estaba y queda' : 'publicaciones ya estaban y quedan'} igual.
               </li>
               <li>
                 <strong className="tabular-nums">{classification.summary.withMetrics}</strong>{' '}
@@ -559,13 +651,38 @@ export function ImportWizard({
                   {classification.summary.errors === 1 ? 'fila con errores no se importa' : 'filas con errores no se importan'}.
                 </li>
               ) : null}
-              {classification.summary.withWarnings > 0 ? (
+              {rowsWithWarnings > 0 ? (
                 <li>
-                  <strong className="tabular-nums">{classification.summary.withWarnings}</strong>{' '}
-                  {classification.summary.withWarnings === 1 ? 'fila con avisos' : 'filas con avisos'}.
+                  <strong className="tabular-nums">{rowsWithWarnings}</strong>{' '}
+                  {rowsWithWarnings === 1 ? 'fila con avisos' : 'filas con avisos'}.
                 </li>
               ) : null}
             </ul>
+          ) : null}
+
+          {replaceTotals.fields > 0 && step === 'review' ? (
+            <div className="space-y-1.5">
+              <Label htmlFor="imp-mode">Lo que ya está en la app</Label>
+              <Select value={mode} onValueChange={(v) => setMode(v as UpdateMode)}>
+                <SelectTrigger id="imp-mode" className="max-w-md">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="FILL_EMPTY">
+                    Solo completar lo vacío · {plural(fillTotals.fields, 'campo')}
+                  </SelectItem>
+                  <SelectItem value="REPLACE">
+                    Completar y reemplazar · {plural(replaceTotals.fields, 'campo')}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                {mode === 'REPLACE'
+                  ? 'Si el archivo dice algo distinto, gana el archivo. En medidas, ficha técnica, compatibilidades y fotos, la lista del archivo reemplaza la lista entera.'
+                  : 'Solo se cargan los campos que hoy están vacíos. Lo que ya tiene la app no se toca.'}{' '}
+                Lo podés deshacer después desde el historial.
+              </p>
+            </div>
           ) : null}
 
           {notes.length > 0 && step === 'review' ? (
@@ -587,42 +704,52 @@ export function ImportWizard({
 
           {classification && step === 'review' ? (
             <div className="space-y-2">
-              <p className="text-xs uppercase tracking-wide text-muted-foreground">Primeras filas</p>
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Filas</p>
               <div className="rounded-md border overflow-hidden">
-                <div className="md:hidden divide-y">
-                  {records.slice(0, 8).map((r, i) => (
+                <div className="md:hidden divide-y max-h-[60vh] overflow-y-auto">
+                  {records.map((r, i) => (
                     <div key={r.rowNumber} className="px-3 py-3 space-y-1">
                       <div className="flex items-baseline justify-between gap-2">
                         <span className="font-medium text-sm truncate">{r.product?.name ?? '—'}</span>
                         <span className="text-xs text-muted-foreground tabular-nums shrink-0">Fila {r.rowNumber}</span>
                       </div>
-                      <DotBadge {...ACTION_BADGE[classification.actions[i]]} />
+                      <DotBadge {...ACTION_BADGE[actionAt(i)]} />
                       <div className="text-xs text-muted-foreground truncate">
                         {[r.publication.externalId, r.skus.join(' / ')].filter(Boolean).join(' · ') || '—'}
                       </div>
+                      {previews.has(r.rowNumber) ? (
+                        <div>
+                          <ChangeList preview={previews.get(r.rowNumber)} mode={mode} />
+                        </div>
+                      ) : null}
                     </div>
                   ))}
                 </div>
-                <div className="hidden md:block">
+                <div className="hidden md:block max-h-[60vh] overflow-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
                         <TableHead>Fila</TableHead>
                         <TableHead>Producto</TableHead>
-                        <TableHead>SKU</TableHead>
                         <TableHead>ID</TableHead>
                         <TableHead>Qué pasa</TableHead>
+                        <TableHead>Qué cambia</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {records.slice(0, 8).map((r, i) => (
+                      {records.map((r, i) => (
                         <TableRow key={r.rowNumber}>
                           <TableCell className="tabular-nums text-muted-foreground">{r.rowNumber}</TableCell>
-                          <TableCell className="font-medium max-w-[18rem] truncate">{r.product?.name ?? '—'}</TableCell>
-                          <TableCell className="text-muted-foreground">{r.skus.join(' / ') || '—'}</TableCell>
+                          <TableCell className="max-w-[18rem]">
+                            <div className="font-medium truncate">{r.product?.name ?? '—'}</div>
+                            <div className="text-xs text-muted-foreground truncate">{r.skus.join(' / ') || '—'}</div>
+                          </TableCell>
                           <TableCell className="text-muted-foreground">{r.publication.externalId ?? '—'}</TableCell>
                           <TableCell>
-                            <DotBadge {...ACTION_BADGE[classification.actions[i]]} />
+                            <DotBadge {...ACTION_BADGE[actionAt(i)]} />
+                          </TableCell>
+                          <TableCell className="max-w-[18rem]">
+                            <ChangeList preview={previews.get(r.rowNumber)} mode={mode} />
                           </TableCell>
                         </TableRow>
                       ))}
@@ -664,6 +791,9 @@ export function ImportWizard({
                   {result.publicationsExisting > 0
                     ? `${plural(result.publicationsExisting, 'publicación ya estaba', 'publicaciones ya estaban')}. `
                     : ''}
+                  {result.fieldsChanged > 0
+                    ? `Se completaron ${plural(result.fieldsChanged, 'campo')} en ${plural(result.publicationsUpdated, 'fila', 'filas')} de lo que ya estaba. `
+                    : ''}
                   Se guardaron {plural(result.measurementsSaved, 'medición', 'mediciones')}.
                   {result.rowsWithErrors > 0 ? ` ${plural(result.rowsWithErrors, 'fila', 'filas')} con errores.` : ''}
                 </p>
@@ -680,6 +810,9 @@ export function ImportWizard({
               ) : null}
               <div className="flex flex-wrap items-center gap-3">
                 <Button asChild>
+                  <Link href={`/a/${accountSlug}/publicaciones`}>Ver publicaciones</Link>
+                </Button>
+                <Button variant="outline" asChild>
                   <Link href={`/a/${accountSlug}/productos`}>Ver productos</Link>
                 </Button>
                 <Button type="button" variant="outline" onClick={reset}>

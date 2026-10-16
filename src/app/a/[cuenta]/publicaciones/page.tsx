@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { SlidersHorizontal } from 'lucide-react';
+import { Download, SlidersHorizontal } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,11 +18,21 @@ import { UrlFilterDropdown } from '@/components/filters/UrlFilterDropdown';
 import { SortSelect } from '@/components/filters/SortSelect';
 import { ChannelStatusBadge, StageBadge } from '@/components/stages/StageBadge';
 import { ScoreBadge } from '@/components/stages/ScoreBadge';
+import { ContentSheetInstructions } from '@/components/import/ContentSheetInstructions';
 import { STAGES, STAGE_LABEL } from '@/domain/stages';
 import { CHANNEL_STATUS_LABEL } from '@/domain/channel-status';
-import { scoreBand } from '@/domain/standard';
-import type { ChannelStatus, Stage } from '@/generated/prisma/enums';
+import { contentSheetInstructions } from '@/importers/content-sheet';
+import { prisma } from '@/lib/db';
 import { getAccountBySlug } from '@/lib/queries/accounts';
+import {
+  BANDS,
+  CHANNEL_STATUSES,
+  SORTS,
+  filterPublications,
+  isFiltered,
+  parsePublicationSearch,
+  type PublicationSearch,
+} from '@/lib/queries/publication-list';
 import { listScoredPublications, type ScoredPublication } from '@/lib/queries/scoring';
 import { plural } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
@@ -33,29 +43,6 @@ export async function generateMetadata({ params }: { params: Promise<{ cuenta: s
   const { cuenta } = await params;
   const account = await getAccountBySlug(cuenta);
   return { title: account ? `Publicaciones · ${account.name}` : 'Publicaciones' };
-}
-
-type Search = { q?: string; puntaje?: string; etapa?: string; estado?: string; orden?: string };
-
-const BANDS = [
-  { value: '', label: 'Todas' },
-  { value: 'bajo', label: 'Menos de 50' },
-  { value: 'medio', label: '50 a 79' },
-  { value: 'alto', label: '80 o más' },
-] as const;
-const BAND_KEY = { bajo: 'low', medio: 'mid', alto: 'high' } as const;
-
-const SORTS = [
-  { value: 'puntaje', label: 'Menor puntaje primero' },
-  { value: 'puntaje-desc', label: 'Mayor puntaje primero' },
-  { value: 'visitas', label: 'Más visitas primero' },
-  { value: 'titulo', label: 'Título' },
-];
-
-const CHANNEL_STATUSES = Object.keys(CHANNEL_STATUS_LABEL) as ChannelStatus[];
-
-function list(raw: string | undefined, allowed: readonly string[]): string[] {
-  return (raw ?? '').split(',').filter((v) => allowed.includes(v));
 }
 
 function chipClass(active: boolean): string {
@@ -84,39 +71,21 @@ export default async function PublicationsPage({
   searchParams,
 }: {
   params: Promise<{ cuenta: string }>;
-  searchParams: Promise<Search>;
+  searchParams: Promise<PublicationSearch>;
 }) {
   const [{ cuenta }, search] = await Promise.all([params, searchParams]);
   const account = await getAccountBySlug(cuenta);
   if (!account) notFound();
 
-  const band = search.puntaje && search.puntaje in BAND_KEY ? (search.puntaje as keyof typeof BAND_KEY) : '';
-  const stages = list(search.etapa, STAGES) as Stage[];
-  const statuses = list(search.estado, CHANNEL_STATUSES) as ChannelStatus[];
-  const sort = SORTS.some((s) => s.value === search.orden) ? search.orden! : 'puntaje';
-  const q = search.q?.trim().toLowerCase() ?? '';
+  const filters = parsePublicationSearch(search);
+  const { band, stages, statuses, sort } = filters;
 
-  const all = await listScoredPublications(account.id);
-  const items = all
-    .filter((p) => !band || scoreBand(p.score) === BAND_KEY[band])
-    .filter((p) => stages.length === 0 || stages.includes(p.stage))
-    .filter((p) => statuses.length === 0 || statuses.includes(p.channelStatus))
-    .filter(
-      (p) =>
-        !q ||
-        p.title.toLowerCase().includes(q) ||
-        (p.externalId ?? '').toLowerCase().includes(q) ||
-        p.skus.some((s) => s.toLowerCase().includes(q)),
-    )
-    .sort((a, b) => {
-      // Sin puntaje, siempre al final.
-      const sa = a.score ?? (sort === 'puntaje-desc' ? -1 : 101);
-      const sb = b.score ?? (sort === 'puntaje-desc' ? -1 : 101);
-      if (sort === 'puntaje') return sa - sb || (b.visits ?? 0) - (a.visits ?? 0);
-      if (sort === 'puntaje-desc') return sb - sa || (b.visits ?? 0) - (a.visits ?? 0);
-      if (sort === 'visitas') return (b.visits ?? -1) - (a.visits ?? -1) || sa - sb;
-      return a.title.localeCompare(b.title, 'es');
-    });
+  const [all, stores] = await Promise.all([
+    listScoredPublications(account.id),
+    prisma.store.findMany({ where: { accountId: account.id }, select: { channel: { select: { name: true } } } }),
+  ]);
+  const items = filterPublications(all, filters);
+  const channelNames = [...new Set(stores.map((s) => s.channel.name))];
 
   const scored = items.filter((p) => p.score !== null);
   const average = scored.length ? Math.round(scored.reduce((s, p) => s + p.score!, 0) / scored.length) : null;
@@ -130,7 +99,11 @@ export default async function PublicationsPage({
   }
 
   const base = `/a/${account.slug}/productos`;
-  const filtered = Boolean(band || stages.length || statuses.length || q);
+  const filtered = isFiltered(filters);
+  const query = new URLSearchParams(
+    Object.entries(search).filter((e): e is [string, string] => typeof e[1] === 'string' && e[1] !== ''),
+  ).toString();
+  const sheetHref = `/a/${account.slug}/publicaciones/planilla${query ? `?${query}` : ''}`;
 
   return (
     <>
@@ -149,6 +122,22 @@ export default async function PublicationsPage({
               Ver estándar
             </Link>
           </Button>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" variant="outline" asChild>
+            <a href={sheetHref} download>
+              <Download className="h-4 w-4" />
+              Descargar planilla de contenido
+            </a>
+          </Button>
+          <ContentSheetInstructions text={contentSheetInstructions(channelNames.join(' y ') || 'la tienda')} />
+          <span className="text-xs text-muted-foreground">
+            {!filtered
+              ? 'Trae todas las publicaciones. Filtrá antes para bajar una tanda.'
+              : items.length === 1
+                ? 'Trae la publicación que estás viendo.'
+                : `Trae las ${items.length} publicaciones que estás viendo.`}
+          </span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {BANDS.map((b) => (

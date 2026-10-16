@@ -43,8 +43,9 @@ export default async function ImportPage({ params }: { params: Promise<{ cuenta:
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold tracking-tight">Importar</h1>
           <p className="text-sm text-muted-foreground">
-            Cargá publicaciones de <strong>{account.name}</strong> desde un Excel o un CSV. El archivo se lee en tu
-            navegador: a la app solo viajan las columnas que elegís importar.
+            Cargá publicaciones de <strong>{account.name}</strong> desde un Excel o un CSV, o completá su contenido con
+            la planilla que se descarga desde Publicaciones. El archivo se lee en tu navegador: a la app solo viajan las
+            columnas que elegís importar.
           </p>
         </div>
       </PageHeader>
@@ -86,6 +87,7 @@ export default async function ImportPage({ params }: { params: Promise<{ cuenta:
                         {plural(run.productsCreated, 'producto nuevo', 'productos nuevos')} ·{' '}
                         {plural(run.publicationsCreated, 'publicación', 'publicaciones')} ·{' '}
                         {plural(run.publicationsExisting, 'ya estaba', 'ya estaban')} ·{' '}
+                        {run.fieldsChanged > 0 ? `${plural(run.fieldsChanged, 'campo completado', 'campos completados')} · ` : ''}
                         {plural(run.measurementsSaved, 'medición', 'mediciones')}
                         {run.rowsWithErrors > 0 ? ` · ${plural(run.rowsWithErrors, 'fila con error', 'filas con error')}` : ''}
                       </div>
@@ -96,6 +98,7 @@ export default async function ImportPage({ params }: { params: Promise<{ cuenta:
                         runId={run.id}
                         productsCreated={run.productsCreated}
                         publicationsCreated={run.publicationsCreated}
+                        fieldsChanged={run.fieldsChanged}
                       />
                     ) : null}
                   </li>

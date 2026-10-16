@@ -88,12 +88,12 @@ model Verification {
 
 // Cuenta: el cliente del estudio. Todo dato pertenece a una cuenta.
 model Account {
-  id        String    @id @default(cuid())
-  slug      String    @unique
-  name      String
-  timezone  String    @default("America/Argentina/Buenos_Aires")
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id             String          @id @default(cuid())
+  slug           String          @unique
+  name           String
+  timezone       String          @default("America/Argentina/Buenos_Aires")
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
   stores         Store[]
   products       Product[]
   importMappings ImportMapping[]
@@ -110,8 +110,8 @@ enum ChannelKind {
 
 // Canal: lista fija de lugares donde se puede mostrar un producto.
 model Channel {
-  id     String      @id @default(cuid())
-  kind   ChannelKind @unique
+  id            String         @id @default(cuid())
+  kind          ChannelKind    @unique
   name          String
   stores        Store[]
   standardRules StandardRule[]
@@ -156,31 +156,32 @@ enum RecordSource {
 }
 
 model Product {
-  id              String          @id @default(cuid())
+  id              String           @id @default(cuid())
   accountId       String
-  account         Account         @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  account         Account          @relation(fields: [accountId], references: [id], onDelete: Cascade)
   name            String
-  brand           String?         // marca del repuesto
-  partNumber      String?         // nº de pieza u OEM
-  productType     String?         // tipo de producto, por ejemplo "Kit de embrague"
-  engineSystem    String?         // sistema del motor, por ejemplo "Distribución"
-  line            String?         // línea, por ejemplo "Liviano nafta"
-  origin          String?         // país de origen
+  brand           String? // marca del repuesto
+  partNumber      String? // nº de pieza u OEM
+  productType     String? // tipo de producto, por ejemplo "Kit de embrague"
+  engineSystem    String? // sistema del motor, por ejemplo "Distribución"
+  line            String? // línea, por ejemplo "Liviano nafta"
+  origin          String? // país de origen
   warranty        String?
   kitContents     String?
   // Ficha técnica: lista de { name, value }.
-  specs           Json            @default("[]")
+  specs           Json             @default("[]")
   notes           String?
-  source          RecordSource    @default(MANUAL)
+  source          RecordSource     @default(MANUAL)
   // Importación que lo creó, para poder deshacerla.
   importRunId     String?
-  importRun       ImportRun?      @relation(fields: [importRunId], references: [id], onDelete: SetNull)
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  importRun       ImportRun?       @relation(fields: [importRunId], references: [id], onDelete: SetNull)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
   variants        ProductVariant[]
   compatibilities Compatibility[]
   assets          Asset[]
   publications    Publication[]
+  importChanges   ImportChange[]
 
   @@index([accountId])
   @@index([importRunId])
@@ -263,7 +264,7 @@ model Publication {
   product        Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
   storeId        String
   store          Store           @relation(fields: [storeId], references: [id])
-  externalId     String?         // por ejemplo MLA123456
+  externalId     String? // por ejemplo MLA123456
   url            String?
   title          String?
   description    String?
@@ -282,6 +283,7 @@ model Publication {
   updatedAt      DateTime        @updatedAt
   stageMovements StageMovement[]
   measurements   Measurement[]
+  importChanges  ImportChange[]
 
   @@unique([storeId, externalId])
   @@index([productId])
@@ -357,37 +359,49 @@ enum ImportStatus {
   UNDONE
 }
 
+// Qué hace una importación con lo que ya está en la app: solo completa lo
+// vacío, o además reemplaza lo que es distinto.
+enum ImportUpdateMode {
+  FILL_EMPTY
+  REPLACE
+}
+
 // Una importación: quién, cuándo, qué archivo y qué resultó.
 model ImportRun {
-  id                   String         @id @default(cuid())
+  id                   String           @id @default(cuid())
   accountId            String
-  account              Account        @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  account              Account          @relation(fields: [accountId], references: [id], onDelete: Cascade)
   storeId              String
-  store                Store          @relation(fields: [storeId], references: [id])
+  store                Store            @relation(fields: [storeId], references: [id])
   mappingId            String?
-  mapping              ImportMapping? @relation(fields: [mappingId], references: [id], onDelete: SetNull)
+  mapping              ImportMapping?   @relation(fields: [mappingId], references: [id], onDelete: SetNull)
   userId               String?
-  user                 User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user                 User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
   fileName             String
   sheetName            String
-  dataDate             DateTime       @db.Date
-  status               ImportStatus   @default(RUNNING)
+  dataDate             DateTime         @db.Date
+  status               ImportStatus     @default(RUNNING)
   rowsTotal            Int
-  rowsProcessed        Int            @default(0)
-  productsCreated      Int            @default(0)
-  publicationsCreated  Int            @default(0)
-  publicationsLinked   Int            @default(0)
-  publicationsExisting Int            @default(0)
-  measurementsSaved    Int            @default(0)
-  rowsWithErrors       Int            @default(0)
+  rowsProcessed        Int              @default(0)
+  productsCreated      Int              @default(0)
+  publicationsCreated  Int              @default(0)
+  publicationsLinked   Int              @default(0)
+  publicationsExisting Int              @default(0)
+  measurementsSaved    Int              @default(0)
+  updateMode           ImportUpdateMode @default(FILL_EMPTY)
+  // Publicaciones o fichas que ya estaban y a las que se les cambió algo.
+  publicationsUpdated  Int              @default(0)
+  fieldsChanged        Int              @default(0)
+  rowsWithErrors       Int              @default(0)
   // Primeros errores, para mostrarlos: lista de { row, message }.
-  errors               Json           @default("[]")
-  startedAt            DateTime       @default(now())
+  errors               Json             @default("[]")
+  startedAt            DateTime         @default(now())
   finishedAt           DateTime?
   undoneAt             DateTime?
   products             Product[]
   publications         Publication[]
   measurements         Measurement[]
+  changes              ImportChange[]
 
   @@index([accountId, startedAt])
   @@map("import_runs")
@@ -416,4 +430,25 @@ model StandardRule {
 
   @@index([accountId, channelId, position])
   @@map("standard_rules")
+}
+
+// Un campo que una importación cambió en algo que ya estaba: cómo estaba y
+// cómo quedó. Deshacer la importación lo devuelve, si nadie lo cambió después.
+model ImportChange {
+  id            Int          @id @default(autoincrement())
+  importRunId   String
+  importRun     ImportRun    @relation(fields: [importRunId], references: [id], onDelete: Cascade)
+  productId     String
+  product       Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  // Solo en los campos de la publicación, como el título.
+  publicationId String?
+  publication   Publication? @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  field         String
+  before        Json?
+  after         Json?
+  createdAt     DateTime     @default(now())
+
+  @@index([importRunId])
+  @@index([productId])
+  @@map("import_changes")
 }

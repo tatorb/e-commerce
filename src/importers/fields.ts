@@ -3,7 +3,7 @@ import { METRICS, METRIC_KEYS, type MetricKey } from '@/domain/measurements';
 // Campos de la app a los que puede ir una columna de un archivo. Este módulo
 // y el resto de src/importers son los únicos que saben de archivos.
 
-export type FieldGroup = 'Producto' | 'Compatibilidad' | 'Publicación' | 'Medición';
+export type FieldGroup = 'Producto' | 'Compatibilidad' | 'Publicación' | 'Fotos y video' | 'Medición';
 
 export type FieldKey =
   | 'product.name'
@@ -17,15 +17,20 @@ export type FieldKey =
   | 'product.kitContents'
   | 'product.notes'
   | 'product.skus'
+  | 'product.measures'
+  | 'product.specs'
   | 'compat.vehicleBrand'
   | 'compat.model'
   | 'compat.engine'
+  | 'compat.list'
   | 'pub.externalId'
   | 'pub.url'
   | 'pub.title'
   | 'pub.description'
   | 'pub.price'
   | 'pub.channelStatus'
+  | 'asset.photos'
+  | 'asset.videos'
   | `metric.${MetricKey}`;
 
 export type FieldDef = {
@@ -69,9 +74,27 @@ export const FIELDS: FieldDef[] = [
   { key: 'product.kitContents', label: 'Contenido del kit', group: 'Producto', synonyms: ['contenido del kit'] },
   { key: 'product.notes', label: 'Notas', group: 'Producto', synonyms: ['notas', 'observaciones'] },
   { key: 'product.skus', label: 'SKU (uno o varios, separados por /)', group: 'Producto', synonyms: ['sku', 'skus'] },
+  {
+    key: 'product.measures',
+    label: 'Medidas por SKU (SKU: medida, una por línea)',
+    group: 'Producto',
+    synonyms: ['medidas por sku', 'medidas', 'medida'],
+  },
+  {
+    key: 'product.specs',
+    label: 'Ficha técnica (Nombre: valor, uno por línea)',
+    group: 'Producto',
+    synonyms: ['ficha tecnica', 'caracteristicas', 'datos tecnicos'],
+  },
   { key: 'compat.vehicleBrand', label: 'Marca del vehículo', group: 'Compatibilidad', synonyms: ['marca del vehiculo', 'marca vehiculo'] },
   { key: 'compat.model', label: 'Modelo', group: 'Compatibilidad', synonyms: ['modelo', 'modelos'] },
   { key: 'compat.engine', label: 'Motor', group: 'Compatibilidad', synonyms: ['motor'] },
+  {
+    key: 'compat.list',
+    label: 'Compatibilidades (Marca | Modelo | Motor | Años, una por línea)',
+    group: 'Compatibilidad',
+    synonyms: ['compatibilidades', 'compatibilidad', 'vehiculos compatibles'],
+  },
   {
     key: 'pub.externalId',
     label: 'ID de la publicación',
@@ -87,6 +110,18 @@ export const FIELDS: FieldDef[] = [
     label: 'Estado en el canal',
     group: 'Publicación',
     synonyms: ['estado', 'estado en el canal', 'estado de la publicacion'],
+  },
+  {
+    key: 'asset.photos',
+    label: 'Links de fotos (uno por línea)',
+    group: 'Fotos y video',
+    synonyms: ['links de fotos', 'link de fotos', 'fotos links', 'urls de fotos'],
+  },
+  {
+    key: 'asset.videos',
+    label: 'Link del video',
+    group: 'Fotos y video',
+    synonyms: ['link del video', 'links de video', 'link de video', 'url del video'],
   },
   ...METRIC_KEYS.map(
     (m): FieldDef => ({
@@ -104,7 +139,7 @@ export function isFieldKey(key: string): key is FieldKey {
   return FIELD_BY_KEY.has(key as FieldKey);
 }
 
-export const FIELD_GROUPS: FieldGroup[] = ['Producto', 'Compatibilidad', 'Publicación', 'Medición'];
+export const FIELD_GROUPS: FieldGroup[] = ['Producto', 'Compatibilidad', 'Publicación', 'Fotos y video', 'Medición'];
 
 /**
  * Pasa un encabezado a una forma comparable: minúsculas, sin acentos, sin
