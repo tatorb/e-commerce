@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { cookies } from 'next/headers';
-import { Package, Upload, Users } from 'lucide-react';
+import { ListChecks, Package, SlidersHorizontal, Upload, Users } from 'lucide-react';
 import { NavLink } from '@/components/dashboard/NavLink';
 import { SidebarShell } from '@/components/dashboard/SidebarShell';
 import { SidebarToggle } from '@/components/dashboard/SidebarToggle';
@@ -15,7 +15,7 @@ import { BRAND_ICON, BRAND_LOGO } from '@/lib/brand';
 
 // Menú lateral con la misma estructura que app.studiomrb.com: cabecera fija
 // (logo y cuenta), separador, secciones que scrollean y pie fijo con la
-// sesión. Settings y Tiempos se suman en sus fases.
+// sesión. Tiempos se suma en su fase.
 export async function Sidebar({
   user,
   account,
@@ -64,8 +64,17 @@ export async function Sidebar({
           <NavLink href={`${accountHome}/productos`} label="Productos">
             <Package className="h-4 w-4" />
           </NavLink>
+          <NavLink href={`${accountHome}/publicaciones`} label="Publicaciones">
+            <ListChecks className="h-4 w-4" />
+          </NavLink>
           <NavLink href={`${accountHome}/importar`} label="Importar">
             <Upload className="h-4 w-4" />
+          </NavLink>
+          <p className="mt-3 mb-1 px-3 text-[10px] uppercase tracking-wide text-muted-foreground font-medium md:group-data-[collapsed=true]:hidden">
+            Ajustes
+          </p>
+          <NavLink href={`${accountHome}/estandar`} label="Estándar">
+            <SlidersHorizontal className="h-4 w-4" />
           </NavLink>
           <p className="mt-3 mb-1 px-3 text-[10px] uppercase tracking-wide text-muted-foreground font-medium md:group-data-[collapsed=true]:hidden">
             Estudio

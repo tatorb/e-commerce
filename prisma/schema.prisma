@@ -98,6 +98,7 @@ model Account {
   products       Product[]
   importMappings ImportMapping[]
   importRuns     ImportRun[]
+  standardRules  StandardRule[]
 
   @@map("accounts")
 }
@@ -111,8 +112,9 @@ enum ChannelKind {
 model Channel {
   id     String      @id @default(cuid())
   kind   ChannelKind @unique
-  name   String
-  stores Store[]
+  name          String
+  stores        Store[]
+  standardRules StandardRule[]
 
   @@map("channels")
 }
@@ -389,4 +391,29 @@ model ImportRun {
 
   @@index([accountId, startedAt])
   @@map("import_runs")
+}
+
+// ───────────────────────────── Estándar de publicación ─────────────────────────────
+
+// Regla del estándar, por cuenta y canal. "check" es una de las revisiones
+// que la app sabe hacer (src/domain/standard.ts) y "params" sus valores,
+// por ejemplo { "min": 6 } fotos.
+model StandardRule {
+  id          String   @id @default(cuid())
+  accountId   String
+  account     Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  channelId   String
+  channel     Channel  @relation(fields: [channelId], references: [id])
+  name        String
+  description String?
+  check       String
+  params      Json     @default("{}")
+  weight      Int      @default(10)
+  active      Boolean  @default(true)
+  position    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([accountId, channelId, position])
+  @@map("standard_rules")
 }

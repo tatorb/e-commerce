@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '../src/generated/prisma/client';
+import { SUGGESTED_RULES } from '../src/domain/standard';
 
 // Datos iniciales. Se puede correr las veces que haga falta: si ya existen,
 // no los duplica ni los pisa. No carga productos ni datos del cliente.
@@ -44,7 +45,26 @@ async function main() {
     },
   });
 
-  console.log('Datos iniciales listos: cuenta Insur, canal Mercado Libre, tienda INSURMOTOR.');
+  // Reglas sugeridas del estándar, solo si la cuenta todavía no tiene reglas
+  // para ese canal. Si ya las editaron, no se tocan.
+  const rules = await prisma.standardRule.count({ where: { accountId: insur.id, channelId: mercadolibre.id } });
+  if (rules === 0) {
+    await prisma.standardRule.createMany({
+      data: SUGGESTED_RULES.map((r, position) => ({
+        accountId: insur.id,
+        channelId: mercadolibre.id,
+        name: r.name,
+        description: r.description,
+        check: r.check,
+        params: r.params ?? {},
+        weight: r.weight,
+        active: r.active,
+        position,
+      })),
+    });
+  }
+
+  console.log('Datos iniciales listos: cuenta Insur, canal Mercado Libre, tienda INSURMOTOR y reglas del estándar.');
 }
 
 main()

@@ -23,11 +23,15 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
 | Medición | `Measurement` | Cómo estaba una publicación en una fecha: visitas, ventas y lo que tenía cargado. Es el "antes" para comparar. |
 | Importación | `ImportRun` | Quién importó qué archivo, cuándo y qué resultó. Se puede deshacer. |
 | Relación de columnas | `ImportMapping` | Qué columna de un archivo va a qué campo. Se guarda para reusarla. |
+| Regla del estándar | `StandardRule` | Qué tiene que tener una publicación correcta, por cuenta y canal: qué revisa, con qué valor y cuánto pesa. |
+| Puntaje | (se calcula) | De 0 a 100: lo que suman las reglas cumplidas sobre lo que suman las que aplican. No se guarda, se calcula cada vez. |
 
 ## Cómo está ordenado
 
-- `src/domain/`: producto, publicación y etapas. No sabe nada de canales ni de archivos.
-  `moveToStage` es la única forma de cambiar de etapa.
+- `src/domain/`: producto, publicación, etapas, mediciones y estándar. No sabe nada de canales
+  ni de archivos. `moveToStage` es la única forma de cambiar de etapa. `standard.ts` tiene las
+  revisiones que puede hacer una regla y el cálculo del puntaje: primero mira la ficha y la
+  publicación, y si la app todavía no tiene ese dato usa la última medición.
 - `src/channels/`: lo único que sabe de cada canal (formato del ID, link, largo del título).
   El resto de la app usa la interfaz `ChannelAdapter`.
 - `src/importers/`: el único lugar que sabe leer archivos. Lee Excel y CSV en el navegador,

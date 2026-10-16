@@ -10,6 +10,9 @@ import { DeleteProductButton } from '@/components/products/DeleteProductButton';
 import { PublicationForm } from '@/components/publications/PublicationForm';
 import { NewPublicationDialog } from '@/components/publications/NewPublicationDialog';
 import { ChannelStatusBadge, StageBadge } from '@/components/stages/StageBadge';
+import { ScoreBadge, ScoreDot } from '@/components/stages/ScoreBadge';
+import { scorePublication } from '@/domain/standard';
+import { loadRulesByChannel, toScoreInput } from '@/lib/queries/scoring';
 import { channelInfo } from '@/channels';
 import { parseNameValueList } from '@/domain/name-value';
 import { METRICS, METRIC_KEYS, formatMetric, parseMetrics } from '@/domain/measurements';
@@ -64,7 +67,11 @@ export default async function ProductPage({ params }: { params: Promise<{ cuenta
   const { cuenta, id } = await params;
   const account = await getAccountBySlug(cuenta);
   if (!account) notFound();
-  const [product, stores] = await Promise.all([getProduct(account.id, id), listStores(account.id)]);
+  const [product, stores, rules] = await Promise.all([
+    getProduct(account.id, id),
+    listStores(account.id),
+    loadRulesByChannel(account.id),
+  ]);
   if (!product) notFound();
 
   const base = `/a/${account.slug}/productos`;
@@ -117,6 +124,7 @@ export default async function ProductPage({ params }: { params: Promise<{ cuenta
         ) : (
           product.publications.map((pub) => {
             const channel = channelInfo(pub.store.channel.kind, pub.store.channel.name);
+            const score = scorePublication(rules.get(pub.store.channelId) ?? [], toScoreInput(product, pub));
             return (
               <Card key={pub.id}>
                 <CardHeader className="space-y-3">
@@ -128,6 +136,7 @@ export default async function ProductPage({ params }: { params: Promise<{ cuenta
                       <p className="text-sm text-muted-foreground">{pub.externalId ?? 'Sin ID todavía'}</p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
+                      <ScoreBadge score={score.score} />
                       <StageBadge stage={pub.stage} />
                       <ChannelStatusBadge status={pub.channelStatus} />
                     </div>
@@ -160,6 +169,41 @@ export default async function ProductPage({ params }: { params: Promise<{ cuenta
                     }}
                   />
                   <Separator />
+                  {score.results.length > 0 ? (
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <p className="text-xs uppercase tracking-wide text-muted-foreground">Estándar</p>
+                        <p className="text-sm text-muted-foreground">
+                          {score.score === null
+                            ? 'Ninguna regla aplica.'
+                            : score.missing.length === 0
+                              ? `Puntaje ${score.score}. Cumple todo el estándar.`
+                              : `Puntaje ${score.score}. ${score.missing.length === 1 ? 'Le falta 1 cosa' : `Le faltan ${score.missing.length} cosas`}.`}
+                        </p>
+                      </div>
+                      <ul className="divide-y rounded-md border">
+                        {[...score.results]
+                          .sort((a, b) => {
+                            const order = { fail: 0, pass: 1, na: 2 };
+                            return order[a.status] - order[b.status] || b.weight - a.weight;
+                          })
+                          .map((r) => (
+                            <li key={r.ruleId} className="flex items-start gap-3 px-4 py-2.5 text-sm">
+                              <ScoreDot
+                                band={r.status === 'pass' ? 'high' : r.status === 'fail' ? 'low' : 'none'}
+                                className="mt-1.5"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <span className="font-medium">{r.name}</span>
+                                <span className="text-muted-foreground tabular-nums"> · peso {r.weight}</span>
+                                {r.status === 'na' ? <span className="text-muted-foreground"> · no aplica</span> : null}
+                                {r.detail ? <p className="text-muted-foreground">{r.detail}</p> : null}
+                              </div>
+                            </li>
+                          ))}
+                      </ul>
+                    </div>
+                  ) : null}
                   <div className="space-y-2">
                     <p className="text-xs uppercase tracking-wide text-muted-foreground">Historial de etapas</p>
                     <ul className="divide-y rounded-md border">
