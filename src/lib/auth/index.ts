@@ -5,6 +5,14 @@ import { prisma } from '@/lib/db';
 
 export const PASSWORD_MIN = 8;
 
+// Dirección pública de la app, para cuando Better Auth no la puede deducir
+// del pedido. En Vercel se toma sola de la dirección de producción.
+const publicUrl =
+  process.env.BETTER_AUTH_URL ||
+  (process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    : undefined);
+
 // Login con email y contraseña. Los usuarios se guardan en nuestra base.
 // Todo pasa por acciones del servidor (src/lib/auth/actions.ts): la app no
 // expone las rutas HTTP de Better Auth, así nadie puede registrarse solo.
@@ -13,7 +21,7 @@ export const auth = betterAuth({
   secret: process.env.BETTER_AUTH_SECRET,
   baseURL: {
     allowedHosts: ['localhost:3000', '*.vercel.app', 'e-commerce.studiomrb.com'],
-    fallback: process.env.BETTER_AUTH_URL,
+    fallback: publicUrl,
   },
   database: prismaAdapter(prisma, { provider: 'postgresql' }),
   // Better Auth llama "account" a las credenciales; acá "Account" es la

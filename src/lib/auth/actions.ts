@@ -64,7 +64,7 @@ export async function createFirstUser(input: {
     .safeParse(input);
   if (!parsed.success) return { ok: false, error: firstError(parsed.error) };
 
-  await auth.api.signUpEmail({ body: parsed.data });
+  await auth.api.signUpEmail({ body: parsed.data, headers: await headers() });
   await auth.api.signInEmail({
     body: { email: parsed.data.email, password: parsed.data.password },
     headers: await headers(),
@@ -87,7 +87,7 @@ export async function addTeamMember(input: {
   const existing = await prisma.user.findUnique({ where: { email: parsed.data.email } });
   if (existing) return { ok: false, error: 'Ya hay una persona con ese email.' };
 
-  await auth.api.signUpEmail({ body: parsed.data });
+  await auth.api.signUpEmail({ body: parsed.data, headers: await headers() });
   return { ok: true };
 }
 
