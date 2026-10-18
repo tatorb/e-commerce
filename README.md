@@ -31,7 +31,9 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
 | Mapa de palabras | (se calcula) | Las palabras de las sugerencias y de la competencia, con de dónde salen y cuántas veces aparecen. Cada una se tilda o se descarta (`TitleWork.words`). |
 | Posición | `SearchPosition` | En qué página y posición aparece la publicación en una búsqueda principal, con fecha. Es la foto del antes. |
 | Título aprobado | `TitleApproval` | El título que quedó, el que tenía, la propuesta de la IA que se eligió, si se editó y si se escribió en la publicación, quedó para la copia con cuotas o se mantuvo. |
-| Prueba de conexión | `ChannelProbe` | Si la app puede leer sola las sugerencias y las posiciones del canal. Se corre en Ajustes, Conexión, y habilita la lectura automática. |
+| Prueba de conexión | `ChannelProbe` | Si la app puede leer sola las sugerencias y las posiciones del canal, sin cuenta o con la cuenta conectada de la tienda. Se corre en Ajustes, Conexión, y habilita la lectura automática. |
+| Conexión por API | `ChannelConnection` | La cuenta del canal de una tienda, autorizada con OAuth. Cada cliente crea su propia aplicación en el canal y carga su App ID y clave secreta en Ajustes, Conexión. La clave secreta y las llaves se guardan cifradas con `CHANNEL_TOKEN_KEY` y nunca se muestran. Las llaves se renuevan solas, una sola vez a la vez. |
+| Pedido de permiso | `ConnectAttempt` | Un link de autorización en curso: un código de control de un solo uso que vence a los 10 minutos, o a las 24 horas si es el link para mandarle al cliente. |
 | Título bloqueado | (se calcula) | Cuando el canal no deja cambiar el título. Lo dicen las ventas de la última medición, con la regla de cada canal; si no hay datos, se marca a mano en la publicación. |
 | Estado de la propuesta | `Stage` | Sin propuesta, Propuesta generada, En revisión, Aprobado, Aplicado en canal, Medido. Es el recorrido de la propuesta completa con IA, no la etapa de la publicación. |
 | Movimiento de la propuesta | `StageMovement` | Cuándo entró y salió una publicación de cada estado de la propuesta, y quién la movió. |
@@ -59,8 +61,9 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
 - `src/channels/`: lo único que sabe de cada canal (formato del ID, link, largo del título, cuándo
   el título está bloqueado, reglas de título iniciales, link de búsqueda y la guía para aplicar a mano,
   con los datos en el orden del formulario del canal). `research.ts` es lo que se lee del canal desde el
-  servidor: sugerencias del buscador, posición y la prueba de conexión. Para probar sin el canal real,
-  `MERCADOLIBRE_SUGGEST_URL`, `MERCADOLIBRE_API_URL` y `MERCADOLIBRE_LISTING_URL` cambian las direcciones.
+  servidor: sugerencias del buscador, posición y la prueba de conexión. `connect.ts` es la conexión por
+  API (OAuth): link de permiso, llaves y renovación. Para probar sin el canal real, `MERCADOLIBRE_SUGGEST_URL`,
+  `MERCADOLIBRE_API_URL`, `MERCADOLIBRE_LISTING_URL` y `MERCADOLIBRE_AUTH_URL` cambian las direcciones.
   El resto de la app usa la interfaz `ChannelAdapter`.
 - `src/importers/`: el único lugar que sabe leer archivos. Lee Excel y CSV en el navegador,
   propone qué columna va a qué campo, traba las columnas confidenciales y traduce cada fila a

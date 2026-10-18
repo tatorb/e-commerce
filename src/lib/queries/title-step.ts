@@ -46,7 +46,7 @@ export async function loadTitleContext(db: PrismaClient, accountId: string, publ
       pipelineStatus: true,
       pipelineStep: true,
       titleLockedManual: true,
-      store: { select: { channel: { select: { id: true, kind: true, name: true } } } },
+      store: { select: { id: true, channel: { select: { id: true, kind: true, name: true } } } },
       measurements: { orderBy: { takenAt: 'desc' }, take: 1, select: { metrics: true } },
       product: {
         select: {
@@ -107,6 +107,7 @@ export async function loadTitleContext(db: PrismaClient, accountId: string, publ
   return {
     publication: { id: pub.id, title: pub.title, externalId: pub.externalId, productId: pub.productId, pipelineStatus: pub.pipelineStatus, pipelineStep: pub.pipelineStep },
     channel,
+    storeId: pub.store.id,
     product: pub.product,
     titleLock: resolveTitleLock(adapter.titleLock(metrics), pub.titleLockedManual),
     rules,

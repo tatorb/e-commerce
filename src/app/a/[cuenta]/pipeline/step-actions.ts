@@ -32,9 +32,9 @@ async function target(accountSlug: string, publicationId: string) {
   if (!account) return null;
   const pub = await prisma.publication.findFirst({
     where: { id: publicationId, product: { accountId: account.id } },
-    select: { id: true, productId: true, externalId: true, store: { select: { channel: { select: { id: true, kind: true } } } } },
+    select: { id: true, productId: true, externalId: true, store: { select: { id: true, channel: { select: { id: true, kind: true } } } } },
   });
-  return pub ? { account, pub, channel: pub.store.channel } : null;
+  return pub ? { account, pub, channel: pub.store.channel, storeId: pub.store.id } : null;
 }
 
 const NOT_FOUND: Result = { ok: false, error: 'La publicación no existe en esta cuenta.' };
@@ -202,7 +202,13 @@ export async function readPositionAction(accountSlug: string, publicationId: str
   const t = await target(accountSlug, publicationId);
   if (!t) return NOT_FOUND;
   if (!t.pub.externalId) return { ok: false, error: 'La publicación no tiene código del canal.' };
-  const r = await readPosition(prisma, { channel: t.channel, publicationId, externalId: t.pub.externalId, query: String(query) });
+  const r = await readPosition(prisma, {
+    channel: t.channel,
+    storeId: t.storeId,
+    publicationId,
+    externalId: t.pub.externalId,
+    query: String(query),
+  });
   if (!r.ok) return { ok: false, error: `${r.error} Podés cargarla a mano.` };
   return done(accountSlug, r.page ? `Página ${r.page}, posición ${r.position}.` : 'No aparece en las primeras 3 páginas.');
 }

@@ -1,7 +1,9 @@
 import type { PrismaClient } from '@/generated/prisma/client';
 import type { ChannelKind } from '@/generated/prisma/enums';
-import { getChannelResearch, pause, ResearchError } from '@/channels/research';
+import { ConnectError } from '@/channels/connect';
+import { getChannelResearch, pause, ResearchError, type ProbeResult } from '@/channels/research';
 import { MAX_PAGES, savePosition, saveSuggestions } from '@/domain/title-work';
+import { withAccessToken } from '@/lib/connections';
 
 // Lecturas automáticas del canal, con lo que ya se leyó guardado para no
 // volver a pedirlo. Recibe la base por parámetro para poder probarlo.
@@ -13,25 +15,68 @@ const LETTERS = 'abcdefghijklmnopqrstuvwxyz'.split('');
 const CACHE_DAYS = 7;
 const PAUSE_MS = 300;
 
-/** Qué se puede leer solo, según la última prueba de conexión. */
-export async function autoAvailable(db: PrismaClient, channel: Channel): Promise<{ suggestions: boolean; positions: boolean }> {
-  const research = getChannelResearch(channel.kind);
-  if (!research) return { suggestions: false, positions: false };
-  const latest = async (check: string) =>
-    (await db.channelProbe.findFirst({ where: { channelId: channel.id, check }, orderBy: { checkedAt: 'desc' } }))?.ok ?? false;
-  const [suggestions, positions] = await Promise.all([latest(research.checks.suggestions), latest(research.checks.positions)]);
-  return { suggestions, positions };
+async function latestOk(db: PrismaClient, channelId: string, check: string, storeId: string | null): Promise<boolean> {
+  const row = await db.channelProbe.findFirst({ where: { channelId, check, storeId }, orderBy: { checkedAt: 'desc' } });
+  return row?.ok ?? false;
 }
 
-/** Corre la prueba de conexión y guarda cada resultado con fecha. */
-export async function runProbe(db: PrismaClient, channel: Channel) {
+async function isConnected(db: PrismaClient, storeId: string | null): Promise<boolean> {
+  if (!storeId) return false;
+  const c = await db.channelConnection.findUnique({ where: { storeId }, select: { status: true } });
+  return c?.status === 'ACTIVE';
+}
+
+/**
+ * Qué se puede leer solo, según la última prueba de conexión. Las posiciones
+ * se leen sin cuenta si la búsqueda pública anda, o con la cuenta conectada
+ * de la tienda si la búsqueda con la cuenta anda.
+ */
+export async function autoAvailable(
+  db: PrismaClient,
+  channel: Channel,
+  storeId: string | null = null,
+): Promise<{ suggestions: boolean; positions: boolean; positionsWithAccount: boolean }> {
   const research = getChannelResearch(channel.kind);
+  if (!research) return { suggestions: false, positions: false, positionsWithAccount: false };
+  const [suggestions, publicSearch, connectedSearch, connected] = await Promise.all([
+    latestOk(db, channel.id, research.checks.suggestions, null),
+    latestOk(db, channel.id, research.checks.positions, null),
+    storeId ? latestOk(db, channel.id, research.checks.positionsConnected, storeId) : Promise.resolve(false),
+    isConnected(db, storeId),
+  ]);
+  const withAccount = connected && connectedSearch;
+  return { suggestions, positions: publicSearch || withAccount, positionsWithAccount: !publicSearch && withAccount };
+}
+
+/**
+ * Corre la prueba de conexión y guarda cada resultado con fecha. Si la tienda
+ * está conectada, suma las pruebas con su cuenta.
+ */
+export async function runProbe(db: PrismaClient, args: { channel: Channel; storeId: string | null }): Promise<ProbeResult[]> {
+  const research = getChannelResearch(args.channel.kind);
   if (!research) return [];
   const results = await research.probe();
   await db.channelProbe.createMany({
-    data: results.map((r) => ({ channelId: channel.id, check: r.check, ok: r.ok, detail: r.detail })),
+    data: results.map((r) => ({ channelId: args.channel.id, check: r.check, ok: r.ok, detail: r.detail })),
   });
-  return results;
+  if (!args.storeId || !(await isConnected(db, args.storeId))) return results;
+  let connected: ProbeResult[];
+  try {
+    connected = await withAccessToken(db, args.storeId, (token, userId) => research.probeConnected(token, userId));
+  } catch (e) {
+    connected = [
+      {
+        check: 'connected_user',
+        label: 'Cuenta conectada',
+        ok: false,
+        detail: e instanceof ConnectError ? e.message : 'No se pudo usar la cuenta conectada.',
+      },
+    ];
+  }
+  await db.channelProbe.createMany({
+    data: connected.map((r) => ({ channelId: args.channel.id, storeId: args.storeId, check: r.check, ok: r.ok, detail: r.detail })),
+  });
+  return [...results, ...connected];
 }
 
 export type ReadOutcome = { read: number; cached: number; empty: number; error: string | null };
@@ -85,15 +130,18 @@ export async function readSuggestions(
   return out;
 }
 
-/** Lee la posición de la publicación en una búsqueda y la guarda con fecha. */
+/** Lee la posición de la publicación en una búsqueda y la guarda con fecha. Usa la cuenta conectada si hace falta. */
 export async function readPosition(
   db: PrismaClient,
-  args: { channel: Channel; publicationId: string; externalId: string; query: string },
+  args: { channel: Channel; storeId?: string | null; publicationId: string; externalId: string; query: string },
 ): Promise<{ ok: true; page: number | null; position: number | null } | { ok: false; error: string }> {
   const research = getChannelResearch(args.channel.kind);
   if (!research) return { ok: false, error: 'Este canal no tiene buscador para leer.' };
   try {
-    const found = await research.findPosition(args.query, args.externalId, MAX_PAGES);
+    const auto = await autoAvailable(db, args.channel, args.storeId ?? null);
+    const find = (token?: string) => research.findPosition(args.query, args.externalId, MAX_PAGES, token);
+    const found =
+      auto.positionsWithAccount && args.storeId ? await withAccessToken(db, args.storeId, (token) => find(token)) : await find();
     await savePosition(db, {
       publicationId: args.publicationId,
       query: args.query,
@@ -103,6 +151,7 @@ export async function readPosition(
     });
     return { ok: true, page: found?.page ?? null, position: found?.position ?? null };
   } catch (e) {
-    return { ok: false, error: e instanceof ResearchError ? e.message : 'No se pudo leer la búsqueda.' };
+    if (e instanceof ResearchError || e instanceof ConnectError) return { ok: false, error: e.message };
+    return { ok: false, error: 'No se pudo leer la búsqueda.' };
   }
 }

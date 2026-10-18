@@ -124,7 +124,7 @@ export default async function PipelineStepPage({ params }: { params: Promise<{ c
                 accountSlug={account.slug}
                 timeZone={account.timezone}
                 ctx={ctx}
-                auto={await autoAvailable(prisma, ctx.channel)}
+                auto={await autoAvailable(prisma, ctx.channel, ctx.storeId)}
                 aiDisabledReason={isAiConfigured() ? null : AI_NOT_CONFIGURED}
               />
             ) : (

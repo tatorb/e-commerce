@@ -39,6 +39,8 @@ model User {
   titleLockChoices TitleWork[]
   titleApprovals   TitleApproval[]
   titleRuleSets    TitleRuleSet[]
+  connections      ChannelConnection[]
+  connectAttempts  ConnectAttempt[]
 
   @@map("users")
 }
@@ -143,18 +145,21 @@ enum ApplyMethod {
 // Tienda: la presencia de una cuenta en un canal. Por ejemplo, Insur en
 // Mercado Libre es la tienda INSURMOTOR.
 model Store {
-  id               String        @id @default(cuid())
+  id               String             @id @default(cuid())
   accountId        String
-  account          Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  account          Account            @relation(fields: [accountId], references: [id], onDelete: Cascade)
   channelId        String
-  channel          Channel       @relation(fields: [channelId], references: [id])
+  channel          Channel            @relation(fields: [channelId], references: [id])
   name             String
   externalSellerId String?
-  applyMethod      ApplyMethod   @default(MANUAL)
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  applyMethod      ApplyMethod        @default(MANUAL)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
   publications     Publication[]
   importRuns       ImportRun[]
+  connection       ChannelConnection?
+  connectAttempts  ConnectAttempt[]
+  probes           ChannelProbe[]
 
   @@unique([accountId, channelId, name])
   @@map("stores")
@@ -760,6 +765,9 @@ model ChannelProbe {
   id        String   @id @default(cuid())
   channelId String
   channel   Channel  @relation(fields: [channelId], references: [id])
+  // Las pruebas con la cuenta conectada son de una tienda; las demás, del canal.
+  storeId   String?
+  store     Store?   @relation(fields: [storeId], references: [id], onDelete: Cascade)
   check     String
   ok        Boolean
   detail    String
@@ -767,4 +775,62 @@ model ChannelProbe {
 
   @@index([channelId, check, checkedAt])
   @@map("channel_probes")
+}
+
+// ───────────────────────────── Conexión con el canal ─────────────────────────────
+
+enum ConnectionStatus {
+  NOT_CONNECTED // hay datos de la aplicación, todavía sin autorizar
+  ACTIVE
+  NEEDS_REAUTH // la renovación falló: hay que volver a autorizar
+}
+
+// La conexión de una tienda con su canal por API. Cada cliente crea su propia
+// aplicación en el canal y la autoriza con su cuenta. Las claves y las llaves
+// se guardan cifradas (src/lib/crypto.ts) y nunca se muestran.
+model ChannelConnection {
+  id               String           @id @default(cuid())
+  storeId          String           @unique
+  store            Store            @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  // La aplicación del cliente en el canal.
+  appId            String
+  appSecret        String
+  // Los últimos 4 caracteres de la clave secreta, para reconocerla.
+  appSecretHint    String
+  status           ConnectionStatus @default(NOT_CONNECTED)
+  // La cuenta del canal que autorizó.
+  externalUserId   String?
+  externalNickname String?
+  accessToken      String?
+  refreshToken     String?
+  expiresAt        DateTime?
+  scope            String?
+  connectedAt      DateTime?
+  connectedById    String?
+  connectedBy      User?            @relation(fields: [connectedById], references: [id], onDelete: SetNull)
+  lastRefreshAt    DateTime?
+  lastError        String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@map("channel_connections")
+}
+
+// Un pedido de autorización en curso. El código de control (state) va y
+// vuelve del canal, y dice de qué tienda era. Se usa una sola vez y vence.
+model ConnectAttempt {
+  id           String    @id @default(cuid())
+  state        String    @unique
+  // El secreto de PKCE, cifrado.
+  codeVerifier String
+  storeId      String
+  store        Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  createdById  String?
+  createdBy    User?     @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  expiresAt    DateTime
+  usedAt       DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([storeId])
+  @@map("connect_attempts")
 }

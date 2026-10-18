@@ -6,7 +6,7 @@ import { PlugZap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { runProbeAction } from '@/app/a/[cuenta]/conexion/actions';
 
-export function ProbeButton({ accountSlug, channelId, label }: { accountSlug: string; channelId: string; label: string }) {
+export function ProbeButton({ accountSlug, storeId, label }: { accountSlug: string; storeId: string; label: string }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -16,7 +16,7 @@ export function ProbeButton({ accountSlug, channelId, label }: { accountSlug: st
         onClick={() => {
           setError(null);
           startTransition(async () => {
-            const r = await runProbeAction(accountSlug, channelId);
+            const r = await runProbeAction(accountSlug, storeId);
             if (!r.ok) setError(r.error);
             else router.refresh();
           });

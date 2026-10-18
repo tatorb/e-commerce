@@ -6,6 +6,7 @@ import { PrismaClient } from '@/generated/prisma/client';
 import { getChannelResearch } from '@/channels/research';
 import { listingIds, parseSearchIds, parseSuggestions, toPagePosition } from '@/channels/mercadolibre/research';
 import { autoAvailable, readPosition, readSuggestions, runProbe } from '@/lib/research';
+import { encrypt } from '@/lib/crypto';
 
 // Mercado Libre simulado en la computadora: desde las pruebas no se llega al
 // real. Datos inventados.
@@ -38,13 +39,18 @@ describe('respuestas de Mercado Libre', () => {
 describe('leer de Mercado Libre', () => {
   let server: http.Server;
   let requests: string[] = [];
+  let authorized: string[] = [];
   let blockAfter = Infinity;
+  // Como hoy en Mercado Libre: la búsqueda sin cuenta da 403.
+  let searchNeedsAccount = false;
   const ids = Array.from({ length: 150 }, (_, i) => `MLA${1000000000 + i}`);
 
   beforeAll(async () => {
     server = http.createServer((req, res) => {
       const u = new URL(req.url!, 'http://x');
       requests.push(u.pathname + u.search);
+      const bearer = req.headers.authorization ?? '';
+      if (bearer) authorized.push(u.pathname);
       if (requests.length > blockAfter) {
         res.writeHead(429).end();
         return;
@@ -53,7 +59,17 @@ describe('leer de Mercado Libre', () => {
         const q = u.searchParams.get('q') ?? '';
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ q, suggested_queries: [{ q: `${q} gol` }, { q: `${q} fiesta` }] }));
+      } else if (u.pathname === '/api/users/me') {
+        res.writeHead(bearer ? 200 : 401, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ id: 77, nickname: 'TIENDA' }));
+      } else if (u.pathname === '/api/users/77/items/search') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ paging: { total: 3 }, results: ['MLA1'] }));
       } else if (u.pathname === '/api/sites/MLA/search') {
+        if (searchNeedsAccount && !bearer) {
+          res.writeHead(403).end();
+          return;
+        }
         const offset = Number(u.searchParams.get('offset') ?? 0);
         const limit = Number(u.searchParams.get('limit') ?? 50);
         res.writeHead(200, { 'content-type': 'application/json' });
@@ -72,7 +88,9 @@ describe('leer de Mercado Libre', () => {
 
   beforeEach(() => {
     requests = [];
+    authorized = [];
     blockAfter = Infinity;
+    searchNeedsAccount = false;
   });
 
   afterAll(async () => {
@@ -132,10 +150,47 @@ describe('leer de Mercado Libre', () => {
     });
 
     it('la prueba de conexión habilita lo que salió bien', async () => {
-      expect(await autoAvailable(db, channel)).toEqual({ suggestions: false, positions: false });
-      await runProbe(db, channel);
-      expect(await autoAvailable(db, channel)).toEqual({ suggestions: true, positions: true });
+      expect(await autoAvailable(db, channel)).toEqual({ suggestions: false, positions: false, positionsWithAccount: false });
+      await runProbe(db, { channel, storeId: null });
+      expect(await autoAvailable(db, channel)).toEqual({ suggestions: true, positions: true, positionsWithAccount: false });
       expect(await db.channelProbe.count()).toBe(3);
+    });
+
+    it('con la cuenta conectada, prueba la cuenta y lee la posición con ella si la búsqueda pública está cerrada', async () => {
+      process.env.CHANNEL_TOKEN_KEY = 'clave-de-prueba-para-cifrar';
+      searchNeedsAccount = true;
+      const store = await db.store.findFirstOrThrow();
+      await db.channelConnection.create({
+        data: {
+          storeId: store.id,
+          appId: '1234567890',
+          appSecret: encrypt('secreto'),
+          appSecretHint: 'reto',
+          status: 'ACTIVE',
+          externalUserId: '77',
+          accessToken: encrypt('acc-1'),
+          refreshToken: encrypt('ref-1'),
+          expiresAt: new Date(Date.now() + 3 * 3600_000),
+        },
+      });
+      const results = await runProbe(db, { channel, storeId: store.id });
+      expect(results.map((r) => [r.check, r.ok])).toEqual([
+        ['suggestions', true],
+        ['search_api', false],
+        ['search_page', false],
+        ['connected_user', true],
+        ['connected_items', true],
+        ['search_connected', true],
+      ]);
+      expect(results[4].detail).toBe('Se pueden leer: 3 publicaciones.');
+      // Sin la tienda, la búsqueda no anda; con la tienda conectada, sí.
+      expect(await autoAvailable(db, channel)).toMatchObject({ positions: false });
+      expect(await autoAvailable(db, channel, store.id)).toEqual({ suggestions: true, positions: true, positionsWithAccount: true });
+      authorized = [];
+      const r = await readPosition(db, { channel, storeId: store.id, publicationId, externalId: 'MLA1000000061', query: 'kit' });
+      expect(r).toEqual({ ok: true, page: 2, position: 14 });
+      expect(authorized.every((p) => p === '/api/sites/MLA/search')).toBe(true);
+      expect(authorized.length).toBeGreaterThan(0);
     });
 
     it('guarda lo leído con fecha y no lo vuelve a pedir', async () => {

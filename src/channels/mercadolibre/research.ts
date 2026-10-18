@@ -1,4 +1,5 @@
-import { pause, ResearchError, type ChannelResearch, type ProbeResult } from '../research';
+import { pause, ResearchError, type ChannelResearch, type ProbeResult } from '../research-types';
+import { apiUrl, listingUrl, suggestUrl } from './urls';
 
 // Lectura de Mercado Libre Argentina desde el servidor de la app.
 //
@@ -12,20 +13,17 @@ import { pause, ResearchError, type ChannelResearch, type ProbeResult } from '..
 // Pocos pedidos y con pausas, para no cargar al canal ni quedar bloqueados.
 // Las direcciones se pueden cambiar con variables de entorno para probar.
 
-const suggestUrl = () => process.env.MERCADOLIBRE_SUGGEST_URL || 'https://http2.mlstatic.com/resources/sites/MLA/autosuggest';
-const apiUrl = () => process.env.MERCADOLIBRE_API_URL || 'https://api.mercadolibre.com';
-const listingUrl = () => process.env.MERCADOLIBRE_LISTING_URL || 'https://listado.mercadolibre.com.ar';
-
 // Publicaciones por página en los resultados de Mercado Libre Argentina.
 export const PAGE_SIZE = 48;
 const API_LIMIT = 50;
 const PROBE_QUERY = 'kit de distribucion';
 
-async function get(url: string, accept: string): Promise<Response> {
+async function get(url: string, accept: string, accessToken?: string): Promise<Response> {
   let res: Response;
   try {
     res = await fetch(url, {
       headers: {
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         Accept: accept,
         'Accept-Language': 'es-AR,es;q=0.9',
         'User-Agent': 'Mozilla/5.0 (compatible; StudioMRB/1.0; +https://e-commerce.studiomrb.com)',
@@ -103,13 +101,13 @@ async function suggest(query: string): Promise<string[]> {
   return parseSuggestions(await json(await get(url, 'application/json')));
 }
 
-async function findPosition(query: string, externalId: string, pages: number) {
+async function findPosition(query: string, externalId: string, pages: number, accessToken?: string) {
   const wanted = externalId.toUpperCase().replace('-', '');
   const total = pages * PAGE_SIZE;
   for (let offset = 0; offset < total; offset += API_LIMIT) {
     if (offset > 0) await pause(400);
     const url = `${apiUrl()}/sites/MLA/search?q=${encodeURIComponent(query)}&offset=${offset}&limit=${API_LIMIT}`;
-    const ids = parseSearchIds(await json(await get(url, 'application/json')));
+    const ids = parseSearchIds(await json(await get(url, 'application/json', accessToken)));
     const i = ids.findIndex((id) => id.toUpperCase() === wanted);
     if (i >= 0) {
       const rank = offset + i + 1;
@@ -151,9 +149,38 @@ async function probe(): Promise<ProbeResult[]> {
   return [suggestions, api, page];
 }
 
+/** Pruebas con la cuenta conectada: quién es, sus publicaciones y la búsqueda. */
+async function probeConnected(accessToken: string, userId: string): Promise<ProbeResult[]> {
+  const me = await check('connected_user', 'Cuenta conectada', async () => {
+    const body = (await json(await get(`${apiUrl()}/users/me`, 'application/json', accessToken))) as { id?: unknown; nickname?: unknown };
+    if (String(body.id ?? '') !== userId) throw new ResearchError('Respondió otra cuenta.');
+    return `Responde como ${String(body.nickname ?? userId)}.`;
+  });
+  await pause(300);
+  const items = await check('connected_items', 'Publicaciones propias', async () => {
+    const body = (await json(
+      await get(`${apiUrl()}/users/${encodeURIComponent(userId)}/items/search?limit=1`, 'application/json', accessToken),
+    )) as { paging?: { total?: unknown } };
+    const total = Number(body.paging?.total);
+    if (!Number.isFinite(total)) throw new ResearchError('Respondió algo que no se entiende.');
+    return `Se pueden leer: ${total} publicaciones.`;
+  });
+  await pause(300);
+  const search = await check('search_connected', 'Búsqueda con la cuenta conectada', async () => {
+    const body = await json(
+      await get(`${apiUrl()}/sites/MLA/search?q=${encodeURIComponent(PROBE_QUERY)}&limit=5`, 'application/json', accessToken),
+    );
+    const ids = parseSearchIds(body);
+    if (ids.length === 0) throw new ResearchError('Respondió, pero sin resultados.');
+    return `Respondió ${ids.length} resultados.`;
+  });
+  return [me, items, search];
+}
+
 export const mercadolibreResearch: ChannelResearch = {
   probe,
+  probeConnected,
   suggest,
   findPosition,
-  checks: { suggestions: 'suggestions', positions: 'search_api' },
+  checks: { suggestions: 'suggestions', positions: 'search_api', positionsConnected: 'search_connected' },
 };
