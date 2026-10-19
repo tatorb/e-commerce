@@ -2,7 +2,7 @@ import { del, head } from '@vercel/blob';
 import type { PrismaClient } from '@/generated/prisma/client';
 import { extensionOf, FILE_TYPES, filesPrefix, MAX_FILES } from './file-rules';
 
-export { extensionOf, FILE_TYPES, filesPrefix, MAX_FILES, safeFileName } from './file-rules';
+export { extensionOf, FILE_TYPES, fileHref, filesPrefix, MAX_FILES, safeFileName } from './file-rules';
 
 // Los archivos del fabricante: van directo del navegador al depósito de
 // Vercel (Vercel Blob) y la app anota cada uno en la ficha. Recibe la base
@@ -60,6 +60,18 @@ export async function registerProductFile(
       uploadedById: args.userId,
     },
   });
+}
+
+/**
+ * Lee un archivo del depósito privado con la clave de la app, para mostrarlo
+ * a quien tiene sesión. Null si ya no está.
+ */
+export async function readBlob(url: string): Promise<Response | null> {
+  if (!isOwnBlobUrl(url)) throw new FileError('El archivo no está en el depósito de la app.');
+  const res = await fetch(url, { headers: { authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN ?? ''}` } });
+  if (res.status === 404) return null;
+  if (!res.ok || !res.body) throw new FileError(`El depósito respondió ${res.status}.`);
+  return res;
 }
 
 /** Borra el archivo del depósito y de la ficha. */

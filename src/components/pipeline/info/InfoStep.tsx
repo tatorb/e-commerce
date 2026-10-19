@@ -64,7 +64,7 @@ export function InfoStep({
         publicationId={publicationId}
         productId={ctx.publication.productId}
         initial={{ site: s(r?.manufacturerSite), productUrl: s(r?.manufacturerProductUrl), text: s(r?.manufacturerText) }}
-        files={research.files.map((f) => ({ id: f.id, kind: f.kind, name: f.name, size: f.size, url: f.url }))}
+        files={research.files.map((f) => ({ id: f.id, kind: f.kind, name: f.name, size: f.size }))}
         blobReady={blobReady}
       />
       <ClarificationsCard accountSlug={accountSlug} publicationId={publicationId} initial={s(r?.clarifications)} />

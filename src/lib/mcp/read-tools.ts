@@ -29,6 +29,7 @@ import {
 } from '@/lib/queries/catalog-filters';
 import { listBoard, listPipelineMovements } from '@/lib/queries/pipeline';
 import { listScoredPublications, type ScoredPublication } from '@/lib/queries/scoring';
+import { fileHref } from '@/lib/file-rules';
 import { loadResearch } from '@/lib/queries/research';
 import { loadTitleContext } from '@/lib/queries/title-step';
 import {
@@ -408,7 +409,7 @@ const getPublication = defineTool({
             nombre: f.name,
             tipo: f.kind === 'PDF' ? 'pdf' : 'imagen',
             kb: Math.max(1, Math.round(f.size / 1024)),
-            link: f.url,
+            link: `${ctx.baseUrl}${fileHref(f.id)}`,
           })),
         },
         aclaraciones_para_imagenes: richTextToMarkdown(r?.clarifications ?? null) || null,

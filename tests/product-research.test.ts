@@ -18,7 +18,7 @@ import {
   updateInsight,
   updateResearch,
 } from '@/domain/research';
-import { deleteProductFile, FileError, isOwnBlobUrl, registerProductFile, safeFileName } from '@/lib/files';
+import { deleteProductFile, FileError, isOwnBlobUrl, readBlob, registerProductFile, safeFileName } from '@/lib/files';
 
 // Datos inventados.
 
@@ -104,6 +104,7 @@ describe.skipIf(!url)('investigación del producto en la base', () => {
   // Depósito simulado: lo que pregunta la app sobre cada archivo.
   const blobs = new Map<string, { pathname: string; size: number; contentType: string }>();
   const deleted: string[] = [];
+  let lastAuth = '';
   let server: http.Server;
   let base = '';
 
@@ -120,6 +121,13 @@ describe.skipIf(!url)('investigación del producto en la base', () => {
               : { error: { code: 'not_found', message: 'no existe' } },
           ),
         );
+        return;
+      }
+      if (req.method === 'GET' && u.pathname.startsWith('/files/')) {
+        lastAuth = req.headers.authorization ?? '';
+        const found = blobs.has(`${base}${u.pathname}`);
+        res.writeHead(found ? 200 : 404, { 'content-type': 'application/pdf' });
+        res.end(found ? '%PDF-1.4' : '');
         return;
       }
       if (req.method === 'POST' && u.pathname === '/delete') {
@@ -217,6 +225,16 @@ describe.skipIf(!url)('investigación del producto en la base', () => {
     await deleteProductFile(db, { productId, fileId: f.id });
     expect(deleted).toEqual([fileUrl]);
     expect(await db.productFile.count()).toBe(0);
+  });
+
+  it('lee un archivo privado con la clave de la app', async () => {
+    const fileUrl = `${base}/files/productos/${productId}/x.pdf`;
+    blobs.set(fileUrl, { pathname: `productos/${productId}/x.pdf`, size: 8, contentType: 'application/pdf' });
+    const res = await readBlob(fileUrl);
+    expect(await res!.text()).toBe('%PDF-1.4');
+    expect(lastAuth).toBe('Bearer vercel_blob_rw_prueba_secretoinventado');
+    expect(await readBlob(`${base}/files/productos/${productId}/no-esta.pdf`)).toBeNull();
+    await expect(readBlob('https://otro-sitio.com/x.pdf')).rejects.toThrow(FileError);
   });
 
   it('rechaza archivos de otro lado, de otro producto, de otro tipo o muy pesados', async () => {

@@ -6,9 +6,9 @@ export function BlobSetup() {
       <ol className="list-decimal space-y-1 pl-5">
         <li>En Vercel, entrá al proyecto y abrí la pestaña Storage.</li>
         <li>Tocá Create y elegí Blob.</li>
-        <li>Ponele un nombre, por ejemplo archivos-ecommerce, y crealo.</li>
-        <li>Conectalo al proyecto. Vercel agrega sola la variable BLOB_READ_WRITE_TOKEN.</li>
-        <li>Volvé a publicar la app desde Deployments, con Redeploy.</li>
+        <li>Ponele un nombre, por ejemplo e-commerce-files, y en Access elegí Private.</li>
+        <li>Tildá Add a read-write token env var to this connection y tocá Create.</li>
+        <li>Conectalo a Production y Preview, y volvé a publicar la app desde Deployments, con Redeploy.</li>
       </ol>
       <p className="text-muted-foreground">Mientras tanto, los links y el texto se guardan igual.</p>
     </div>

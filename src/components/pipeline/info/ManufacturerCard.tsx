@@ -12,11 +12,11 @@ import { IconButton, SectionBody, SectionCard } from '@/components/ui/section-ca
 import { StatusText } from '@/components/pipeline/StatusText';
 import { useStepAction } from '@/components/pipeline/useStepAction';
 import { deleteFileAction, registerFileAction, saveManufacturerAction } from '@/app/a/[cuenta]/pipeline/research-actions';
-import { extensionOf, FILE_TYPES, filesPrefix, MAX_FILES, safeFileName } from '@/lib/file-rules';
+import { BLOB_ACCESS, extensionOf, FILE_TYPES, fileHref, filesPrefix, MAX_FILES, safeFileName } from '@/lib/file-rules';
 import { cn } from '@/lib/utils/cn';
 import { BlobSetup } from './BlobSetup';
 
-export type ManufacturerFile = { id: string; kind: 'IMAGE' | 'PDF'; name: string; size: number; url: string };
+export type ManufacturerFile = { id: string; kind: 'IMAGE' | 'PDF'; name: string; size: number };
 
 const ACCEPT = Object.keys(FILE_TYPES)
   .map((ext) => `.${ext}`)
@@ -169,7 +169,7 @@ function Uploader({
         setProgress(queue.length === 1 ? `Subiendo ${file.name}…` : `Subiendo ${i + 1} de ${queue.length}…`);
         try {
           const blob = await upload(`${filesPrefix(productId)}${safeFileName(file.name)}`, file, {
-            access: 'public',
+            access: BLOB_ACCESS,
             handleUploadUrl: '/api/archivos',
             contentType: FILE_TYPES[extensionOf(file.name)].contentType,
             multipart: file.size > 8 * 1024 * 1024,
@@ -258,9 +258,9 @@ function FileList({
         <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
           {images.map((f) => (
             <li key={f.id} className="group relative overflow-hidden rounded-md border bg-background">
-              <a href={f.url} target="_blank" rel="noreferrer" title={f.name}>
-                {/* eslint-disable-next-line @next/next/no-img-element -- miniatura del depósito, sin optimizar */}
-                <img src={f.url} alt={f.name} loading="lazy" className="aspect-square w-full object-cover" />
+              <a href={fileHref(f.id)} target="_blank" rel="noreferrer" title={f.name}>
+                {/* eslint-disable-next-line @next/next/no-img-element -- archivo privado, servido por la app */}
+                <img src={fileHref(f.id)} alt={f.name} loading="lazy" className="aspect-square w-full object-cover" />
               </a>
               <p className="truncate px-2 py-1 text-[11px] text-muted-foreground">{f.name}</p>
               {canDelete ? (
@@ -282,7 +282,7 @@ function FileList({
           {pdfs.map((f) => (
             <li key={f.id} className="inline-flex max-w-full items-center gap-1.5 rounded border bg-muted/40 py-1 pl-2 pr-1 text-xs">
               <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-              <a href={f.url} target="_blank" rel="noreferrer" className="truncate hover:underline">
+              <a href={fileHref(f.id)} target="_blank" rel="noreferrer" className="truncate hover:underline">
                 {f.name}
               </a>
               <span className="shrink-0 tabular-nums text-muted-foreground">{formatSize(f.size)}</span>

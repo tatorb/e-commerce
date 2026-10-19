@@ -3,6 +3,12 @@ import type { ProductFileKind } from '@/generated/prisma/enums';
 // Qué archivos del fabricante se aceptan y cómo se nombran en el depósito.
 // Sin nada del servidor, para usarlo también en el navegador.
 
+// El depósito es privado: los archivos solo se ven a través de la app, con sesión.
+export const BLOB_ACCESS = 'private' as const;
+
+/** Dónde la app muestra un archivo, solo con sesión iniciada. */
+export const fileHref = (fileId: string) => `/api/archivos/${fileId}`;
+
 const MB = 1024 * 1024;
 
 // Qué se puede subir y hasta qué peso, según la extensión.
