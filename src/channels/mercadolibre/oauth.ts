@@ -1,4 +1,5 @@
 import { ConnectError, type ChannelConnector, type TokenSet } from '../connect-types';
+import { readItems } from './http';
 import { apiUrl, authUrl } from './urls';
 
 // Autorización de Mercado Libre (OAuth con PKCE). La llave de uso dura unas
@@ -128,15 +129,8 @@ export const mercadolibreConnector: ChannelConnector = {
 
   async ownersOf(accessToken, externalIds) {
     const out = new Map<string, string>();
-    const ids = externalIds.slice(0, 20);
-    if (ids.length === 0) return out;
-    const body = await getJson(`/items?ids=${ids.map(encodeURIComponent).join(',')}&attributes=id,seller_id`, accessToken);
-    // Respuesta de varios a la vez: [{ code, body: { id, seller_id } }].
-    for (const entry of Array.isArray(body) ? body : []) {
-      const item = (entry as { code?: unknown; body?: { id?: unknown; seller_id?: unknown } }).body;
-      if ((entry as { code?: unknown }).code === 200 && item?.id && item.seller_id !== undefined) {
-        out.set(String(item.id), String(item.seller_id));
-      }
+    for (const item of await readItems(accessToken, externalIds, ['id', 'seller_id'])) {
+      if (item.seller_id !== undefined && item.seller_id !== null) out.set(String(item.id), String(item.seller_id));
     }
     return out;
   },

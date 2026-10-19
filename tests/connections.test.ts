@@ -77,6 +77,9 @@ describe.skipIf(!url)('conexión de una tienda', () => {
     revokes: 0,
     meId: '363689851',
     owner: '363689851',
+    // Si ya contesta /items/bulk, la forma que reemplaza a /items?ids=.
+    bulk: true,
+    paths: [] as string[],
     clientIds: [] as string[],
   };
   let storeId = '';
@@ -114,7 +117,15 @@ describe.skipIf(!url)('conexión de una tienda', () => {
         }
         if (!auth.startsWith('Bearer acc-')) return send(401, { message: 'invalid token' });
         if (u.pathname === '/users/me') return send(200, { id: Number(ml.meId), nickname: ml.meId === '363689851' ? 'INSURMOTOR' : 'OTRA' });
+        if (u.pathname === '/items/bulk') {
+          ml.paths.push(u.pathname);
+          if (!ml.bulk) return send(404, {});
+          expect(u.searchParams.get('attributes')).toBe('body.id,body.seller_id');
+          const ids = (u.searchParams.get('ids') ?? '').split(',');
+          return send(200, ids.map((id) => ({ id, status_code: 200, body: { id, seller_id: Number(ml.owner) } })));
+        }
         if (u.pathname === '/items') {
+          ml.paths.push(u.pathname);
           const ids = (u.searchParams.get('ids') ?? '').split(',');
           return send(200, ids.map((id) => ({ code: 200, body: { id, seller_id: Number(ml.owner) } })));
         }
@@ -133,7 +144,18 @@ describe.skipIf(!url)('conexión de una tienda', () => {
 
   beforeEach(async () => {
     await db.$executeRawUnsafe('TRUNCATE connect_attempts, channel_connections, publications, products, stores, channels, accounts, users CASCADE');
-    Object.assign(ml, { challenge: '', refresh: 'ref-1', n: 1, refreshCalls: 0, revokes: 0, meId: '363689851', owner: '363689851', clientIds: [] });
+    Object.assign(ml, {
+      challenge: '',
+      refresh: 'ref-1',
+      n: 1,
+      refreshCalls: 0,
+      revokes: 0,
+      meId: '363689851',
+      owner: '363689851',
+      bulk: true,
+      paths: [],
+      clientIds: [],
+    });
     const channel = await db.channel.create({ data: { kind: 'MERCADOLIBRE', name: 'Mercado Libre' } });
     accountId = (await db.account.create({ data: { slug: 'prueba', name: 'Prueba' } })).id;
     storeId = (await db.store.create({ data: { accountId, channelId: channel.id, name: 'INSURMOTOR', externalSellerId: '363689851' } })).id;
@@ -218,6 +240,18 @@ describe.skipIf(!url)('conexión de una tienda', () => {
     ml.owner = '363689851';
     expect((await connect()).result).toMatchObject({ ok: true });
     expect((await db.store.findUniqueOrThrow({ where: { id: storeId } })).externalSellerId).toBe('363689851');
+    // Usa la forma nueva de Mercado Libre para leer varias a la vez.
+    expect(ml.paths).toEqual(['/items/bulk', '/items/bulk']);
+  });
+
+  it('si Mercado Libre todavía no acepta la forma nueva, usa la vieja', async () => {
+    await db.store.update({ where: { id: storeId }, data: { externalSellerId: null } });
+    const product = await db.product.create({ data: { accountId, name: 'Kit' } });
+    await db.publication.create({ data: { productId: product.id, storeId, externalId: 'MLA1' } });
+    await saveAppCredentials(db, { storeId, appId: '1234567890', appSecret: SECRET });
+    ml.bulk = false;
+    expect((await connect()).result).toMatchObject({ ok: true });
+    expect(ml.paths).toEqual(['/items/bulk', '/items']);
   });
 
   it('renueva la llave una sola vez aunque la pidan tres a la vez', async () => {
