@@ -13,9 +13,11 @@ import {
   type ContentSnapshot,
   type UpdateMode,
 } from '@/domain/content';
+import { parseMetrics } from '@/domain/measurements';
 import { writeProduct } from '@/domain/products';
 import { insertPublication, publicationDataSchema } from '@/domain/publications';
 import { isFieldKey, type FieldKey } from './fields';
+import { isListingField, loadListing, planListingUpdate, writeListingField, type ListingField } from './listing-fields';
 import type { RowInput } from './mapping';
 import type { Cell } from './spreadsheet';
 import { toRecord, type ImportRecord } from './transform';
@@ -34,6 +36,10 @@ export type ApplyContext = {
   dataDate: Date;
   // Qué hacer con lo que ya está: solo completar lo vacío, o también reemplazar.
   mode?: UpdateMode;
+  // Las filas vienen del canal, leídas con la cuenta conectada: el estado, el
+  // link y el precio de lo que ya estaba se actualizan siempre, y la ficha
+  // solo se completa.
+  fromChannel?: boolean;
 };
 
 export type ApplyResult = {
@@ -154,7 +160,6 @@ export async function applyRows(db: PrismaClient, ctx: ApplyContext, rows: RowIn
       ...record.publication,
       title: record.publication.title ?? '',
       description: record.publication.description ?? '',
-      attributes: [],
     });
     if (!publicationData.success) {
       result.errors.push({
@@ -210,6 +215,7 @@ export async function applyRows(db: PrismaClient, ctx: ApplyContext, rows: RowIn
           const current = await loadContent(tx, target.productId, target.publicationId);
           const { changes } = planContentUpdate(current, record.content, target.publicationId ? mode : 'FILL_EMPTY', {
             publication: target.publicationId !== null,
+            productMode: ctx.fromChannel ? 'FILL_EMPTY' : undefined,
           });
           for (const change of changes) {
             await writeContentField(tx, target, change.field, change.after);
@@ -225,23 +231,50 @@ export async function applyRows(db: PrismaClient, ctx: ApplyContext, rows: RowIn
             });
           }
           changed = changes.length;
+
+          // Los datos de la publicación en el canal: estado, link, precio y datos de catálogo.
+          if (target.publicationId) {
+            const listing = planListingUpdate(await loadListing(tx, target.publicationId), publicationData.data, mode, {
+              sync: ctx.fromChannel ?? false,
+            });
+            for (const change of listing) {
+              await writeListingField(tx, target.publicationId, change.field, change.after);
+              await tx.importChange.create({
+                data: {
+                  importRunId: ctx.runId,
+                  productId: target.productId,
+                  publicationId: target.publicationId,
+                  field: change.field,
+                  before: asJson(change.before),
+                  after: asJson(change.after),
+                },
+              });
+            }
+            // El estado, el link y el precio no cuentan como cambios: la revisión no los muestra.
+            changed += listing.filter((c) => c.kind !== 'sync').length;
+          }
         }
 
-        // La medición de esa fecha: si ya estaba, se reemplaza.
+        // La medición de esa fecha: si ya estaba, se reemplaza. La del canal
+        // se suma a la de ese día, que puede traer datos que el canal no da,
+        // como las ventas de 90 días de una planilla.
         let measured = false;
         if (Object.keys(record.metrics).length > 0) {
+          const where = { publicationId_takenAt: { publicationId, takenAt: ctx.dataDate } };
+          const before = ctx.fromChannel ? await tx.measurement.findUnique({ where, select: { metrics: true } }) : null;
+          const metrics = before ? { ...parseMetrics(before.metrics), ...record.metrics } : record.metrics;
           await tx.measurement.upsert({
-            where: { publicationId_takenAt: { publicationId, takenAt: ctx.dataDate } },
+            where,
             create: {
               publicationId,
               takenAt: ctx.dataDate,
               source: 'IMPORT',
-              metrics: record.metrics,
+              metrics,
               importRunId: ctx.runId,
             },
             // Sigue ligada a la importación que la creó: deshacer una
             // reimportación no borra mediciones de antes.
-            update: { metrics: record.metrics, source: 'IMPORT' },
+            update: { metrics, source: 'IMPORT' },
           });
           measured = true;
         }
@@ -270,12 +303,15 @@ export async function applyRows(db: PrismaClient, ctx: ApplyContext, rows: RowIn
   return result;
 }
 
+// Lo que la revisión muestra que cambia: el contenido y los datos de catálogo.
+export type PreviewField = ContentField | Extract<ListingField, 'attributes'>;
+
 export type RowPreview = {
   rowNumber: number;
   // Campos que cambian solo completando lo vacío.
-  fill: ContentField[];
+  fill: PreviewField[];
   // Campos que además cambian si se elige reemplazar.
-  replace: ContentField[];
+  replace: PreviewField[];
   // Avisos de las medidas.
   warnings: string[];
   // Otros avisos de la fila, para mostrar tal cual.
@@ -290,7 +326,7 @@ export type RowPreview = {
  */
 export async function previewRows(
   db: PrismaClient,
-  ctx: { accountId: string; storeId: string; adapter: ChannelAdapter },
+  ctx: { accountId: string; storeId: string; adapter: ChannelAdapter; fromChannel?: boolean },
   rows: RowInput[],
 ): Promise<RowPreview[]> {
   const previews: RowPreview[] = [];
@@ -312,15 +348,24 @@ export async function previewRows(
     }
     const current = await loadContent(db, found.productId, found.publicationId);
     const sameListing = found.publicationId !== null;
-    const opts = { publication: sameListing };
+    const opts = { publication: sameListing, productMode: ctx.fromChannel ? ('FILL_EMPTY' as const) : undefined };
     const fill = planContentUpdate(current, record.content, 'FILL_EMPTY', opts);
     // Otra publicación del mismo producto: la ficha nunca se reemplaza.
     const replace = sameListing ? planContentUpdate(current, record.content, 'REPLACE', opts) : fill;
-    const fillAfter = new Map(fill.changes.map((c) => [c.field, c.after]));
+    const fillChanges: { field: PreviewField; after: unknown }[] = [...fill.changes];
+    const replaceChanges: { field: PreviewField; after: unknown }[] = [...replace.changes];
+    if (found.publicationId) {
+      const listing = await loadListing(db, found.publicationId);
+      const onlyAttributes = (mode: UpdateMode) =>
+        planListingUpdate(listing, record.publication, mode, { sync: false }).map((c) => ({ field: 'attributes' as const, after: c.after }));
+      fillChanges.push(...onlyAttributes('FILL_EMPTY'));
+      replaceChanges.push(...onlyAttributes('REPLACE'));
+    }
+    const fillAfter = new Map(fillChanges.map((c) => [c.field, c.after]));
     previews.push({
       rowNumber: record.rowNumber,
-      fill: fill.changes.map((c) => c.field),
-      replace: replace.changes
+      fill: fillChanges.map((c) => c.field),
+      replace: replaceChanges
         .filter((c) => !fillAfter.has(c.field) || !sameValue(fillAfter.get(c.field), c.after))
         .map((c) => c.field),
       warnings: replace.warnings,
@@ -363,6 +408,17 @@ export async function undoImportRun(
         return snapshots.get(key)!;
       };
       for (const c of list) {
+        if (isListingField(c.field)) {
+          if (!c.publicationId) continue;
+          const now = await loadListing(tx, c.publicationId);
+          if (!sameValue(now[c.field], c.after)) {
+            kept++;
+            continue;
+          }
+          await writeListingField(tx, c.publicationId, c.field, c.before);
+          restored++;
+          continue;
+        }
         if (!isContentField(c.field)) continue;
         const snapshot = await snapshotFor(c.publicationId);
         if (!sameValue(readContentField(snapshot, c.field), c.after)) {

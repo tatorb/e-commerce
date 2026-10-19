@@ -6,10 +6,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { ImportWizard } from '@/components/import/ImportWizard';
 import { UndoImportButton } from '@/components/import/UndoImportButton';
 import { ImportStatusBadge } from '@/components/stages/StageBadge';
+import { getChannelListings } from '@/channels/listings';
 import { getAccountBySlug } from '@/lib/queries/accounts';
 import { formatDateTime, plural } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
+// Leer las publicaciones del canal va por tandas, y cada tanda hace varios pedidos.
+export const maxDuration = 60;
 
 export async function generateMetadata({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
@@ -27,7 +30,11 @@ export default async function ImportPage({ params }: { params: Promise<{ cuenta:
   if (!account) notFound();
 
   const [stores, mappings, runs] = await Promise.all([
-    prisma.store.findMany({ where: { accountId: account.id }, orderBy: { name: 'asc' }, include: { channel: true } }),
+    prisma.store.findMany({
+      where: { accountId: account.id },
+      orderBy: { name: 'asc' },
+      include: { channel: true, connection: { select: { status: true } } },
+    }),
     prisma.importMapping.findMany({ where: { accountId: account.id }, orderBy: { updatedAt: 'desc' } }),
     prisma.importRun.findMany({
       where: { accountId: account.id },
@@ -36,6 +43,11 @@ export default async function ImportPage({ params }: { params: Promise<{ cuenta:
       include: { user: { select: { name: true } }, store: { select: { name: true } } },
     }),
   ]);
+
+  // Las conectadas, de los canales que dejan leer sus publicaciones.
+  const channelStores = stores
+    .filter((s) => s.connection?.status === 'ACTIVE' && getChannelListings(s.channel.kind))
+    .map((s) => ({ id: s.id, name: s.name, channelName: s.channel.name }));
 
   return (
     <>
@@ -46,6 +58,7 @@ export default async function ImportPage({ params }: { params: Promise<{ cuenta:
             Cargá publicaciones de <strong>{account.name}</strong> desde un Excel o un CSV, o completá su contenido con
             la planilla que se descarga desde Publicaciones. El archivo se lee en tu navegador: a la app solo viajan las
             columnas que elegís importar.
+            {channelStores.length > 0 ? ' Con una tienda conectada, también podés traerlas directo del canal.' : ''}
           </p>
         </div>
       </PageHeader>
@@ -53,6 +66,7 @@ export default async function ImportPage({ params }: { params: Promise<{ cuenta:
         <ImportWizard
           accountSlug={account.slug}
           stores={stores.map((s) => ({ id: s.id, name: s.name, channelKind: s.channel.kind, channelName: s.channel.name }))}
+          channelStores={channelStores}
           savedMappings={mappings.map((m) => ({
             id: m.id,
             name: m.name,
@@ -80,8 +94,8 @@ export default async function ImportPage({ params }: { params: Promise<{ cuenta:
                         <ImportStatusBadge status={run.status} />
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        {formatDateTime(run.startedAt, account.timezone)} · {run.user?.name ?? '—'} · hoja{' '}
-                        {run.sheetName} · {run.store.name}
+                        {formatDateTime(run.startedAt, account.timezone)} · {run.user?.name ?? '—'} ·{' '}
+                        {run.origin === 'CHANNEL_API' ? 'leída con la cuenta conectada' : `hoja ${run.sheetName} · ${run.store.name}`}
                       </div>
                       <div className="text-xs text-muted-foreground tabular-nums">
                         {plural(run.productsCreated, 'producto nuevo', 'productos nuevos')} ·{' '}

@@ -5,9 +5,14 @@ import { z } from 'zod';
 import { prisma } from '@/lib/db';
 import { requireUser } from '@/lib/auth/session';
 import { getChannelAdapter } from '@/channels';
+import { ConnectError } from '@/channels/connect';
+import { getChannelListings, LISTING_STATUSES, LISTINGS_BATCH, type ListingStatus } from '@/channels/listings';
+import { withAccessToken } from '@/lib/connections';
 import { applyRows, previewRows, rowsInputSchema, undoImportRun, type RowPreview } from '@/importers/apply';
+import { listingToRow } from '@/importers/channel-listings';
 import type { ExistingKeys } from '@/importers/classify';
 import { isConfidentialHeader, isFieldKey } from '@/importers/fields';
+import type { RowInput } from '@/importers/mapping';
 
 export type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string };
 
@@ -65,6 +70,7 @@ export async function previewUpdatesAction(
   accountSlug: string,
   storeId: string,
   rawRows: unknown,
+  fromChannel = false,
 ): Promise<Result<{ previews: RowPreview[] }>> {
   await requireUser();
   const accountId = await accountIdFor(accountSlug);
@@ -76,7 +82,7 @@ export async function previewUpdatesAction(
 
   const previews = await previewRows(
     prisma,
-    { accountId, storeId: store.id, adapter: getChannelAdapter(store.channel.kind, store.channel.name) },
+    { accountId, storeId: store.id, adapter: getChannelAdapter(store.channel.kind, store.channel.name), fromChannel },
     rows.data,
   );
   return { ok: true, previews };
@@ -187,6 +193,7 @@ export async function importBatchAction(
       userId: user.id,
       dataDate: run.dataDate,
       mode: run.updateMode,
+      fromChannel: run.origin === 'CHANNEL_API',
     },
     rows.data,
   );
@@ -254,4 +261,134 @@ export async function undoImportAction(accountSlug: string, runId: string): Prom
   revalidatePath(`/a/${accountSlug}/publicaciones`);
   revalidatePath(`/a/${accountSlug}/importar`);
   return { ok: true };
+}
+
+// ───────────────────────────── Desde el canal ─────────────────────────────
+
+// Las publicaciones se leen con la cuenta conectada de la tienda. Solo lo
+// público de cada una: nada de órdenes, compradores ni mensajes.
+
+async function connectedStore(accountSlug: string, storeId: string) {
+  const account = await prisma.account.findUnique({ where: { slug: accountSlug }, select: { id: true, timezone: true } });
+  if (!account) return { ok: false, error: 'La cuenta no existe.' } as const;
+  const store = await prisma.store.findFirst({
+    where: { id: storeId, accountId: account.id },
+    include: { channel: true, connection: { select: { status: true } } },
+  });
+  if (!store) return { ok: false, error: 'La tienda no existe en esta cuenta.' } as const;
+  const listings = getChannelListings(store.channel.kind);
+  if (!listings) return { ok: false, error: `Todavía no se pueden traer publicaciones de ${store.channel.name}.` } as const;
+  if (store.connection?.status !== 'ACTIVE') return { ok: false, error: 'La tienda no está conectada: conectala en Conexión.' } as const;
+  return { ok: true, account, store, listings } as const;
+}
+
+function channelFailure(e: unknown): { ok: false; error: string } {
+  if (e instanceof ConnectError) return { ok: false, error: e.message };
+  console.error('Error al leer del canal', e instanceof Error ? e.message : e);
+  return { ok: false, error: 'No se pudo leer del canal. Probá de nuevo.' };
+}
+
+/** Cuántas publicaciones hay de cada estado en el canal. */
+export async function countListingsAction(
+  accountSlug: string,
+  storeId: string,
+): Promise<Result<{ counts: Record<ListingStatus, number> }>> {
+  await requireUser();
+  const found = await connectedStore(accountSlug, storeId);
+  if (!found.ok) return { ok: false, error: found.error };
+  try {
+    const counts = await withAccessToken(prisma, found.store.id, (token, userId) => found.listings.countByStatus(token, userId));
+    return { ok: true, counts };
+  } catch (e) {
+    return channelFailure(e);
+  }
+}
+
+const statusesSchema = z.array(z.enum(LISTING_STATUSES as [ListingStatus, ...ListingStatus[]])).min(1).max(LISTING_STATUSES.length);
+
+/** Los códigos de las publicaciones con esos estados. */
+export async function listListingIdsAction(
+  accountSlug: string,
+  storeId: string,
+  rawStatuses: unknown,
+): Promise<Result<{ ids: string[] }>> {
+  await requireUser();
+  const statuses = statusesSchema.safeParse(rawStatuses);
+  if (!statuses.success) return { ok: false, error: 'Elegí qué publicaciones traer.' };
+  const found = await connectedStore(accountSlug, storeId);
+  if (!found.ok) return { ok: false, error: found.error };
+  try {
+    const ids = await withAccessToken(prisma, found.store.id, (token, userId) => found.listings.listIds(token, userId, statuses.data));
+    return { ok: true, ids: ids.slice(0, 20000) };
+  } catch (e) {
+    return channelFailure(e);
+  }
+}
+
+const readSchema = z.object({
+  ids: z.array(z.string().trim().min(1).max(40)).min(1).max(LISTINGS_BATCH),
+  firstRow: z.number().int().min(1).max(20000),
+});
+
+/** Lee una tanda de publicaciones y las devuelve como filas, igual que las de una planilla. */
+export async function readListingsAction(
+  accountSlug: string,
+  storeId: string,
+  input: z.input<typeof readSchema>,
+): Promise<Result<{ rows: RowInput[]; missing: string[] }>> {
+  await requireUser();
+  const parsed = readSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: 'El pedido no tiene la forma esperada.' };
+  const found = await connectedStore(accountSlug, storeId);
+  if (!found.ok) return { ok: false, error: found.error };
+  try {
+    const { listings, missing } = await withAccessToken(prisma, found.store.id, (token, userId) =>
+      found.listings.readListings(token, userId, parsed.data.ids),
+    );
+    const adapter = getChannelAdapter(found.store.channel.kind, found.store.channel.name);
+    // En el orden en que se pidieron, así cada una conserva su número de fila.
+    const order = new Map(parsed.data.ids.map((id, i) => [id, i]));
+    const rowOf = (externalId: string) => parsed.data.firstRow + (order.get(externalId) ?? 0);
+    const rows = listings.map((l) => listingToRow(l, rowOf(l.externalId), adapter)).sort((a, b) => a.rowNumber - b.rowNumber);
+    return { ok: true, rows, missing };
+  } catch (e) {
+    return channelFailure(e);
+  }
+}
+
+const startChannelSchema = z.object({
+  storeId: z.string().min(1),
+  rowsTotal: z.number().int().min(1).max(20000),
+  updateMode: z.enum(['FILL_EMPTY', 'REPLACE']),
+});
+
+function todayIn(timeZone: string): Date {
+  return new Date(`${new Intl.DateTimeFormat('en-CA', { timeZone, dateStyle: 'short' }).format(new Date())}T00:00:00Z`);
+}
+
+/** Empieza una importación desde el canal: los datos son de hoy. */
+export async function startChannelImportAction(
+  accountSlug: string,
+  input: z.input<typeof startChannelSchema>,
+): Promise<Result<{ runId: string }>> {
+  const user = await requireUser();
+  const parsed = startChannelSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Revisá los datos.' };
+  const found = await connectedStore(accountSlug, parsed.data.storeId);
+  if (!found.ok) return { ok: false, error: found.error };
+  const run = await prisma.importRun.create({
+    data: {
+      accountId: found.account.id,
+      storeId: found.store.id,
+      userId: user.id,
+      origin: 'CHANNEL_API',
+      fileName: `${found.store.channel.name} · ${found.store.name}`,
+      sheetName: found.store.channel.name,
+      dataDate: todayIn(found.account.timezone),
+      rowsTotal: parsed.data.rowsTotal,
+      updateMode: parsed.data.updateMode,
+    },
+    select: { id: true },
+  });
+  return { ok: true, runId: run.id };
 }

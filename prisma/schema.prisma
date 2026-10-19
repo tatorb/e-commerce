@@ -445,6 +445,12 @@ enum ImportUpdateMode {
   REPLACE
 }
 
+// De dónde vienen las filas: un archivo, o el canal leído con la cuenta conectada.
+enum ImportOrigin {
+  FILE
+  CHANNEL_API
+}
+
 // Una importación: quién, cuándo, qué archivo y qué resultó.
 model ImportRun {
   id                   String           @id @default(cuid())
@@ -456,6 +462,8 @@ model ImportRun {
   mapping              ImportMapping?   @relation(fields: [mappingId], references: [id], onDelete: SetNull)
   userId               String?
   user                 User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  origin               ImportOrigin     @default(FILE)
+  // Con origin CHANNEL_API, el canal y la tienda.
   fileName             String
   sheetName            String
   dataDate             DateTime         @db.Date

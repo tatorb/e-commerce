@@ -57,3 +57,21 @@ export function formatMetric(key: MetricKey, value: MetricValue): string {
   if (typeof value === 'number') return new Intl.NumberFormat('es-AR', { maximumFractionDigits: 2 }).format(value);
   return String(value);
 }
+
+// Cuántas mediciones se leen para armar el último dato de cada métrica.
+export const LATEST_MEASUREMENTS = 10;
+
+/**
+ * El último dato que se tiene de cada métrica. Las mediciones llegan de la más
+ * nueva a la más vieja: por ejemplo, las visitas salen de la última lectura
+ * del canal y las ventas de 90 días, de la última planilla que las traía.
+ */
+export function latestMetrics(measurements: { metrics: unknown }[]): Metrics {
+  const out: Metrics = {};
+  for (const m of measurements) {
+    for (const [key, value] of Object.entries(parseMetrics(m.metrics)) as [MetricKey, MetricValue][]) {
+      if (out[key] === undefined) out[key] = value;
+    }
+  }
+  return out;
+}

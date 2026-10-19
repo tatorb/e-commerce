@@ -34,6 +34,8 @@ export interface ChannelCatalog {
   categories: { id: string; name: string }[];
   /** La categoría que le toca a una familia de producto, si tiene una. */
   categoryForFamily(family: string | null): string | null;
+  /** Al revés: la familia de una categoría. Si varias comparten la categoría, decide el título. */
+  familyForCategory(categoryId: string, title: string | null): string | null;
   category(id: string): CatalogCategory | null;
 }
 

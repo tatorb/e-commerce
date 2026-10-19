@@ -1,0 +1,248 @@
+import type { ChannelStatus } from '@/generated/prisma/enums';
+import { BULK_MAX, MercadoLibreRequestError, mlGet, readItems } from './http';
+import { mercadolibreCatalog } from './catalog';
+import type { ChannelListing, ChannelListings, ListingStatus } from '../listings-types';
+
+// Leer las publicaciones propias de la cuenta conectada. Solo lo público de
+// cada publicación: no se leen órdenes, compradores ni mensajes.
+
+const PAGE = 100;
+// Más allá de este punto Mercado Libre no pagina por posición: hay que recorrer.
+const OFFSET_MAX = 1000;
+const SCAN_PAGES_MAX = 500;
+const PARALLEL = 4;
+
+const ITEM_FIELDS = [
+  'id',
+  'seller_id',
+  'title',
+  'price',
+  'status',
+  'permalink',
+  'sold_quantity',
+  'category_id',
+  'pictures',
+  'video_id',
+  'attributes',
+  'variations',
+  'seller_custom_field',
+  'health',
+];
+
+// Los que van a la ficha y no a los datos de catálogo.
+const BRAND = 'BRAND';
+const PART_NUMBER = 'PART_NUMBER';
+const ORIGIN = 'ORIGIN';
+const SELLER_SKU = 'SELLER_SKU';
+
+type Obj = Record<string, unknown>;
+
+const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v);
+const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null);
+const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
+/** El valor de un atributo: value_name o, si tiene varios, sus nombres. */
+function attributeValue(a: Obj): string | null {
+  const name = str(a.value_name);
+  if (name) return name;
+  const names = arr(a.values)
+    .map((v) => (isObj(v) ? str(v.name) : null))
+    .filter((v): v is string => v !== null);
+  return names.length > 0 ? names.join(', ') : null;
+}
+
+function statusOf(raw: unknown): ChannelStatus {
+  if (raw === 'active') return 'ACTIVE';
+  if (raw === 'paused') return 'PAUSED';
+  return 'INACTIVE';
+}
+
+/** Una publicación de Mercado Libre en el formato neutro. Sin la descripción ni las visitas, que se piden aparte. */
+export function parseItem(item: Obj): ChannelListing {
+  const attributes: ChannelListing['attributes'] = [];
+  let brand: string | null = null;
+  let partNumber: string | null = null;
+  let origin: string | null = null;
+  const skus: string[] = [];
+  const addSku = (sku: string | null) => {
+    if (sku && !skus.includes(sku)) skus.push(sku);
+  };
+
+  for (const a of arr(item.attributes)) {
+    if (!isObj(a)) continue;
+    const id = str(a.id);
+    const value = attributeValue(a);
+    if (!id || !value) continue;
+    if (id === BRAND) brand = value;
+    else if (id === PART_NUMBER) partNumber = value;
+    else if (id === ORIGIN) origin = value;
+    else if (id === SELLER_SKU) addSku(value);
+    else attributes.push({ id, name: str(a.name) ?? id, value });
+  }
+  addSku(str(item.seller_custom_field));
+
+  // Cada variante tiene su SKU y su medida, por ejemplo "STD" o "0.50".
+  const measures: ChannelListing['measures'] = [];
+  for (const v of arr(item.variations)) {
+    if (!isObj(v)) continue;
+    const skuAttr = arr(v.attributes).find((a) => isObj(a) && a.id === SELLER_SKU);
+    const sku = (isObj(skuAttr) ? attributeValue(skuAttr) : null) ?? str(v.seller_custom_field);
+    addSku(sku);
+    const measure = arr(v.attribute_combinations)
+      .map((c) => (isObj(c) ? attributeValue(c) : null))
+      .filter((c): c is string => c !== null)
+      .join(' / ');
+    if (sku && measure) measures.push({ sku, measure });
+  }
+
+  const photos = arr(item.pictures)
+    .map((p) => (isObj(p) ? (str(p.secure_url) ?? str(p.url)) : null))
+    .filter((p): p is string => p !== null);
+  const health = num(item.health);
+  const skuAttr = arr(item.attributes).some((a) => isObj(a) && a.id === SELLER_SKU && attributeValue(a));
+
+  return {
+    externalId: String(item.id),
+    url: str(item.permalink),
+    title: str(item.title),
+    description: null,
+    price: num(item.price),
+    status: statusOf(item.status),
+    sold: num(item.sold_quantity),
+    visits90d: null,
+    photos,
+    hasVideo: str(item.video_id) !== null,
+    quality: health === null ? null : Math.round(Math.min(Math.max(health, 0), 1) * 100),
+    categoryId: str(item.category_id),
+    categoryName: null,
+    brand,
+    partNumber,
+    origin,
+    skus,
+    measures,
+    attributes,
+    attributeCount: attributes.length + [brand, partNumber, origin].filter(Boolean).length + (skuAttr ? 1 : 0),
+  };
+}
+
+/** Corre las tareas de a pocas a la vez, para no pasarse del límite de Mercado Libre. */
+async function inParallel(tasks: (() => Promise<void>)[], limit = PARALLEL): Promise<void> {
+  let next = 0;
+  const worker = async () => {
+    while (next < tasks.length) await tasks[next++]();
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker));
+}
+
+/** Un dato que puede faltar: si falla, queda vacío. Una llave vencida o "demasiados pedidos" sí cortan. */
+async function optional<T>(read: () => Promise<T | null>): Promise<T | null> {
+  try {
+    return await read();
+  } catch (e) {
+    if (e instanceof MercadoLibreRequestError && (e.status === 401 || e.status === 429)) throw e;
+    return null;
+  }
+}
+
+// Los nombres de las categorías no cambian: se guardan mientras dure el servidor.
+const categoryNames = new Map<string, string | null>();
+
+async function categoryName(accessToken: string, id: string): Promise<string | null> {
+  const known = mercadolibreCatalog.category(id);
+  if (known) return known.name;
+  if (categoryNames.has(id)) return categoryNames.get(id) ?? null;
+  const body = await optional(() => mlGet(`/categories/${encodeURIComponent(id)}`, accessToken));
+  const name = isObj(body) ? str(body.name) : null;
+  categoryNames.set(id, name);
+  return name;
+}
+
+function searchPath(userId: string, params: Record<string, string>): string {
+  return `/users/${encodeURIComponent(userId)}/items/search?${new URLSearchParams(params).toString()}`;
+}
+
+function results(body: unknown): string[] {
+  return isObj(body) ? arr(body.results).filter((r): r is string => typeof r === 'string') : [];
+}
+
+function total(body: unknown): number {
+  return (isObj(body) && isObj(body.paging) && num(body.paging.total)) || 0;
+}
+
+async function idsWithStatus(accessToken: string, userId: string, status: ListingStatus): Promise<string[]> {
+  const first = await mlGet(searchPath(userId, { status, limit: String(PAGE), offset: '0' }), accessToken);
+  const count = total(first);
+  const ids = results(first);
+  if (count <= OFFSET_MAX) {
+    for (let offset = PAGE; offset < count; offset += PAGE) {
+      const page = results(await mlGet(searchPath(userId, { status, limit: String(PAGE), offset: String(offset) }), accessToken));
+      if (page.length === 0) break;
+      ids.push(...page);
+    }
+    return ids;
+  }
+  // Muchas: se recorren con scroll_id, desde el principio.
+  const scanned: string[] = [];
+  let scrollId: string | null = null;
+  for (let i = 0; i < SCAN_PAGES_MAX; i++) {
+    const params: Record<string, string> = { status, search_type: 'scan', limit: String(PAGE) };
+    if (scrollId) params.scroll_id = scrollId;
+    const body = await mlGet(searchPath(userId, params), accessToken);
+    const page = results(body);
+    if (page.length === 0) break;
+    scanned.push(...page);
+    scrollId = isObj(body) ? str(body.scroll_id) : null;
+    if (!scrollId || scanned.length >= count) break;
+  }
+  return scanned;
+}
+
+export const mercadolibreListings: ChannelListings = {
+  async countByStatus(accessToken, userId) {
+    const [active, paused, closed] = await Promise.all(
+      (['active', 'paused', 'closed'] as const).map(async (status) =>
+        total(await mlGet(searchPath(userId, { status, limit: '1' }), accessToken)),
+      ),
+    );
+    return { active, paused, closed };
+  },
+
+  async listIds(accessToken, userId, statuses) {
+    const out: string[] = [];
+    for (const status of statuses) {
+      for (const id of await idsWithStatus(accessToken, userId, status)) if (!out.includes(id)) out.push(id);
+    }
+    return out;
+  },
+
+  async readListings(accessToken, userId, ids) {
+    const wanted = [...new Set(ids)].slice(0, BULK_MAX);
+    // Solo las propias: las de otra cuenta quedan como no leídas.
+    const own = (await readItems(accessToken, wanted, ITEM_FIELDS, { allAttributes: true })).filter(
+      (item) => item.seller_id === undefined || item.seller_id === null || String(item.seller_id) === userId,
+    );
+    const listings = own.map(parseItem);
+    const tasks: (() => Promise<void>)[] = [];
+    for (const l of listings) {
+      const id = encodeURIComponent(l.externalId);
+      tasks.push(async () => {
+        const body = await optional(() => mlGet(`/items/${id}/description`, accessToken));
+        l.description = isObj(body) ? str(body.plain_text) : null;
+      });
+      tasks.push(async () => {
+        const body = await optional(() => mlGet(`/items/${id}/visits/time_window?last=90&unit=day`, accessToken));
+        l.visits90d = isObj(body) ? num(body.total_visits) : null;
+      });
+    }
+    for (const categoryId of new Set(listings.map((l) => l.categoryId).filter((c): c is string => c !== null))) {
+      tasks.push(async () => {
+        const name = await categoryName(accessToken, categoryId);
+        for (const l of listings) if (l.categoryId === categoryId) l.categoryName = name;
+      });
+    }
+    await inParallel(tasks);
+    const found = new Set(listings.map((l) => l.externalId));
+    return { listings, missing: wanted.filter((id) => !found.has(id)) };
+  },
+};

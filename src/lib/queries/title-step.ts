@@ -1,6 +1,6 @@
 import type { PrismaClient } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
-import { parseMetrics } from '@/domain/measurements';
+import { LATEST_MEASUREMENTS, latestMetrics } from '@/domain/measurements';
 import { resolveTitleLock } from '@/domain/title-lock';
 import { buildSeeds, buildWordMap, sameText } from '@/domain/titles';
 import { parseProposals, parseStrings, parseWordStatuses } from '@/domain/title-work';
@@ -48,7 +48,7 @@ export async function loadTitleContext(db: PrismaClient, accountId: string, publ
       titleLockedManual: true,
       ownQuestions: true,
       store: { select: { id: true, channel: { select: { id: true, kind: true, name: true } } } },
-      measurements: { orderBy: { takenAt: 'desc' }, take: 1, select: { metrics: true } },
+      measurements: { orderBy: { takenAt: 'desc' }, take: LATEST_MEASUREMENTS, select: { metrics: true } },
       product: {
         select: {
           name: true,
@@ -106,7 +106,7 @@ export async function loadTitleContext(db: PrismaClient, accountId: string, publ
     pub.competitors.map((c) => c.title),
     statuses,
   );
-  const metrics = pub.measurements[0] ? parseMetrics(pub.measurements[0].metrics) : {};
+  const metrics = latestMetrics(pub.measurements);
 
   return {
     publication: {

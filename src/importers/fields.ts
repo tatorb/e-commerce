@@ -29,6 +29,7 @@ export type FieldKey =
   | 'pub.description'
   | 'pub.price'
   | 'pub.channelStatus'
+  | 'pub.attributes'
   | 'asset.photos'
   | 'asset.videos'
   | `metric.${MetricKey}`;
@@ -110,6 +111,12 @@ export const FIELDS: FieldDef[] = [
     label: 'Estado en el canal',
     group: 'Publicación',
     synonyms: ['estado', 'estado en el canal', 'estado de la publicacion'],
+  },
+  {
+    key: 'pub.attributes',
+    label: 'Datos de catálogo (Nombre: valor, uno por línea)',
+    group: 'Publicación',
+    synonyms: ['datos de catalogo', 'atributos en el canal', 'atributos del canal'],
   },
   {
     key: 'asset.photos',

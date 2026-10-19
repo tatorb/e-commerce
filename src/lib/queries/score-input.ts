@@ -1,4 +1,4 @@
-import { parseMetrics } from '@/domain/measurements';
+import { latestMetrics } from '@/domain/measurements';
 import { parseNameValueList } from '@/domain/name-value';
 import type { ScoreInput } from '@/domain/standard';
 
@@ -23,7 +23,8 @@ type PublicationForScore = {
 };
 
 export function toScoreInput(product: ProductForScore, publication: PublicationForScore): ScoreInput {
-  // La medición más reciente: viene ordenada de la más nueva a la más vieja.
+  // Las mediciones vienen de la más nueva a la más vieja: vale la fecha de la
+  // última, con el último dato que se tiene de cada métrica.
   const last = publication.measurements[0];
   return {
     product: {
@@ -40,6 +41,6 @@ export function toScoreInput(product: ProductForScore, publication: PublicationF
       description: publication.description,
       attributes: parseNameValueList(publication.attributes),
     },
-    measurement: last ? { takenAt: last.takenAt, metrics: parseMetrics(last.metrics) } : null,
+    measurement: last ? { takenAt: last.takenAt, metrics: latestMetrics(publication.measurements) } : null,
   };
 }

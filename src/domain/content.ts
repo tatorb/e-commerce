@@ -163,21 +163,23 @@ export function sameValue(a: unknown, b: unknown): boolean {
 /**
  * Compara lo que llega con lo que hay y devuelve qué cambia. Una lista que
  * llega reemplaza la lista entera; en "solo completar" se carga únicamente
- * si la app no tenía ninguna. Las medidas van una por una, por SKU.
+ * si la app no tenía ninguna. Las medidas van una por una, por SKU. Con
+ * productMode, la ficha sigue otro modo que la publicación.
  */
 export function planContentUpdate(
   current: ContentSnapshot,
   incoming: IncomingContent,
   mode: UpdateMode,
-  opts: { publication: boolean },
+  opts: { publication: boolean; productMode?: UpdateMode },
 ): { changes: FieldChange[]; warnings: string[] } {
   const changes: FieldChange[] = [];
   const warnings: string[] = [];
+  const modeFor = (field: ContentField) => (isPublicationField(field) ? mode : (opts.productMode ?? mode));
 
   const consider = (field: ContentField, before: unknown, after: unknown, empty: boolean) => {
     if (sameValue(before, after)) return;
     if (empty) changes.push({ field, kind: 'fill', before, after });
-    else if (mode === 'REPLACE') changes.push({ field, kind: 'replace', before, after });
+    else if (modeFor(field) === 'REPLACE') changes.push({ field, kind: 'replace', before, after });
   };
 
   for (const field of [...PUBLICATION_TEXT, ...PRODUCT_TEXT]) {
@@ -211,7 +213,7 @@ export function planContentUpdate(
       if (target.measure === null) {
         target.measure = measure;
         filled = true;
-      } else if (mode === 'REPLACE') {
+      } else if (modeFor('measures') === 'REPLACE') {
         target.measure = measure;
         replaced = true;
       }

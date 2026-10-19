@@ -4,6 +4,7 @@ import { parsePrice } from '@/domain/money';
 import { METRICS, type MetricKey, type Metrics } from '@/domain/measurements';
 import { productInputSchema, type ProductData } from '@/domain/products';
 import type { IncomingContent } from '@/domain/content';
+import type { NameValue } from '@/domain/name-value';
 import { parseCompatibilities, parseLinks, parseMeasures, parseSpecs } from './cells';
 import { normalizeHeader, type FieldKey } from './fields';
 import type { RowInput } from './mapping';
@@ -24,6 +25,8 @@ export type ImportRecord = {
     description: string | null;
     price: number | null;
     channelStatus: ChannelStatus;
+    // Datos de catálogo en el canal. Vacío si la fila no los trae.
+    attributes: NameValue[];
   };
   metrics: Metrics;
   // Lo que la fila trae con dato, para completar lo que ya está en la app.
@@ -169,12 +172,14 @@ export function toRecord(row: RowInput, adapter: ChannelAdapter): ImportRecord {
   // Celdas con varios datos.
   const measures = parseMeasures(text(get('product.measures')));
   const specs = parseSpecs(text(get('product.specs')));
+  const attributes = parseSpecs(text(get('pub.attributes')));
   const compatList = parseCompatibilities(text(get('compat.list')));
   const photos = parseLinks(text(get('asset.photos')));
   const videos = parseLinks(text(get('asset.videos')));
   for (const [label, parsed] of [
     ['Medidas', measures],
     ['Ficha técnica', specs],
+    ['Datos de catálogo', attributes],
     ['Compatibilidades', compatList],
     ['Fotos', photos],
     ['Video', videos],
@@ -221,6 +226,7 @@ export function toRecord(row: RowInput, adapter: ChannelAdapter): ImportRecord {
     description: text(get('pub.description')) || null,
     price,
     channelStatus,
+    attributes: attributes.items,
   };
 
   if (!name) {

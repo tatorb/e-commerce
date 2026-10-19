@@ -26,7 +26,7 @@ import { scorePublication } from '@/domain/standard';
 import { loadRulesByChannel, toScoreInput } from '@/lib/queries/scoring';
 import { channelInfo, getChannelAdapter } from '@/channels';
 import { parseNameValueList } from '@/domain/name-value';
-import { METRICS, METRIC_KEYS, formatMetric, parseMetrics } from '@/domain/measurements';
+import { METRICS, METRIC_KEYS, formatMetric, latestMetrics, parseMetrics } from '@/domain/measurements';
 import { getAccountBySlug } from '@/lib/queries/accounts';
 import { getProduct, listStores, type ProductDetail } from '@/lib/queries/products';
 import { formatDateTime, formatDuration } from '@/lib/format';
@@ -148,7 +148,7 @@ export default async function ProductPage({ params }: { params: Promise<{ cuenta
           product.publications.map((pub) => {
             const channel = channelInfo(pub.store.channel.kind, pub.store.channel.name);
             const score = scorePublication(rules.get(pub.store.channelId) ?? [], toScoreInput(product, pub));
-            const lastMetrics = pub.measurements[0] ? parseMetrics(pub.measurements[0].metrics) : {};
+            const lastMetrics = latestMetrics(pub.measurements);
             const titleLock = resolveTitleLock(
               getChannelAdapter(pub.store.channel.kind, pub.store.channel.name).titleLock(lastMetrics),
               pub.titleLockedManual,

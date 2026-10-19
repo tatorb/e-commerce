@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/db';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
-import { parseMetrics } from '@/domain/measurements';
+import { LATEST_MEASUREMENTS, latestMetrics } from '@/domain/measurements';
 import { resolveTitleLock } from '@/domain/title-lock';
 import { scorePublication, type RuleConfig, type ScoreResult } from '@/domain/standard';
 import { toScoreInput } from './score-input';
@@ -51,7 +51,7 @@ export async function listScoredPublications(
         titleLockedManual: true,
         updatedAt: true,
         store: { select: { name: true, channelId: true, channel: { select: { kind: true, name: true } } } },
-        measurements: { orderBy: { takenAt: 'desc' }, take: 1, select: { takenAt: true, metrics: true } },
+        measurements: { orderBy: { takenAt: 'desc' }, take: LATEST_MEASUREMENTS, select: { takenAt: true, metrics: true } },
         product: {
           select: {
             id: true,
@@ -73,7 +73,7 @@ export async function listScoredPublications(
 
   return publications.map((p) => {
     const result: ScoreResult = scorePublication(rules.get(p.store.channelId) ?? [], toScoreInput(p.product, p));
-    const metrics = p.measurements[0] ? parseMetrics(p.measurements[0].metrics) : {};
+    const metrics = latestMetrics(p.measurements);
     const channel = getChannelAdapter(p.store.channel.kind, p.store.channel.name);
     return {
       id: p.id,

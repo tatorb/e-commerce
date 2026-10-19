@@ -2,7 +2,7 @@ import type { PrismaClient } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
 import { ProposalError, requestProposal, toDraft, type ProposalInput, type ProposalResult } from '@/ai/proposal';
 import { loadContent } from '@/domain/content';
-import { parseMetrics } from '@/domain/measurements';
+import { LATEST_MEASUREMENTS, latestMetrics } from '@/domain/measurements';
 import { comboParts } from '@/domain/combos';
 import { canGenerateProposal, ProposalStageError, saveProposal, toProposalFields } from '@/domain/proposals';
 import { describeCheck, scorePublication } from '@/domain/standard';
@@ -33,7 +33,7 @@ export async function generateProposal(
       description: true,
       attributes: true,
       store: { select: { channel: { select: { id: true, kind: true, name: true } } } },
-      measurements: { orderBy: { takenAt: 'desc' }, take: 1, select: { takenAt: true, metrics: true } },
+      measurements: { orderBy: { takenAt: 'desc' }, take: LATEST_MEASUREMENTS, select: { takenAt: true, metrics: true } },
       product: {
         select: {
           id: true,
@@ -66,7 +66,7 @@ export async function generateProposal(
     orderBy: { createdAt: 'asc' },
     select: { title: true, store: { select: { name: true } } },
   });
-  const metrics = pub.measurements[0] ? parseMetrics(pub.measurements[0].metrics) : {};
+  const metrics = latestMetrics(pub.measurements);
 
   const input: ProposalInput = {
     accountName: pub.product.account.name,

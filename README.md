@@ -40,11 +40,12 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
 | Dolor u objeción | `BuyerInsight` | Lo que preocupa o frena al comprador, en dos listas ordenables por producto. |
 | Datos de catálogo | `Publication.attributes` | Los campos del formulario del canal para la categoría de la publicación, con sus opciones, por ejemplo "Tipo de embrague" o "Incluye disco". Cada canal trae sus categorías y campos (los de Mercado Libre están en `src/channels/mercadolibre/catalog/`, bajados de su API pública). La categoría sale de la familia del producto o se elige a mano (`Publication.channelCategory`). Marca, número de pieza y origen salen de la ficha. Solo se guardan valores válidos, como nombre y valor. |
 | Conexión con Claude | `McpToken` | El permiso para que Claude use la app en nombre de una persona, desde claude.ai u otro programa de Claude. Se agrega como conector con la dirección `/api/mcp`, dura 30 días y se corta en Equipo. Cada cambio queda a nombre de esa persona. En la base se guarda solo la huella de la llave. |
-| Título bloqueado | (se calcula) | Cuando el canal no deja cambiar el título. Lo dicen las ventas de la última medición, con la regla de cada canal; si no hay datos, se marca a mano en la publicación. |
+| Título bloqueado | (se calcula) | Cuando el canal no deja cambiar el título. Lo dicen los vendidos y las ventas de las mediciones, con la regla de cada canal; si no hay datos, se marca a mano en la publicación. |
 | Estado de la propuesta | `Stage` | Sin propuesta, Propuesta generada, En revisión, Aprobado, Aplicado en canal, Medido. Es el recorrido de la propuesta completa con IA, no la etapa de la publicación. |
 | Movimiento de la propuesta | `StageMovement` | Cuándo entró y salió una publicación de cada estado de la propuesta, y quién la movió. |
-| Medición | `Measurement` | Cómo estaba una publicación en una fecha: visitas, ventas y lo que tenía cargado. Es el "antes" para comparar. |
-| Importación | `ImportRun` | Quién importó qué archivo, cuándo y qué resultó. Se puede deshacer: los productos que creó y después sumaron otras publicaciones, o están en un combo, quedan como cargados a mano, y el historial dice cuántos (`productsKept`). |
+| Medición | `Measurement` | Cómo estaba una publicación en una fecha: visitas, ventas y lo que tenía cargado. Es el "antes" para comparar. Cada pantalla muestra el último dato que se tiene de cada métrica (`latestMetrics`): por ejemplo, las visitas de la última lectura del canal y las ventas de 90 días de la última planilla. |
+| Importación | `ImportRun` | Quién importó qué, cuándo y qué resultó. Viene de un archivo o del canal (`origin`). Se puede deshacer: los productos que creó y después sumaron otras publicaciones, o están en un combo, quedan como cargados a mano, y el historial dice cuántos (`productsKept`). |
+| Traer del canal | (pantalla) | En Importar, para cada tienda conectada: elige activas, pausadas o finalizadas, lee las publicaciones con la cuenta conectada y sigue con la misma revisión, modo y deshacer que un archivo. Trae título, descripción, link, estado, precio público, datos de catálogo, marca, número de pieza, SKU, medidas de las variantes, tipo de producto (la familia de la categoría, o el nombre de la categoría), fotos, y una medición con vendidos, visitas de 90 días, fotos, video, atributos y calidad. En lo que ya estaba, estado, link y precio se actualizan siempre, y la ficha solo se completa. No lee órdenes, compradores ni mensajes, así que las ventas de 90 días siguen saliendo de la planilla. |
 | Relación de columnas | `ImportMapping` | Qué columna de un archivo va a qué campo. Se guarda para reusarla. |
 | Cambio de importación | `ImportChange` | Un campo que una importación completó o reemplazó en algo que ya estaba: cómo estaba y cómo quedó. Es lo que permite deshacerla. |
 | Propuesta | `Proposal` | Lo que la IA propone cambiar en una publicación, campo por campo, con el motivo y lo que hay que confirmar. No cambia nada hasta que se aprueba. Guarda cómo estaba todo al generarla. |
@@ -68,7 +69,10 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
   el título está bloqueado, reglas de título iniciales, link de búsqueda y la guía para aplicar a mano,
   con los datos en el orden del formulario del canal). `research.ts` es lo que se lee del canal desde el
   servidor: sugerencias del buscador, posición y la prueba de conexión. `connect.ts` es la conexión por
-  API (OAuth): link de permiso, llaves y renovación. Para probar sin el canal real, `MERCADOLIBRE_SUGGEST_URL`,
+  API (OAuth): link de permiso, llaves y renovación. `listings.ts` lee las publicaciones propias con la
+  cuenta conectada y las devuelve en un formato neutro (`ChannelListing`). En Mercado Libre, varias
+  publicaciones se leen juntas con `/items/bulk` (`mercadolibre/http.ts`), que reemplaza a `/items?ids=`
+  desde el 25/10/2026, con reintentos cuando el canal pide esperar. Para probar sin el canal real, `MERCADOLIBRE_SUGGEST_URL`,
   `MERCADOLIBRE_API_URL`, `MERCADOLIBRE_LISTING_URL` y `MERCADOLIBRE_AUTH_URL` cambian las direcciones.
   El resto de la app usa la interfaz `ChannelAdapter`.
 - `src/lib/files.ts` y `src/lib/file-rules.ts`: los archivos del fabricante en el depósito de Vercel. Sin
@@ -90,7 +94,9 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
   publicación de un producto que ya está (mismo SKU, otro código) solo completa lo vacío de la
   ficha, aunque se elija reemplazar. Si los SKU de una fila son de productos distintos, crea una
   ficha nueva y avisa que puede ser un combo. Anota de qué importación vino cada cosa y cada cambio, para poder deshacerla.
-  También arma la planilla de contenido (`content-sheet.ts`).
+  También arma la planilla de contenido (`content-sheet.ts`). `channel-listings.ts` convierte lo leído del
+  canal en las mismas filas que una planilla, y `listing-fields.ts` guarda y deshace el estado, el link,
+  el precio y los datos de catálogo de la publicación.
 - `src/components/ui/` y `src/components/dashboard/`: componentes y estructura de pantalla
   copiados de app.studiomrb.com (`tatorb/LGM-processor`). El estilo no se inventa: si hace
   falta algo nuevo, se toma de allá.

@@ -43,8 +43,9 @@ import {
 import { readSpreadsheet, SpreadsheetError, type TableData } from '@/importers/spreadsheet';
 import { toRecord, type ImportRecord } from '@/importers/transform';
 import { classifyRecords, type Classification, type RowAction } from '@/importers/classify';
-import type { RowPreview } from '@/importers/apply';
-import { CONTENT_FIELD_LABEL, type ContentField, type UpdateMode } from '@/domain/content';
+import type { PreviewField, RowPreview } from '@/importers/apply';
+import { LISTING_FIELD_LABEL } from '@/importers/listing-fields';
+import { CONTENT_FIELD_LABEL, type UpdateMode } from '@/domain/content';
 import { joinEs } from '@/domain/standard';
 import { plural } from '@/lib/format';
 import {
@@ -53,13 +54,17 @@ import {
   lookupExistingAction,
   previewUpdatesAction,
   saveMappingAction,
+  startChannelImportAction,
   startImportAction,
   type RunTotals,
 } from '@/app/a/[cuenta]/importar/actions';
+import { ChannelSourceCard, type ChannelStoreInfo } from './ChannelSourceCard';
 
 export type StoreInfo = { id: string; name: string; channelKind: ChannelKind; channelName: string };
 
 type Step = 'file' | 'columns' | 'review' | 'running' | 'done';
+// De dónde salen las filas: un archivo, o el canal leído con la cuenta conectada.
+type Origin = 'file' | 'channel';
 type DisplayAction = RowAction | 'update';
 
 const NONE = '__none__';
@@ -76,19 +81,21 @@ const ACTION_BADGE: Record<DisplayAction, { label: string; cfg: Cfg }> = {
   error: { label: 'Error', cfg: { cls: 'border-transparent bg-alert text-alert-foreground', dot: 'bg-[hsl(6_38%_73%)]' } },
 };
 
-function StepTitle({ n, title, active }: { n: number; title: string; active: boolean }) {
+function StepTitle({ n, title, active }: { n?: number; title: string; active: boolean }) {
   return (
     <CardTitle className={active ? '' : 'text-muted-foreground'}>
-      {n}. {title}
+      {n ? `${n}. ` : ''}
+      {title}
     </CardTitle>
   );
 }
 
 const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
-const fieldNames = (fields: ContentField[]) => joinEs(fields.map((f) => lowerFirst(CONTENT_FIELD_LABEL[f])));
+const FIELD_LABEL: Record<PreviewField, string> = { ...CONTENT_FIELD_LABEL, attributes: LISTING_FIELD_LABEL.attributes };
+const fieldNames = (fields: PreviewField[]) => joinEs(fields.map((f) => lowerFirst(FIELD_LABEL[f])));
 
 /** Qué campos cambian en una fila según el modo elegido. */
-function changesFor(preview: RowPreview | undefined, mode: UpdateMode): { fill: ContentField[]; replace: ContentField[] } {
+function changesFor(preview: RowPreview | undefined, mode: UpdateMode): { fill: PreviewField[]; replace: PreviewField[] } {
   if (!preview) return { fill: [], replace: [] };
   return {
     fill: preview.fill,
@@ -116,16 +123,21 @@ function formatDate(iso: string): string {
 export function ImportWizard({
   accountSlug,
   stores,
+  channelStores = [],
   savedMappings,
   defaultDate,
 }: {
   accountSlug: string;
   stores: StoreInfo[];
+  // Las tiendas conectadas de las que se pueden traer publicaciones.
+  channelStores?: ChannelStoreInfo[];
   savedMappings: SavedMapping[];
   defaultDate: string;
 }) {
   const router = useRouter();
   const [step, setStep] = useState<Step>('file');
+  const [origin, setOrigin] = useState<Origin>('file');
+  const [missing, setMissing] = useState(0);
   const [storeId, setStoreId] = useState(stores[0]?.id ?? '');
   const [table, setTable] = useState<TableData | null>(null);
   const [sheetName, setSheetName] = useState('');
@@ -166,6 +178,8 @@ export function ImportWizard({
 
   function reset() {
     setStep('file');
+    setOrigin('file');
+    setMissing(0);
     setTable(null);
     setSheetName('');
     setFileError(null);
@@ -231,11 +245,25 @@ export function ImportWizard({
 
   function goToReview() {
     if (!sheet || !adapter || !store) return;
+    review(extractRows(sheet, mapping), store, 'file');
+  }
+
+  function readFromChannel(channelStore: ChannelStoreInfo, read: { rows: RowInput[]; missing: number }) {
+    const target = stores.find((s) => s.id === channelStore.id);
+    if (!target) return;
+    setStoreId(target.id);
+    setDataDate(defaultDate);
+    setMissing(read.missing);
+    review(read.rows, target, 'channel');
+  }
+
+  /** Clasifica las filas y pide al servidor qué cambiaría en lo que ya está. */
+  function review(extracted: RowInput[], target: StoreInfo, from: Origin) {
+    const channelAdapter = getChannelAdapter(target.channelKind, target.channelName);
     setReviewError(null);
-    const extracted = extractRows(sheet, mapping);
-    const recs = extracted.map((r) => toRecord(r, adapter));
+    const recs = extracted.map((r) => toRecord(r, channelAdapter));
     startTransition(async () => {
-      const lookup = await lookupExistingAction(accountSlug, store.id, {
+      const lookup = await lookupExistingAction(accountSlug, target.id, {
         externalIds: recs.map((r) => r.publication.externalId).filter((id): id is string => Boolean(id)),
         skus: recs.flatMap((r) => r.skus),
       });
@@ -252,7 +280,7 @@ export function ImportWizard({
       const found = new Map<number, RowPreview>();
       for (let i = 0; i < toPreview.length; i += BATCH_SIZE) {
         try {
-          const r = await previewUpdatesAction(accountSlug, store.id, toPreview.slice(i, i + BATCH_SIZE));
+          const r = await previewUpdatesAction(accountSlug, target.id, toPreview.slice(i, i + BATCH_SIZE), from === 'channel');
           if (!r.ok) {
             setReviewError(r.error);
             return;
@@ -277,26 +305,30 @@ export function ImportWizard({
       setClassification(classified);
       setPreviews(found);
       setMode('FILL_EMPTY');
+      setOrigin(from);
       setStep('review');
     });
   }
 
   async function runImport() {
-    if (!sheet || !table || !store) return;
+    if (!store || (origin === 'file' && (!sheet || !table))) return;
     setStep('running');
     setRunError(null);
     setRunErrors([]);
     setProgress({ done: 0, total: rows.length });
 
-    const start = await startImportAction(accountSlug, {
-      storeId: store.id,
-      fileName: table.fileName,
-      sheetName: sheet.name,
-      dataDate,
-      mappingId,
-      rowsTotal: rows.length,
-      updateMode: mode,
-    });
+    const start =
+      origin === 'channel'
+        ? await startChannelImportAction(accountSlug, { storeId: store.id, rowsTotal: rows.length, updateMode: mode })
+        : await startImportAction(accountSlug, {
+            storeId: store.id,
+            fileName: table!.fileName,
+            sheetName: sheet!.name,
+            dataDate,
+            mappingId,
+            rowsTotal: rows.length,
+            updateMode: mode,
+          });
     if (!start.ok) {
       setRunError(start.error);
       setStep('review');
@@ -343,8 +375,42 @@ export function ImportWizard({
     </>
   );
 
+  // ───────────────────────────── Desde el canal ─────────────────────────────
+  const channelCards =
+    step === 'file' && channelStores.length > 0 ? (
+      <>
+        {channelStores.map((s) => (
+          <ChannelSourceCard
+            key={s.id}
+            accountSlug={accountSlug}
+            store={s}
+            disabled={pending}
+            onRead={(read) => readFromChannel(s, read)}
+          />
+        ))}
+        {pending ? <p className="text-sm text-muted-foreground">Revisando qué cambia en lo que ya está en la app…</p> : null}
+        {reviewError && !pending ? <p className="text-sm text-destructive">{reviewError}</p> : null}
+      </>
+    ) : null;
+
+  const channelSummary =
+    origin === 'channel' && step !== 'file' ? (
+      <Card>
+        <CardHeader>
+          <StepTitle title={`Traer de ${store?.channelName ?? 'el canal'}`} active={false} />
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            {store?.name} · {plural(rows.length, 'publicación leída', 'publicaciones leídas')}
+            {missing > 0 ? ` · ${plural(missing, 'no se pudo leer', 'no se pudieron leer')}` : ''} · datos del{' '}
+            {formatDate(dataDate)}
+          </p>
+        </CardContent>
+      </Card>
+    ) : null;
+
   // ───────────────────────────── 1. Archivo ─────────────────────────────
-  const fileCard = (
+  const fileCard = origin === 'channel' && step !== 'file' ? null : (
     <Card>
       <CardHeader>
         <StepTitle n={1} title="Archivo" active={step === 'file'} />
@@ -450,7 +516,7 @@ export function ImportWizard({
 
   // ───────────────────────────── 2. Columnas ─────────────────────────────
   const columnsCard =
-    step === 'file' ? null : (
+    step === 'file' || origin === 'channel' ? null : (
       <Card>
         <CardHeader>
           <StepTitle n={2} title="Columnas" active={step === 'columns'} />
@@ -622,8 +688,12 @@ export function ImportWizard({
     step === 'review' || step === 'running' || step === 'done' ? (
       <Card>
         <CardHeader>
-          <StepTitle n={3} title="Revisión" active={step !== 'done'} />
-          <CardDescription>Lo que va a pasar al importar. Una celda vacía nunca borra lo que ya está en la app.</CardDescription>
+          <StepTitle n={origin === 'channel' ? undefined : 3} title="Revisión" active={step !== 'done'} />
+          <CardDescription>
+            {origin === 'channel'
+              ? `Lo que va a pasar al importar. Un dato que ${store?.channelName ?? 'el canal'} no informa nunca borra lo que ya está en la app.`
+              : 'Lo que va a pasar al importar. Una celda vacía nunca borra lo que ya está en la app.'}
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
           {classification ? (
@@ -665,7 +735,21 @@ export function ImportWizard({
                   {rowsWithWarnings === 1 ? 'fila con avisos' : 'filas con avisos'}.
                 </li>
               ) : null}
+              {origin === 'channel' && missing > 0 ? (
+                <li>
+                  <strong className="tabular-nums">{missing}</strong>{' '}
+                  {missing === 1 ? 'publicación no se pudo leer' : 'publicaciones no se pudieron leer'} y no se
+                  {missing === 1 ? ' importa' : ' importan'}.
+                </li>
+              ) : null}
             </ul>
+          ) : null}
+
+          {origin === 'channel' && step === 'review' ? (
+            <p className="text-sm text-muted-foreground">
+              En las que ya estaban, el estado, el link y el precio se actualizan siempre con lo que dice{' '}
+              {store?.channelName ?? 'el canal'}. La ficha del producto solo se completa: lo que ya tiene no se reemplaza.
+            </p>
           ) : null}
 
           {replaceTotals.fields > 0 && step === 'review' ? (
@@ -686,7 +770,9 @@ export function ImportWizard({
               </Select>
               <p className="text-xs text-muted-foreground">
                 {mode === 'REPLACE'
-                  ? 'Si el archivo dice algo distinto, gana el archivo. En medidas, ficha técnica, compatibilidades y fotos, la lista del archivo reemplaza la lista entera. Las filas que son otra publicación de un producto que ya está solo completan lo vacío de su ficha.'
+                  ? origin === 'channel'
+                    ? `Si ${store?.channelName ?? 'el canal'} dice algo distinto en el título, la descripción o los datos de catálogo, gana ${store?.channelName ?? 'el canal'}.`
+                    : 'Si el archivo dice algo distinto, gana el archivo. En medidas, ficha técnica, compatibilidades y fotos, la lista del archivo reemplaza la lista entera. Las filas que son otra publicación de un producto que ya está solo completan lo vacío de su ficha.'
                   : 'Solo se cargan los campos que hoy están vacíos. Lo que ya tiene la app no se toca.'}{' '}
                 Lo podés deshacer después desde el historial.
               </p>
@@ -770,9 +856,15 @@ export function ImportWizard({
 
           {step === 'review' ? (
             <div className="flex flex-wrap items-center gap-3">
-              <Button type="button" variant="outline" onClick={() => setStep('columns')}>
-                Volver a columnas
-              </Button>
+              {origin === 'channel' ? (
+                <Button type="button" variant="outline" onClick={reset}>
+                  Volver
+                </Button>
+              ) : (
+                <Button type="button" variant="outline" onClick={() => setStep('columns')}>
+                  Volver a columnas
+                </Button>
+              )}
               <Button type="button" onClick={runImport} disabled={importable === 0}>
                 Importar {plural(importable, 'fila')}
               </Button>
@@ -824,7 +916,7 @@ export function ImportWizard({
                   <Link href={`/a/${accountSlug}/productos`}>Ver productos</Link>
                 </Button>
                 <Button type="button" variant="outline" onClick={reset}>
-                  Importar otro archivo
+                  {origin === 'channel' ? 'Hacer otra importación' : 'Importar otro archivo'}
                 </Button>
               </div>
             </div>
@@ -835,6 +927,8 @@ export function ImportWizard({
 
   return (
     <div className="flex flex-col gap-4 md:gap-6">
+      {channelCards}
+      {channelSummary}
       {fileCard}
       {columnsCard}
       {reviewCard}

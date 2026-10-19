@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { CHANNEL_STATUS_LABEL } from '@/domain/channel-status';
-import { METRICS, formatMetric, isMetricKey, parseMetrics } from '@/domain/measurements';
+import { LATEST_MEASUREMENTS, METRICS, formatMetric, isMetricKey, latestMetrics, type Metrics } from '@/domain/measurements';
 import { parseNameValueList, type NameValue } from '@/domain/name-value';
 import {
   PIPELINE_EXIT_LABEL,
@@ -93,9 +93,9 @@ function summary(ctx: McpContext, account: AccountRef, p: ScoredPublication) {
   };
 }
 
-function metricsOf(raw: unknown): Record<string, string> {
+function metricsOf(metrics: Metrics): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(parseMetrics(raw))) {
+  for (const [key, value] of Object.entries(metrics)) {
     if (isMetricKey(key) && value !== undefined) out[METRICS[key].label] = formatMetric(key, value);
   }
   return out;
@@ -320,7 +320,7 @@ const getPublication = defineTool({
           description: true,
           attributes: true,
           ownQuestions: true,
-          measurements: { orderBy: { takenAt: 'desc' }, take: 1, select: { takenAt: true, metrics: true } },
+          measurements: { orderBy: { takenAt: 'desc' }, take: LATEST_MEASUREMENTS, select: { takenAt: true, metrics: true } },
           competitors: { orderBy: { position: 'asc' }, select: { title: true, url: true, soldQuantity: true } },
           product: {
             select: {
@@ -415,7 +415,7 @@ const getPublication = defineTool({
         valor: scored.score,
         le_falta: scored.missing.map((m) => ({ regla: m.name, peso: m.weight, detalle: m.detail })),
       },
-      ultima_medicion: measurement ? { fecha: when(measurement.takenAt, account), metricas: metricsOf(measurement.metrics) } : null,
+      ultima_medicion: measurement ? { fecha: when(measurement.takenAt, account), metricas: metricsOf(latestMetrics(pub.measurements)) } : null,
       titulo_bloqueado: lockValue(scored.titleLock),
       pipeline: {
         estado: PIPELINE_STATUS_LABEL[scored.pipelineStatus],

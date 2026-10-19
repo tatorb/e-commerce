@@ -82,15 +82,22 @@ export function parseBulk(body: unknown): Record<string, unknown>[] {
 /**
  * Varias publicaciones a la vez, hasta 20, con los campos pedidos. Usa
  * /items/bulk, que reemplaza a /items?ids= desde el 25/10/2026; si no lo
- * acepta, prueba con la forma vieja.
+ * acepta, prueba con la forma vieja. allAttributes suma los datos de cada
+ * variante, como su SKU.
  */
-export async function readItems(accessToken: string, ids: string[], fields: string[]): Promise<Record<string, unknown>[]> {
+export async function readItems(
+  accessToken: string,
+  ids: string[],
+  fields: string[],
+  { allAttributes = false }: { allAttributes?: boolean } = {},
+): Promise<Record<string, unknown>[]> {
   const list = ids.slice(0, BULK_MAX).map(encodeURIComponent).join(',');
   if (!list) return [];
+  const extra = allAttributes ? '&include_attributes=all' : '';
   try {
-    return parseBulk(await mlGet(`/items/bulk?ids=${list}&attributes=${fields.map((f) => `body.${f}`).join(',')}`, accessToken));
+    return parseBulk(await mlGet(`/items/bulk?ids=${list}&attributes=${fields.map((f) => `body.${f}`).join(',')}${extra}`, accessToken));
   } catch (e) {
     if (!(e instanceof MercadoLibreRequestError) || ![400, 404, 405].includes(e.status)) throw e;
-    return parseBulk(await mlGet(`/items?ids=${list}&attributes=${fields.join(',')}`, accessToken));
+    return parseBulk(await mlGet(`/items?ids=${list}&attributes=${fields.join(',')}${extra}`, accessToken));
   }
 }

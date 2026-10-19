@@ -31,12 +31,23 @@ const byBase = new Map(
   Object.entries(FAMILY_CATEGORY).map(([family, id]) => [normalizeText(familyBase(family) ?? family), id]),
 );
 const byId = new Map(ML_CATEGORIES.map((c) => [c.id, c]));
+const familiesOf = new Map<string, string[]>();
+for (const [family, id] of Object.entries(FAMILY_CATEGORY)) familiesOf.set(id, [...(familiesOf.get(id) ?? []), family]);
+
+/** Para buscar palabras enteras: "subconjunto" no tiene que dar "conjunto". */
+const words = (s: string) => ` ${normalizeText(s).replace(/[^a-z0-9]+/g, ' ').trim()} `;
 
 export const mercadolibreCatalog: ChannelCatalog = {
   categories: ML_CATEGORIES.map((c) => ({ id: c.id, name: c.name })),
   categoryForFamily(family) {
     if (!family?.trim()) return null;
     return byFamily.get(normalizeText(family)) ?? byBase.get(normalizeText(familyBase(family) ?? '')) ?? null;
+  },
+  familyForCategory(categoryId, title) {
+    const families = familiesOf.get(categoryId) ?? [];
+    if (families.length <= 1) return families[0] ?? null;
+    const t = words(title ?? '');
+    return families.find((f) => t.includes(words(familyBase(f) ?? f))) ?? families[0];
   },
   category: (id) => byId.get(id) ?? null,
 };
