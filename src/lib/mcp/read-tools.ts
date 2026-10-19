@@ -33,7 +33,7 @@ import { KIND_OPTIONS, parseKinds } from '@/lib/queries/catalog-filters';
 import { fileHref } from '@/lib/file-rules';
 import { loadResearch } from '@/lib/queries/research';
 import { loadCombo } from '@/lib/queries/combos';
-import { PRODUCT_KIND_LABEL } from '@/domain/combos';
+import { comboForAi, comboParts, PRODUCT_KIND_LABEL } from '@/domain/combos';
 import { loadCatalogData } from '@/lib/catalog-data';
 import { catalogForClaude } from './catalog';
 import { loadTitleContext } from '@/lib/queries/title-step';
@@ -80,7 +80,7 @@ function summary(ctx: McpContext, account: AccountRef, p: ScoredPublication) {
     codigo: p.externalId,
     titulo: p.title,
     tienda: `${p.channelName} · ${p.storeName}`,
-    tipo: PRODUCT_KIND_LABEL[p.kind],
+    individual_o_combo: PRODUCT_KIND_LABEL[p.kind],
     familia: p.family,
     puntaje: p.score,
     visitas_90d: p.visits,
@@ -162,7 +162,7 @@ const searchCatalog = defineTool({
       .array(asEnum(PIPELINE_STEPS))
       .optional()
       .describe(`Paso, para las que están en el pipeline: ${labels(PIPELINE_STEPS.map((s) => [s, PIPELINE_STEP_LABEL[s]]))}.`),
-    tipo: z
+    individual_o_combo: z
       .array(asEnum(KIND_OPTIONS.map((o) => o.value)))
       .optional()
       .describe('individual = productos individuales; combo = combos armados con productos individuales.'),
@@ -219,7 +219,7 @@ const searchCatalog = defineTool({
       q: args.texto,
       pipeline: join(args.pipeline),
       familia: join(wantedFamilies.map(encodeFamily)),
-      tipo: join(args.tipo),
+      tipo: join(args.individual_o_combo),
       visitas: join(args.visitas),
       ventas: join(args.ventas),
       bloqueado: join(args.bloqueado),
@@ -258,7 +258,7 @@ const getPipelineBoard = defineTool({
     'Muestra el tablero del pipeline de una cuenta: cuántas publicaciones hay en cada paso, cuáles son y hace cuántos días esperan en ese paso. Las que esperan hace más van primero. Se puede ver solo individuales o solo combos.',
   input: z.object({
     cuenta: accountArg,
-    tipo: z
+    individual_o_combo: z
       .array(asEnum(KIND_OPTIONS.map((o) => o.value)))
       .optional()
       .describe('individual = productos individuales; combo = combos armados con productos individuales.'),
@@ -267,7 +267,7 @@ const getPipelineBoard = defineTool({
   async run(ctx, args) {
     const account = await resolveAccount(ctx.db, args.cuenta);
     const now = new Date();
-    const kinds = parseKinds(args.tipo?.join(','));
+    const kinds = parseKinds(args.individual_o_combo?.join(','));
     const [board, completed] = await Promise.all([
       listBoard(account.id, ctx.db),
       ctx.db.pipelineMovement.count({
@@ -306,7 +306,7 @@ const getPublication = defineTool({
   name: 'get_publication',
   title: 'Ver una publicación',
   description:
-    'Muestra todo de una publicación: la ficha del producto (la fuente de verdad), el título y la descripción actuales, los atributos del canal, los datos de catálogo del canal (cada campo del formulario de su categoría, con sus opciones y lo cargado), el puntaje y lo que le falta, la última medición, el estado e historial del pipeline, el candado del título, la competencia cargada y la investigación del producto: lo del fabricante, las aclaraciones para las imágenes, las preguntas de los compradores y sus dolores y objeciones.',
+    'Muestra todo de una publicación: la ficha del producto (la fuente de verdad), el título y la descripción actuales, los atributos del canal, los datos de catálogo del canal (cada campo del formulario de su categoría, con sus opciones y lo cargado), el puntaje y lo que le falta, la última medición, el estado e historial del pipeline, el candado del título, la competencia cargada y la investigación del producto: lo del fabricante, las aclaraciones para las imágenes, las preguntas de los compradores y sus dolores y objeciones. La ficha y la investigación son del producto y las comparten todas sus publicaciones; las preguntas de la publicación propia son solo de esta.',
   input: z.object({ cuenta: accountArg, publicacion: publicationArg }),
   readOnly: true,
   async run(ctx, args) {
@@ -319,6 +319,7 @@ const getPublication = defineTool({
           title: true,
           description: true,
           attributes: true,
+          ownQuestions: true,
           measurements: { orderBy: { takenAt: 'desc' }, take: 1, select: { takenAt: true, metrics: true } },
           competitors: { orderBy: { position: 'asc' }, select: { title: true, url: true, soldQuantity: true } },
           product: {
@@ -349,6 +350,7 @@ const getPublication = defineTool({
                 },
               },
               assets: { select: { kind: true } },
+              _count: { select: { publications: true } },
             },
           },
         },
@@ -372,6 +374,7 @@ const getPublication = defineTool({
       ficha: {
         producto_id: product.id,
         nombre: product.name,
+        publicaciones_que_la_comparten: product._count.publications,
         individual_o_combo: combo ? PRODUCT_KIND_LABEL[combo.kind] : null,
         ...(combo?.kind === 'COMBO'
           ? {
@@ -448,7 +451,7 @@ const getPublication = defineTool({
           })),
         },
         aclaraciones_para_imagenes: richTextToMarkdown(r?.clarifications ?? null) || null,
-        preguntas: { propia: r?.ownQuestions ?? null, competencia: r?.competitorQuestions ?? null },
+        preguntas: { propia: pub.ownQuestions, competencia: r?.competitorQuestions ?? null },
         dolores: research.pains.map((i) => i.text),
         objeciones: research.objections.map((i) => i.text),
       },
@@ -470,11 +473,12 @@ const getTitleWorkspace = defineTool({
   name: 'get_title_workspace',
   title: 'Ver el trabajo del título',
   description:
-    'Muestra el paso Título de una publicación: el candado y la decisión tomada, las reglas y la estructura sugerida, las semillas, las sugerencias del buscador guardadas con su fecha, el mapa de palabras con las tildadas, las búsquedas principales y sus posiciones, las propuestas guardadas, la competencia y el último título aprobado.',
+    'Muestra el paso Título de una publicación: el candado y la decisión tomada, las reglas y la estructura sugerida, las semillas, las sugerencias del buscador guardadas con su fecha, el mapa de palabras con las tildadas, las búsquedas principales y sus posiciones, las propuestas guardadas, la competencia y el último título aprobado. Si el producto es un combo, trae los productos que lo forman: el título tiene que dejar claro que trae varios.',
   input: z.object({ cuenta: accountArg, publicacion: publicationArg }),
   readOnly: true,
   async run(ctx, args) {
     const { account, tc } = await titleContext(ctx, args);
+    const combo = await loadCombo(ctx.db, tc.publication.productId);
     const current = tc.publication.title ?? '';
     const usable = tc.words.filter((w) => w.status === 'use').map((w) => w.word);
     return {
@@ -490,6 +494,7 @@ const getTitleWorkspace = defineTool({
       decision_del_bloqueo: tc.lockDecision ? LOCK_DECISION_LABEL[tc.lockDecision] : null,
       ficha: {
         nombre: tc.product.name,
+        ...comboForAi(comboParts(combo)),
         tipo: tc.product.productType,
         marca: tc.product.brand,
         numero_de_pieza: tc.product.partNumber,

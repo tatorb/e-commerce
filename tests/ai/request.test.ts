@@ -35,6 +35,8 @@ const input: ProposalInput = {
     photos: [],
     videos: [],
   },
+  combo: null,
+  otherPublications: [],
   listing: { photoCount: null, hasVideo: null, channelQuality: null, channelGoals: null },
 };
 

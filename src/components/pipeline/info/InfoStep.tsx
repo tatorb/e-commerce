@@ -12,13 +12,14 @@ import { ClarificationsCard } from './ClarificationsCard';
 import { CompetitorsCard } from './CompetitorsCard';
 import { ManufacturerCard } from './ManufacturerCard';
 import { ProductInfoForm } from './ProductInfoForm';
+import { withSharedNote } from './SharedNote';
 
 // Paso Información, en este orden: los datos de la ficha (y los del combo), lo
 // del fabricante, los datos de catálogo del canal, la competencia, los dolores
 // del comprador, las aclaraciones para las imágenes y lo que se fue juntando
-// en el paso Título. La
-// investigación es del producto: la comparten todas sus publicaciones. Los
-// datos de catálogo son de la publicación, porque cada canal tiene los suyos.
+// en el paso Título. La ficha y la investigación son del producto: las
+// comparten todas sus publicaciones, y las tarjetas lo avisan. Los datos de
+// catálogo, la competencia y las preguntas propias son de la publicación.
 export function InfoStep({
   accountSlug,
   timeZone,
@@ -44,7 +45,10 @@ export function InfoStep({
     <>
       <SectionCard
         title="Datos del producto"
-        description={`Vienen de la ficha maestra de «${p.name}». Revisalos y completá lo que falte: lo que guardes queda en la ficha.`}
+        description={withSharedNote(
+          `Vienen de la ficha maestra de «${p.name}». Revisalos y completá lo que falte: lo que guardes queda en la ficha.`,
+          ctx.sharedWith,
+        )}
       >
         <SectionBody>
           <ProductInfoForm
@@ -80,6 +84,7 @@ export function InfoStep({
         accountSlug={accountSlug}
         publicationId={publicationId}
         productId={ctx.publication.productId}
+        sharedWith={ctx.sharedWith}
         initial={{ site: s(r?.manufacturerSite), productUrl: s(r?.manufacturerProductUrl), text: s(r?.manufacturerText) }}
         files={research.files.map((f) => ({ id: f.id, kind: f.kind, name: f.name, size: f.size }))}
         blobReady={blobReady}
@@ -99,11 +104,17 @@ export function InfoStep({
       <BuyerPainsCard
         accountSlug={accountSlug}
         publicationId={publicationId}
-        questions={{ own: s(r?.ownQuestions), competitors: s(r?.competitorQuestions) }}
+        sharedWith={ctx.sharedWith}
+        questions={{ own: s(ctx.publication.ownQuestions), competitors: s(r?.competitorQuestions) }}
         pains={research.pains.map((i) => ({ id: i.id, text: i.text }))}
         objections={research.objections.map((i) => ({ id: i.id, text: i.text }))}
       />
-      <ClarificationsCard accountSlug={accountSlug} publicationId={publicationId} initial={s(r?.clarifications)} />
+      <ClarificationsCard
+        accountSlug={accountSlug}
+        publicationId={publicationId}
+        sharedWith={ctx.sharedWith}
+        initial={s(r?.clarifications)}
+      />
       <SectionCard title="Material capturado" description="Lo que se juntó en el paso Título, con su fecha.">
         <SectionBody>
           <CapturedMaterial captures={ctx.captures} positions={ctx.positions} timeZone={timeZone} />

@@ -46,6 +46,7 @@ export async function loadTitleContext(db: PrismaClient, accountId: string, publ
       pipelineStatus: true,
       pipelineStep: true,
       titleLockedManual: true,
+      ownQuestions: true,
       store: { select: { id: true, channel: { select: { id: true, kind: true, name: true } } } },
       measurements: { orderBy: { takenAt: 'desc' }, take: 1, select: { metrics: true } },
       product: {
@@ -70,6 +71,7 @@ export async function loadTitleContext(db: PrismaClient, accountId: string, publ
               note: true,
             },
           },
+          _count: { select: { publications: true } },
         },
       },
       titleWork: true,
@@ -79,12 +81,13 @@ export async function loadTitleContext(db: PrismaClient, accountId: string, publ
     },
   });
   if (!pub) return null;
+  const { _count, ...product } = pub.product;
   const channel = pub.store.channel;
   const adapter = getChannelAdapter(channel.kind, channel.name);
   const { rules, custom } = await loadTitleRules(db, accountId, channel);
   const work = pub.titleWork;
   const seedsSaved = work?.seeds !== null && work?.seeds !== undefined;
-  const seeds = seedsSaved ? parseStrings(work!.seeds) : buildSeeds(pub.product);
+  const seeds = seedsSaved ? parseStrings(work!.seeds) : buildSeeds(product);
 
   // Lo leído para estas semillas, de cualquier publicación de la cuenta: lo más nuevo de cada cosa escrita.
   const rows = await db.searchSuggestion.findMany({
@@ -106,10 +109,20 @@ export async function loadTitleContext(db: PrismaClient, accountId: string, publ
   const metrics = pub.measurements[0] ? parseMetrics(pub.measurements[0].metrics) : {};
 
   return {
-    publication: { id: pub.id, title: pub.title, externalId: pub.externalId, productId: pub.productId, pipelineStatus: pub.pipelineStatus, pipelineStep: pub.pipelineStep },
+    publication: {
+      id: pub.id,
+      title: pub.title,
+      externalId: pub.externalId,
+      productId: pub.productId,
+      pipelineStatus: pub.pipelineStatus,
+      pipelineStep: pub.pipelineStep,
+      ownQuestions: pub.ownQuestions,
+    },
     channel,
     storeId: pub.store.id,
-    product: pub.product,
+    product,
+    // Cuántas publicaciones comparten la ficha y la investigación del producto.
+    sharedWith: _count.publications,
     titleLock: resolveTitleLock(adapter.titleLock(metrics), pub.titleLockedManual),
     rules,
     customRules: custom,

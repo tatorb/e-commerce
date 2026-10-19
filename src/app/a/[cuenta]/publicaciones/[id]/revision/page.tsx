@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ExternalLink } from 'lucide-react';
+import { ExternalLink, Users } from 'lucide-react';
 import { prisma } from '@/lib/db';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
@@ -13,7 +13,7 @@ import { StartReviewButton } from '@/components/proposals/StartReviewButton';
 import { getChannelAdapter } from '@/channels';
 import { loadContent, sameValue, type ContentField, type ContentSnapshot } from '@/domain/content';
 import { parseNotes, parseProposalFields, parseReview } from '@/domain/proposals';
-import { toEditorValue, type ReviewField } from '@/domain/review';
+import { initialReviewValue, type ReviewField } from '@/domain/review';
 import { getAccountBySlug } from '@/lib/queries/accounts';
 import { formatDateTime } from '@/lib/format';
 
@@ -110,13 +110,24 @@ export default async function ReviewPage({ params }: { params: Promise<{ cuenta:
   const initialFields: ReviewField[] =
     review?.kind === 'draft'
       ? review.fields
-      : aiFields.map((f) => ({ field: f.field, value: toEditorValue(f.field, f.after), included: true, fromAi: true }));
+      : aiFields.map((f) => ({
+          field: f.field,
+          value: initialReviewValue(f.field, current[f.field], f.after),
+          included: true,
+          fromAi: true,
+        }));
   const savedText =
     review?.kind === 'draft' && review.savedAt
       ? `Borrador guardado el ${formatDateTime(new Date(review.savedAt), account.timezone)}.`
       : null;
   const canEdit = publication.stage === 'IN_REVIEW';
   const notes = parseNotes(proposal.notes);
+  // Las otras publicaciones del producto ven los cambios a la ficha.
+  const siblings = await prisma.publication.findMany({
+    where: { productId: publication.product.id, id: { not: publication.id } },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true, title: true, externalId: true, store: { select: { name: true } } },
+  });
 
   return (
     <>
@@ -125,11 +136,30 @@ export default async function ReviewPage({ params }: { params: Promise<{ cuenta:
         <div className="space-y-2">
           <p className="text-sm">{proposal.summary}</p>
           <p className="text-xs text-muted-foreground">
-            Revisá cada campo. Lo que dejes marcado con &quot;Usar este cambio&quot; se escribe en la ficha al aprobar.
-            Mercado Libre no cambia hasta que lo apliques.
+            Revisá cada campo. Lo que dejes marcado con &quot;Usar este cambio&quot; se escribe al aprobar: el título y la
+            descripción en esta publicación, y lo marcado &quot;De la ficha&quot; en el producto. En las listas elegís fila por
+            fila. {adapter.name} no cambia hasta que lo apliques.
           </p>
           {notes.length > 0 ? <ToConfirm items={notes} prefix={false} /> : null}
         </div>
+
+        {siblings.length > 0 ? (
+          <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-sm">
+            <p className="flex items-start gap-2 font-medium">
+              <Users className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+              {siblings.length === 1
+                ? 'Este producto tiene otra publicación. Lo que apruebes "De la ficha" cambia también en ella:'
+                : `Este producto tiene ${siblings.length} publicaciones más. Lo que apruebes "De la ficha" cambia también en ellas:`}
+            </p>
+            <ul className="space-y-0.5 pl-6 text-muted-foreground">
+              {siblings.map((s) => (
+                <li key={s.id} className="break-words">
+                  {s.title ?? publication.product.name} · {s.store.name} · {s.externalId ?? 'sin código'}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
 
         {!canEdit ? (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/40 px-4 py-3">

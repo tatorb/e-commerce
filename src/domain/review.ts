@@ -213,3 +213,131 @@ export const reviewFieldsInputSchema = z
     }
     return out;
   });
+
+// ───────────────────────────── Listas fila por fila ─────────────────────────────
+
+// Compatibilidades, ficha técnica y medidas se revisan fila por fila: qué se
+// suma, qué se saca y qué cambia, cada cosa con su casilla. Lo marcado se arma
+// como la lista completa, que es lo que se aprueba y se escribe.
+
+export type ListRow = SpecRow | CompatRow | MeasureRow;
+export type RowChange =
+  | { kind: 'same'; row: ListRow }
+  | { kind: 'add'; row: ListRow }
+  | { kind: 'remove'; row: ListRow }
+  | { kind: 'change'; before: ListRow; row: ListRow };
+
+export function isListField(field: ContentField): boolean {
+  const kind = CONTENT_FIELD_KIND[field];
+  return kind === 'specs' || kind === 'compatibilities' || kind === 'measures';
+}
+
+const squash = (v: string) => v.trim().replace(/\s+/g, ' ');
+const cells = (row: ListRow) => Object.values(row) as string[];
+
+function sameRow(a: ListRow, b: ListRow): boolean {
+  const x = cells(a);
+  const y = cells(b);
+  return x.length === y.length && x.every((v, i) => squash(v) === squash(y[i]));
+}
+
+// Lo que identifica una fila, con el mismo criterio con que se guarda: marca,
+// modelo y motor en compatibilidades, el dato en la ficha técnica y la
+// variante en las medidas.
+function rowKey(field: ContentField, row: ListRow): string {
+  switch (CONTENT_FIELD_KIND[field]) {
+    case 'compatibilities': {
+      const c = row as CompatRow;
+      return [c.vehicleBrand, c.model, c.engine].map((v) => squash(v).toLowerCase()).join('|');
+    }
+    case 'specs':
+      return squash((row as SpecRow).name).toLowerCase();
+    default:
+      return (row as MeasureRow).id;
+  }
+}
+
+// Las filas vacías no cuentan; en las medidas sí, porque cada una es una variante.
+const withoutBlanks = (field: ContentField, rows: ListRow[]) =>
+  CONTENT_FIELD_KIND[field] === 'measures' ? rows : rows.filter((r) => cells(r).some((v) => v.trim()));
+
+/** Qué cambia de hoy a lo propuesto, en el orden de lo propuesto. Lo que se saca va donde estaba. */
+export function diffList(field: ContentField, today: ListRow[], proposed: ListRow[]): RowChange[] {
+  const before = withoutBlanks(field, today);
+  const after = withoutBlanks(field, proposed);
+  const used = new Set<number>();
+  const free = (test: (b: ListRow) => boolean) => before.findIndex((b, j) => !used.has(j) && test(b));
+  const matches = after.map((row) => {
+    let i = free((b) => sameRow(b, row));
+    if (i < 0) i = free((b) => rowKey(field, b) === rowKey(field, row));
+    if (i >= 0) used.add(i);
+    return i;
+  });
+
+  // Lo que se saca va detrás de la fila que tenía antes. Una medida no se
+  // saca: si falta en lo propuesto, la variante queda como está.
+  const out: RowChange[] = [];
+  const placed = new Set<number>();
+  const remove = (j: number) => {
+    if (used.has(j) || placed.has(j)) return;
+    placed.add(j);
+    out.push({ kind: CONTENT_FIELD_KIND[field] === 'measures' ? 'same' : 'remove', row: before[j] });
+  };
+  const removedFrom = (start: number) => {
+    for (let j = start; j < before.length && !used.has(j); j++) remove(j);
+  };
+  removedFrom(0);
+  after.forEach((row, k) => {
+    const i = matches[k];
+    if (i < 0) {
+      out.push({ kind: 'add', row });
+      return;
+    }
+    out.push(sameRow(before[i], row) ? { kind: 'same', row } : { kind: 'change', before: before[i], row });
+    removedFrom(i + 1);
+  });
+  before.forEach((_, j) => remove(j));
+  return out;
+}
+
+/** Lo que viene marcado: lo que se suma y lo que cambia. Lo que se saca, no. */
+export function defaultPicks(changes: RowChange[]): boolean[] {
+  return changes.map((c) => c.kind !== 'remove');
+}
+
+/** La lista que queda con lo marcado. */
+export function composeList(changes: RowChange[], picks: boolean[]): ListRow[] {
+  return changes.flatMap((c, i) => {
+    switch (c.kind) {
+      case 'same':
+        return [c.row];
+      case 'add':
+        return picks[i] ? [c.row] : [];
+      case 'remove':
+        return picks[i] ? [] : [c.row];
+      case 'change':
+        return [picks[i] ? c.row : c.before];
+    }
+  });
+}
+
+/**
+ * Qué está marcado en una lista ya armada, por ejemplo un borrador guardado.
+ * Null si la lista se editó a mano y no sale de marcar filas.
+ */
+export function picksFromList(field: ContentField, changes: RowChange[], value: ListRow[]): boolean[] | null {
+  const rows = withoutBlanks(field, value);
+  const has = (row: ListRow) => rows.some((v) => sameRow(v, row));
+  const picks = changes.map((c) => (c.kind === 'remove' ? !has(c.row) : has(c.row)));
+  const composed = composeList(changes, picks);
+  const same = composed.length === rows.length && composed.every((r, i) => sameRow(r, rows[i]));
+  return same ? picks : null;
+}
+
+/** Cómo arranca la revisión de un campo propuesto: en las listas, sin sacar nada. */
+export function initialReviewValue(field: ContentField, current: unknown, proposed: unknown): EditorValue {
+  const value = toEditorValue(field, proposed);
+  if (!isListField(field)) return value;
+  const changes = diffList(field, toEditorValue(field, current) as ListRow[], value as ListRow[]);
+  return composeList(changes, defaultPicks(changes)) as EditorValue;
+}

@@ -9,6 +9,7 @@ import { EditableList, type EditableItem } from '@/components/ui/editable-list';
 import { SectionBody, SectionCard, SubHeader } from '@/components/ui/section-card';
 import { StatusText } from '@/components/pipeline/StatusText';
 import { useStepAction } from '@/components/pipeline/useStepAction';
+import { withSharedNote } from './SharedNote';
 import {
   addInsightAction,
   deleteInsightAction,
@@ -33,16 +34,19 @@ const LISTS: Record<Kind, { title: string; empty: string; placeholder: string }>
 };
 
 // Dolores del comprador: las preguntas pegadas y las listas de dolores y
-// objeciones. Es del producto.
+// objeciones. Es del producto, salvo las preguntas de la publicación propia,
+// que son de cada publicación.
 export function BuyerPainsCard({
   accountSlug,
   publicationId,
+  sharedWith,
   questions,
   pains,
   objections,
 }: {
   accountSlug: string;
   publicationId: string;
+  sharedWith: number;
   questions: { own: string; competitors: string };
   pains: EditableItem[];
   objections: EditableItem[];
@@ -54,12 +58,16 @@ export function BuyerPainsCard({
     <SectionCard
       title="Dolores del comprador"
       count={pains.length + objections.length}
-      description="Las preguntas de los compradores, y los dolores y objeciones que salen de ellas."
+      description={withSharedNote(
+        'Las preguntas de los compradores, y los dolores y objeciones que salen de ellas.',
+        sharedWith,
+        'las preguntas de esta publicación',
+      )}
     >
       <SectionBody>
         <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
-            <Label htmlFor="q-own">Preguntas de la publicación propia</Label>
+            <Label htmlFor="q-own">Preguntas de esta publicación</Label>
             <Textarea
               id="q-own"
               rows={8}

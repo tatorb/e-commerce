@@ -18,7 +18,7 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
 | Canal | `Channel` | Mercado Libre, tienda web, etc. |
 | Tienda | `Store` | La presencia de una cuenta en un canal, por ejemplo INSURMOTOR. Guarda la forma de aplicar: manual, planilla o API. |
 | Individual o combo | `Product.kind`, `ComboItem` | Un producto individual se vende tal cual. Un combo se arma con productos individuales, cada uno con su cantidad; no puede tener otro combo adentro. En el canal los dos son publicaciones del mismo nivel. Un individual que está en un combo no se puede borrar ni pasar a combo. Productos, Catálogo y Pipeline filtran por tipo (`?tipo=individual`, `?tipo=combo`). |
-| Publicación | `Publication` | El producto armado para una tienda: título, descripción, atributos, precio, ID externo, link, estado. |
+| Publicación | `Publication` | El producto armado para una tienda: título, descripción, atributos, precio, ID externo, link, estado y las preguntas que recibió de los compradores (`ownQuestions`). Un producto puede tener varias publicaciones: la ficha la comparten todas, y las tarjetas del paso Información que son del producto lo avisan ("Es del producto: lo ven sus N publicaciones"). |
 | Catálogo | (pantalla) | La lista de todas las publicaciones, en `/publicaciones`. Desde ahí se eligen las que entran al pipeline. |
 | Pipeline | `Publication.pipelineStatus` | La etapa que se ve de cada publicación: Sin tocar, En pipeline (con su paso), Corregida o Descartada (con su motivo). Solo entran las que tienen código del canal. |
 | Tablero | (pantalla) | La sección Pipeline, que es la página de inicio: una columna por paso, con una tarjeta por publicación. Al tocarla se abre su paso, con los botones para volver, avanzar, marcarla como corregida o sacarla del pipeline. Desde la línea de pasos se puede mirar y trabajar cualquier otro paso (`?paso=informacion`, `?paso=titulo`…), también en otra pestaña; los botones para mover la publicación están solo en su paso actual. |
@@ -35,7 +35,7 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
 | Prueba de conexión | `ChannelProbe` | Si la app puede leer sola las sugerencias y las posiciones del canal, sin cuenta o con la cuenta conectada de la tienda. Se corre en Ajustes, Conexión, y habilita la lectura automática. |
 | Conexión por API | `ChannelConnection` | La cuenta del canal de una tienda, autorizada con OAuth. Cada cliente crea su propia aplicación en el canal y carga su App ID y clave secreta en Ajustes, Conexión. La clave secreta y las llaves se guardan cifradas con `CHANNEL_TOKEN_KEY` y nunca se muestran. Las llaves se renuevan solas, una sola vez a la vez. |
 | Pedido de permiso | `ConnectAttempt` | Un link de autorización en curso: un código de control de un solo uso que vence a los 10 minutos, o a las 24 horas si es el link para mandarle al cliente. |
-| Investigación del producto | `ProductResearch` | Lo que se junta en el paso Información y es del producto: sitio y página del fabricante, texto pegado del fabricante, aclaraciones para las imágenes (texto con formato, guardado como HTML limpio con solo negrita, cursiva y listas) y las preguntas de los compradores. La comparten todas las publicaciones del producto. |
+| Investigación del producto | `ProductResearch` | Lo que se junta en el paso Información y es del producto: sitio y página del fabricante, texto pegado del fabricante, aclaraciones para las imágenes (texto con formato, guardado como HTML limpio con solo negrita, cursiva y listas) y las preguntas de las publicaciones de la competencia. La comparten todas las publicaciones del producto. Las preguntas que recibió cada publicación son de esa publicación. |
 | Archivo del fabricante | `ProductFile` | Imagen o PDF del fabricante, subido directo del navegador al depósito privado de Vercel (Vercel Blob) con un permiso que da `/api/archivos` solo con sesión. La app anota tipo y peso reales que informa el depósito, y los muestra en `/api/archivos/<id>`, también solo con sesión. |
 | Dolor u objeción | `BuyerInsight` | Lo que preocupa o frena al comprador, en dos listas ordenables por producto. |
 | Datos de catálogo | `Publication.attributes` | Los campos del formulario del canal para la categoría de la publicación, con sus opciones, por ejemplo "Tipo de embrague" o "Incluye disco". Cada canal trae sus categorías y campos (los de Mercado Libre están en `src/channels/mercadolibre/catalog/`, bajados de su API pública). La categoría sale de la familia del producto o se elige a mano (`Publication.channelCategory`). Marca, número de pieza y origen salen de la ficha. Solo se guardan valores válidos, como nombre y valor. |
@@ -44,11 +44,11 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
 | Estado de la propuesta | `Stage` | Sin propuesta, Propuesta generada, En revisión, Aprobado, Aplicado en canal, Medido. Es el recorrido de la propuesta completa con IA, no la etapa de la publicación. |
 | Movimiento de la propuesta | `StageMovement` | Cuándo entró y salió una publicación de cada estado de la propuesta, y quién la movió. |
 | Medición | `Measurement` | Cómo estaba una publicación en una fecha: visitas, ventas y lo que tenía cargado. Es el "antes" para comparar. |
-| Importación | `ImportRun` | Quién importó qué archivo, cuándo y qué resultó. Se puede deshacer. |
+| Importación | `ImportRun` | Quién importó qué archivo, cuándo y qué resultó. Se puede deshacer: los productos que creó y después sumaron otras publicaciones, o están en un combo, quedan como cargados a mano, y el historial dice cuántos (`productsKept`). |
 | Relación de columnas | `ImportMapping` | Qué columna de un archivo va a qué campo. Se guarda para reusarla. |
 | Cambio de importación | `ImportChange` | Un campo que una importación completó o reemplazó en algo que ya estaba: cómo estaba y cómo quedó. Es lo que permite deshacerla. |
 | Propuesta | `Proposal` | Lo que la IA propone cambiar en una publicación, campo por campo, con el motivo y lo que hay que confirmar. No cambia nada hasta que se aprueba. Guarda cómo estaba todo al generarla. |
-| Revisión | `Proposal.review` | Donde una persona corrige la propuesta, campo por campo, y la aprueba o la rechaza. Al aprobar se escribe en la ficha y la publicación, y queda qué propuso la IA, qué quedó y qué se editó. No deja aprobar con marcas [A CONFIRMAR: …] ni con un título más largo que el del canal. |
+| Revisión | `Proposal.review` | Donde una persona corrige la propuesta, campo por campo, y la aprueba o la rechaza. Los campos de la ficha llevan la marca "De la ficha", y si el producto tiene otras publicaciones la pantalla las lista, porque esos cambios también les llegan. En compatibilidades, ficha técnica y medidas se elige fila por fila qué se suma, qué se saca y qué cambia; lo que se saca viene sin marcar. Al aprobar se escribe en la ficha y la publicación, y queda qué propuso la IA, qué quedó y qué se editó. No deja aprobar con marcas [A CONFIRMAR: …] ni con un título más largo que el del canal. |
 | Aplicación | `ChannelApplication` | Cuándo lo aprobado quedó aplicado en el canal, de qué forma (a mano, por planilla o por API) y qué campos. Es el punto de partida para medir el antes y el después. |
 | Planilla de contenido | (archivo) | CSV que se baja desde el Catálogo, con una fila por publicación y lo que la app ya sabe. Se completa a mano o con IA y se vuelve a importar. |
 | Regla del estándar | `StandardRule` | Qué tiene que tener una publicación correcta, por cuenta y canal: qué revisa, con qué valor y cuánto pesa. |
@@ -84,9 +84,12 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
   La pantalla de permiso es `/conectar-claude`.
 - `src/importers/`: el único lugar que sabe leer archivos. Lee Excel y CSV en el navegador,
   propone qué columna va a qué campo, traba las columnas confidenciales y traduce cada fila a
-  producto, publicación y medición. Al importar vincula por ID de publicación o por SKU. A lo
-  que ya estaba solo le completa lo vacío, o también reemplaza si se elige; una celda vacía nunca
-  borra nada. Anota de qué importación vino cada cosa y cada cambio, para poder deshacerla.
+  producto, publicación y medición. Al importar vincula por ID de publicación o por SKU; con un
+  SKU repetido en varias fichas, gana la más antigua. A lo que ya estaba solo le completa lo
+  vacío, o también reemplaza si se elige; una celda vacía nunca borra nada. Una fila que es otra
+  publicación de un producto que ya está (mismo SKU, otro código) solo completa lo vacío de la
+  ficha, aunque se elija reemplazar. Si los SKU de una fila son de productos distintos, crea una
+  ficha nueva y avisa que puede ser un combo. Anota de qué importación vino cada cosa y cada cambio, para poder deshacerla.
   También arma la planilla de contenido (`content-sheet.ts`).
 - `src/components/ui/` y `src/components/dashboard/`: componentes y estructura de pantalla
   copiados de app.studiomrb.com (`tatorb/LGM-processor`). El estilo no se inventa: si hace

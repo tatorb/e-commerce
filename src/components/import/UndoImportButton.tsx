@@ -62,7 +62,7 @@ export function UndoImportButton({
           </h3>
           <p className="text-xs text-muted-foreground mt-1">
             {productsCreated > 0 || publicationsCreated > 0 || fieldsChanged === 0
-              ? `Vas a borrar ${plural(productsCreated, 'producto')} y ${plural(publicationsCreated, 'publicación', 'publicaciones')} que creó esta importación, con su historial de etapas, sus mediciones y lo que les hayas cargado después. `
+              ? `Vas a borrar ${plural(productsCreated, 'producto')} y ${plural(publicationsCreated, 'publicación', 'publicaciones')} que creó esta importación, con su historial de etapas, sus mediciones y lo que les hayas cargado después. Los productos que tengan publicaciones cargadas después o estén en un combo quedan. `
               : ''}
             {fieldsChanged > 0
               ? fieldsChanged === 1

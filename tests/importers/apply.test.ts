@@ -157,9 +157,48 @@ describe.skipIf(!url)('importación en la base', () => {
     const combo = await db.product.create({ data: { accountId, name: 'Combo armado a mano', kind: 'COMBO' } });
     await db.comboItem.create({ data: { comboId: combo.id, productId: imported.id, quantity: 2 } });
     const undone = await undoImportRun(db, { runId, accountId });
-    expect(undone.products).toBe(2);
+    expect(undone).toMatchObject({ products: 2, productsKept: 1 });
     expect(await db.product.findUnique({ where: { id: imported.id } })).toMatchObject({ importRunId: null });
     expect(await db.comboItem.count({ where: { comboId: combo.id } })).toBe(1);
+    // Queda anotado para el historial.
+    expect((await db.importRun.findUniqueOrThrow({ where: { id: runId } })).productsKept).toBe(1);
+  });
+
+  it('deshacer borra un combo armado con productos de la misma importación', async () => {
+    const { runId } = await run();
+    const [combo, ...parts] = await db.product.findMany({ where: { importRunId: runId }, orderBy: { createdAt: 'asc' } });
+    await db.product.update({ where: { id: combo.id }, data: { kind: 'COMBO' } });
+    await db.comboItem.createMany({ data: parts.map((p) => ({ comboId: combo.id, productId: p.id, quantity: 1 })) });
+    const undone = await undoImportRun(db, { runId, accountId });
+    expect(undone).toMatchObject({ products: 3, productsKept: 0 });
+    expect(await db.product.count()).toBe(0);
+    expect(await db.comboItem.count()).toBe(0);
+  });
+
+  it('deshacer deja un producto importado al que después se le sumó una publicación a mano', async () => {
+    const { runId } = await run();
+    const imported = await db.product.findFirstOrThrow({ where: { importRunId: runId } });
+    const manual = await db.publication.create({ data: { productId: imported.id, storeId, title: 'Publicación cargada a mano' } });
+    const undone = await undoImportRun(db, { runId, accountId });
+    expect(undone).toMatchObject({ products: 2, productsKept: 1 });
+    expect(await db.product.findUnique({ where: { id: imported.id } })).toMatchObject({ importRunId: null });
+    expect((await db.publication.findMany()).map((p) => p.id)).toEqual([manual.id]);
+  });
+
+  it('se puede borrar una cuenta con combos', async () => {
+    const part = await db.product.create({ data: { accountId, name: 'Disco' } });
+    const combo = await db.product.create({ data: { accountId, name: 'Combo', kind: 'COMBO' } });
+    await db.comboItem.create({ data: { comboId: combo.id, productId: part.id, quantity: 2 } });
+    await db.account.delete({ where: { id: accountId } });
+    expect(await db.product.count()).toBe(0);
+  });
+
+  it('la base no deja borrar un producto que está en un combo', async () => {
+    const part = await db.product.create({ data: { accountId, name: 'Disco' } });
+    const combo = await db.product.create({ data: { accountId, name: 'Combo', kind: 'COMBO' } });
+    await db.comboItem.create({ data: { comboId: combo.id, productId: part.id, quantity: 2 } });
+    await expect(db.product.delete({ where: { id: part.id } })).rejects.toThrow();
+    expect(await db.product.count()).toBe(2);
   });
 
   it('deshacer una reimportación no borra las mediciones de antes', async () => {

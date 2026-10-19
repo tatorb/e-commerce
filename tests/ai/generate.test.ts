@@ -119,6 +119,23 @@ describe.skipIf(!url)('generar propuestas', () => {
     expect(pub.title).toBe('Kit de prueba');
   });
 
+  it('le cuenta a la IA las otras publicaciones del producto y si es combo', async () => {
+    const pub = await db.publication.findUniqueOrThrow({ where: { id: publicationId }, include: { store: true } });
+    await db.publication.create({ data: { productId: pub.productId, storeId: pub.storeId, title: 'Kit de prueba Modelo 2', price: 55555 } });
+    const part = await db.product.create({ data: { accountId, name: 'Disco de prueba', brand: 'Marca D', partNumber: 'D-1' } });
+    await db.product.update({ where: { id: pub.productId }, data: { kind: 'COMBO' } });
+    await db.comboItem.create({ data: { comboId: pub.productId, productId: part.id, quantity: 2 } });
+
+    let seen: ProposalInput | null = null;
+    await generateProposal(db, { accountId, publicationId, userId }, async (input) => {
+      seen = input;
+      return { output: answer, usage, model: 'claude-opus-5-5' };
+    });
+    expect(seen!.otherPublications).toEqual([{ store: 'TIENDA', title: 'Kit de prueba Modelo 2' }]);
+    expect(seen!.combo).toEqual([{ name: 'Disco de prueba', quantity: 2, brand: 'Marca D', partNumber: 'D-1' }]);
+    expect(JSON.stringify(buildProposalRequest(seen!))).not.toContain('55555');
+  });
+
   it('volver a generar reemplaza la anterior sin repetir la etapa', async () => {
     const fake = async () => ({ output: answer, usage, model: 'claude-opus-5-5' });
     await generateProposal(db, { accountId, publicationId, userId }, fake);

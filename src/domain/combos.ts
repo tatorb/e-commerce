@@ -30,6 +30,24 @@ export const comboItemsSchema = z
 
 export type ComboItemInput = z.input<typeof comboItemsSchema>[number];
 
+// Un producto del combo como lo leen la IA y Claude: sin IDs ni precios.
+export type ComboPart = { name: string; quantity: number; brand: string | null; partNumber: string | null };
+
+/** Los productos del combo para la IA, o null si es un individual. */
+export function comboParts(combo: { kind: ProductKind; items: ComboPart[] } | null): ComboPart[] | null {
+  if (combo?.kind !== 'COMBO') return null;
+  return combo.items.map((i) => ({ name: i.name, quantity: i.quantity, brand: i.brand, partNumber: i.partNumber }));
+}
+
+/** Si es combo y qué productos lo forman, con nombres en castellano para la IA y Claude. */
+export function comboForAi(parts: ComboPart[] | null) {
+  if (parts === null) return { individual_o_combo: PRODUCT_KIND_LABEL.INDIVIDUAL };
+  return {
+    individual_o_combo: PRODUCT_KIND_LABEL.COMBO,
+    productos_del_combo: parts.map((p) => ({ nombre: p.name, cantidad: p.quantity, marca: p.brand, numero_de_pieza: p.partNumber })),
+  };
+}
+
 const names = (list: { name: string }[]) => list.map((p) => `«${p.name}»`).join(', ');
 
 // De a un cambio por combo a la vez, así la lista no se mezcla.

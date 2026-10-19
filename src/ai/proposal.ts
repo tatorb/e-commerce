@@ -1,5 +1,6 @@
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { z } from 'zod';
+import { comboForAi, type ComboPart } from '@/domain/combos';
 import { cleanText, type Compat, type ContentField, type ContentSnapshot, type IncomingContent } from '@/domain/content';
 import { nameValueSchema } from '@/domain/name-value';
 import type { ProposalDraft } from '@/domain/proposals';
@@ -19,6 +20,10 @@ export type ProposalInput = {
   missing: { name: string; detail: string | null }[];
   productName: string;
   content: ContentSnapshot;
+  // Los productos del combo, o null si es un individual.
+  combo: ComboPart[] | null;
+  // Las otras publicaciones del mismo producto: comparten la ficha.
+  otherPublications: { store: string; title: string | null }[];
   // De la última medición, solo lo que describe la publicación.
   listing: { photoCount: number | null; hasVideo: boolean | null; channelQuality: number | null; channelGoals: string | null };
 };
@@ -82,6 +87,16 @@ Regla principal: no inventes datos técnicos.
 - Si un dato hace falta y no está, no lo completes. Agregalo a "toConfirm" de ese campo con una frase corta que diga qué hay que confirmar. Si el dato tiene que aparecer dentro de un texto, escribí [A CONFIRMAR: qué falta] en ese lugar.
 - Si deducís algo muy probable pero no seguro, por ejemplo que "0.50" en un cojinete es 0,50 mm, proponelo y agregá a "toConfirm" qué hay que verificar.
 
+La ficha es del producto:
+- La marca, el número de pieza, la ficha técnica, las medidas y las compatibilidades son del producto. Si recibís "otras_publicaciones_del_producto", esas publicaciones usan la misma ficha, y cada una puede apuntar a otro vehículo o a otra presentación.
+- Por eso, en las listas no saques filas solo porque no aparecen en el título de esta publicación: sumá o corregí lo que haga falta y dejá lo demás. El título y la descripción sí son solo de esta publicación.
+
+Combos:
+- Si "individual_o_combo" dice Combo, la publicación vende juntos los productos de "productos_del_combo", con su cantidad.
+- El título y la descripción tienen que dejar claro que trae varios productos y cuáles.
+- En contenido del kit podés listar los productos del combo con su cantidad.
+- La marca y el número de pieza de un componente no son los del combo: no los copies al combo.
+
 Cómo responder cada campo:
 - Si no tenés nada que mejorar, devolvé value vacío o items como lista vacía, reason vacío y toConfirm vacía.
 - Si proponés un cambio, devolvé el valor completo, no solo la parte que cambia.
@@ -126,6 +141,8 @@ export function publicationData(input: ProposalInput) {
   const c = input.content;
   return {
     producto: input.productName,
+    ...comboForAi(input.combo),
+    otras_publicaciones_del_producto: input.otherPublications.map((p) => ({ tienda: p.store, titulo: p.title })),
     titulo: c.title,
     descripcion: c.description,
     marca_del_repuesto: c.brand,

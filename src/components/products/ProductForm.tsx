@@ -100,8 +100,12 @@ export function ProductForm({
       return;
     }
     setStatus({ kind: 'idle' });
+    // "Individual o Combo" va solo si se cambió acá: así una ficha abierta hace
+    // rato no deshace un combo armado en otra pestaña o desde Claude.
+    const { kind, ...rest } = values;
+    const input = isNew || kind !== saved.kind ? values : rest;
     startTransition(async () => {
-      const result = await saveProductAction(accountSlug, productId, values);
+      const result = await saveProductAction(accountSlug, productId, input);
       if (!result.ok) {
         setStatus({ kind: 'error', message: result.error });
         return;

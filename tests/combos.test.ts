@@ -1,15 +1,11 @@
 import { PrismaPg } from '@prisma/adapter-pg';
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@/generated/prisma/client';
 import { assertNotInCombos, ComboError, setComboItems, setProductKind } from '@/domain/combos';
 import { productInputSchema, saveProduct } from '@/domain/products';
 import { loadCombo, searchComboCandidates } from '@/lib/queries/combos';
 
 // Datos inventados.
-
-vi.hoisted(() => {
-  process.env.DATABASE_URL = process.env.TEST_DATABASE_URL ?? 'postgresql://sin-base@localhost/sin-base';
-});
 
 const url = process.env.TEST_DATABASE_URL;
 
@@ -90,8 +86,11 @@ describe.skipIf(!url)('individuales y combos', () => {
     const base = { ...text, specs: [], variants: [], compatibilities: [], assets: [] };
     const { id } = await saveProduct(db, { accountId, productId: null, data: productInputSchema.parse({ ...base, name: 'Combo nuevo', kind: 'COMBO' }) });
     expect((await db.product.findUniqueOrThrow({ where: { id } })).kind).toBe('COMBO');
+    // Como una ficha abierta antes de que le sumaran productos: guardarla sin el tipo no borra la lista.
+    await set([{ productId: aros, quantity: 2 }], id);
     await saveProduct(db, { accountId, productId: id, data: productInputSchema.parse({ ...base, name: 'Combo nuevo editado' }) });
     expect((await db.product.findUniqueOrThrow({ where: { id } })).kind).toBe('COMBO');
+    expect(await db.comboItem.count({ where: { comboId: id } })).toBe(1);
     const plain = await saveProduct(db, { accountId, productId: null, data: productInputSchema.parse({ ...base, name: 'Suelto' }) });
     expect((await db.product.findUniqueOrThrow({ where: { id: plain.id } })).kind).toBe('INDIVIDUAL');
     await set([{ productId: piston, quantity: 1 }]);

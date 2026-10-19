@@ -327,6 +327,9 @@ model Publication {
   description       String?
   // Atributos tal como se cargan en el canal: lista de { name, value }.
   attributes        Json                 @default("[]")
+  // Las preguntas de los compradores en esta publicación, pegadas tal cual.
+  // Las de la competencia son del producto (ProductResearch).
+  ownQuestions      String?
   // Precio público del canal. Nunca costos ni listas de proveedor.
   price             Decimal?             @db.Decimal(14, 2)
   currency          String               @default("ARS")
@@ -474,6 +477,9 @@ model ImportRun {
   startedAt            DateTime         @default(now())
   finishedAt           DateTime?
   undoneAt             DateTime?
+  // Productos que creó y quedaron al deshacer: tenían publicaciones cargadas
+  // después o estaban en un combo.
+  productsKept         Int              @default(0)
   products             Product[]
   publications         Publication[]
   measurements         Measurement[]
@@ -680,7 +686,6 @@ model ProductResearch {
   manufacturerText       String?
   // Texto con formato, en HTML limpio: solo negrita, cursiva y listas.
   clarifications         String?
-  ownQuestions           String?
   competitorQuestions    String?
   updatedById            String?
   updatedBy              User?    @relation(fields: [updatedById], references: [id], onDelete: SetNull)

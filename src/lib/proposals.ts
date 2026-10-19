@@ -3,8 +3,10 @@ import { getChannelAdapter } from '@/channels';
 import { ProposalError, requestProposal, toDraft, type ProposalInput, type ProposalResult } from '@/ai/proposal';
 import { loadContent } from '@/domain/content';
 import { parseMetrics } from '@/domain/measurements';
+import { comboParts } from '@/domain/combos';
 import { canGenerateProposal, ProposalStageError, saveProposal, toProposalFields } from '@/domain/proposals';
 import { describeCheck, scorePublication } from '@/domain/standard';
+import { loadCombo } from '@/lib/queries/combos';
 import { toScoreInput } from '@/lib/queries/score-input';
 
 // Genera la propuesta de una publicación: junta lo que sabe la app, se lo
@@ -59,6 +61,11 @@ export async function generateProposal(
   });
   const score = scorePublication(rules, toScoreInput(pub.product, pub));
   const baseline = await loadContent(db, pub.product.id, pub.id);
+  const others = await db.publication.findMany({
+    where: { productId: pub.product.id, id: { not: pub.id } },
+    orderBy: { createdAt: 'asc' },
+    select: { title: true, store: { select: { name: true } } },
+  });
   const metrics = pub.measurements[0] ? parseMetrics(pub.measurements[0].metrics) : {};
 
   const input: ProposalInput = {
@@ -70,6 +77,8 @@ export async function generateProposal(
     missing: score.missing.map((m) => ({ name: m.name, detail: m.detail })),
     productName: pub.product.name,
     content: baseline,
+    combo: comboParts(await loadCombo(db, pub.product.id)),
+    otherPublications: others.map((o) => ({ store: o.store.name, title: o.title })),
     listing: {
       photoCount: typeof metrics.photo_count === 'number' ? metrics.photo_count : null,
       hasVideo: typeof metrics.has_video === 'boolean' ? metrics.has_video : null,

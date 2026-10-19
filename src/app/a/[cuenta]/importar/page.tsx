@@ -91,6 +91,13 @@ export default async function ImportPage({ params }: { params: Promise<{ cuenta:
                         {plural(run.measurementsSaved, 'medición', 'mediciones')}
                         {run.rowsWithErrors > 0 ? ` · ${plural(run.rowsWithErrors, 'fila con error', 'filas con error')}` : ''}
                       </div>
+                      {run.status === 'UNDONE' && run.productsKept > 0 ? (
+                        <div className="text-xs text-muted-foreground">
+                          {run.productsKept === 1
+                            ? 'Al deshacer quedó 1 producto porque tiene publicaciones cargadas después o está en un combo.'
+                            : `Al deshacer quedaron ${run.productsKept} productos porque tienen publicaciones cargadas después o están en un combo.`}
+                        </div>
+                      ) : null}
                     </div>
                     {run.status === 'DONE' || run.status === 'FAILED' || run.status === 'RUNNING' ? (
                       <UndoImportButton

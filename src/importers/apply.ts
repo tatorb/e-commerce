@@ -62,42 +62,69 @@ export const rowsInputSchema = z
     }),
   );
 
+type Existing = { productId: string; productName: string; publicationId: string | null };
+// Los SKU de la fila son de productos distintos: no se pega a ninguno.
+type SkuConflict = { conflict: string[] };
+
 /** Publicación o producto que ya está en la app para esta fila, si hay. */
 async function findExisting(
   tx: Prisma.TransactionClient,
   ctx: { accountId: string; storeId: string },
   record: ImportRecord,
-): Promise<{ productId: string; publicationId: string | null } | null> {
+): Promise<Existing | SkuConflict | null> {
   const externalId = record.publication.externalId;
   // 1. Publicación con el mismo ID en la tienda.
   if (externalId) {
     const pub = await tx.publication.findFirst({
       where: { storeId: ctx.storeId, externalId },
-      select: { id: true, productId: true },
+      select: { id: true, productId: true, product: { select: { name: true } } },
     });
-    if (pub) return { productId: pub.productId, publicationId: pub.id };
+    if (pub) return { productId: pub.productId, productName: pub.product.name, publicationId: pub.id };
   }
-  // 2. Producto con algún SKU igual.
+  // 2. Producto con los SKU de la fila. Con un SKU repetido en varias fichas,
+  // gana la más antigua.
   if (record.skus.length === 0) return null;
-  const match = await tx.product.findFirst({
+  const products = await tx.product.findMany({
     where: {
       accountId: ctx.accountId,
       variants: {
         some: { OR: record.skus.map((sku) => ({ sku: { equals: sku, mode: 'insensitive' as const } })) },
       },
     },
-    select: { id: true },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    take: 20,
+    select: { id: true, name: true, variants: { select: { sku: true } } },
   });
-  if (!match) return null;
+  if (products.length === 0) return null;
+  const has = (p: (typeof products)[number], sku: string) => p.variants.some((v) => v.sku?.toUpperCase() === sku);
+  const found = record.skus.map((s) => s.toUpperCase()).filter((sku) => products.some((p) => has(p, sku)));
+  const match = products.find((p) => found.every((sku) => has(p, sku)));
+  // Por ejemplo "A / B", con A de un producto y B de otro: puede ser un combo.
+  if (!match) return { conflict: products.map((p) => p.name) };
   // Sin ID, la publicación de ese producto en la tienda es la misma.
   if (!externalId) {
     const pub = await tx.publication.findFirst({
       where: { productId: match.id, storeId: ctx.storeId, externalId: null },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       select: { id: true },
     });
-    if (pub) return { productId: match.id, publicationId: pub.id };
+    if (pub) return { productId: match.id, productName: match.name, publicationId: pub.id };
   }
-  return { productId: match.id, publicationId: null };
+  return { productId: match.id, productName: match.name, publicationId: null };
+}
+
+const isConflict = (f: Existing | SkuConflict | null): f is SkuConflict => f !== null && 'conflict' in f;
+
+/** El aviso de una fila con SKU de productos distintos. */
+export function skuConflictNote(names: string[]): string {
+  const list = names.map((n) => `«${n}»`);
+  const joined = list.length > 1 ? `${list.slice(0, -1).join(', ')} y ${list[list.length - 1]}` : list[0];
+  return `Sus SKU son de productos distintos (${joined}), así que se crea una ficha nueva. Si es un combo, pasala a Combo y sumale sus productos.`;
+}
+
+/** El aviso de una fila que es otra publicación de un producto que ya está. */
+export function otherPublicationNote(name: string): string {
+  return `Es otra publicación de «${name}»: en la ficha solo completa lo vacío, aunque elijas reemplazar.`;
 }
 
 const asJson = (v: unknown) => (v === null || v === undefined ? Prisma.DbNull : (v as Prisma.InputJsonValue));
@@ -140,7 +167,8 @@ export async function applyRows(db: PrismaClient, ctx: ApplyContext, rows: RowIn
 
     try {
       const outcome = await db.$transaction(async (tx) => {
-        const found = await findExisting(tx, ctx, record);
+        const match = await findExisting(tx, ctx, record);
+        const found = isConflict(match) ? null : match;
         let kind: 'existing' | 'link' | 'new';
         let publicationId: string;
         let changed = 0;
@@ -175,11 +203,12 @@ export async function applyRows(db: PrismaClient, ctx: ApplyContext, rows: RowIn
         }
 
         // Lo que ya estaba: se completa con lo que trae la fila, y cada cambio
-        // queda anotado para poder deshacerlo.
+        // queda anotado para poder deshacerlo. Si la fila es otra publicación
+        // del producto, la ficha solo se completa: la comparten las demás.
         if (found) {
           const target = { productId: found.productId, publicationId: found.publicationId };
           const current = await loadContent(tx, target.productId, target.publicationId);
-          const { changes } = planContentUpdate(current, record.content, mode, {
+          const { changes } = planContentUpdate(current, record.content, target.publicationId ? mode : 'FILL_EMPTY', {
             publication: target.publicationId !== null,
           });
           for (const change of changes) {
@@ -247,7 +276,12 @@ export type RowPreview = {
   fill: ContentField[];
   // Campos que además cambian si se elige reemplazar.
   replace: ContentField[];
+  // Avisos de las medidas.
   warnings: string[];
+  // Otros avisos de la fila, para mostrar tal cual.
+  notes: string[];
+  // Se crea un producto nuevo aunque algún SKU ya exista.
+  newProduct: boolean;
 };
 
 /**
@@ -265,10 +299,23 @@ export async function previewRows(
     if (record.error || !record.product) continue;
     const found = await findExisting(db, ctx, record);
     if (!found) continue;
+    if (isConflict(found)) {
+      previews.push({
+        rowNumber: record.rowNumber,
+        fill: [],
+        replace: [],
+        warnings: [],
+        notes: [skuConflictNote(found.conflict)],
+        newProduct: true,
+      });
+      continue;
+    }
     const current = await loadContent(db, found.productId, found.publicationId);
-    const opts = { publication: found.publicationId !== null };
+    const sameListing = found.publicationId !== null;
+    const opts = { publication: sameListing };
     const fill = planContentUpdate(current, record.content, 'FILL_EMPTY', opts);
-    const replace = planContentUpdate(current, record.content, 'REPLACE', opts);
+    // Otra publicación del mismo producto: la ficha nunca se reemplaza.
+    const replace = sameListing ? planContentUpdate(current, record.content, 'REPLACE', opts) : fill;
     const fillAfter = new Map(fill.changes.map((c) => [c.field, c.after]));
     previews.push({
       rowNumber: record.rowNumber,
@@ -277,6 +324,8 @@ export async function previewRows(
         .filter((c) => !fillAfter.has(c.field) || !sameValue(fillAfter.get(c.field), c.after))
         .map((c) => c.field),
       warnings: replace.warnings,
+      notes: sameListing ? [] : [otherPublicationNote(found.productName)],
+      newProduct: false,
     });
   }
   return previews;
@@ -286,14 +335,16 @@ export async function previewRows(
  * Deshace una importación. Primero devuelve los campos que cambió en lo que
  * ya estaba, del último cambio al primero, salvo los que alguien cambió
  * después. Después borra las mediciones, publicaciones y productos que creó.
+ * Un producto que creó pero que después sumó otras publicaciones, o que está
+ * en un combo que queda, se queda: sin la importación, como cargado a mano.
  */
 export async function undoImportRun(
   db: PrismaClient,
   args: { runId: string; accountId: string },
-): Promise<{ products: number; publications: number; measurements: number; restored: number; kept: number }> {
+): Promise<{ products: number; publications: number; measurements: number; restored: number; kept: number; productsKept: number }> {
   const run = await db.importRun.findFirst({ where: { id: args.runId, accountId: args.accountId } });
   if (!run) throw new Error('La importación no existe en esta cuenta.');
-  if (run.status === 'UNDONE') return { products: 0, publications: 0, measurements: 0, restored: 0, kept: 0 };
+  if (run.status === 'UNDONE') return { products: 0, publications: 0, measurements: 0, restored: 0, kept: 0, productsKept: 0 };
 
   const changes = await db.importChange.findMany({ where: { importRunId: run.id }, orderBy: { id: 'desc' } });
   const byProduct = new Map<string, typeof changes>();
@@ -331,18 +382,21 @@ export async function undoImportRun(
   const deleted = await db.$transaction(async (tx) => {
     const measurements = await tx.measurement.deleteMany({ where: { importRunId: run.id } });
     const publications = await tx.publication.deleteMany({ where: { importRunId: run.id } });
-    // Un producto de esta importación que después se puso en un combo que no
-    // es de la importación se queda: sin él, el combo quedaría incompleto.
+    // Se quedan los productos de esta importación que después sumaron
+    // publicaciones de otro lado (a mano u otra importación)…
+    const fromRun = { importRunId: run.id };
+    const withOthers = await tx.product.findMany({ where: { ...fromRun, publications: { some: {} } }, select: { id: true } });
+    const keep = new Set(withOthers.map((p) => p.id));
+    // …y los que están en un combo que queda: sin ellos, el combo quedaría incompleto.
     const inCombos = await tx.comboItem.findMany({
-      where: { product: { importRunId: run.id }, combo: { OR: [{ importRunId: null }, { importRunId: { not: run.id } }] } },
-      select: { productId: true },
+      where: { product: fromRun },
+      select: { productId: true, combo: { select: { id: true, importRunId: true } } },
     });
-    if (inCombos.length > 0) {
-      await tx.product.updateMany({ where: { id: { in: inCombos.map((c) => c.productId) } }, data: { importRunId: null } });
-    }
-    const products = await tx.product.deleteMany({ where: { importRunId: run.id } });
-    await tx.importRun.update({ where: { id: run.id }, data: { status: 'UNDONE', undoneAt: new Date() } });
-    return { products: products.count, publications: publications.count, measurements: measurements.count };
+    for (const c of inCombos) if (c.combo.importRunId !== run.id || keep.has(c.combo.id)) keep.add(c.productId);
+    if (keep.size > 0) await tx.product.updateMany({ where: { id: { in: [...keep] } }, data: { importRunId: null } });
+    const products = await tx.product.deleteMany({ where: fromRun });
+    await tx.importRun.update({ where: { id: run.id }, data: { status: 'UNDONE', undoneAt: new Date(), productsKept: keep.size } });
+    return { products: products.count, publications: publications.count, measurements: measurements.count, productsKept: keep.size };
   });
   return { ...deleted, restored, kept };
 }

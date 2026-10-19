@@ -1,5 +1,6 @@
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { z } from 'zod';
+import { comboForAi, type ComboPart } from '@/domain/combos';
 import type { TitleRules } from '@/domain/title-rules';
 import { PROPOSAL_MODEL } from './claude';
 import { sendStructured, type StructuredResult } from './request';
@@ -28,6 +29,8 @@ export type TitleInput = {
       yearTo: number | null;
     }[];
   };
+  // Los productos del combo, o null si es un individual.
+  combo: ComboPart[] | null;
   currentTitle: string | null;
   // Tildadas, en el orden en que aparecen en las sugerencias.
   words: string[];
@@ -62,6 +65,7 @@ Reglas:
 - Seguí la estructura sugerida si hay una.
 - No inventes datos: si una palabra elegida contradice los datos del producto, dejala afuera.
 - Los 3 títulos tienen que ser distintos entre sí: por ejemplo, uno que priorice el modelo, otro el motor y otro la marca del vehículo.
+- Si el producto es un combo, la publicación vende juntos los productos de "productos_del_combo". Cada título tiene que dejar claro que trae varios productos, por ejemplo con "Kit", "Combo" o la cantidad, según las palabras elegidas. Si no hay una palabra elegida que lo deje claro, sumá una de esas.
 
 Escribí en castellano de Argentina. No uses el guion largo.`;
 
@@ -83,6 +87,7 @@ export function titleData(input: TitleInput) {
     marca_del_repuesto: p.brand,
     numero_de_pieza: p.partNumber,
     linea: p.line,
+    ...comboForAi(input.combo),
     compatibilidades: p.compatibilities.map((c) => ({
       marca: c.vehicleBrand,
       modelo: c.model,

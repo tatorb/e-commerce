@@ -263,6 +263,14 @@ export function ImportWizard({
           return;
         }
       }
+      // Filas con SKU de productos distintos: no se suman a ninguno, crean una ficha nueva.
+      recs.forEach((r, i) => {
+        if (classified.actions[i] === 'link' && found.get(r.rowNumber)?.newProduct) {
+          classified.actions[i] = 'new';
+          classified.summary.linked--;
+          classified.summary.newProducts++;
+        }
+      });
 
       setRows(extracted);
       setRecords(recs);
@@ -574,8 +582,8 @@ export function ImportWizard({
       ...(r.error ? [{ row: r.rowNumber, message: r.error, error: true }] : []),
       ...r.warnings.map((w) => ({ row: r.rowNumber, message: w, error: false })),
     ];
-    const fromPreview = (previews.get(r.rowNumber)?.warnings ?? [])
-      .map((w) => `Medidas: ${w}`)
+    const preview = previews.get(r.rowNumber);
+    const fromPreview = [...(preview?.warnings ?? []).map((w) => `Medidas: ${w}`), ...(preview?.notes ?? [])]
       .filter((w) => !r.warnings.includes(w))
       .map((w) => ({ row: r.rowNumber, message: w, error: false }));
     return [...own, ...fromPreview];
@@ -678,7 +686,7 @@ export function ImportWizard({
               </Select>
               <p className="text-xs text-muted-foreground">
                 {mode === 'REPLACE'
-                  ? 'Si el archivo dice algo distinto, gana el archivo. En medidas, ficha técnica, compatibilidades y fotos, la lista del archivo reemplaza la lista entera.'
+                  ? 'Si el archivo dice algo distinto, gana el archivo. En medidas, ficha técnica, compatibilidades y fotos, la lista del archivo reemplaza la lista entera. Las filas que son otra publicación de un producto que ya está solo completan lo vacío de su ficha.'
                   : 'Solo se cargan los campos que hoy están vacíos. Lo que ya tiene la app no se toca.'}{' '}
                 Lo podés deshacer después desde el historial.
               </p>

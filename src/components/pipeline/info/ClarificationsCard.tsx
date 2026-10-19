@@ -7,16 +7,19 @@ import { SectionBody, SectionCard } from '@/components/ui/section-card';
 import { StatusText } from '@/components/pipeline/StatusText';
 import { useStepAction } from '@/components/pipeline/useStepAction';
 import { saveClarificationsAction } from '@/app/a/[cuenta]/pipeline/research-actions';
+import { withSharedNote } from './SharedNote';
 
 // Aclaraciones para las imágenes: texto con formato sobre modelos compatibles,
 // confusiones y lo que tiene que quedar claro. Es del producto.
 export function ClarificationsCard({
   accountSlug,
   publicationId,
+  sharedWith,
   initial,
 }: {
   accountSlug: string;
   publicationId: string;
+  sharedWith: number;
   initial: string;
 }) {
   const [html, setHtml] = useState(initial);
@@ -24,7 +27,10 @@ export function ClarificationsCard({
   return (
     <SectionCard
       title="Aclaraciones para las imágenes"
-      description="Modelos compatibles, confusiones habituales y todo lo que tiene que quedar claro en las imágenes."
+      description={withSharedNote(
+        'Modelos compatibles, confusiones habituales y todo lo que tiene que quedar claro en las imágenes.',
+        sharedWith,
+      )}
     >
       <SectionBody>
         <RichTextEditor

@@ -33,6 +33,8 @@ const input: ProposalInput = {
   missing: [{ name: 'Garantía declarada', detail: null }],
   productName: 'Kit de prueba',
   content,
+  combo: null,
+  otherPublications: [],
   listing: { photoCount: 4, hasVideo: false, channelQuality: 0.5, channelGoals: 'Sumar fotos' },
 };
 
@@ -80,6 +82,26 @@ describe('pedido a la IA', () => {
     const objects = [...schema.matchAll(/"properties":\{/g)].length;
     const required = [...schema.matchAll(/"required":\[/g)].length;
     expect(required).toBe(objects);
+  });
+
+  it('manda si es combo, qué lo forma y las otras publicaciones del producto', () => {
+    const individual = buildProposalRequest(input).messages[0].content;
+    expect(individual).toContain('"individual_o_combo": "Individual"');
+    expect(individual).not.toContain('productos_del_combo');
+
+    const combo = buildProposalRequest({
+      ...input,
+      combo: [{ name: 'Disco de prueba', quantity: 2, brand: 'Marca D', partNumber: 'D-1' }],
+      otherPublications: [{ store: 'TIENDA 2', title: 'Kit de prueba Modelo 2' }],
+    });
+    const body = combo.messages[0].content;
+    expect(body).toContain('"individual_o_combo": "Combo"');
+    expect(body).toContain('"nombre": "Disco de prueba"');
+    expect(body).toContain('"cantidad": 2');
+    expect(body).toContain('Kit de prueba Modelo 2');
+    // Las instrucciones explican la ficha compartida y los combos, y siguen fijas.
+    expect(combo.system).toEqual(buildProposalRequest(input).system);
+    expect(combo.system[0].text).toContain('no saques filas solo porque no aparecen en el título');
   });
 
   it('no manda IDs internos', () => {

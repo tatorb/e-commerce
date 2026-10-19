@@ -16,6 +16,7 @@ import { deleteFileAction, registerFileAction, saveManufacturerAction } from '@/
 import { BLOB_ACCESS, extensionOf, FILE_TYPES, fileHref, filesPrefix, MAX_FILES, safeFileName } from '@/lib/file-rules';
 import { cn } from '@/lib/utils/cn';
 import { BlobSetup } from './BlobSetup';
+import { withSharedNote } from './SharedNote';
 
 export type ManufacturerFile = { id: string; kind: 'IMAGE' | 'PDF'; name: string; size: number };
 
@@ -33,6 +34,7 @@ export function ManufacturerCard({
   accountSlug,
   publicationId,
   productId,
+  sharedWith,
   initial,
   files,
   blobReady,
@@ -40,6 +42,7 @@ export function ManufacturerCard({
   accountSlug: string;
   publicationId: string;
   productId: string;
+  sharedWith: number;
   initial: { site: string; productUrl: string; text: string };
   files: ManufacturerFile[];
   blobReady: boolean;
@@ -54,7 +57,10 @@ export function ManufacturerCard({
     <SectionCard
       title="Información del fabricante"
       count={files.length}
-      description="Lo que dice el fabricante de la pieza: su sitio, la página del producto, catálogos e imágenes. No subas listas de precios ni costos del proveedor."
+      description={withSharedNote(
+        'Lo que dice el fabricante de la pieza: su sitio, la página del producto, catálogos e imágenes. No subas listas de precios ni costos del proveedor.',
+        sharedWith,
+      )}
     >
       <SectionBody>
         <div className="grid gap-4 md:grid-cols-2">

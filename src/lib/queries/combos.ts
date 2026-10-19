@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
-import { productSearchWhere } from './products';
+import { productSearchWhere } from './product-search';
 
 // Lo que muestran las tarjetas de combos: los productos de un combo, o los
 // combos de los que forma parte un individual. Recibe la base por parámetro

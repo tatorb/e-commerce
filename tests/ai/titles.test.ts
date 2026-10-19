@@ -16,6 +16,7 @@ const input: TitleInput = {
   rules: getChannelAdapter('MERCADOLIBRE').titleRules,
   structure: 'Tipo + Modelo',
   product: { productType: 'Kit de prueba', brand: 'Marca R', partNumber: null, line: null, compatibilities: [] },
+  combo: null,
   currentTitle: 'Kit viejo',
   words: ['kit', 'gol'],
   suggestions: ['kit gol', 'kit gol trend'],
@@ -30,6 +31,15 @@ describe('pedido de títulos', () => {
     expect(text).toContain('palabras_elegidas');
     expect(text).not.toMatch(/precio|visitas|ventas|vendidos|price|sold/i);
     expect(req.output_config.format.schema).toBeDefined();
+  });
+
+  it('con un combo, manda los productos que lo forman y pide que se note', () => {
+    const req = buildTitleRequest({ ...input, combo: [{ name: 'Disco', quantity: 2, brand: 'Marca D', partNumber: 'D-1' }] });
+    const text = JSON.stringify(req);
+    expect(text).toContain('productos_del_combo');
+    expect(text).toContain('Disco');
+    expect(req.system[0].text).toContain('dejar claro que trae varios productos');
+    expect(JSON.stringify(buildTitleRequest(input))).toContain('Individual');
   });
 
   it('limpia lo que devuelve: sin vacíos ni repetidos, hasta 3', () => {
@@ -122,6 +132,7 @@ describe.skipIf(!url)('generar títulos', () => {
     expect(sent!.words).toEqual(['kit', 'gol', 'power']);
     expect(sent!.suggestions).toEqual(['kit gol trend', 'kit gol power']);
     expect(sent!.competitorTitles).toEqual(['Kit Gol Otro']);
+    expect(sent!.combo).toBeNull();
     // Nada de precios, visitas ni ventas en lo que se manda.
     const text = JSON.stringify(buildTitleRequest(sent!));
     for (const secret of ['99999', '777', '4321']) expect(text).not.toContain(secret);

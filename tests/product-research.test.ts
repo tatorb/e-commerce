@@ -15,6 +15,7 @@ import {
   withoutPrices,
   moveInsight,
   ResearchError,
+  saveQuestions,
   updateInsight,
   updateResearch,
 } from '@/domain/research';
@@ -170,14 +171,38 @@ describe.skipIf(!url)('investigación del producto en la base', () => {
 
   it('guarda solo los campos que llegan', async () => {
     await updateResearch(db, { productId, userId: 'u1', data: { manufacturerSite: 'https://f.com', manufacturerText: 'texto' } });
-    await updateResearch(db, { productId, userId: 'u1', data: { ownQuestions: '¿sirve para Gol?' } });
+    await updateResearch(db, { productId, userId: 'u1', data: { competitorQuestions: '¿sirve para Gol?' } });
     expect(await db.productResearch.findUniqueOrThrow({ where: { productId } })).toMatchObject({
       manufacturerSite: 'https://f.com',
       manufacturerText: 'texto',
-      ownQuestions: '¿sirve para Gol?',
-      competitorQuestions: null,
+      competitorQuestions: '¿sirve para Gol?',
+      clarifications: null,
       updatedById: 'u1',
     });
+  });
+
+  it('las preguntas propias son de cada publicación y las de la competencia, del producto', async () => {
+    const product = await db.product.findUniqueOrThrow({ where: { id: productId } });
+    const channel = await db.channel.upsert({
+      where: { kind: 'MERCADOLIBRE' },
+      update: {},
+      create: { kind: 'MERCADOLIBRE', name: 'Mercado Libre' },
+    });
+    const store = await db.store.create({ data: { accountId: product.accountId, channelId: channel.id, name: 'TIENDA' } });
+    const gol = await db.publication.create({ data: { productId, storeId: store.id, title: 'Kit Gol' } });
+    const corsa = await db.publication.create({ data: { productId, storeId: store.id, title: 'Kit Corsa' } });
+    const save = (publicationId: string, data: { own?: string | null; competitors?: string | null }) =>
+      db.$transaction((tx) => saveQuestions(tx, { productId, publicationId, userId: 'u1', ...data }));
+
+    await save(gol.id, { own: '¿sirve para Gol?', competitors: '¿es original?' });
+    await save(corsa.id, { own: '¿sirve para Corsa?' });
+    const pubs = await db.publication.findMany({ orderBy: { title: 'asc' }, select: { title: true, ownQuestions: true } });
+    expect(pubs).toEqual([
+      { title: 'Kit Corsa', ownQuestions: '¿sirve para Corsa?' },
+      { title: 'Kit Gol', ownQuestions: '¿sirve para Gol?' },
+    ]);
+    // Lo que no se manda queda como estaba.
+    expect((await db.productResearch.findUniqueOrThrow({ where: { productId } })).competitorQuestions).toBe('¿es original?');
   });
 
   it('dolores y objeciones: agregar, ordenar, editar y borrar, cada lista por su lado', async () => {

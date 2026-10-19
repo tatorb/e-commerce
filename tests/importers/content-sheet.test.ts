@@ -118,9 +118,9 @@ describe.skipIf(!url)('importar la planilla de contenido', () => {
     return loadContent(db, productId, publicationId);
   }
 
-  async function sheetWith(content: ContentSnapshot) {
+  async function sheetWith(content: ContentSnapshot, externalId = 'MLA1000000001') {
     const csv = buildContentSheet([
-      { externalId: 'MLA1000000001', url: 'https://articulo.mercadolibre.com.ar/MLA-1000000001', content },
+      { externalId, url: `https://articulo.mercadolibre.com.ar/${externalId.replace('MLA', 'MLA-')}`, content },
     ]);
     return (await readCsv(csv)).rows;
   }
@@ -226,6 +226,64 @@ describe.skipIf(!url)('importar la planilla de contenido', () => {
 
     await undoImportRun(db, { runId, accountId });
     expect(await snapshot()).toEqual(before);
+  });
+
+  it('otra publicación del mismo producto solo completa la ficha, aunque se elija reemplazar', async () => {
+    await importRows(await sheetWith(filled(await snapshot())), 'REPLACE');
+    const before = await snapshot();
+    const other: ContentSnapshot = {
+      ...before,
+      title: 'Kit de prueba A para Modelo 2',
+      brand: 'Marca W',
+      kitContents: 'Disco y placa',
+      compatibilities: [{ vehicleBrand: 'Marca B', model: 'Modelo 2', engine: '1.4', yearFrom: null, yearTo: null, note: null }],
+    };
+    const rows = await sheetWith(other, 'MLA1000000009');
+    const [preview] = await previewRows(db, { accountId, storeId, adapter: mercadolibre }, rows);
+    expect(preview).toMatchObject({ fill: ['kitContents'], replace: [], newProduct: false });
+    expect(preview.notes).toEqual(['Es otra publicación de «Kit de prueba A»: en la ficha solo completa lo vacío, aunque elijas reemplazar.']);
+
+    const { result } = await importRows(rows, 'REPLACE');
+    expect(result).toMatchObject({ publicationsLinked: 1, fieldsChanged: 1, errors: [] });
+    const after = await snapshot();
+    expect(after.brand).toBe('Marca X');
+    expect(after.compatibilities).toEqual(before.compatibilities);
+    expect(after.kitContents).toBe('Disco y placa');
+    const pub = await db.publication.findFirstOrThrow({ where: { externalId: 'MLA1000000009' } });
+    expect(pub).toMatchObject({ productId, title: 'Kit de prueba A para Modelo 2' });
+  });
+
+  it('si los SKU de la fila son de productos distintos, crea una ficha nueva y avisa', async () => {
+    const other = await db.product.create({
+      data: { accountId, name: 'Disco de prueba', variants: { create: [{ sku: 'XYZ-1' }] } },
+    });
+    const content: ContentSnapshot = {
+      ...(await snapshot()),
+      title: 'Combo de prueba',
+      measures: [
+        { id: 'a', sku: 'ABC-1', measure: null },
+        { id: 'b', sku: 'XYZ-1', measure: null },
+      ],
+    };
+    const rows = await sheetWith(content, 'MLA1000000010');
+    const [preview] = await previewRows(db, { accountId, storeId, adapter: mercadolibre }, rows);
+    expect(preview.newProduct).toBe(true);
+    expect(preview.notes[0]).toContain('son de productos distintos («Kit de prueba A» y «Disco de prueba»)');
+
+    const { result } = await importRows(rows, 'REPLACE');
+    expect(result).toMatchObject({ productsCreated: 1, publicationsLinked: 0, fieldsChanged: 0, errors: [] });
+    const pub = await db.publication.findFirstOrThrow({ where: { externalId: 'MLA1000000010' } });
+    expect([productId, other.id]).not.toContain(pub.productId);
+  });
+
+  it('con un SKU repetido en dos fichas, se suma a la más antigua', async () => {
+    await db.product.create({
+      data: { accountId, name: 'Copia más nueva', createdAt: new Date(Date.now() + 60_000), variants: { create: [{ sku: 'ABC-1' }] } },
+    });
+    const content: ContentSnapshot = { ...(await snapshot()), measures: [{ id: 'a', sku: 'ABC-1', measure: null }] };
+    await importRows(await sheetWith(content, 'MLA1000000011'), 'FILL_EMPTY');
+    const pub = await db.publication.findFirstOrThrow({ where: { externalId: 'MLA1000000011' } });
+    expect(pub.productId).toBe(productId);
   });
 
   it('una celda vacía no borra nada', async () => {

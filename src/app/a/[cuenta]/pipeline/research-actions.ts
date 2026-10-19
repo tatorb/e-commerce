@@ -11,6 +11,7 @@ import {
   moveInsight,
   questionsSchema,
   ResearchError,
+  saveQuestions,
   updateInsight,
   updateResearch,
 } from '@/domain/research';
@@ -18,7 +19,8 @@ import type { InsightKind } from '@/generated/prisma/enums';
 import { BLOB_NOT_CONFIGURED, deleteProductFile, FileError, isBlobConfigured, registerProductFile } from '@/lib/files';
 
 // Lo que se guarda desde las tarjetas nuevas del paso Información: fabricante,
-// aclaraciones, preguntas, dolores y objeciones. Todo es del producto.
+// aclaraciones, preguntas, dolores y objeciones. Todo es del producto, salvo
+// las preguntas en la publicación propia.
 
 type Result = { ok: true; message?: string } | { ok: false; error: string };
 
@@ -87,11 +89,9 @@ export async function saveQuestionsAction(
   const parsed = questionsSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: firstIssue(parsed.error) };
   return guard(accountSlug, async () => {
-    await updateResearch(prisma, {
-      productId,
-      userId: user.id,
-      data: { ownQuestions: parsed.data.own, competitorQuestions: parsed.data.competitors },
-    });
+    await prisma.$transaction((tx) =>
+      saveQuestions(tx, { productId, publicationId, userId: user.id, own: parsed.data.own, competitors: parsed.data.competitors }),
+    );
     return 'Preguntas guardadas.';
   });
 }

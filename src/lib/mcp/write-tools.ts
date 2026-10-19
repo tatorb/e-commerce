@@ -23,6 +23,7 @@ import {
   MAX_INSIGHTS,
   questionsSchema,
   replaceInsights,
+  saveQuestions,
   updateResearch,
 } from '@/domain/research';
 import { titleRulesInputSchema } from '@/domain/title-rules';
@@ -430,9 +431,9 @@ async function productTarget(ctx: McpContext, args: { cuenta?: string; publicaci
   const { account, id } = await target(ctx, args);
   const pub = await ctx.db.publication.findUniqueOrThrow({
     where: { id },
-    select: { productId: true, product: { select: { research: true } } },
+    select: { productId: true, ownQuestions: true, product: { select: { research: true } } },
   });
-  return { account, id, productId: pub.productId, research: pub.product.research };
+  return { account, id, productId: pub.productId, ownQuestions: pub.ownQuestions, research: pub.product.research };
 }
 
 const keepOr = (sent: string | undefined, current: string | null | undefined) => (sent === undefined ? (current ?? '') : sent);
@@ -473,7 +474,7 @@ const saveClarificationsTool = defineTool({
   name: 'save_image_clarifications',
   title: 'Guardar las aclaraciones para las imágenes',
   description:
-    'Guarda las aclaraciones para las imágenes del producto: modelos compatibles, confusiones habituales y lo que tiene que quedar claro. Reemplaza el texto entero. Se escribe en Markdown simple: **negrita**, _cursiva_, listas con "- " o "1. ". Usá solo datos de la ficha o que te dio la persona.',
+    'Guarda las aclaraciones para las imágenes del producto: modelos compatibles, confusiones habituales y lo que tiene que quedar claro. Son del producto: las comparten todas sus publicaciones. Reemplaza el texto entero. Se escribe en Markdown simple: **negrita**, _cursiva_, listas con "- " o "1. ". Usá solo datos de la ficha o que te dio la persona.',
   input: z.object({ cuenta: accountArg, publicacion: publicationArg, texto: z.string().describe('Vacío lo borra.') }),
   readOnly: false,
   destructive: true,
@@ -488,27 +489,25 @@ const saveQuestionsTool = defineTool({
   name: 'save_buyer_questions',
   title: 'Guardar las preguntas de los compradores',
   description:
-    'Guarda las preguntas de los compradores que te pegó la persona: las de la publicación propia y las de la competencia, tal como vienen. Lo que no se manda queda como está; vacío lo borra.',
+    'Guarda las preguntas de los compradores que te pegó la persona, tal como vienen. Las de la publicación propia quedan solo en esta publicación; las de la competencia son del producto y las comparten todas sus publicaciones. Lo que no se manda queda como está; vacío lo borra.',
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg,
-    propia: z.string().optional().describe('Las preguntas de la publicación propia.'),
+    propia: z.string().optional().describe('Las preguntas que recibió esta publicación.'),
     competencia: z.string().optional().describe('Las preguntas de las publicaciones de la competencia.'),
   }),
   readOnly: false,
   destructive: true,
   async run(ctx, args) {
-    const { account, id, productId, research: r } = await productTarget(ctx, args);
+    const { account, id, productId, ownQuestions, research: r } = await productTarget(ctx, args);
     const parsed = questionsSchema.safeParse({
-      own: keepOr(args.propia, r?.ownQuestions),
+      own: keepOr(args.propia, ownQuestions),
       competitors: keepOr(args.competencia, r?.competitorQuestions),
     });
     if (!parsed.success) throw new McpToolError(parsed.error.issues[0]?.message ?? 'Revisá los datos.');
-    await updateResearch(ctx.db, {
-      productId,
-      userId: ctx.userId,
-      data: { ownQuestions: parsed.data.own, competitorQuestions: parsed.data.competitors },
-    });
+    await ctx.db.$transaction((tx) =>
+      saveQuestions(tx, { productId, publicationId: id, userId: ctx.userId, own: parsed.data.own, competitors: parsed.data.competitors }),
+    );
     return { listo: true, link_app: appLink(ctx, account, id) };
   },
 });
@@ -518,7 +517,7 @@ const KIND = { dolores: 'PAIN', objeciones: 'OBJECTION' } as const;
 const saveInsightsTool = defineTool({
   name: 'save_buyer_insights',
   title: 'Guardar dolores u objeciones',
-  description: `Agrega a la lista de dolores o de objeciones de los compradores, o la reemplaza entera, hasta ${MAX_INSIGHTS} por lista. Cada ítem es una frase corta. Tienen que salir de las preguntas guardadas o de lo que te dijo la persona, no de suposiciones. Para reemplazar, confirmalo con la persona antes.`,
+  description: `Agrega a la lista de dolores o de objeciones de los compradores, o la reemplaza entera, hasta ${MAX_INSIGHTS} por lista. Son del producto: las comparten todas sus publicaciones. Cada ítem es una frase corta. Tienen que salir de las preguntas guardadas o de lo que te dijo la persona, no de suposiciones. Para reemplazar, confirmalo con la persona antes.`,
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg,

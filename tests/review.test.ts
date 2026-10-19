@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { reviewFieldsInputSchema, toEditorValue, validateReview, wasEdited, type ReviewField } from '@/domain/review';
+import {
+  composeList,
+  defaultPicks,
+  diffList,
+  initialReviewValue,
+  picksFromList,
+  reviewFieldsInputSchema,
+  toEditorValue,
+  validateReview,
+  wasEdited,
+  type CompatRow,
+  type ReviewField,
+} from '@/domain/review';
 
 // Datos inventados.
 const base: ReviewField[] = [
@@ -74,5 +86,90 @@ describe('validar la revisión', () => {
     expect(reviewFieldsInputSchema.safeParse(wrong).success).toBe(false);
     expect(reviewFieldsInputSchema.safeParse([{ field: 'price', value: '1', included: true, fromAi: true }]).success).toBe(false);
     expect(reviewFieldsInputSchema.safeParse([base[0], base[0]]).success).toBe(false);
+  });
+});
+
+describe('listas fila por fila', () => {
+  const compat = (vehicleBrand: string, model: string, engine = '', yearFrom = '', yearTo = ''): CompatRow => ({
+    vehicleBrand,
+    model,
+    engine,
+    yearFrom,
+    yearTo,
+    note: '',
+  });
+  const gol = compat('Volkswagen', 'Gol', '1.6', '2009', '2014');
+  const corsa = compat('Chevrolet', 'Corsa', '1.6');
+  const uno = compat('Fiat', 'Uno', '1.3');
+
+  it('compatibilidades: lo que se suma, se saca y cambia, con lo que se saca en su lugar', () => {
+    const changes = diffList('compatibilities', [gol, corsa, uno], [{ ...gol, yearTo: '2016' }, uno, compat('Fiat', 'Palio', '1.3')]);
+    expect(changes.map((c) => c.kind)).toEqual(['change', 'remove', 'same', 'add']);
+    expect(changes[1].row).toEqual(corsa);
+  });
+
+  it('con el orden cambiado, no se pierde ninguna fila', () => {
+    const changes = diffList('compatibilities', [gol, corsa, uno], [uno, gol]);
+    expect(changes.map((c) => c.kind)).toEqual(['same', 'same', 'remove']);
+    expect(composeList(changes, defaultPicks(changes))).toEqual([uno, gol, corsa]);
+  });
+
+  it('por defecto no se saca nada', () => {
+    const changes = diffList('compatibilities', [gol, corsa], [gol]);
+    expect(defaultPicks(changes)).toEqual([true, false]);
+    expect(composeList(changes, defaultPicks(changes))).toEqual([gol, corsa]);
+    expect(composeList(changes, [true, true])).toEqual([gol]);
+  });
+
+  it('cambiar sin marcar deja la fila de hoy', () => {
+    const changes = diffList('compatibilities', [gol], [{ ...gol, yearTo: '2016' }]);
+    expect(composeList(changes, [false])).toEqual([gol]);
+    expect(composeList(changes, [true])).toEqual([{ ...gol, yearTo: '2016' }]);
+  });
+
+  it('ficha técnica: la misma fila por el nombre del dato', () => {
+    const changes = diffList(
+      'specs',
+      [
+        { name: 'Diámetro', value: '200 mm' },
+        { name: 'Estrías', value: '22' },
+      ],
+      [
+        { name: 'diámetro', value: '210 mm' },
+        { name: 'Material', value: 'Acero' },
+      ],
+    );
+    expect(changes.map((c) => c.kind)).toEqual(['change', 'remove', 'add']);
+  });
+
+  it('medidas: cada variante por su id, aunque esté vacía', () => {
+    const changes = diffList(
+      'measures',
+      [
+        { id: 'v1', sku: 'A', measure: '' },
+        { id: 'v2', sku: 'B', measure: 'STD' },
+      ],
+      [
+        { id: 'v1', sku: 'A', measure: '0,50' },
+        { id: 'v2', sku: 'B', measure: 'STD' },
+      ],
+    );
+    expect(changes.map((c) => c.kind)).toEqual(['change', 'same']);
+    // Una variante que falta en lo propuesto no se saca.
+    const missing = diffList('measures', [{ id: 'v1', sku: 'A', measure: 'STD' }], []);
+    expect(missing.map((c) => c.kind)).toEqual(['same']);
+  });
+
+  it('lee lo marcado de un borrador, y avisa si se editó a mano', () => {
+    const changes = diffList('compatibilities', [gol, corsa], [gol, uno]);
+    expect(picksFromList('compatibilities', changes, [gol, uno])).toEqual([true, true, true]);
+    expect(picksFromList('compatibilities', changes, [gol, corsa])).toEqual([true, false, false]);
+    expect(picksFromList('compatibilities', changes, [compat('Ford', 'Ka')])).toBeNull();
+  });
+
+  it('la revisión arranca sin sacar filas; los textos, como los propuso la IA', () => {
+    const current = [{ vehicleBrand: 'Volkswagen', model: 'Gol', engine: '1.6', yearFrom: 2009, yearTo: 2014, note: null }];
+    expect(initialReviewValue('compatibilities', current, [])).toEqual([gol]);
+    expect(initialReviewValue('brand', 'SKF', 'Sachs')).toBe('Sachs');
   });
 });

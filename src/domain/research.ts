@@ -5,8 +5,9 @@ import type { InsightKind } from '@/generated/prisma/enums';
 
 // La investigación del producto que se junta en el paso Información: lo del
 // fabricante, las aclaraciones para las imágenes, las preguntas de los
-// compradores y los dolores y objeciones. Es del producto, como la ficha, y
-// no sabe nada de canales.
+// compradores y los dolores y objeciones. Es del producto, como la ficha,
+// salvo las preguntas en la publicación propia, que son de cada publicación.
+// No sabe nada de canales.
 
 type Tx = Prisma.TransactionClient;
 
@@ -70,7 +71,6 @@ type ResearchFields = {
   manufacturerProductUrl?: string | null;
   manufacturerText?: string | null;
   clarifications?: string | null;
-  ownQuestions?: string | null;
   competitorQuestions?: string | null;
 };
 
@@ -82,6 +82,22 @@ export async function updateResearch(tx: Tx, args: { productId: string; userId: 
     update: data,
     create: { productId: args.productId, ...data },
   });
+}
+
+/**
+ * Las preguntas de los compradores. Las de la publicación propia quedan en esa
+ * publicación; las de la competencia, en el producto. Guarda las que llegan.
+ */
+export async function saveQuestions(
+  tx: Tx,
+  args: { productId: string; publicationId: string; userId: string | null; own?: string | null; competitors?: string | null },
+) {
+  if (args.own !== undefined) {
+    await tx.publication.update({ where: { id: args.publicationId }, data: { ownQuestions: args.own } });
+  }
+  if (args.competitors !== undefined) {
+    await updateResearch(tx, { productId: args.productId, userId: args.userId, data: { competitorQuestions: args.competitors } });
+  }
 }
 
 // ───────────────────────────── Dolores y objeciones ─────────────────────────────

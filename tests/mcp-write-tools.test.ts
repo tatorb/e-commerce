@@ -261,7 +261,7 @@ describe.skipIf(!url)('herramientas de escritura', () => {
     expect((await call('save_manufacturer_info', { publicacion: 'MLA1110001', pagina_del_producto: 'fabricante.com/kit' })).isError).toBe(true);
     await call('save_manufacturer_info', { publicacion: 'MLA1110001', pagina_del_producto: 'https://fabricante.com/kit' });
     await call('save_image_clarifications', { publicacion: 'MLA1110001', texto: 'Sirve para **Gol 1.6**\n- No confundir con 1.4' });
-    await call('save_buyer_questions', { publicacion: 'MLA1110001', propia: '¿Sirve para Gol 2012?' });
+    await call('save_buyer_questions', { publicacion: 'MLA1110001', propia: '¿Sirve para Gol 2012?', competencia: '¿Es original?' });
     await call('save_buyer_insights', { publicacion: 'MLA1110001', lista: 'dolores', accion: 'agregar', items: ['No sabe si le sirve'] });
     await call('save_buyer_insights', { publicacion: 'MLA1110001', lista: 'dolores', accion: 'agregar', items: ['Teme que no sea la medida'] });
     const obj = await call('save_buyer_insights', { publicacion: 'MLA1110001', lista: 'objeciones', accion: 'reemplazar', items: ['Duda de la calidad'] });
@@ -273,17 +273,21 @@ describe.skipIf(!url)('herramientas de escritura', () => {
       manufacturerSite: 'https://fabricante.com',
       manufacturerProductUrl: 'https://fabricante.com/kit',
       clarifications: '<p>Sirve para <strong>Gol 1.6</strong></p><ul><li><p>No confundir con 1.4</p></li></ul>',
-      ownQuestions: '¿Sirve para Gol 2012?',
+      competitorQuestions: '¿Es original?',
       updatedById: 'u1',
     });
+    const mine = await call('get_publication', { publicacion: 'MLA1110001' });
+    expect(mine.data.investigacion.preguntas).toEqual({ propia: '¿Sirve para Gol 2012?', competencia: '¿Es original?' });
+    expect(mine.data.ficha.publicaciones_que_la_comparten).toBe(2);
 
-    // Lo ve también la otra publicación del mismo producto, sin la línea del precio.
+    // Lo ve también la otra publicación del mismo producto, sin la línea del
+    // precio. Las preguntas propias no: son de cada publicación.
     const { data, text } = await call('get_publication', { publicacion: 'MLA1110002' });
     expect(text).not.toContain('777999');
     expect(data.investigacion).toMatchObject({
       fabricante: { sitio: 'https://fabricante.com', texto: 'Diámetro 200 mm', aviso: 'Se ocultó una línea que parecía un precio.', archivos: [] },
       aclaraciones_para_imagenes: 'Sirve para **Gol 1.6**\n- No confundir con 1.4',
-      preguntas: { propia: '¿Sirve para Gol 2012?', competencia: null },
+      preguntas: { propia: null, competencia: '¿Es original?' },
       dolores: ['No sabe si le sirve', 'Teme que no sea la medida'],
       objeciones: ['Duda de la calidad'],
     });
@@ -343,7 +347,14 @@ describe.skipIf(!url)('herramientas de escritura', () => {
       individual_o_combo: 'Combo',
       productos_del_combo: [{ nombre: 'Kit de embrague Gol', cantidad: 2, marca: 'Marca Uno', numero_de_pieza: 'P-100' }],
     });
-    expect(combo.data.tipo).toBe('Combo');
+    expect(combo.data.individual_o_combo).toBe('Combo');
+    // "tipo" es solo el tipo de producto.
+    expect(combo.data.ficha.tipo).not.toBe('Combo');
+    const ws = await call('get_title_workspace', { publicacion: 'MLA2220002' });
+    expect(ws.data.ficha).toMatchObject({
+      individual_o_combo: 'Combo',
+      productos_del_combo: [{ nombre: 'Kit de embrague Gol', cantidad: 2, marca: 'Marca Uno', numero_de_pieza: 'P-100' }],
+    });
     const part = await call('get_publication', { publicacion: 'MLA1110001' });
     expect(part.data.ficha).toMatchObject({ individual_o_combo: 'Individual', forma_parte_de_combos: [{ nombre: 'Bomba de agua', cantidad: 2 }] });
 
@@ -354,9 +365,11 @@ describe.skipIf(!url)('herramientas de escritura', () => {
     // Lo que falló no cambió nada.
     expect((await call('get_publication', { publicacion: 'MLA2220002' })).data.ficha.productos_del_combo).toHaveLength(1);
 
-    const combos = await call('search_catalog', { tipo: ['combo'] });
+    const combos = await call('search_catalog', { individual_o_combo: ['combo'] });
     expect(combos.data.publicaciones.map((p: { codigo: string }) => p.codigo)).toEqual(['MLA2220002']);
-    expect((await call('search_catalog', { tipo: ['individual'] })).data.total).toBe(2);
+    expect((await call('search_catalog', { individual_o_combo: ['individual'] })).data.total).toBe(2);
+    const board = await call('get_pipeline_board', { individual_o_combo: ['combo'] });
+    expect(board.isError).toBeFalsy();
   });
 
   it('update_title_rules: cambia solo lo que se manda, y restablecer vuelve a las del canal', async () => {

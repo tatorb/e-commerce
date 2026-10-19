@@ -1,7 +1,9 @@
 import type { PrismaClient } from '@/generated/prisma/client';
 import { cleanTitleProposals, requestTitles, type TitleInput, type TitleResult } from '@/ai/titles';
 import { ProposalError } from '@/ai/request';
+import { comboParts } from '@/domain/combos';
 import { structureFor } from '@/domain/title-rules';
+import { loadCombo } from '@/lib/queries/combos';
 import { loadTitleContext } from '@/lib/queries/title-step';
 
 // Pide a la IA 3 títulos con las palabras tildadas y los guarda en el trabajo
@@ -34,6 +36,7 @@ export async function generateTitles(
     rules: ctx.rules,
     structure: structureFor(ctx.rules, ctx.product.productType),
     product: ctx.product,
+    combo: comboParts(await loadCombo(db, ctx.publication.productId)),
     currentTitle: ctx.publication.title,
     words,
     suggestions: ctx.suggestions,

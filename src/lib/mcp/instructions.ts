@@ -12,7 +12,7 @@ Conceptos:
 - Individual o combo: un combo es un producto armado con productos individuales, cada uno con su cantidad. En el canal, combos e individuales son publicaciones del mismo nivel. Un producto puede tener varias publicaciones y estar en varios combos.
 - Catálogo: todas las publicaciones de la cuenta, con puntaje de 0 a 100 según el estándar de la cuenta, y visitas y ventas de 90 días.
 - Pipeline: el recorrido para corregir una publicación de punta a punta. Los pasos, en orden: ${PIPELINE_STEPS.map((s) => PIPELINE_STEP_LABEL[s]).join(', ')}. Una publicación puede estar sin tocar, en el pipeline, corregida o descartada.
-- Investigación del producto, en el paso Información: lo del fabricante, aclaraciones para las imágenes, preguntas de los compradores, y sus dolores y objeciones. Es del producto: la comparten todas sus publicaciones.
+- Investigación del producto, en el paso Información: lo del fabricante, aclaraciones para las imágenes, preguntas de los compradores, y sus dolores y objeciones. Es del producto: la comparten todas sus publicaciones, salvo las preguntas que recibió cada publicación.
 - Datos de catálogo, en el paso Información: los campos del formulario del canal para la categoría de la publicación, con las mismas opciones del canal. Son de la publicación. La categoría sale de la familia del producto o se elige a mano. Marca, número de pieza y origen salen de la ficha.
 - Paso Título: semillas, sugerencias del buscador del canal, mapa de palabras (se tildan las que se usan), búsquedas principales con su posición, propuestas y aprobación. Si la publicación tiene ventas, el título está bloqueado: se mantiene o se prueba en una copia con cuotas.
 

@@ -2,23 +2,30 @@
 
 import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, Check, Loader2, RotateCcw, X } from 'lucide-react';
+import { AlertTriangle, Check, ListChecks, Loader2, Pencil, RotateCcw, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { RowList } from '@/components/products/RowList';
-import { CONTENT_FIELD_KIND, CONTENT_FIELD_LABEL, type ContentField } from '@/domain/content';
+import { CONTENT_FIELD_KIND, CONTENT_FIELD_LABEL, isPublicationField, type ContentField } from '@/domain/content';
 import {
+  composeList,
+  defaultPicks,
+  diffList,
   findPlaceholders,
+  isListField,
+  picksFromList,
   REVIEWABLE_FIELDS,
   toEditorValue,
   validateReview,
   type CompatRow,
   type EditorValue,
+  type ListRow,
   type MeasureRow,
   type ReviewField,
   type ReviewProblem,
+  type RowChange,
   type SpecRow,
 } from '@/domain/review';
 import { cn } from '@/lib/utils/cn';
@@ -62,6 +69,8 @@ export function ReviewForm({
   const [message, setMessage] = useState<string | null>(savedText);
   const [error, setError] = useState<string | null>(null);
   const [serverProblems, setServerProblems] = useState<ReviewProblem[]>([]);
+  // Las listas que se pasaron al editor completo.
+  const [manual, setManual] = useState<Partial<Record<ContentField, boolean>>>({});
   const [pending, startTransition] = useTransition();
   const disabled = !canEdit || pending;
 
@@ -110,7 +119,15 @@ export function ReviewForm({
       {fields.map((f) => {
         const info = ai[f.field];
         const aiValue = info ? toEditorValue(f.field, info.value) : null;
-        const edited = aiValue !== null && JSON.stringify(aiValue) !== JSON.stringify(f.value);
+        // Las listas propuestas por la IA se eligen fila por fila, salvo que
+        // se hayan editado a mano.
+        const changes =
+          aiValue !== null && isListField(f.field)
+            ? diffList(f.field, toEditorValue(f.field, current[f.field]) as ListRow[], aiValue as ListRow[])
+            : null;
+        const picks = changes ? picksFromList(f.field, changes, f.value as ListRow[]) : null;
+        const byRows = changes !== null && picks !== null && !manual[f.field];
+        const edited = aiValue !== null && !byRows && JSON.stringify(aiValue) !== JSON.stringify(f.value);
         const marks = findPlaceholders(f.value);
         const own = problems.filter((p) => p.field === f.field);
         // Las listas anchas van una debajo de la otra: no entran en media pantalla.
@@ -129,11 +146,46 @@ export function ReviewForm({
                 />
                 {CONTENT_FIELD_LABEL[f.field]}
               </label>
+              {!isPublicationField(f.field) ? (
+                <span
+                  className="rounded-full border px-2 py-0.5 text-[11px] leading-none text-muted-foreground"
+                  title="Es del producto: cambia en todas sus publicaciones."
+                >
+                  De la ficha
+                </span>
+              ) : null}
               <span className="text-xs text-muted-foreground">{f.included ? 'Usar este cambio' : 'Queda como está'}</span>
               {!f.fromAi ? <span className="text-xs text-muted-foreground">· sumado en la revisión</span> : null}
               {edited ? <span className="text-xs text-muted-foreground">· editado</span> : null}
               <div className="ml-auto flex items-center gap-1">
-                {f.fromAi && edited ? (
+                {changes && byRows ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setManual((m) => ({ ...m, [f.field]: true }))}
+                    disabled={disabled}
+                  >
+                    <Pencil className="h-4 w-4" />
+                    Editar a mano
+                  </Button>
+                ) : null}
+                {changes && !byRows ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setManual((m) => ({ ...m, [f.field]: false }));
+                      update(f.field, { value: composeList(changes, picks ?? defaultPicks(changes)) as EditorValue });
+                    }}
+                    disabled={disabled}
+                  >
+                    <ListChecks className="h-4 w-4" />
+                    {picks ? 'Elegir fila por fila' : 'Volver a elegir fila por fila'}
+                  </Button>
+                ) : null}
+                {f.fromAi && edited && !changes ? (
                   <Button
                     type="button"
                     size="sm"
@@ -164,24 +216,36 @@ export function ReviewForm({
                 ) : null}
               </div>
             ) : null}
-            <div className={cn('grid', !wide && 'md:grid-cols-2 md:divide-x')}>
-              <div className="space-y-1 px-4 py-3 text-sm">
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">Hoy</p>
-                <div className="text-muted-foreground">
-                  <Value field={f.field} value={current[f.field]} />
-                </div>
-              </div>
-              <div className={cn('space-y-2 border-t px-4 py-3 text-sm', !wide && 'md:border-t-0')}>
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">Queda</p>
-                <FieldEditor
+            {byRows ? (
+              <div className="px-4 py-3">
+                <RowChanges
                   field={f.field}
-                  value={f.value}
-                  onChange={(value) => update(f.field, { value })}
-                  disabled={disabled}
-                  titleMaxLength={titleMaxLength}
+                  changes={changes}
+                  picks={picks}
+                  onChange={(next) => update(f.field, { value: composeList(changes, next) as EditorValue })}
+                  disabled={disabled || !f.included}
                 />
               </div>
-            </div>
+            ) : (
+              <div className={cn('grid', !wide && 'md:grid-cols-2 md:divide-x')}>
+                <div className="space-y-1 px-4 py-3 text-sm">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Hoy</p>
+                  <div className="text-muted-foreground">
+                    <Value field={f.field} value={current[f.field]} />
+                  </div>
+                </div>
+                <div className={cn('space-y-2 border-t px-4 py-3 text-sm', !wide && 'md:border-t-0')}>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Queda</p>
+                  <FieldEditor
+                    field={f.field}
+                    value={f.value}
+                    onChange={(value) => update(f.field, { value })}
+                    disabled={disabled}
+                    titleMaxLength={titleMaxLength}
+                  />
+                </div>
+              </div>
+            )}
             {(info?.toConfirm.length ?? 0) > 0 || marks.length > 0 || (f.included && own.length > 0) ? (
               <div className="space-y-1 border-t px-4 py-2.5">
                 <ToConfirm
@@ -254,6 +318,122 @@ export function ReviewForm({
           {error ? <span className="text-sm text-destructive">{error}</span> : null}
         </div>
       </div>
+    </div>
+  );
+}
+
+const CHANGE_LABEL: Record<Exclude<RowChange['kind'], 'same'>, { text: string; className: string }> = {
+  add: { text: 'Se suma', className: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700' },
+  remove: { text: 'Se saca', className: 'border-destructive/40 bg-destructive/10 text-destructive' },
+  change: { text: 'Cambia', className: 'border-amber-500/40 bg-amber-500/10 text-amber-700' },
+};
+
+function rowText(field: ContentField, row: ListRow): string {
+  switch (CONTENT_FIELD_KIND[field]) {
+    case 'specs': {
+      const r = row as SpecRow;
+      return `${r.name}: ${r.value}`;
+    }
+    case 'measures': {
+      const r = row as MeasureRow;
+      return `${r.sku || 'Sin SKU'}: ${r.measure || 'sin medida'}`;
+    }
+    default: {
+      const c = row as CompatRow;
+      const years =
+        c.yearFrom && c.yearTo
+          ? c.yearFrom === c.yearTo
+            ? c.yearFrom
+            : `${c.yearFrom} a ${c.yearTo}`
+          : c.yearFrom
+            ? `desde ${c.yearFrom}`
+            : c.yearTo
+              ? `hasta ${c.yearTo}`
+              : '';
+      const vehicle = [c.vehicleBrand, c.model, c.engine].filter(Boolean).join(' ');
+      return [vehicle, years, c.note].filter(Boolean).join(' · ');
+    }
+  }
+}
+
+/** Una lista fila por fila: lo que se suma, se saca o cambia, cada cosa con su casilla. */
+function RowChanges({
+  field,
+  changes,
+  picks,
+  onChange,
+  disabled,
+}: {
+  field: ContentField;
+  changes: RowChange[];
+  picks: boolean[];
+  onChange: (picks: boolean[]) => void;
+  disabled: boolean;
+}) {
+  const [showSame, setShowSame] = useState(false);
+  const same = changes.filter((c) => c.kind === 'same').length;
+  const anyRemoved = changes.some((c) => c.kind === 'remove');
+  const label = CONTENT_FIELD_LABEL[field].toLowerCase();
+  if (same === changes.length) {
+    return <p className="text-sm text-muted-foreground">La IA no cambia ninguna fila de {label}.</p>;
+  }
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-muted-foreground">
+        Marcá lo que querés usar.{anyRemoved ? ' Lo que se saca viene sin marcar: marcalo solo si querés sacarlo.' : ''}
+      </p>
+      <ul className="divide-y rounded-md border">
+        {changes.map((c, i) => {
+          if (c.kind === 'same') {
+            return showSame ? (
+              <li key={i} className="flex items-start gap-3 px-3 py-2 text-sm text-muted-foreground">
+                <span className="w-4 shrink-0" />
+                <span className="w-16 shrink-0 text-[11px] leading-5">Queda igual</span>
+                <span className="min-w-0 flex-1 break-words">{rowText(field, c.row)}</span>
+              </li>
+            ) : null;
+          }
+          const tag = CHANGE_LABEL[c.kind];
+          return (
+            <li key={i}>
+              <label className={cn('flex items-start gap-3 px-3 py-2 text-sm', !disabled && 'cursor-pointer hover:bg-muted/40')}>
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 shrink-0 accent-[hsl(var(--primary))]"
+                  checked={picks[i]}
+                  onChange={(e) => onChange(picks.map((p, j) => (j === i ? e.target.checked : p)))}
+                  disabled={disabled}
+                  aria-label={`${tag.text}: ${rowText(field, c.row)}`}
+                />
+                <span
+                  className={cn('w-16 shrink-0 rounded-full border px-1.5 py-0.5 text-center text-[11px] leading-none', tag.className)}
+                >
+                  {tag.text}
+                </span>
+                <span className="min-w-0 flex-1 break-words">
+                  {c.kind === 'change' ? (
+                    <>
+                      <span className="block text-muted-foreground line-through">{rowText(field, c.before)}</span>
+                      <span className="block">{rowText(field, c.row)}</span>
+                    </>
+                  ) : (
+                    <span className={cn(c.kind === 'remove' && 'text-muted-foreground')}>{rowText(field, c.row)}</span>
+                  )}
+                </span>
+              </label>
+            </li>
+          );
+        })}
+      </ul>
+      {same > 0 ? (
+        <button
+          type="button"
+          className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+          onClick={() => setShowSame((v) => !v)}
+        >
+          {showSame ? 'Ocultar las que quedan igual' : same === 1 ? 'Ver la fila que queda igual' : `Ver las ${same} filas que quedan igual`}
+        </button>
+      ) : null}
     </div>
   );
 }
