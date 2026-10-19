@@ -142,3 +142,103 @@ export async function moveInsight(tx: Tx, args: { productId: string; id: string;
     if (x.position !== position) await tx.buyerInsight.update({ where: { id: x.id }, data: { position } });
   }
 }
+
+// ───────────────────────────── Texto con formato ↔ texto simple ─────────────────────────────
+// Para la conexión con Claude: lee y escribe el texto con formato como
+// Markdown simple (**negrita**, _cursiva_, listas con "- " o "1. ").
+
+const decode = (s: string) =>
+  s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
+
+/** El HTML limpio como Markdown simple. */
+export function richTextToMarkdown(html: string | null): string {
+  if (!html) return '';
+  const lines: string[] = [];
+  const lists: { ordered: boolean; n: number }[] = [];
+  let line = '';
+  const flush = () => {
+    if (line.trim()) lines.push(line.replace(/\s+$/, ''));
+    line = '';
+  };
+  for (const m of html.matchAll(/<(\/?)(p|br|strong|em|ul|ol|li)\s*\/?>|([^<]+)/g)) {
+    const [, close, tag, text] = m;
+    if (text !== undefined) {
+      line += decode(text);
+      continue;
+    }
+    if (tag === 'strong') line += '**';
+    else if (tag === 'em') line += '_';
+    else if (tag === 'br') flush();
+    else if (tag === 'ul' || tag === 'ol') {
+      flush();
+      if (close) lists.pop();
+      else lists.push({ ordered: tag === 'ol', n: 0 });
+    } else if (tag === 'li' && !close) {
+      flush();
+      const list = lists[lists.length - 1];
+      if (list) list.n++;
+      line = `${'  '.repeat(Math.max(0, lists.length - 1))}${list?.ordered ? `${list.n}. ` : '- '}`;
+    } else if (tag === 'p' && close && lists.length === 0) flush();
+    else if (tag === 'li' && close) flush();
+  }
+  flush();
+  return lines.join('\n');
+}
+
+const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const inline = (s: string) =>
+  escapeHtml(s)
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[^\w])_(.+?)_(?=[^\w]|$)/g, '$1<em>$2</em>')
+    .replace(/(^|[^*])\*([^*]+?)\*(?!\*)/g, '$1<em>$2</em>');
+
+/** Markdown simple a HTML limpio. Vacío da null. */
+export function markdownToRichText(md: string): string | null {
+  const out: string[] = [];
+  let list: 'ul' | 'ol' | null = null;
+  const close = () => {
+    if (list) out.push(`</${list}>`);
+    list = null;
+  };
+  for (const raw of md.split(/\r?\n/)) {
+    const bullet = raw.match(/^\s*[-*•]\s+(.*)$/);
+    const numbered = raw.match(/^\s*\d+[.)]\s+(.*)$/);
+    const item = bullet ?? numbered;
+    if (item) {
+      const kind = bullet ? 'ul' : 'ol';
+      if (list !== kind) {
+        close();
+        out.push(`<${kind}>`);
+        list = kind;
+      }
+      out.push(`<li><p>${inline(item[1].trim())}</p></li>`);
+    } else {
+      close();
+      if (raw.trim()) out.push(`<p>${inline(raw.trim())}</p>`);
+    }
+  }
+  close();
+  return cleanRichText(out.join(''));
+}
+
+/** Saca las líneas que parecen precios o listas de precios, por si se pegaron en el texto del fabricante. */
+export function withoutPrices(text: string | null): { text: string | null; hidden: number } {
+  if (!text) return { text, hidden: 0 };
+  const lines = text.split(/\r?\n/);
+  const keep = lines.filter((l) => !/\$\s?\d|\b(precio|precios|costo|costos|lista de precios|usd|u\$s)\b/i.test(l));
+  return { text: keep.join('\n'), hidden: lines.length - keep.length };
+}
+
+/** Reemplaza la lista entera de dolores u objeciones. */
+export async function replaceInsights(tx: Tx, args: { productId: string; kind: InsightKind; texts: string[] }) {
+  const texts = [...new Set(args.texts.map(cleanInsight))];
+  if (texts.length > MAX_INSIGHTS) throw new ResearchError(`Hasta ${MAX_INSIGHTS} por lista.`);
+  await lockInsights(tx, args.productId);
+  await tx.buyerInsight.deleteMany({ where: { productId: args.productId, kind: args.kind } });
+  if (texts.length > 0) {
+    await tx.buyerInsight.createMany({
+      data: texts.map((text, position) => ({ productId: args.productId, kind: args.kind, text, position })),
+    });
+  }
+  return texts;
+}

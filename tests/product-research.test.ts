@@ -9,6 +9,10 @@ import {
   cleanRichText,
   deleteInsight,
   manufacturerSchema,
+  markdownToRichText,
+  replaceInsights,
+  richTextToMarkdown,
+  withoutPrices,
   moveInsight,
   ResearchError,
   updateInsight,
@@ -36,6 +40,26 @@ describe('texto con formato', () => {
     expect(cleanRichText('<p></p>')).toBeNull();
     expect(cleanRichText('  ')).toBeNull();
     expect(() => cleanRichText(`<p>${'a'.repeat(60_000)}</p>`)).toThrow(ResearchError);
+  });
+});
+
+describe('texto con formato para Claude', () => {
+  it('ida y vuelta entre HTML y Markdown simple', () => {
+    const html = '<p>Sirve para <strong>Gol 1.6</strong> y <em>Saveiro</em>.</p><ul><li><p>No confundir con 1.4</p></li></ul><ol><li><p>Uno</p></li><li><p>Dos</p></li></ol>';
+    const md = richTextToMarkdown(html);
+    expect(md).toBe('Sirve para **Gol 1.6** y _Saveiro_.\n- No confundir con 1.4\n1. Uno\n2. Dos');
+    expect(markdownToRichText(md)).toBe(html);
+  });
+
+  it('escapa lo que no es formato y vacío da null', () => {
+    expect(markdownToRichText('<b>x</b> & *y*')).toBe('<p>&lt;b&gt;x&lt;/b&gt; &amp; <em>y</em></p>');
+    expect(markdownToRichText('  \n ')).toBeNull();
+    expect(richTextToMarkdown(null)).toBe('');
+  });
+
+  it('oculta las líneas que parecen precios', () => {
+    expect(withoutPrices('Diámetro 200 mm\nPrecio de lista: 1000\nCosto $ 500\n24 estrías')).toEqual({ text: 'Diámetro 200 mm\n24 estrías', hidden: 2 });
+    expect(withoutPrices(null)).toEqual({ text: null, hidden: 0 });
   });
 });
 
@@ -171,6 +195,17 @@ describe.skipIf(!url)('investigación del producto en la base', () => {
     expect(await texts('OBJECTION')).toEqual(['objeción']);
     // Solo los del producto.
     await expect(updateInsight(db, { productId: otherId, id: b.id, text: 'x' })).rejects.toThrow('ya no existe');
+  });
+
+  it('reemplazar una lista deja la otra como estaba', async () => {
+    await db.$transaction((tx) => addInsight(tx, { productId, kind: 'OBJECTION', text: 'objeción' }));
+    await db.$transaction((tx) => replaceInsights(tx, { productId, kind: 'PAIN', texts: ['a', ' a ', 'b'] }));
+    const all = await db.buyerInsight.findMany({ where: { productId }, orderBy: [{ kind: 'asc' }, { position: 'asc' }] });
+    expect(all.map((i) => [i.kind, i.text, i.position])).toEqual([
+      ['PAIN', 'a', 0],
+      ['PAIN', 'b', 1],
+      ['OBJECTION', 'objeción', 0],
+    ]);
   });
 
   it('anota un archivo del depósito con su tipo y peso reales', async () => {

@@ -13,6 +13,15 @@ import {
   removeFromPipeline,
 } from '@/domain/pipeline';
 import { productInfoSchema, updateProductInfo } from '@/domain/product-info';
+import {
+  addInsight,
+  manufacturerSchema,
+  markdownToRichText,
+  MAX_INSIGHTS,
+  questionsSchema,
+  replaceInsights,
+  updateResearch,
+} from '@/domain/research';
 import { titleRulesInputSchema } from '@/domain/title-rules';
 import {
   approveTitle,
@@ -348,6 +357,126 @@ const saveCompetitorsTool = defineTool({
   },
 });
 
+// ───────────────────────────── Investigación del producto ─────────────────────────────
+
+async function productTarget(ctx: McpContext, args: { cuenta?: string; publicacion: string }) {
+  const { account, id } = await target(ctx, args);
+  const pub = await ctx.db.publication.findUniqueOrThrow({
+    where: { id },
+    select: { productId: true, product: { select: { research: true } } },
+  });
+  return { account, id, productId: pub.productId, research: pub.product.research };
+}
+
+const keepOr = (sent: string | undefined, current: string | null | undefined) => (sent === undefined ? (current ?? '') : sent);
+
+const saveManufacturerTool = defineTool({
+  name: 'save_manufacturer_info',
+  title: 'Guardar lo del fabricante',
+  description:
+    'Guarda el sitio del fabricante, la página del producto y el texto del fabricante, en la investigación del producto. Lo comparten todas sus publicaciones. Lo que no se manda queda como está; vacío lo borra. Solo datos reales que te pasó la persona; nunca precios ni costos del proveedor. Los archivos se suben desde la app.',
+  input: z.object({
+    cuenta: accountArg,
+    publicacion: publicationArg,
+    sitio: z.string().optional().describe('El sitio del fabricante, con https://.'),
+    pagina_del_producto: z.string().optional().describe('La página de este producto en el sitio del fabricante, con https://.'),
+    texto: z.string().optional().describe('Lo que dice el fabricante: descripción, ficha técnica.'),
+  }),
+  readOnly: false,
+  destructive: true,
+  async run(ctx, args) {
+    const { account, id, productId, research: r } = await productTarget(ctx, args);
+    const parsed = manufacturerSchema.safeParse({
+      site: keepOr(args.sitio, r?.manufacturerSite),
+      productUrl: keepOr(args.pagina_del_producto, r?.manufacturerProductUrl),
+      text: keepOr(args.texto, r?.manufacturerText),
+    });
+    if (!parsed.success) throw new McpToolError(parsed.error.issues[0]?.message ?? 'Revisá los datos.');
+    const { site, productUrl, text } = parsed.data;
+    await updateResearch(ctx.db, {
+      productId,
+      userId: ctx.userId,
+      data: { manufacturerSite: site, manufacturerProductUrl: productUrl, manufacturerText: text },
+    });
+    return { listo: true, link_app: appLink(ctx, account, id) };
+  },
+});
+
+const saveClarificationsTool = defineTool({
+  name: 'save_image_clarifications',
+  title: 'Guardar las aclaraciones para las imágenes',
+  description:
+    'Guarda las aclaraciones para las imágenes del producto: modelos compatibles, confusiones habituales y lo que tiene que quedar claro. Reemplaza el texto entero. Se escribe en Markdown simple: **negrita**, _cursiva_, listas con "- " o "1. ". Usá solo datos de la ficha o que te dio la persona.',
+  input: z.object({ cuenta: accountArg, publicacion: publicationArg, texto: z.string().describe('Vacío lo borra.') }),
+  readOnly: false,
+  destructive: true,
+  async run(ctx, args) {
+    const { account, id, productId } = await productTarget(ctx, args);
+    await updateResearch(ctx.db, { productId, userId: ctx.userId, data: { clarifications: markdownToRichText(args.texto) } });
+    return { listo: true, link_app: appLink(ctx, account, id) };
+  },
+});
+
+const saveQuestionsTool = defineTool({
+  name: 'save_buyer_questions',
+  title: 'Guardar las preguntas de los compradores',
+  description:
+    'Guarda las preguntas de los compradores que te pegó la persona: las de la publicación propia y las de la competencia, tal como vienen. Lo que no se manda queda como está; vacío lo borra.',
+  input: z.object({
+    cuenta: accountArg,
+    publicacion: publicationArg,
+    propia: z.string().optional().describe('Las preguntas de la publicación propia.'),
+    competencia: z.string().optional().describe('Las preguntas de las publicaciones de la competencia.'),
+  }),
+  readOnly: false,
+  destructive: true,
+  async run(ctx, args) {
+    const { account, id, productId, research: r } = await productTarget(ctx, args);
+    const parsed = questionsSchema.safeParse({
+      own: keepOr(args.propia, r?.ownQuestions),
+      competitors: keepOr(args.competencia, r?.competitorQuestions),
+    });
+    if (!parsed.success) throw new McpToolError(parsed.error.issues[0]?.message ?? 'Revisá los datos.');
+    await updateResearch(ctx.db, {
+      productId,
+      userId: ctx.userId,
+      data: { ownQuestions: parsed.data.own, competitorQuestions: parsed.data.competitors },
+    });
+    return { listo: true, link_app: appLink(ctx, account, id) };
+  },
+});
+
+const KIND = { dolores: 'PAIN', objeciones: 'OBJECTION' } as const;
+
+const saveInsightsTool = defineTool({
+  name: 'save_buyer_insights',
+  title: 'Guardar dolores u objeciones',
+  description: `Agrega a la lista de dolores o de objeciones de los compradores, o la reemplaza entera, hasta ${MAX_INSIGHTS} por lista. Cada ítem es una frase corta. Tienen que salir de las preguntas guardadas o de lo que te dijo la persona, no de suposiciones. Para reemplazar, confirmalo con la persona antes.`,
+  input: z.object({
+    cuenta: accountArg,
+    publicacion: publicationArg,
+    lista: z.enum(['dolores', 'objeciones']),
+    accion: z.enum(['agregar', 'reemplazar']).describe('agregar suma al final; reemplazar cambia la lista entera, y una lista vacía la borra.'),
+    items: z.array(z.string()).max(MAX_INSIGHTS),
+  }),
+  readOnly: false,
+  destructive: true,
+  async run(ctx, args) {
+    const { account, id, productId } = await productTarget(ctx, args);
+    const kind = KIND[args.lista];
+    if (args.accion === 'reemplazar') {
+      await ctx.db.$transaction((tx) => replaceInsights(tx, { productId, kind, texts: args.items }));
+    } else {
+      if (args.items.length === 0) throw new McpToolError('Falta al menos un ítem.');
+      await ctx.db.$transaction(async (tx) => {
+        for (const text of args.items) await addInsight(tx, { productId, kind, text });
+      });
+    }
+    const list = await ctx.db.buyerInsight.findMany({ where: { productId, kind }, orderBy: { position: 'asc' }, select: { text: true } });
+    return { listo: true, [args.lista]: list.map((i) => i.text), link_app: appLink(ctx, account, id) };
+  },
+});
+
 // ───────────────────────────── Título ─────────────────────────────
 
 const saveSeedsTool = defineTool({
@@ -628,6 +757,10 @@ export const WRITE_TOOLS = [
   removeTool,
   updateProductInfoTool,
   saveCompetitorsTool,
+  saveManufacturerTool,
+  saveClarificationsTool,
+  saveQuestionsTool,
+  saveInsightsTool,
   saveSeedsTool,
   saveSuggestionsTool,
   setWordsTool,

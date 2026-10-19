@@ -11,6 +11,7 @@ import {
   PIPELINE_STEP_LABEL,
   pipelineLabel,
 } from '@/domain/pipeline';
+import { richTextToMarkdown, withoutPrices } from '@/domain/research';
 import { titleLockText, type TitleLock } from '@/domain/title-lock';
 import { structureFor } from '@/domain/title-rules';
 import { checkTitle, titleCoverage } from '@/domain/titles';
@@ -28,6 +29,7 @@ import {
 } from '@/lib/queries/catalog-filters';
 import { listBoard, listPipelineMovements } from '@/lib/queries/pipeline';
 import { listScoredPublications, type ScoredPublication } from '@/lib/queries/scoring';
+import { loadResearch } from '@/lib/queries/research';
 import { loadTitleContext } from '@/lib/queries/title-step';
 import {
   McpToolError,
@@ -284,13 +286,13 @@ const getPublication = defineTool({
   name: 'get_publication',
   title: 'Ver una publicación',
   description:
-    'Muestra todo de una publicación: la ficha del producto (la fuente de verdad), el título y la descripción actuales, los atributos del canal, el puntaje y lo que le falta, la última medición, el estado e historial del pipeline, el candado del título y la competencia cargada.',
+    'Muestra todo de una publicación: la ficha del producto (la fuente de verdad), el título y la descripción actuales, los atributos del canal, el puntaje y lo que le falta, la última medición, el estado e historial del pipeline, el candado del título, la competencia cargada y la investigación del producto: lo del fabricante, las aclaraciones para las imágenes, las preguntas de los compradores y sus dolores y objeciones.',
   input: z.object({ cuenta: accountArg, publicacion: publicationArg }),
   readOnly: true,
   async run(ctx, args) {
     const account = await resolveAccount(ctx.db, args.cuenta);
     const id = await resolvePublication(ctx.db, account.id, args.publicacion);
-    const [pub, [scored], movements] = await Promise.all([
+    const [pub, [scored], movements, research] = await Promise.all([
       ctx.db.publication.findUniqueOrThrow({
         where: { id },
         select: {
@@ -333,8 +335,11 @@ const getPublication = defineTool({
       }),
       listScoredPublications(account.id, { id }, ctx.db),
       listPipelineMovements(id, ctx.db),
+      ctx.db.publication.findUniqueOrThrow({ where: { id }, select: { productId: true } }).then((p) => loadResearch(ctx.db, p.productId)),
     ]);
     const product = pub.product;
+    const r = research.research;
+    const manufacturerText = withoutPrices(r?.manufacturerText ?? null);
     const measurement = pub.measurements[0] ?? null;
     return {
       ...summary(ctx, account, scored),
@@ -388,6 +393,29 @@ const getPublication = defineTool({
         })),
       },
       competencia: pub.competitors.map((c) => ({ titulo: c.title, vendidos: c.soldQuantity, link: c.url })),
+      investigacion: {
+        fabricante: {
+          sitio: r?.manufacturerSite ?? null,
+          pagina_del_producto: r?.manufacturerProductUrl ?? null,
+          texto: manufacturerText.text,
+          ...(manufacturerText.hidden > 0 ? {
+                aviso:
+                  manufacturerText.hidden === 1
+                    ? 'Se ocultó una línea que parecía un precio.'
+                    : `Se ocultaron ${manufacturerText.hidden} líneas que parecían precios.`,
+              } : {}),
+          archivos: research.files.map((f) => ({
+            nombre: f.name,
+            tipo: f.kind === 'PDF' ? 'pdf' : 'imagen',
+            kb: Math.max(1, Math.round(f.size / 1024)),
+            link: f.url,
+          })),
+        },
+        aclaraciones_para_imagenes: richTextToMarkdown(r?.clarifications ?? null) || null,
+        preguntas: { propia: r?.ownQuestions ?? null, competencia: r?.competitorQuestions ?? null },
+        dolores: research.pains.map((i) => i.text),
+        objeciones: research.objections.map((i) => i.text),
+      },
     };
   },
 });

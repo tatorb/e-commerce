@@ -21,7 +21,7 @@ describe('herramientas de escritura en la lista', () => {
     expect(tools.get('approve_title')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('remove_from_pipeline')).toMatchObject({ destructiveHint: true });
     expect(tools.get('get_publication')).toEqual(expect.not.objectContaining({ destructiveHint: expect.anything() }));
-    expect(tools.size).toBe(20);
+    expect(tools.size).toBe(24);
   });
 });
 
@@ -246,6 +246,44 @@ describe.skipIf(!url)('herramientas de escritura', () => {
     await call('decide_title_lock', { publicacion: 'MLA2220002', decision: 'probar_en_copia' });
     const r = await call('approve_title', { publicacion: 'MLA2220002', titulo: 'Bomba Agua Fiat Uno 1.3' });
     expect(r.data).toMatchObject({ mensaje: 'Título guardado para la copia con cuotas.', titulo: 'Bomba Agua Fiat' });
+  });
+
+  it('investigación del producto: fabricante, aclaraciones, preguntas, dolores y objeciones', async () => {
+    const m = await call('save_manufacturer_info', {
+      publicacion: 'MLA1110001',
+      sitio: 'https://fabricante.com',
+      texto: 'Diámetro 200 mm\nPrecio de lista 777999',
+    });
+    expect(m.data.listo).toBe(true);
+    expect((await call('save_manufacturer_info', { publicacion: 'MLA1110001', pagina_del_producto: 'fabricante.com/kit' })).isError).toBe(true);
+    await call('save_manufacturer_info', { publicacion: 'MLA1110001', pagina_del_producto: 'https://fabricante.com/kit' });
+    await call('save_image_clarifications', { publicacion: 'MLA1110001', texto: 'Sirve para **Gol 1.6**\n- No confundir con 1.4' });
+    await call('save_buyer_questions', { publicacion: 'MLA1110001', propia: '¿Sirve para Gol 2012?' });
+    await call('save_buyer_insights', { publicacion: 'MLA1110001', lista: 'dolores', accion: 'agregar', items: ['No sabe si le sirve'] });
+    await call('save_buyer_insights', { publicacion: 'MLA1110001', lista: 'dolores', accion: 'agregar', items: ['Teme que no sea la medida'] });
+    const obj = await call('save_buyer_insights', { publicacion: 'MLA1110001', lista: 'objeciones', accion: 'reemplazar', items: ['Duda de la calidad'] });
+    expect(obj.data.objeciones).toEqual(['Duda de la calidad']);
+    expect((await call('save_buyer_insights', { publicacion: 'MLA1110001', lista: 'dolores', accion: 'agregar', items: [] })).isError).toBe(true);
+
+    const r = await db.productResearch.findUniqueOrThrow({ where: { productId } });
+    expect(r).toMatchObject({
+      manufacturerSite: 'https://fabricante.com',
+      manufacturerProductUrl: 'https://fabricante.com/kit',
+      clarifications: '<p>Sirve para <strong>Gol 1.6</strong></p><ul><li><p>No confundir con 1.4</p></li></ul>',
+      ownQuestions: '¿Sirve para Gol 2012?',
+      updatedById: 'u1',
+    });
+
+    // Lo ve también la otra publicación del mismo producto, sin la línea del precio.
+    const { data, text } = await call('get_publication', { publicacion: 'MLA1110002' });
+    expect(text).not.toContain('777999');
+    expect(data.investigacion).toMatchObject({
+      fabricante: { sitio: 'https://fabricante.com', texto: 'Diámetro 200 mm', aviso: 'Se ocultó una línea que parecía un precio.', archivos: [] },
+      aclaraciones_para_imagenes: 'Sirve para **Gol 1.6**\n- No confundir con 1.4',
+      preguntas: { propia: '¿Sirve para Gol 2012?', competencia: null },
+      dolores: ['No sabe si le sirve', 'Teme que no sea la medida'],
+      objeciones: ['Duda de la calidad'],
+    });
   });
 
   it('update_title_rules: cambia solo lo que se manda, y restablecer vuelve a las del canal', async () => {
