@@ -19,9 +19,10 @@ const { handleRpc, toolList } = await import('@/lib/mcp/server');
 const SECRETS = ['987654', '777001', '777002', '777003', 'clave-secreta-inventada'];
 
 describe('lista de herramientas', () => {
-  it('cada una con su esquema y marcada como de lectura', () => {
+  it('las de lectura, cada una con su esquema y marcada como de lectura', () => {
     const tools = toolList();
-    expect(tools.map((t) => t.name)).toEqual([
+    const read = tools.filter((t) => t.annotations.readOnlyHint);
+    expect(read.map((t) => t.name)).toEqual([
       'list_accounts',
       'search_catalog',
       'get_pipeline_board',
@@ -32,7 +33,6 @@ describe('lista de herramientas', () => {
     for (const t of tools) {
       expect(t.inputSchema.type).toBe('object');
       expect(t.inputSchema).not.toHaveProperty('$schema');
-      expect(t.annotations.readOnlyHint).toBe(true);
     }
     const search = tools.find((t) => t.name === 'search_catalog')!.inputSchema as { required?: string[]; properties: Record<string, unknown> };
     expect(search.required ?? []).toEqual([]);

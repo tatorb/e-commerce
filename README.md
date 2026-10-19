@@ -68,9 +68,10 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
   El resto de la app usa la interfaz `ChannelAdapter`.
 - `src/lib/mcp/`: la conexión con Claude (MCP). `oauth.ts` es el permiso: registro del programa, código de un solo
   uso con PKCE, llaves de 30 días y desconexión. `redirect-allowlist.ts` dice a qué direcciones puede volver el
-  permiso (las de Claude, las de la propia computadora y las de `MCP_OAUTH_REDIRECT_URIS`). `read-tools.ts` son
-  las herramientas: una capa fina sobre las mismas consultas de las pantallas, que nunca devuelve precios ni
-  datos de las conexiones con los canales. `server.ts` resuelve el protocolo a mano, una respuesta por pedido.
+  permiso (las de Claude, las de la propia computadora y las de `MCP_OAUTH_REDIRECT_URIS`). `read-tools.ts` y
+  `write-tools.ts` son las herramientas: una capa fina sobre las mismas consultas y la misma lógica de las
+  pantallas, con las mismas reglas y avisos. Nunca devuelven precios ni datos de las conexiones con los canales,
+  y cada cambio queda a nombre de la persona que conectó a Claude. No usan la IA de la app. `server.ts` resuelve el protocolo a mano, una respuesta por pedido.
   La pantalla de permiso es `/conectar-claude`.
 - `src/importers/`: el único lugar que sabe leer archivos. Lee Excel y CSV en el navegador,
   propone qué columna va a qué campo, traba las columnas confidenciales y traduce cada fila a

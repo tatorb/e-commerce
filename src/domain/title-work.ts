@@ -1,4 +1,4 @@
-import type { Prisma } from '@/generated/prisma/client';
+import { Prisma } from '@/generated/prisma/client';
 import type { CaptureSource, TitleLockDecision } from '@/generated/prisma/enums';
 import { writeContentField } from './content';
 import { advanceStep, PipelineError } from './pipeline';
@@ -72,6 +72,26 @@ export async function setWordStatus(tx: Tx, publicationId: string, word: string,
     await tx.$executeRaw`
       UPDATE title_works SET words = words - ${key}::text, "updatedAt" = now() WHERE "publicationId" = ${publicationId}`;
   }
+}
+
+export const MAX_PROPOSALS = 3;
+
+/**
+ * Guarda propuestas de título armadas fuera de la app, por ejemplo por Claude
+ * en una conversación. Reemplazan las que había y aparecen en el paso para
+ * elegir. Sin costo de la IA de la app.
+ */
+export async function saveProposals(tx: Tx, publicationId: string, proposals: TitleProposal[], now: Date = new Date()) {
+  const clean: TitleProposal[] = [];
+  for (const p of proposals) {
+    const title = p.title.replace(/\s+/g, ' ').trim().slice(0, 300);
+    if (title && !clean.some((c) => sameText(c.title, title))) clean.push({ title, reason: p.reason.trim().slice(0, 1000) });
+  }
+  if (clean.length === 0) throw new TitleError('Falta al menos una propuesta.');
+  if (clean.length > MAX_PROPOSALS) throw new TitleError(`Hasta ${MAX_PROPOSALS} propuestas.`);
+  const data = { proposals: clean, proposalsAt: now, proposalUsage: Prisma.DbNull };
+  await tx.titleWork.upsert({ where: { publicationId }, update: data, create: { publicationId, ...data } });
+  return clean;
 }
 
 export const MAX_MAIN_SEARCHES = 5;

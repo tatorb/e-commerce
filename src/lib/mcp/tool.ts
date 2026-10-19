@@ -24,6 +24,8 @@ export type McpTool<S extends z.ZodType = z.ZodType> = {
   input: S;
   // Solo lee: Claude la puede usar sin pedir confirmación.
   readOnly: boolean;
+  // Pisa o borra algo que ya estaba, o mueve la publicación de una forma que conviene confirmar.
+  destructive?: boolean;
   run: (ctx: McpContext, args: z.output<S>) => Promise<unknown>;
 };
 

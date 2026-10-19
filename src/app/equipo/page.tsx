@@ -114,8 +114,8 @@ export default async function TeamPage() {
           <CardHeader>
             <CardTitle>Conexión con Claude</CardTitle>
             <CardDescription>
-              Conectá tu Claude con la app para consultar el Catálogo y el Pipeline desde una conversación. Usa tu
-              usuario: lo que haga queda a tu nombre.
+              Conectá tu Claude con la app para consultar y trabajar el Catálogo y el Pipeline desde una conversación.
+              Usa tu usuario: lo que haga queda a tu nombre.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">

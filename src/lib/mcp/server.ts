@@ -1,5 +1,8 @@
 import { z } from 'zod';
+import { PipelineError } from '@/domain/pipeline';
+import { TitleError } from '@/domain/title-work';
 import { READ_TOOLS } from './read-tools';
+import { WRITE_TOOLS } from './write-tools';
 import { MCP_INSTRUCTIONS } from './instructions';
 import { McpToolError, type McpContext, type McpTool } from './tool';
 
@@ -9,7 +12,7 @@ import { McpToolError, type McpContext, type McpTool } from './tool';
 const SUPPORTED_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 const SERVER_INFO = { name: 'ecommerce-studio-mrb', title: 'E-commerce Studio MRB', version: '1.0.0' };
 
-export const TOOLS: McpTool[] = [...READ_TOOLS];
+export const TOOLS: McpTool[] = [...READ_TOOLS, ...WRITE_TOOLS];
 
 export type RpcMessage = {
   jsonrpc?: string;
@@ -34,7 +37,12 @@ export function toolList() {
       title: t.title,
       description: t.description,
       inputSchema: schema,
-      annotations: { title: t.title, readOnlyHint: t.readOnly, openWorldHint: false },
+      annotations: {
+        title: t.title,
+        readOnlyHint: t.readOnly,
+        ...(t.readOnly ? {} : { destructiveHint: t.destructive === true }),
+        openWorldHint: false,
+      },
     };
   });
 }
@@ -56,6 +64,10 @@ async function callTool(ctx: McpContext, name: string, rawArgs: unknown) {
     return text(JSON.stringify(out));
   } catch (e) {
     if (e instanceof McpToolError) return text(e.message, true);
+    // Los avisos de la app hablan de la pantalla: para Claude, volver a consultar.
+    if (e instanceof PipelineError || e instanceof TitleError) {
+      return text(e.message.replace(/Recargá la página\./g, 'Volvé a consultarla antes de seguir.'), true);
+    }
     console.error(`[mcp] ${name} falló: ${e instanceof Error ? e.name : 'error'}`);
     return text('Algo falló en la app al hacer esto. Probá de nuevo en un rato.', true);
   }
