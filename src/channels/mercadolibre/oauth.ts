@@ -78,14 +78,17 @@ async function getJson(path: string, accessToken: string): Promise<unknown> {
 }
 
 export const mercadolibreConnector: ChannelConnector = {
-  setupSteps(redirectUri) {
+  setupSteps({ redirectUri, noticesUri }) {
     return [
-      'Entrá a developers.mercadolibre.com.ar con el usuario principal de la cuenta de Mercado Libre del cliente.',
+      'Entrá a developers.mercadolibre.com.ar/devcenter con el usuario principal de la cuenta de Mercado Libre del cliente.',
       'Andá a "Mis aplicaciones" y tocá "Crear aplicación". Si pide validar los datos del titular, tienen que ser exactamente los de cuando se creó la cuenta.',
       'Nombre: E-commerce Studio MRB. Completá la descripción corta con "Corrección de publicaciones".',
       `En "URIs de redirect" pegá exactamente: ${redirectUri}`,
       'Activá PKCE.',
-      'En permisos elegí lectura y escritura de publicaciones, lectura de usuarios y de métricas, y acceso sin conexión ("offline access"). No hace falta nada de ventas, mensajes ni pagos.',
+      'En los flujos OAuth marcá Authorization Code y Refresh token. Client credentials no.',
+      'En unidades de negocio elegí solo Mercado Libre, sin VIS.',
+      'En permisos elegí lectura y escritura de publicaciones, lectura de usuarios y de métricas, y acceso sin conexión ("offline access"). Ventas, mensajes, facturación, pagos, promociones y publicidad, sin acceso.',
+      `En "Notificaciones callbacks URL" pegá: ${noticesUri}. No marques ningún tópico.`,
       'Guardá. Copiá el App ID y la Clave secreta y pegalos acá abajo.',
     ];
   },

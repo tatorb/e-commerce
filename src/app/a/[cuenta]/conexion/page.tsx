@@ -12,7 +12,7 @@ import { KeySetup } from '@/components/settings/KeySetup';
 import { getChannelConnector } from '@/channels/connect';
 import { getChannelResearch } from '@/channels/research';
 import { isCryptoConfigured } from '@/lib/crypto';
-import { connectionSummary, redirectUri } from '@/lib/connections';
+import { connectionSummary, noticesUri, redirectUri } from '@/lib/connections';
 import { getAccountBySlug } from '@/lib/queries/accounts';
 import { formatDateTime } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
@@ -111,6 +111,7 @@ export default async function ConnectionPage({
           const connector = getChannelConnector(store.channel.kind);
           const summary = summaries[i];
           const back = redirectUri(store.channel.kind);
+          const notices = noticesUri(store.channel.kind);
           // Lo último de cada prueba: las del canal y las de esta tienda.
           const latest = new Map<string, (typeof probes)[number]>();
           for (const p of probes) {
@@ -143,13 +144,21 @@ export default async function ConnectionPage({
                         <details className="rounded-md border px-4 py-3 text-sm" open={!summary}>
                           <summary className="cursor-pointer font-medium">Cómo crear la aplicación</summary>
                           <ol className="mt-3 list-decimal space-y-1.5 pl-5">
-                            {connector.setupSteps(back).map((step) => (
+                            {connector.setupSteps({ redirectUri: back, noticesUri: notices }).map((step) => (
                               <li key={step}>{step}</li>
                             ))}
                           </ol>
-                          <div className="mt-3 flex flex-wrap items-center gap-2">
-                            <code className="break-all rounded bg-muted px-2 py-1 text-xs">{back}</code>
-                            <CopyButton value={back} label="la dirección de vuelta" />
+                          <div className="mt-3 space-y-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-xs text-muted-foreground">Dirección de vuelta:</span>
+                              <code className="break-all rounded bg-muted px-2 py-1 text-xs">{back}</code>
+                              <CopyButton value={back} label="la dirección de vuelta" />
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-xs text-muted-foreground">Dirección de avisos:</span>
+                              <code className="break-all rounded bg-muted px-2 py-1 text-xs">{notices}</code>
+                              <CopyButton value={notices} label="la dirección de avisos" />
+                            </div>
                           </div>
                         </details>
                         <AppCredentialsForm

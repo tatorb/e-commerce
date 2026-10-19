@@ -24,7 +24,7 @@ export class ConnectError extends Error {
 
 export interface ChannelConnector {
   /** Pasos para crear la aplicación en el canal, para mostrarlos en pantalla. */
-  setupSteps(redirectUri: string): string[];
+  setupSteps(uris: { redirectUri: string; noticesUri: string }): string[];
   /** Dirección del canal donde la persona da permiso. */
   authorizeUrl(args: { appId: string; redirectUri: string; state: string; codeChallenge: string }): string;
   /** Cambia el código que devuelve el canal por las llaves. */

@@ -1,6 +1,6 @@
 import type { PrismaClient } from '@/generated/prisma/client';
 import type { ChannelKind } from '@/generated/prisma/enums';
-import { ConnectError, connectPath, getChannelConnector, type ChannelConnector } from '@/channels/connect';
+import { ConnectError, connectPath, getChannelConnector, noticesPath, type ChannelConnector } from '@/channels/connect';
 import { decrypt, encrypt, pkceChallenge, randomToken } from '@/lib/crypto';
 import { publicAppUrl } from '@/lib/public-url';
 
@@ -18,6 +18,11 @@ const REFRESH_MARGIN_MS = 15 * 60 * 1000;
 
 export function redirectUri(kind: ChannelKind): string {
   return `${publicAppUrl()}${connectPath(kind)}`;
+}
+
+/** Dónde el canal manda sus avisos. Por ahora solo se responde que llegaron. */
+export function noticesUri(kind: ChannelKind): string {
+  return `${publicAppUrl()}${noticesPath(kind)}`;
 }
 
 async function storeWithChannel(db: PrismaClient, storeId: string) {

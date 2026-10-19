@@ -19,3 +19,8 @@ export function getChannelConnector(kind: ChannelKind): ChannelConnector | null 
 export function connectPath(kind: ChannelKind): string {
   return `/api/canales/${kind.toLowerCase()}/vuelta`;
 }
+
+/** Ruta donde el canal manda sus avisos, igual para todas las cuentas. */
+export function noticesPath(kind: ChannelKind): string {
+  return `/api/canales/${kind.toLowerCase()}/avisos`;
+}
