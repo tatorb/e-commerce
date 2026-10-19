@@ -11,7 +11,7 @@ export class MercadoLibreRequestError extends ConnectError {
     message: string,
     readonly status: number,
   ) {
-    super(message, status === 401);
+    super(message, status === 401, status === 429);
   }
 }
 
@@ -21,9 +21,12 @@ const TRIES = 3;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function waitFor(res: Response, attempt: number): number {
-  const after = Number(res.headers.get('retry-after'));
+  const raw = res.headers.get('retry-after');
+  const after = raw === null ? NaN : Number(raw);
   if (Number.isFinite(after) && after >= 0) return Math.min(after, 30) * 1000;
-  return 500 * 2 ** attempt + Math.floor(Math.random() * 250);
+  // "Demasiados pedidos" sin decir cuánto esperar: más pausa que ante una falla pasajera.
+  const base = res.status === 429 ? 2000 : 500;
+  return base * 2 ** attempt + Math.floor(Math.random() * 250);
 }
 
 /** GET con la llave. Devuelve el cuerpo ya leído. */
@@ -50,7 +53,7 @@ export async function mlGet(path: string, accessToken: string): Promise<unknown>
     }
     if (res.status === 401) throw new MercadoLibreRequestError('Mercado Libre no aceptó la llave: hay que volver a conectar.', 401);
     if (res.status === 429) {
-      throw new MercadoLibreRequestError('Mercado Libre pidió esperar: hubo demasiados pedidos. Probá de nuevo en unos minutos.', 429);
+      throw new MercadoLibreRequestError('Mercado Libre pidió esperar porque hubo demasiados pedidos. Probá de nuevo en unos minutos.', 429);
     }
     throw new MercadoLibreRequestError(`Mercado Libre respondió con un error (código ${res.status}).`, res.status);
   }

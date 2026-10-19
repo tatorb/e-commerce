@@ -66,6 +66,7 @@ describe('pedidos con la llave', () => {
     calls = 0;
     await expect(mlGet('/siempre-429', 'llave')).rejects.toThrow('demasiados pedidos');
     expect(calls).toBe(3);
+    await expect(mlGet('/siempre-429', 'llave')).rejects.toMatchObject({ busy: true, reauth: false });
     await expect(mlGet('/lento', 'otra')).rejects.toMatchObject({ reauth: true });
   });
 

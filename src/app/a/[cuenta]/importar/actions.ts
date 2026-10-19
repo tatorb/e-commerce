@@ -14,7 +14,8 @@ import type { ExistingKeys } from '@/importers/classify';
 import { isConfidentialHeader, isFieldKey } from '@/importers/fields';
 import type { RowInput } from '@/importers/mapping';
 
-export type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string };
+// wait: el canal pidió esperar; se puede volver a probar en un rato.
+export type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string; wait?: boolean };
 
 async function accountIdFor(slug: string): Promise<string | null> {
   const account = await prisma.account.findUnique({ where: { slug }, select: { id: true } });
@@ -282,8 +283,8 @@ async function connectedStore(accountSlug: string, storeId: string) {
   return { ok: true, account, store, listings } as const;
 }
 
-function channelFailure(e: unknown): { ok: false; error: string } {
-  if (e instanceof ConnectError) return { ok: false, error: e.message };
+function channelFailure(e: unknown): { ok: false; error: string; wait?: boolean } {
+  if (e instanceof ConnectError) return { ok: false, error: e.message, wait: e.busy };
   console.error('Error al leer del canal', e instanceof Error ? e.message : e);
   return { ok: false, error: 'No se pudo leer del canal. Probá de nuevo.' };
 }

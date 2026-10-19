@@ -2,7 +2,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { getChannelListings } from '@/channels/listings';
-import { mercadolibreListings, parseItem } from '@/channels/mercadolibre/listings';
+import { mercadolibreListings, parseItem, resetVisitsTogether } from '@/channels/mercadolibre/listings';
 
 // Leer las publicaciones propias desde Mercado Libre, contra un Mercado Libre
 // simulado. Los datos son de prueba.
@@ -102,6 +102,9 @@ describe('de Mercado Libre al formato neutro', () => {
 describe('con la cuenta conectada', () => {
   let server: http.Server;
   const paths: string[] = [];
+  // Si el Mercado Libre simulado acepta las visitas de varias juntas.
+  let visitsTogether = false;
+  let busy = false;
 
   beforeAll(async () => {
     server = http.createServer((req, res) => {
@@ -109,6 +112,7 @@ describe('con la cuenta conectada', () => {
       paths.push(u.pathname + u.search);
       const json = (status: number, body: unknown) => res.writeHead(status, { 'Content-Type': 'application/json' }).end(JSON.stringify(body));
       if (req.headers.authorization !== 'Bearer llave') return json(401, {});
+      if (busy && u.pathname.endsWith('/description')) return json(429, {});
 
       if (u.pathname === '/users/7/items/search') {
         const status = u.searchParams.get('status');
@@ -133,6 +137,13 @@ describe('con la cuenta conectada', () => {
       }
       if (u.pathname === '/items/MLA1/description') return json(200, { plain_text: 'Kit completo.\nIncluye disco.' });
       if (u.pathname === '/items/MLA2/description') return json(404, { message: 'no description' });
+      if (u.pathname === '/items/visits' && visitsTogether) {
+        expect(u.searchParams.get('date_from')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+        return json(
+          200,
+          (u.searchParams.get('ids') ?? '').split(',').map((id) => ({ item_id: id, total_visits: id === 'MLA1' ? 341 : 12 })),
+        );
+      }
       if (u.pathname === '/items/MLA1/visits/time_window') return json(200, { item_id: 'MLA1', total_visits: 340 });
       if (u.pathname === '/items/MLA2/visits/time_window') return json(403, {});
       if (u.pathname === '/categories/MLA999') return json(200, { id: 'MLA999', name: 'Aros de Pistón' });
@@ -180,7 +191,28 @@ describe('con la cuenta conectada', () => {
     expect(paths.filter((p) => p.startsWith('/categories/'))).toEqual(['/categories/MLA999']);
   });
 
+  it('las visitas de varias van en un solo pedido cuando Mercado Libre lo acepta', async () => {
+    resetVisitsTogether();
+    visitsTogether = true;
+    paths.length = 0;
+    const { listings } = await mercadolibreListings.readListings('llave', '7', ['MLA1', 'MLA2']);
+    expect(listings.map((l) => l.visits90d)).toEqual([341, 12]);
+    expect(paths.filter((p) => p.includes('/visits'))).toHaveLength(1);
+    expect(paths.some((p) => p.includes('/visits/time_window'))).toBe(false);
+    visitsTogether = false;
+    resetVisitsTogether();
+  });
+
   it('una llave que no sirve corta y pide volver a conectar', async () => {
     await expect(mercadolibreListings.readListings('otra', '7', ['MLA1'])).rejects.toMatchObject({ reauth: true });
   });
+
+  it('si Mercado Libre pide esperar, avisa que se puede probar más tarde', async () => {
+    busy = true;
+    try {
+      await expect(mercadolibreListings.readListings('llave', '7', ['MLA1'])).rejects.toMatchObject({ busy: true, reauth: false });
+    } finally {
+      busy = false;
+    }
+  }, 20_000);
 });

@@ -20,6 +20,13 @@ export async function generateMetadata({ params }: { params: Promise<{ cuenta: s
   return { title: account ? `Importar · ${account.name}` : 'Importar' };
 }
 
+// Pausa entre tandas y espera cuando el canal pide esperar, en segundos. Se
+// pueden acortar para probar contra un canal simulado.
+function seconds(raw: string | undefined, fallback: number): number {
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 && raw !== undefined && raw !== '' ? n : fallback;
+}
+
 function todayIn(timeZone: string): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone, dateStyle: 'short' }).format(new Date());
 }
@@ -67,6 +74,10 @@ export default async function ImportPage({ params }: { params: Promise<{ cuenta:
           accountSlug={account.slug}
           stores={stores.map((s) => ({ id: s.id, name: s.name, channelKind: s.channel.kind, channelName: s.channel.name }))}
           channelStores={channelStores}
+          readPacing={{
+            pauseSeconds: seconds(process.env.CHANNEL_READ_PAUSE_SECONDS, 20),
+            waitSeconds: seconds(process.env.CHANNEL_READ_WAIT_SECONDS, 60),
+          }}
           savedMappings={mappings.map((m) => ({
             id: m.id,
             name: m.name,

@@ -10,7 +10,9 @@ const PAGE = 100;
 // Más allá de este punto Mercado Libre no pagina por posición: hay que recorrer.
 const OFFSET_MAX = 1000;
 const SCAN_PAGES_MAX = 500;
-const PARALLEL = 4;
+// Pocos pedidos a la vez: Mercado Libre corta con "demasiados pedidos".
+const PARALLEL = 2;
+const VISIT_DAYS = 90;
 
 const ITEM_FIELDS = [
   'id',
@@ -158,6 +160,49 @@ async function categoryName(accessToken: string, id: string): Promise<string | n
   return name;
 }
 
+// Las visitas de varias publicaciones van en un solo pedido. Si Mercado Libre
+// no lo acepta, se piden de a una, y no se vuelve a probar mientras dure el servidor.
+let visitsTogether = true;
+
+const isoDay = (d: Date) => d.toISOString().slice(0, 10);
+
+/** Visitas de los últimos 90 días de cada publicación. Las que no se pudieron leer no están. */
+async function visitsOf(accessToken: string, ids: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (ids.length === 0) return out;
+  if (visitsTogether) {
+    const now = new Date();
+    const from = isoDay(new Date(now.getTime() - VISIT_DAYS * 86_400_000));
+    const q = new URLSearchParams({ ids: ids.join(','), date_from: from, date_to: isoDay(now) });
+    try {
+      const body = await mlGet(`/items/visits?${q.toString()}`, accessToken);
+      const list = Array.isArray(body) ? body : isObj(body) ? arr(body.results) : [];
+      for (const v of list) {
+        if (!isObj(v)) continue;
+        const id = str(v.item_id) ?? str(v.id);
+        const total = num(v.total_visits);
+        if (id && total !== null) out.set(id, total);
+      }
+      if (out.size > 0) return out;
+    } catch (e) {
+      if (e instanceof MercadoLibreRequestError && (e.status === 401 || e.status === 429)) throw e;
+    }
+    visitsTogether = false;
+  }
+  const tasks = ids.map((id) => async () => {
+    const body = await optional(() => mlGet(`/items/${encodeURIComponent(id)}/visits/time_window?last=${VISIT_DAYS}&unit=day`, accessToken));
+    const total = isObj(body) ? num(body.total_visits) : null;
+    if (total !== null) out.set(id, total);
+  });
+  await inParallel(tasks);
+  return out;
+}
+
+/** Solo para las pruebas: vuelve a probar el pedido de visitas conjunto. */
+export function resetVisitsTogether() {
+  visitsTogether = true;
+}
+
 function searchPath(userId: string, params: Record<string, string>): string {
   return `/users/${encodeURIComponent(userId)}/items/search?${new URLSearchParams(params).toString()}`;
 }
@@ -223,16 +268,14 @@ export const mercadolibreListings: ChannelListings = {
       (item) => item.seller_id === undefined || item.seller_id === null || String(item.seller_id) === userId,
     );
     const listings = own.map(parseItem);
+    const visits = await visitsOf(accessToken, listings.map((l) => l.externalId));
     const tasks: (() => Promise<void>)[] = [];
     for (const l of listings) {
+      l.visits90d = visits.get(l.externalId) ?? null;
       const id = encodeURIComponent(l.externalId);
       tasks.push(async () => {
         const body = await optional(() => mlGet(`/items/${id}/description`, accessToken));
         l.description = isObj(body) ? str(body.plain_text) : null;
-      });
-      tasks.push(async () => {
-        const body = await optional(() => mlGet(`/items/${id}/visits/time_window?last=90&unit=day`, accessToken));
-        l.visits90d = isObj(body) ? num(body.total_visits) : null;
       });
     }
     for (const categoryId of new Set(listings.map((l) => l.categoryId).filter((c): c is string => c !== null))) {

@@ -17,6 +17,8 @@ export class ConnectError extends Error {
     message: string,
     // La autorización ya no sirve: hay que volver a conectar.
     readonly reauth = false,
+    // El canal pidió esperar porque hubo demasiados pedidos: sirve probar más tarde.
+    readonly busy = false,
   ) {
     super(message);
   }

@@ -58,7 +58,7 @@ import {
   startImportAction,
   type RunTotals,
 } from '@/app/a/[cuenta]/importar/actions';
-import { ChannelSourceCard, type ChannelStoreInfo } from './ChannelSourceCard';
+import { ChannelSourceCard, type ChannelStoreInfo, type ReadPacing } from './ChannelSourceCard';
 
 export type StoreInfo = { id: string; name: string; channelKind: ChannelKind; channelName: string };
 
@@ -124,6 +124,7 @@ export function ImportWizard({
   accountSlug,
   stores,
   channelStores = [],
+  readPacing,
   savedMappings,
   defaultDate,
 }: {
@@ -131,6 +132,7 @@ export function ImportWizard({
   stores: StoreInfo[];
   // Las tiendas conectadas de las que se pueden traer publicaciones.
   channelStores?: ChannelStoreInfo[];
+  readPacing?: ReadPacing;
   savedMappings: SavedMapping[];
   defaultDate: string;
 }) {
@@ -385,6 +387,7 @@ export function ImportWizard({
             accountSlug={accountSlug}
             store={s}
             disabled={pending}
+            pacing={readPacing}
             onRead={(read) => readFromChannel(s, read)}
           />
         ))}
