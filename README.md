@@ -34,6 +34,7 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
 | Prueba de conexión | `ChannelProbe` | Si la app puede leer sola las sugerencias y las posiciones del canal, sin cuenta o con la cuenta conectada de la tienda. Se corre en Ajustes, Conexión, y habilita la lectura automática. |
 | Conexión por API | `ChannelConnection` | La cuenta del canal de una tienda, autorizada con OAuth. Cada cliente crea su propia aplicación en el canal y carga su App ID y clave secreta en Ajustes, Conexión. La clave secreta y las llaves se guardan cifradas con `CHANNEL_TOKEN_KEY` y nunca se muestran. Las llaves se renuevan solas, una sola vez a la vez. |
 | Pedido de permiso | `ConnectAttempt` | Un link de autorización en curso: un código de control de un solo uso que vence a los 10 minutos, o a las 24 horas si es el link para mandarle al cliente. |
+| Conexión con Claude | `McpToken` | El permiso para que Claude use la app en nombre de una persona, desde claude.ai u otro programa de Claude. Se agrega como conector con la dirección `/api/mcp`, dura 30 días y se corta en Equipo. Cada cambio queda a nombre de esa persona. En la base se guarda solo la huella de la llave. |
 | Título bloqueado | (se calcula) | Cuando el canal no deja cambiar el título. Lo dicen las ventas de la última medición, con la regla de cada canal; si no hay datos, se marca a mano en la publicación. |
 | Estado de la propuesta | `Stage` | Sin propuesta, Propuesta generada, En revisión, Aprobado, Aplicado en canal, Medido. Es el recorrido de la propuesta completa con IA, no la etapa de la publicación. |
 | Movimiento de la propuesta | `StageMovement` | Cuándo entró y salió una publicación de cada estado de la propuesta, y quién la movió. |
@@ -65,6 +66,12 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
   API (OAuth): link de permiso, llaves y renovación. Para probar sin el canal real, `MERCADOLIBRE_SUGGEST_URL`,
   `MERCADOLIBRE_API_URL`, `MERCADOLIBRE_LISTING_URL` y `MERCADOLIBRE_AUTH_URL` cambian las direcciones.
   El resto de la app usa la interfaz `ChannelAdapter`.
+- `src/lib/mcp/`: la conexión con Claude (MCP). `oauth.ts` es el permiso: registro del programa, código de un solo
+  uso con PKCE, llaves de 30 días y desconexión. `redirect-allowlist.ts` dice a qué direcciones puede volver el
+  permiso (las de Claude, las de la propia computadora y las de `MCP_OAUTH_REDIRECT_URIS`). `read-tools.ts` son
+  las herramientas: una capa fina sobre las mismas consultas de las pantallas, que nunca devuelve precios ni
+  datos de las conexiones con los canales. `server.ts` resuelve el protocolo a mano, una respuesta por pedido.
+  La pantalla de permiso es `/conectar-claude`.
 - `src/importers/`: el único lugar que sabe leer archivos. Lee Excel y CSV en el navegador,
   propone qué columna va a qué campo, traba las columnas confidenciales y traduce cada fila a
   producto, publicación y medición. Al importar vincula por ID de publicación o por SKU. A lo

@@ -1,3 +1,4 @@
+import type { PrismaClient } from '@/generated/prisma/client';
 import { prisma } from '@/lib/db';
 import { listScoredPublications } from './scoring';
 
@@ -6,9 +7,9 @@ import { listScoredPublications } from './scoring';
 export type BoardItem = Awaited<ReturnType<typeof listBoard>>[number];
 
 /** Las publicaciones que están en el pipeline, con desde cuándo están en su paso. Las que esperan hace más, primero. */
-export async function listBoard(accountId: string) {
-  const items = await listScoredPublications(accountId, { pipelineStatus: 'IN_PIPELINE' });
-  const open = await prisma.pipelineMovement.findMany({
+export async function listBoard(accountId: string, db: PrismaClient = prisma) {
+  const items = await listScoredPublications(accountId, { pipelineStatus: 'IN_PIPELINE' }, db);
+  const open = await db.pipelineMovement.findMany({
     where: { publicationId: { in: items.map((i) => i.id) }, exitedAt: null },
     select: { publicationId: true, enteredAt: true },
   });
@@ -26,8 +27,8 @@ export async function getPipelinePublication(accountId: string, publicationId: s
   return { ...item, movements };
 }
 
-export async function listPipelineMovements(publicationId: string) {
-  return prisma.pipelineMovement.findMany({
+export async function listPipelineMovements(publicationId: string, db: PrismaClient = prisma) {
+  return db.pipelineMovement.findMany({
     where: { publicationId },
     orderBy: { enteredAt: 'asc' },
     include: { user: { select: { name: true } }, exitedBy: { select: { name: true } } },

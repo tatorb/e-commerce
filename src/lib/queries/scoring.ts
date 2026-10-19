@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/db';
-import type { Prisma } from '@/generated/prisma/client';
+import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
 import { parseMetrics } from '@/domain/measurements';
 import { resolveTitleLock } from '@/domain/title-lock';
@@ -11,8 +11,8 @@ export { toScoreInput } from './score-input';
 // Arma lo que necesita el puntaje y lo calcula. El puntaje no se guarda:
 // se calcula cada vez, con las reglas y los datos de ese momento.
 
-export async function loadRulesByChannel(accountId: string): Promise<Map<string, RuleConfig[]>> {
-  const rules = await prisma.standardRule.findMany({
+export async function loadRulesByChannel(accountId: string, db: PrismaClient = prisma): Promise<Map<string, RuleConfig[]>> {
+  const rules = await db.standardRule.findMany({
     where: { accountId },
     orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
   });
@@ -27,10 +27,14 @@ export async function loadRulesByChannel(accountId: string): Promise<Map<string,
 
 export type ScoredPublication = Awaited<ReturnType<typeof listScoredPublications>>[number];
 
-export async function listScoredPublications(accountId: string, where: Prisma.PublicationWhereInput = {}) {
+export async function listScoredPublications(
+  accountId: string,
+  where: Prisma.PublicationWhereInput = {},
+  db: PrismaClient = prisma,
+) {
   const [rules, publications] = await Promise.all([
-    loadRulesByChannel(accountId),
-    prisma.publication.findMany({
+    loadRulesByChannel(accountId, db),
+    db.publication.findMany({
       where: { ...where, product: { accountId } },
       select: {
         id: true,

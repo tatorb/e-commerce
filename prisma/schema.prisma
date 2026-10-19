@@ -41,6 +41,8 @@ model User {
   titleRuleSets    TitleRuleSet[]
   connections      ChannelConnection[]
   connectAttempts  ConnectAttempt[]
+  mcpCodes         McpAuthCode[]
+  mcpTokens        McpToken[]
 
   @@map("users")
 }
@@ -833,4 +835,60 @@ model ConnectAttempt {
 
   @@index([storeId])
   @@map("connect_attempts")
+}
+
+// ───────────────────────────── Conexión con Claude (MCP) ─────────────────────────────
+
+// Un programa que pidió conectarse, por ejemplo Claude en claude.ai. Se
+// registra solo la primera vez (registro dinámico de OAuth).
+model McpClient {
+  id           String        @id
+  name         String?
+  // Direcciones de vuelta que declaró: lista de textos.
+  redirectUris Json          @default("[]")
+  createdAt    DateTime      @default(now())
+  codes        McpAuthCode[]
+  tokens       McpToken[]
+
+  @@map("mcp_clients")
+}
+
+// El código que recibe Claude cuando la persona toca Autorizar. Se cambia por
+// la llave una sola vez y vence a los 10 minutos. Se guarda solo su huella.
+model McpAuthCode {
+  id            String     @id @default(cuid())
+  codeHash      String     @unique
+  clientId      String?
+  client        McpClient? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  userId        String
+  user          User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  redirectUri   String
+  codeChallenge String
+  expiresAt     DateTime
+  usedAt        DateTime?
+  createdAt     DateTime   @default(now())
+  tokens        McpToken[]
+
+  @@map("mcp_auth_codes")
+}
+
+// La llave con la que Claude usa la app en nombre de una persona. Vale 30
+// días y se puede cortar desde Equipo. Se guarda solo su huella.
+model McpToken {
+  id         String       @id @default(cuid())
+  tokenHash  String       @unique
+  userId     String
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clientId   String?
+  client     McpClient?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  clientName String
+  codeId     String?
+  code       McpAuthCode? @relation(fields: [codeId], references: [id], onDelete: SetNull)
+  expiresAt  DateTime
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime     @default(now())
+
+  @@index([userId])
+  @@map("mcp_tokens")
 }
