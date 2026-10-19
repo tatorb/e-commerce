@@ -4,7 +4,7 @@ import { withEngineData } from './engine';
 import { productInputSchema } from './products';
 
 // Los datos de la ficha que se editan desde el paso Información: tipo de
-// producto, marca, número de pieza, línea, medidas y compatibilidades. Se
+// producto, marca, número de pieza, línea, origen, medidas y compatibilidades. Se
 // guardan en la ficha maestra, que sigue siendo la única fuente.
 
 const s = productInputSchema.shape;
@@ -14,6 +14,8 @@ export const productInfoSchema = z.object({
   brand: s.brand,
   partNumber: s.partNumber,
   line: s.line,
+  // Sin mandar, queda como está.
+  origin: s.origin.optional(),
   // Con su id las que ya estaban, así no se pierden las referencias a cada medida.
   variants: z
     .array(z.object({ id: z.string().nullable(), measure: s.variants.element.shape.measure, sku: s.variants.element.shape.sku }))
@@ -32,7 +34,7 @@ export async function updateProductInfo(tx: Tx, args: { accountId: string; produ
   if (!product) throw new Error('El producto no existe en esta cuenta.');
   await tx.product.update({
     where: { id: productId },
-    data: { productType: data.productType, brand: data.brand, partNumber: data.partNumber, line: data.line },
+    data: { productType: data.productType, brand: data.brand, partNumber: data.partNumber, line: data.line, origin: data.origin },
   });
 
   // Medidas: se actualizan en su lugar, se suman las nuevas y se borran las que se sacaron.

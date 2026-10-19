@@ -1,28 +1,33 @@
 import { SectionBody, SectionCard } from '@/components/ui/section-card';
+import type { CatalogData } from '@/lib/catalog-data';
 import type { ResearchData } from '@/lib/queries/research';
 import type { TitleContext } from '@/lib/queries/title-step';
 import { BuyerPainsCard } from './BuyerPainsCard';
 import { CapturedMaterial } from './CapturedMaterial';
+import { CatalogCard } from './CatalogCard';
 import { ClarificationsCard } from './ClarificationsCard';
 import { CompetitorsForm } from './CompetitorsForm';
 import { ManufacturerCard } from './ManufacturerCard';
 import { ProductInfoForm } from './ProductInfoForm';
 
-// Paso Información: los datos de la ficha, lo del fabricante, las aclaraciones
-// para las imágenes, los dolores del comprador, la competencia y lo que se fue
-// juntando en el paso Título. Lo nuevo es del producto: lo comparten todas sus
-// publicaciones.
+// Paso Información: los datos de la ficha, lo del fabricante, los datos de
+// catálogo del canal, las aclaraciones para las imágenes, los dolores del
+// comprador, la competencia y lo que se fue juntando en el paso Título. La
+// investigación es del producto: la comparten todas sus publicaciones. Los
+// datos de catálogo son de la publicación, porque cada canal tiene los suyos.
 export function InfoStep({
   accountSlug,
   timeZone,
   ctx,
   research,
+  catalog,
   blobReady,
 }: {
   accountSlug: string;
   timeZone: string;
   ctx: TitleContext;
   research: ResearchData;
+  catalog: CatalogData | null;
   blobReady: boolean;
 }) {
   const s = (v: string | null | undefined) => v ?? '';
@@ -44,6 +49,7 @@ export function InfoStep({
               brand: s(p.brand),
               partNumber: s(p.partNumber),
               line: s(p.line),
+              origin: s(p.origin),
               variants: p.variants.map((v) => ({ id: v.id, measure: s(v.measure), sku: s(v.sku) })),
               compatibilities: p.compatibilities.map((c) => ({
                 vehicleBrand: s(c.vehicleBrand),
@@ -67,6 +73,13 @@ export function InfoStep({
         files={research.files.map((f) => ({ id: f.id, kind: f.kind, name: f.name, size: f.size }))}
         blobReady={blobReady}
       />
+      {catalog ? (
+        <CatalogCard
+          accountSlug={accountSlug}
+          publicationId={publicationId}
+          data={catalog}
+        />
+      ) : null}
       <ClarificationsCard accountSlug={accountSlug} publicationId={publicationId} initial={s(r?.clarifications)} />
       <BuyerPainsCard
         accountSlug={accountSlug}

@@ -1,5 +1,6 @@
 import type { ChannelAdapter } from '../types';
 import { mercadolibreApplyGuide } from './apply';
+import { mercadolibreCatalog } from './catalog';
 import { mercadolibreTitleLock } from './title-lock';
 import { MERCADOLIBRE_TITLE_RULES, mercadolibreSearchUrl } from './title-rules';
 
@@ -37,4 +38,5 @@ export const mercadolibre: ChannelAdapter = {
   titleLock: mercadolibreTitleLock,
   titleRules: MERCADOLIBRE_TITLE_RULES,
   searchUrl: mercadolibreSearchUrl,
+  catalog: mercadolibreCatalog,
 };

@@ -21,7 +21,8 @@ describe('herramientas de escritura en la lista', () => {
     expect(tools.get('approve_title')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('remove_from_pipeline')).toMatchObject({ destructiveHint: true });
     expect(tools.get('get_publication')).toEqual(expect.not.objectContaining({ destructiveHint: expect.anything() }));
-    expect(tools.size).toBe(24);
+    expect(tools.get('save_catalog_data')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+    expect(tools.size).toBe(25);
   });
 });
 
@@ -284,6 +285,48 @@ describe.skipIf(!url)('herramientas de escritura', () => {
       dolores: ['No sabe si le sirve', 'Teme que no sea la medida'],
       objeciones: ['Duda de la calidad'],
     });
+  });
+
+  it('datos de catálogo: los campos con sus opciones, y solo valores válidos', async () => {
+    await call('update_product_info', { publicacion: 'MLA1110001', origen: 'Brasil' });
+    const before = await call('get_publication', { publicacion: 'MLA1110001' });
+    expect(before.data.ficha.origen).toBe('Brasil');
+    expect(before.data.datos_de_catalogo).toMatchObject({
+      canal: 'Mercado Libre',
+      categoria: 'Kits de Embrague (MLA373460)',
+      categoria_elegida: 'por la familia',
+      de_la_ficha: [
+        { nombre: 'Marca', valor: 'Marca Uno' },
+        { nombre: 'Número de pieza', valor: 'P-100' },
+      ],
+    });
+    expect(before.data.datos_de_catalogo.campos).toContainEqual({
+      campo: 'CLUTCH_TYPE',
+      nombre: 'Tipo de embrague',
+      tipo: 'opción',
+      opciones: ['Multidisco', 'Bidisco', 'Monodisco'],
+      valor: null,
+    });
+
+    const r = await call('save_catalog_data', {
+      publicacion: 'MLA1110001',
+      valores: { CLUTCH_TYPE: 'Monodisco', 'Incluye disco': 'Sí', OEM: ['A-1', 'B-2'] },
+    });
+    expect(r.data.datos_de_catalogo.campos.filter((c: { valor: string | null }) => c.valor)).toEqual([
+      expect.objectContaining({ campo: 'CLUTCH_TYPE', valor: 'Monodisco' }),
+      expect.objectContaining({ campo: 'INCLUDES_DISC', valor: 'Sí' }),
+      expect.objectContaining({ campo: 'OEM', valor: 'A-1, B-2', varios_valores: true }),
+    ]);
+    const bad = await call('save_catalog_data', { publicacion: 'MLA1110001', valores: { CLUTCH_TYPE: 'Tridisco' } });
+    expect(bad).toMatchObject({ isError: true, text: expect.stringContaining('no es una opción') });
+    expect((await call('save_catalog_data', { publicacion: 'MLA1110001', valores: { BRAND: 'Otra' } })).text).toContain('sale de la ficha');
+    expect((await call('save_catalog_data', { publicacion: 'MLA1110001' })).isError).toBe(true);
+
+    // La bomba de agua tiene la suya; se puede cambiar a mano y volver a la de la familia.
+    const bomba = await call('save_catalog_data', { publicacion: 'MLA2220002', categoria: 'Bombas de Aceite' });
+    expect(bomba.data.datos_de_catalogo).toMatchObject({ categoria: 'Bombas de Aceite (MLA60626)', categoria_elegida: 'a mano' });
+    const back = await call('save_catalog_data', { publicacion: 'MLA2220002', categoria: null });
+    expect(back.data.datos_de_catalogo).toMatchObject({ categoria: 'Bombas de Agua (MLA60598)', categoria_elegida: 'por la familia' });
   });
 
   it('update_title_rules: cambia solo lo que se manda, y restablecer vuelve a las del canal', async () => {

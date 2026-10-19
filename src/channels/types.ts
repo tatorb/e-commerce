@@ -1,4 +1,5 @@
 import type { ChannelKind } from '@/generated/prisma/enums';
+import type { ChannelCatalog } from '@/domain/catalog-data';
 import type { ContentField, ContentSnapshot } from '@/domain/content';
 import type { Metrics } from '@/domain/measurements';
 import type { TitleRules } from '@/domain/title-rules';
@@ -54,4 +55,6 @@ export interface ChannelAdapter {
   titleRules: TitleRules;
   /** Link para ver una búsqueda en el canal, si el canal tiene buscador. */
   searchUrl(query: string): string | null;
+  /** Las categorías del canal con los campos de su formulario, si el canal las tiene. */
+  catalog: ChannelCatalog | null;
 }

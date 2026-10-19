@@ -17,6 +17,7 @@ export type ProductInfoValues = {
   brand: string;
   partNumber: string;
   line: string;
+  origin: string;
   variants: { id: string; measure: string; sku: string }[];
   compatibilities: {
     vehicleBrand: string;
@@ -30,11 +31,12 @@ export type ProductInfoValues = {
   }[];
 };
 
-const FIELDS: { key: 'productType' | 'brand' | 'partNumber' | 'line'; label: string; placeholder?: string }[] = [
+const FIELDS: { key: 'productType' | 'brand' | 'partNumber' | 'line' | 'origin'; label: string; placeholder?: string }[] = [
   { key: 'productType', label: 'Tipo de producto', placeholder: 'subconjunto, kit de embrague…' },
   { key: 'brand', label: 'Marca del repuesto', placeholder: 'Persan, Dexco, Sabó…' },
   { key: 'partNumber', label: 'Número de pieza u OEM' },
   { key: 'line', label: 'Línea', placeholder: 'liviano nafta, línea pesada…' },
+  { key: 'origin', label: 'Origen', placeholder: 'Argentina, Brasil…' },
 ];
 
 export function ProductInfoForm({

@@ -55,6 +55,7 @@ export async function loadTitleContext(db: PrismaClient, accountId: string, publ
           brand: true,
           partNumber: true,
           line: true,
+          origin: true,
           variants: { orderBy: { position: 'asc' }, select: { id: true, sku: true, measure: true } },
           compatibilities: {
             orderBy: { position: 'asc' },

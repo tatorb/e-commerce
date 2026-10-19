@@ -31,6 +31,8 @@ import { listBoard, listPipelineMovements } from '@/lib/queries/pipeline';
 import { listScoredPublications, type ScoredPublication } from '@/lib/queries/scoring';
 import { fileHref } from '@/lib/file-rules';
 import { loadResearch } from '@/lib/queries/research';
+import { loadCatalogData } from '@/lib/catalog-data';
+import { catalogForClaude } from './catalog';
 import { loadTitleContext } from '@/lib/queries/title-step';
 import {
   McpToolError,
@@ -287,13 +289,13 @@ const getPublication = defineTool({
   name: 'get_publication',
   title: 'Ver una publicación',
   description:
-    'Muestra todo de una publicación: la ficha del producto (la fuente de verdad), el título y la descripción actuales, los atributos del canal, el puntaje y lo que le falta, la última medición, el estado e historial del pipeline, el candado del título, la competencia cargada y la investigación del producto: lo del fabricante, las aclaraciones para las imágenes, las preguntas de los compradores y sus dolores y objeciones.',
+    'Muestra todo de una publicación: la ficha del producto (la fuente de verdad), el título y la descripción actuales, los atributos del canal, los datos de catálogo del canal (cada campo del formulario de su categoría, con sus opciones y lo cargado), el puntaje y lo que le falta, la última medición, el estado e historial del pipeline, el candado del título, la competencia cargada y la investigación del producto: lo del fabricante, las aclaraciones para las imágenes, las preguntas de los compradores y sus dolores y objeciones.',
   input: z.object({ cuenta: accountArg, publicacion: publicationArg }),
   readOnly: true,
   async run(ctx, args) {
     const account = await resolveAccount(ctx.db, args.cuenta);
     const id = await resolvePublication(ctx.db, account.id, args.publicacion);
-    const [pub, [scored], movements, research] = await Promise.all([
+    const [pub, [scored], movements, research, catalog] = await Promise.all([
       ctx.db.publication.findUniqueOrThrow({
         where: { id },
         select: {
@@ -337,6 +339,7 @@ const getPublication = defineTool({
       listScoredPublications(account.id, { id }, ctx.db),
       listPipelineMovements(id, ctx.db),
       ctx.db.publication.findUniqueOrThrow({ where: { id }, select: { productId: true } }).then((p) => loadResearch(ctx.db, p.productId)),
+      loadCatalogData(ctx.db, id),
     ]);
     const product = pub.product;
     const r = research.research;
@@ -347,6 +350,7 @@ const getPublication = defineTool({
       titulo: pub.title,
       descripcion: pub.description,
       atributos_en_el_canal: safeList(parseNameValueList(pub.attributes)),
+      datos_de_catalogo: catalogForClaude(catalog),
       ficha: {
         producto_id: product.id,
         nombre: product.name,

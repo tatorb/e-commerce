@@ -18,6 +18,7 @@ import { getAccountBySlug } from '@/lib/queries/accounts';
 import { getPipelinePublication } from '@/lib/queries/pipeline';
 import { loadTitleContext } from '@/lib/queries/title-step';
 import { loadResearch } from '@/lib/queries/research';
+import { loadCatalogData } from '@/lib/catalog-data';
 import { isBlobConfigured } from '@/lib/files';
 import { autoAvailable } from '@/lib/research';
 import { prisma } from '@/lib/db';
@@ -125,6 +126,7 @@ export default async function PipelineStepPage({ params }: { params: Promise<{ c
                 timeZone={account.timezone}
                 ctx={ctx}
                 research={await loadResearch(prisma, ctx.publication.productId)}
+                catalog={await loadCatalogData(prisma, ctx.publication.id)}
                 blobReady={isBlobConfigured()}
               />
             ) : ctx && pub.pipelineStep === 'TITLE' ? (

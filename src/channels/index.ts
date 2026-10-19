@@ -56,6 +56,7 @@ function genericAdapter(kind: ChannelKind, name: string): ChannelAdapter {
     titleLock: () => null,
     titleRules: EMPTY_TITLE_RULES,
     searchUrl: () => null,
+    catalog: null,
   };
 }
 

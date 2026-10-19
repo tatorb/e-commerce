@@ -38,6 +38,7 @@ import {
 } from '@/domain/title-work';
 import { checkTitle, parsePastedSuggestions, wordKey } from '@/domain/titles';
 import { resolveExternalIds } from '@/lib/catalog';
+import { loadCatalogData, saveCatalogData } from '@/lib/catalog-data';
 import { loadTitleContext } from '@/lib/queries/title-step';
 import { loadTitleRules } from '@/lib/title-rules';
 import {
@@ -51,6 +52,7 @@ import {
   type AccountRef,
   type McpContext,
 } from './tool';
+import { catalogForClaude } from './catalog';
 
 // Las herramientas que cambian cosas. Usan la misma lógica que las pantallas,
 // con las mismas reglas y avisos, y cada cambio queda a nombre de la persona
@@ -209,7 +211,7 @@ const updateProductInfoTool = defineTool({
   name: 'update_product_info',
   title: 'Corregir la ficha',
   description:
-    'Corrige la ficha del producto de una publicación: tipo, marca, número de pieza, línea, medidas y compatibilidades. La ficha es la fuente de verdad y la comparten todas las publicaciones del producto. Lo que no se manda queda como está; las listas reemplazan la lista entera. Usá solo datos que te dio la persona o que están en la ficha, nunca supuestos.',
+    'Corrige la ficha del producto de una publicación: tipo, marca, número de pieza, línea, origen, medidas y compatibilidades. La ficha es la fuente de verdad y la comparten todas las publicaciones del producto. Lo que no se manda queda como está; las listas reemplazan la lista entera. Usá solo datos que te dio la persona o que están en la ficha, nunca supuestos.',
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg,
@@ -217,6 +219,7 @@ const updateProductInfoTool = defineTool({
     marca: optionalText('Marca del repuesto'),
     numero_de_pieza: optionalText('Número de pieza u OEM'),
     linea: optionalText('Línea, por ejemplo "Liviano nafta"'),
+    origen: optionalText('País de origen, por ejemplo "Argentina"'),
     medidas: z
       .array(z.object({ medida: z.string().optional(), sku: z.string().optional() }))
       .max(100)
@@ -253,6 +256,7 @@ const updateProductInfoTool = defineTool({
             brand: true,
             partNumber: true,
             line: true,
+            origin: true,
             variants: { orderBy: { position: 'asc' }, select: { id: true, measure: true, sku: true } },
             compatibilities: {
               orderBy: { position: 'asc' },
@@ -318,6 +322,7 @@ const updateProductInfoTool = defineTool({
       brand: pick(args.marca, p.brand),
       partNumber: pick(args.numero_de_pieza, p.partNumber),
       line: pick(args.linea, p.line),
+      origin: pick(args.origen, p.origin),
       variants,
       compatibilities,
     });
@@ -474,6 +479,39 @@ const saveInsightsTool = defineTool({
     }
     const list = await ctx.db.buyerInsight.findMany({ where: { productId, kind }, orderBy: { position: 'asc' }, select: { text: true } });
     return { listo: true, [args.lista]: list.map((i) => i.text), link_app: appLink(ctx, account, id) };
+  },
+});
+
+// ───────────────────────────── Datos de catálogo ─────────────────────────────
+
+const saveCatalogTool = defineTool({
+  name: 'save_catalog_data',
+  title: 'Guardar los datos de catálogo',
+  description:
+    'Carga los datos de catálogo de la publicación: los campos del formulario del canal para su categoría, por ejemplo "Tipo de embrague" o "Incluye disco". Antes miralos en get_publication, en datos_de_catalogo: cada campo dice su tipo, sus opciones y lo cargado. Los de tipo opción y sí o no solo aceptan sus opciones; los de texto aceptan cualquier texto y sus sugerencias son las que usa el canal. Marca, número de pieza y origen salen de la ficha: se cambian con update_product_info. Lo que no se manda queda como está; null o vacío lo borra. Usá solo datos de la ficha, del fabricante o que te dio la persona, nunca supuestos.',
+  input: z.object({
+    cuenta: accountArg,
+    publicacion: publicationArg,
+    categoria: z
+      .string()
+      .nullable()
+      .optional()
+      .describe('Para cambiar la categoría: su código o su nombre. null vuelve a la que le toca por la familia. Si la familia no tiene una, hay que elegirla antes de cargar los campos.'),
+    valores: z
+      .record(z.string(), z.union([z.string(), z.array(z.string()), z.null()]))
+      .optional()
+      .describe('Por campo, con su código (por ejemplo CLUTCH_TYPE) o su nombre: el valor. Los de varios valores aceptan una lista. Los números con unidad van con la unidad, por ejemplo "76.5 mm".'),
+  }),
+  readOnly: false,
+  destructive: true,
+  async run(ctx, args) {
+    const { account, id } = await target(ctx, args);
+    const values = args.valores ?? {};
+    if (args.categoria === undefined && Object.keys(values).length === 0) {
+      throw new McpToolError('Mandá una categoría o al menos un valor.');
+    }
+    await saveCatalogData(ctx.db, { publicationId: id, category: args.categoria, values });
+    return { listo: true, datos_de_catalogo: catalogForClaude(await loadCatalogData(ctx.db, id)), link_app: appLink(ctx, account, id) };
   },
 });
 
@@ -761,6 +799,7 @@ export const WRITE_TOOLS = [
   saveClarificationsTool,
   saveQuestionsTool,
   saveInsightsTool,
+  saveCatalogTool,
   saveSeedsTool,
   saveSuggestionsTool,
   setWordsTool,
