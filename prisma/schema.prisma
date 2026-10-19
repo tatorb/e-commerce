@@ -45,6 +45,10 @@ model User {
   mcpTokens        McpToken[]
   researchEdits    ProductResearch[]
   uploadedFiles    ProductFile[]
+  imageWorkers     ImageWorker[]
+  photoSettings    PhotoSettings[]
+  photoEdits       PhotoEdit[]
+  photoDecisions   PhotoStepRun[]
 
   @@map("users")
 }
@@ -115,6 +119,7 @@ model Account {
   standardRules  StandardRule[]
   titleRuleSets  TitleRuleSet[]
   suggestions    SearchSuggestion[]
+  photoSettings  PhotoSettings?
 
   @@map("accounts")
 }
@@ -219,6 +224,7 @@ model Product {
   comboItems      ComboItem[]      @relation("ComboItems")
   // Si es individual, los combos de los que forma parte.
   inCombos        ComboItem[]      @relation("ComboComponent")
+  photoEdits      PhotoEdit[]
 
   @@index([accountId])
   @@index([importRunId])
@@ -1004,4 +1010,138 @@ model McpToken {
 
   @@index([userId])
   @@map("mcp_tokens")
+}
+
+// ───────────────────────────── Paso Imágenes ─────────────────────────────
+
+// El trabajador de imágenes: el programa que corrige las fotos en la Mac del
+// estudio (trabajador-imagenes/). Es uno solo para todo el estudio y entra con
+// su propia llave, de la que se guarda solo la huella. Crear una llave nueva
+// corta la anterior.
+model ImageWorker {
+  id          String         @id @default(cuid())
+  keyHash     String         @unique
+  // Los últimos 4 caracteres de la llave, para reconocerla.
+  keyHint     String
+  createdById String?
+  createdBy   User?          @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime       @default(now())
+  revokedAt   DateTime?
+  // Su última señal y lo que contó en ella: versión, modelo del fondo, memoria y avisos.
+  lastSeenAt  DateTime?
+  info        Json?
+  runs        PhotoStepRun[]
+
+  @@map("image_workers")
+}
+
+// Los valores de la línea de imágenes de una cuenta: margen, fondo, calidad y
+// topes. Sin fila, valen los de src/domain/photo-settings.ts.
+model PhotoSettings {
+  id          String   @id @default(cuid())
+  accountId   String   @unique
+  account     Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  values      Json
+  updatedById String?
+  updatedBy   User?    @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+  updatedAt   DateTime @updatedAt
+
+  @@map("photo_settings")
+}
+
+enum PhotoSource {
+  UPLOAD // el original, subido desde la Mac
+  CHANNEL // la foto publicada en el canal
+}
+
+// Una foto del producto en la línea de corrección. El original queda en el
+// depósito y nunca se toca. Es del producto: la ven todas sus publicaciones.
+model PhotoEdit {
+  id           String         @id @default(cuid())
+  productId    String
+  product      Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  source       PhotoSource
+  originalUrl  String         @unique
+  originalName String
+  originalType String
+  originalSize Int
+  // De dónde se bajó, si es del canal.
+  channelUrl   String?
+  // Lo que anota el trabajador al prepararla: la vista liviana, el tamaño y la cámara.
+  previewUrl   String?
+  width        Int?
+  height       Int?
+  camera       Json?
+  position     Int            @default(0)
+  // Sacada de la lista. El original sigue en el depósito.
+  archivedAt   DateTime?
+  createdById  String?
+  createdBy    User?          @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  runs         PhotoStepRun[]
+
+  @@index([productId, position])
+  @@map("photo_edits")
+}
+
+enum PhotoRunStatus {
+  QUEUED // en cola
+  PROCESSING // el trabajador lo tomó
+  REVIEW // esperando aprobación
+  APPROVED
+  SKIPPED
+  FAILED // falló 3 veces
+  REPLACED // se rehízo este paso o uno anterior
+}
+
+// Cada intento de un paso de una foto: lo pedido, lo que propuso Claude, lo
+// que se usó y lo que midió el código. La cola de trabajo está en
+// src/lib/photo-queue.ts.
+model PhotoStepRun {
+  id            String         @id @default(cuid())
+  editId        String
+  edit          PhotoEdit      @relation(fields: [editId], references: [id], onDelete: Cascade)
+  // El paso, de 0 a 7 (src/domain/photo-steps.ts).
+  step          Int
+  status        PhotoRunStatus @default(QUEUED)
+  // El id de la foto mientras el intento está abierto: en cola, en proceso,
+  // esperando aprobación o fallido. Así hay uno solo abierto por foto.
+  openFor       String?        @unique
+  // Los valores que pidió la persona al rehacer. Sin pedido, propone Claude.
+  requested     Json?
+  // Copia de los ajustes de la cuenta con los que corre.
+  settings      Json
+  // Lo que devolvió el trabajador.
+  proposal      Json?
+  values        Json?
+  measures      Json?
+  // Los valores que se pueden editar en pantalla, con su rango.
+  params        Json?
+  note          String?
+  // Por qué el paso no se pudo aplicar, por ejemplo una foto sin datos de lente.
+  notApplicable String?
+  previewUrl    String?
+  maskUrl       String?
+  pngUrl        String?
+  jpgUrl        String?
+  aiUsage       Json?
+  seconds       Float?
+  // El turno: sube cada vez que el trabajador lo toma. Un resultado con otro
+  // turno es de un intento viejo y no se acepta.
+  lease         Int            @default(0)
+  leaseUntil    DateTime?
+  workerId      String?
+  worker        ImageWorker?   @relation(fields: [workerId], references: [id], onDelete: SetNull)
+  attempts      Int            @default(0)
+  error         String?
+  decidedById   String?
+  decidedBy     User?          @relation(fields: [decidedById], references: [id], onDelete: SetNull)
+  decidedAt     DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([status, createdAt])
+  @@index([editId, step])
+  @@map("photo_step_runs")
 }

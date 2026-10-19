@@ -42,7 +42,7 @@ def leer_ajustes(datos: dict | None = None) -> dict:
         salida["margen"] = float(datos["margen"])
     if isinstance(datos.get("fondo"), str) and _COLOR.match(datos["fondo"]):
         salida["fondo"] = datos["fondo"].upper()
-    if isinstance(datos.get("calidad_jpg"), (int, float)) and 60 <= datos["calidad_jpg"] <= 100:
+    if isinstance(datos.get("calidad_jpg"), (int, float)) and 80 <= datos["calidad_jpg"] <= 100:
         salida["calidad_jpg"] = int(datos["calidad_jpg"])
     for clave, valor in (datos.get("topes") or {}).items():
         if clave in salida["topes"] and isinstance(valor, (int, float)) and valor >= 0:

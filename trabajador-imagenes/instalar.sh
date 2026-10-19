@@ -1,5 +1,6 @@
 #!/bin/bash
-# Deja listo el trabajador: Python, librerías y el modelo para quitar el fondo.
+# Deja listo el trabajador: Python, librerías, el modelo para quitar el fondo y
+# el arranque automático al iniciar sesión.
 # Se puede correr de nuevo sin problema: solo completa lo que falta.
 set -euo pipefail
 source "$(dirname "$0")/entorno.sh"
@@ -21,4 +22,7 @@ from mrb_imagenes.pasos.fondo import elegir_modelo, memoria_gb, preparar_modelo
 print(f'Memoria de esta Mac: {memoria_gb():.0f} GB. Modelo: {elegir_modelo()}.')
 preparar_modelo()
 "
-echo "Listo. Ahora cargá la clave de Claude con ./configurar.sh"
+if [ "$(uname)" = "Darwin" ]; then
+  bash "$CARPETA/prender.sh"
+fi
+echo "Listo. Si todavía no lo configuraste, corré: bash configurar.sh"

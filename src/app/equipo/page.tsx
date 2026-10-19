@@ -21,6 +21,9 @@ import { NewTeamMemberDialog } from '@/components/team/NewTeamMemberDialog';
 import { ChangePasswordForm } from '@/components/team/ChangePasswordForm';
 import { ClaudeConnections } from '@/components/team/ClaudeConnections';
 import { CopyButton } from '@/components/apply/CopyButton';
+import { ImageWorkerCard } from '@/components/team/ImageWorkerCard';
+import { WorkerStatusLine } from '@/components/pipeline/images/WorkerStatusLine';
+import { workerState } from '@/lib/image-worker';
 
 export const metadata = { title: 'Equipo' };
 
@@ -28,13 +31,15 @@ export const dynamic = 'force-dynamic';
 
 export default async function TeamPage() {
   const me = await requireUser();
-  const [users, connections] = await Promise.all([
+  const [users, connections, worker] = await Promise.all([
     prisma.user.findMany({
       orderBy: { createdAt: 'asc' },
       select: { id: true, name: true, email: true, createdAt: true },
     }),
     listConnections(prisma, me.id),
+    workerState(prisma),
   ]);
+  const now = new Date();
   const mcpUrl = `${baseUrlFromHeaders(await headers(), publicAppUrl())}/api/mcp`;
 
   return (
@@ -149,6 +154,33 @@ export default async function TeamPage() {
                 }))}
               />
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Trabajador de imágenes</CardTitle>
+            <CardDescription>
+              El programa que corrige las fotos del paso Imágenes. Corre en la Mac del estudio y es uno solo para todas
+              las cuentas. Entra con su propia llave, que se carga una vez en la Mac. Cómo instalarlo está en IMAGENES.md.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <WorkerStatusLine state={worker} now={now} />
+            {worker.kind !== 'none' && (worker.info.version || worker.info.modelo_fondo) ? (
+              <p className="text-xs text-muted-foreground">
+                {[
+                  worker.info.version ? `Versión ${worker.info.version}` : null,
+                  worker.info.modelo_fondo ? `modelo para el fondo ${worker.info.modelo_fondo}` : null,
+                  worker.info.memoria_gb ? `${Math.round(worker.info.memoria_gb)} GB de memoria` : null,
+                  worker.lastSeenAt ? `última señal ${formatDateTime(worker.lastSeenAt)}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(', ')}
+                {'.'}
+              </p>
+            ) : null}
+            <ImageWorkerCard hasKey={worker.kind !== 'none'} keyHint={worker.kind !== 'none' ? worker.keyHint : null} />
           </CardContent>
         </Card>
       </PageBody>

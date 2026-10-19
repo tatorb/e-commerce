@@ -57,6 +57,7 @@ function genericAdapter(kind: ChannelKind, name: string): ChannelAdapter {
     titleRules: EMPTY_TITLE_RULES,
     searchUrl: () => null,
     catalog: null,
+    fullSizePhotoUrl: () => null,
   };
 }
 
@@ -66,6 +67,15 @@ const ADAPTERS: Partial<Record<ChannelKind, ChannelAdapter>> = {
 
 export function getChannelAdapter(kind: ChannelKind, fallbackName = 'Canal'): ChannelAdapter {
   return ADAPTERS[kind] ?? genericAdapter(kind, fallbackName);
+}
+
+/** El link para bajar una foto publicada en algún canal, en su tamaño más grande. Null si no es de ningún canal. */
+export function channelPhotoUrl(url: string): string | null {
+  for (const adapter of Object.values(ADAPTERS)) {
+    const full = adapter?.fullSizePhotoUrl(url);
+    if (full) return full;
+  }
+  return null;
 }
 
 /** Lo que un formulario del navegador necesita saber del canal: solo datos. */

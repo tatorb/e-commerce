@@ -57,4 +57,6 @@ export interface ChannelAdapter {
   searchUrl(query: string): string | null;
   /** Las categorías del canal con los campos de su formulario, si el canal las tiene. */
   catalog: ChannelCatalog | null;
+  /** El link de una foto publicada en su tamaño más grande, o null si la foto no es de este canal. */
+  fullSizePhotoUrl(url: string): string | null;
 }

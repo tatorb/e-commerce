@@ -31,6 +31,9 @@ import { prisma } from '@/lib/db';
 import { AI_NOT_CONFIGURED, isAiConfigured } from '@/ai/claude';
 import { InfoStep } from '@/components/pipeline/info/InfoStep';
 import { TitleStep } from '@/components/pipeline/title/TitleStep';
+import { ImagesStep } from '@/components/pipeline/images/ImagesStep';
+import { countChannelPhotos, loadPhotoLine } from '@/lib/photos';
+import { workerState } from '@/lib/image-worker';
 import { formatDateTime, formatDuration, plural } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
@@ -61,10 +64,10 @@ export default async function PipelineStepPage({
   searchParams,
 }: {
   params: Promise<{ cuenta: string; id: string }>;
-  searchParams: Promise<{ paso?: string | string[] }>;
+  searchParams: Promise<{ paso?: string | string[]; foto?: string | string[] }>;
 }) {
   const { cuenta, id } = await params;
-  const { paso } = await searchParams;
+  const { paso, foto } = await searchParams;
   const account = await getAccountBySlug(cuenta);
   if (!account) notFound();
   const pub = await getPipelinePublication(account.id, id);
@@ -212,6 +215,21 @@ export default async function PipelineStepPage({
             ctx={ctx}
             auto={await autoAvailable(prisma, ctx.channel, ctx.storeId)}
             aiDisabledReason={isAiConfigured() ? null : AI_NOT_CONFIGURED}
+          />
+        ) : viewing === 'IMAGES' ? (
+          <ImagesStep
+            accountSlug={account.slug}
+            publicationId={pub.id}
+            productId={pub.productId}
+            pageHref={`${pageHref}?paso=${PIPELINE_STEP_SLUG.IMAGES}`}
+            timeZone={account.timezone}
+            edits={await loadPhotoLine(prisma, pub.productId)}
+            selectedId={typeof foto === 'string' ? foto : null}
+            worker={await workerState(prisma)}
+            channelPhotos={await countChannelPhotos(prisma, pub.productId)}
+            channelName={pub.channelName}
+            sharedWith={await prisma.publication.count({ where: { productId: pub.productId } })}
+            blobReady={isBlobConfigured()}
           />
         ) : channel && viewing === 'PUBLISH' ? (
           <PublicationCodeCard

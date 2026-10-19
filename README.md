@@ -38,6 +38,10 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
 | Investigación del producto | `ProductResearch` | Lo que se junta en el paso Información y es del producto: sitio y página del fabricante, texto pegado del fabricante, aclaraciones para las imágenes (texto con formato, guardado como HTML limpio con solo negrita, cursiva y listas) y las preguntas de las publicaciones de la competencia. La comparten todas las publicaciones del producto. Las preguntas que recibió cada publicación son de esa publicación. |
 | Archivo del fabricante | `ProductFile` | Imagen o PDF del fabricante, subido directo del navegador al depósito privado de Vercel (Vercel Blob) con un permiso que da `/api/archivos` solo con sesión. La app anota tipo y peso reales que informa el depósito, y los muestra en `/api/archivos/<id>`, también solo con sesión. |
 | Dolor u objeción | `BuyerInsight` | Lo que preocupa o frena al comprador, en dos listas ordenables por producto. |
+| Línea de imágenes | `PhotoEdit` | Una foto del producto en el paso Imágenes. El original, subido desde la Mac (JPG, PNG, HEIC o TIFF) o bajado del canal en su tamaño más grande, queda en el depósito y nunca se toca. Pasa por 8 pasos: lente, perspectiva, blancos, luces, color, fondo, recorte y exportar. Es del producto: la ven todas sus publicaciones. |
+| Paso de una foto | `PhotoStepRun` | Cada intento de un paso: lo que pidió la persona, lo que propuso Claude con su razón, lo que se usó, lo que midió el programa, la vista y los archivos. Espera aprobación; rehacer un paso reemplaza ese y los siguientes. Hay uno solo abierto por foto (`openFor`). |
+| Trabajador de imágenes | `ImageWorker` | El programa que corrige las fotos, en la Mac del estudio (`trabajador-imagenes/`). Pregunta por trabajo, lo hace y lo entrega; la app nunca le habla a la Mac. Entra con su propia llave, que se crea y se corta en Equipo, y de la que se guarda solo la huella. Uno solo para todo el estudio. Cómo instalarlo está en `IMAGENES.md`. |
+| Ajustes de imágenes | `PhotoSettings` | Margen del recorte, color de fondo y calidad del JPG, y el tope de cada ajuste, por cuenta. Sin cargar valen los de `src/domain/photo-settings.ts`. Cada paso guarda una copia de los que usó. |
 | Datos de catálogo | `Publication.attributes` | Los campos del formulario del canal para la categoría de la publicación, con sus opciones, por ejemplo "Tipo de embrague" o "Incluye disco". Cada canal trae sus categorías y campos (los de Mercado Libre están en `src/channels/mercadolibre/catalog/`, bajados de su API pública). La categoría sale de la familia del producto o se elige a mano (`Publication.channelCategory`). Marca, número de pieza y origen salen de la ficha. Solo se guardan valores válidos, como nombre y valor. |
 | Conexión con Claude | `McpToken` | El permiso para que Claude use la app en nombre de una persona, desde claude.ai u otro programa de Claude. Se agrega como conector con la dirección `/api/mcp`, dura 30 días y se corta en Equipo. Cada cambio queda a nombre de esa persona. En la base se guarda solo la huella de la llave. |
 | Título bloqueado | (se calcula) | Cuando el canal no deja cambiar el título. Lo dicen los vendidos y las ventas de las mediciones, con la regla de cada canal; si no hay datos, se marca a mano en la publicación. |
@@ -80,6 +84,14 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
   `BLOB_READ_WRITE_TOKEN`, el paso Información muestra los pasos para crearlo. Para probar sin Vercel,
   `VERCEL_BLOB_API_URL` y `NEXT_PUBLIC_VERCEL_BLOB_API_URL` apuntan a un depósito simulado y
   `BLOB_TEST_URL_PREFIX` acepta sus direcciones.
+- `src/lib/photo-queue.ts`: la cola de la línea de imágenes. El trabajador toma un paso con `FOR UPDATE SKIP LOCKED`,
+  con un turno que sube cada vez: un resultado con turno viejo no se acepta. Si no avisa en 15 minutos, el paso
+  vuelve a la cola, y a los 3 intentos queda fallido. Los pedidos del trabajador van a `/api/imagenes/trabajador/`
+  (`siguiente`, `latido`, `resultado`) con la forma de `src/domain/photo-contract.ts`; los ejemplos de
+  `trabajador-imagenes/contrato/` los prueban la app y el trabajador. `photo-files.ts` arma los permisos para que el
+  trabajador baje el original con un link firmado y suba sus archivos directo al depósito. Las fotos se ven en
+  `/api/imagenes/ver`, solo con sesión.
+- `trabajador-imagenes/`: el trabajador, en Python. No entra en el armado de la app ni en Vercel.
 - `src/lib/mcp/`: la conexión con Claude (MCP). `oauth.ts` es el permiso: registro del programa, código de un solo
   uso con PKCE, llaves de 30 días y desconexión. `redirect-allowlist.ts` dice a qué direcciones puede volver el
   permiso (las de Claude, las de la propia computadora y las de `MCP_OAUTH_REDIRECT_URIS`). `read-tools.ts` y
