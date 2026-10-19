@@ -104,14 +104,11 @@ describe.skipIf(!url)('permiso para Claude', () => {
     return r.accessToken;
   }
 
-  it('registra el programa con su nombre y rechaza direcciones de vuelta raras', async () => {
-    const r = await registerClient(db, { client_name: 'Claude', redirect_uris: [CLAUDE] });
-    expect(r.ok).toBe(true);
-    if (!r.ok) return;
-    expect(r.client.client_id).toMatch(/^mcp-/);
-    expect(await db.mcpClient.findUnique({ where: { id: r.client.client_id } })).toMatchObject({ name: 'Claude' });
-    const bad = await registerClient(db, { redirect_uris: ['https://otro-sitio.com/cb'] });
-    expect(bad.ok).toBe(false);
+  it('registra el programa con su nombre, aunque declare direcciones propias', async () => {
+    const r = await registerClient(db, { client_name: 'Claude', redirect_uris: [CLAUDE, 'claude://callback'] });
+    expect(r.client_id).toMatch(/^mcp-/);
+    expect(await db.mcpClient.findUnique({ where: { id: r.client_id } })).toMatchObject({ name: 'Claude' });
+    expect((await registerClient(db, null)).client_id).toMatch(/^mcp-/);
   });
 
   it('revisa el pedido: dirección, tipo de respuesta y PKCE', async () => {
@@ -125,16 +122,15 @@ describe.skipIf(!url)('permiso para Claude', () => {
     expect(await checkAuthorizeRequest(db, params())).toMatchObject({ ok: true, clientName: 'Claude', destination: 'claude.ai' });
   });
 
-  it('con un programa registrado, usa su nombre y exige su dirección de vuelta', async () => {
-    const r = await registerClient(db, { client_name: 'Claude Desktop', redirect_uris: ['http://localhost:5000/cb'] });
-    if (!r.ok) throw new Error('no registró');
-    const id = r.client.client_id;
-    expect(await checkAuthorizeRequest(db, params({ clientId: id, redirectUri: 'http://localhost:5000/cb' }))).toMatchObject({
-      ok: true,
-      clientId: id,
-      clientName: 'Claude Desktop',
+  it('con un programa registrado, usa su nombre; la dirección de vuelta igual tiene que estar permitida', async () => {
+    const { client_id: id } = await registerClient(db, { client_name: 'Claude Desktop', redirect_uris: ['https://otro-sitio.com/cb'] });
+    expect(await checkAuthorizeRequest(db, params({ clientId: id }))).toMatchObject({ ok: true, clientId: id, clientName: 'Claude Desktop' });
+    expect(await checkAuthorizeRequest(db, params({ clientId: id, redirectUri: 'https://otro-sitio.com/cb' }))).toMatchObject({
+      ok: false,
+      show: expect.any(String),
     });
-    expect(await checkAuthorizeRequest(db, params({ clientId: id }))).toMatchObject({ ok: false, show: expect.any(String) });
+    // Un programa que no se registró acá, por ejemplo después de borrar la base, igual puede pedir permiso.
+    expect(await checkAuthorizeRequest(db, params({ clientId: 'mcp-desconocido' }))).toMatchObject({ ok: true, clientId: null });
   });
 
   it('el código se cambia por una llave que vale, y en la base queda solo la huella', async () => {

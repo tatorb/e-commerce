@@ -29,27 +29,27 @@ export const baseUrlFrom = (req: Request) => baseUrlFromHeaders(req.headers, new
 
 // ───────────────────────────── Registro del programa ─────────────────────────────
 
-/** Registro dinámico: el programa se presenta con su nombre y sus direcciones de vuelta. */
+/**
+ * Registro dinámico: el programa se presenta con su nombre y sus direcciones
+ * de vuelta. Acepta lo que mande, como la conexión de app.studiomrb.com: lo
+ * que protege es la lista de direcciones permitidas, que se revisa al pedir
+ * el permiso. Claude puede declarar direcciones propias que después no usa.
+ */
 export async function registerClient(db: PrismaClient, body: unknown) {
   const b = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
   const name = typeof b.client_name === 'string' ? b.client_name.trim().slice(0, 100) || null : null;
   const redirectUris = Array.isArray(b.redirect_uris)
-    ? b.redirect_uris.filter((u): u is string => typeof u === 'string').slice(0, 10)
+    ? b.redirect_uris.filter((u): u is string => typeof u === 'string').slice(0, 10).map((u) => u.slice(0, 2000))
     : [];
-  const bad = redirectUris.find((u) => !isAllowedRedirectUri(u));
-  if (bad) return { ok: false as const, error: 'invalid_redirect_uri', detail: `Dirección de vuelta no permitida: ${bad}` };
   const client = await db.mcpClient.create({ data: { id: `mcp-${randomToken(16)}`, name, redirectUris } });
   return {
-    ok: true as const,
-    client: {
-      client_id: client.id,
-      client_id_issued_at: Math.floor(client.createdAt.getTime() / 1000),
-      token_endpoint_auth_method: 'none',
-      grant_types: ['authorization_code'],
-      response_types: ['code'],
-      redirect_uris: redirectUris,
-      ...(name ? { client_name: name } : {}),
-    },
+    client_id: client.id,
+    client_id_issued_at: Math.floor(client.createdAt.getTime() / 1000),
+    token_endpoint_auth_method: 'none',
+    grant_types: ['authorization_code'],
+    response_types: ['code'],
+    redirect_uris: redirectUris,
+    ...(name ? { client_name: name } : {}),
   };
 }
 
@@ -118,10 +118,6 @@ export async function checkAuthorizeRequest(db: PrismaClient, p: AuthorizeParams
     return { ok: false, show: 'El pedido no vino de Claude o de un programa permitido.' };
   }
   const client = p.clientId ? await db.mcpClient.findUnique({ where: { id: p.clientId } }) : null;
-  const declared = Array.isArray(client?.redirectUris) ? (client.redirectUris as unknown[]) : [];
-  if (client && declared.length > 0 && !declared.includes(p.redirectUri)) {
-    return { ok: false, show: 'La dirección de vuelta no es la que declaró el programa.' };
-  }
   if (p.responseType !== 'code') return { ok: false, redirect: errorRedirect(p.redirectUri, 'unsupported_response_type', p.state) };
   if (!p.codeChallenge || p.codeChallengeMethod !== 'S256') {
     return { ok: false, redirect: errorRedirect(p.redirectUri, 'invalid_request', p.state) };

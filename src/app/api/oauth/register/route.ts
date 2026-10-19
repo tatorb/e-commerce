@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { registerClient } from '@/lib/mcp/oauth';
-import { CORS, corsPreflight, oauthError } from '@/lib/mcp/http';
+import { CORS, corsPreflight } from '@/lib/mcp/http';
 
 // Registro dinámico (RFC 7591): Claude se presenta antes de pedir permiso.
 
@@ -18,7 +18,6 @@ export async function POST(req: Request) {
   } catch {
     // Sin cuerpo: igual se registra.
   }
-  const r = await registerClient(prisma, body);
-  if (!r.ok) return oauthError(r.error, r.detail);
-  return NextResponse.json(r.client, { status: 201, headers: CORS });
+  const client = await registerClient(prisma, body);
+  return NextResponse.json(client, { status: 201, headers: CORS });
 }
