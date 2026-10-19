@@ -255,6 +255,70 @@ def test_la_segunda_pasada_mira_solo_la_zona_del_producto(foto):
     assert a[12, 12] == 0
 
 
+def _pieza_grande(rgb):
+    """Una pieza que llena casi toda su caja, como un pistón de cerca."""
+    alto, ancho = rgb.shape[:2]
+    m = np.zeros((alto, ancho), np.float32)
+    m[int(alto * 0.25) : int(alto * 0.75), int(ancho * 0.25) : int(ancho * 0.75)] = 1
+    return m
+
+
+def test_la_segunda_pasada_deja_entorno_alrededor_del_producto(foto):
+    vistas = []
+
+    def segmentador(rgb):
+        vistas.append(rgb.shape[:2])
+        return _pieza_grande(rgb) if len(vistas) == 1 else np.ones(rgb.shape[:2], np.float32)
+
+    medicion = Fondo(segmentador).medir(foto, AJUSTES)
+    (alto, ancho), (alto_zona, ancho_zona) = vistas
+    assert alto_zona < alto and ancho_zona < ancho
+    # El producto ocupa a lo sumo la mitad de lo que mira la segunda pasada.
+    assert (alto * ancho / 4) <= 0.5 * alto_zona * ancho_zona
+    assert medicion.medidas["segunda_pasada_disponible"]
+
+
+def test_la_segunda_pasada_se_descarta_si_pierde_parte_del_producto(foto):
+    def segmentador(rgb):
+        m = _pieza_grande(rgb)
+        if rgb.shape[:2] != foto.rgb.shape[:2]:
+            m[:, rgb.shape[1] // 2 :] = 0  # la segunda pasada se queda con media pieza
+        return m
+
+    paso = Fondo(segmentador)
+    medicion = paso.medir(foto, AJUSTES)
+    assert medicion.medidas["segunda_pasada_descartada"]
+    assert not medicion.medidas["segunda_pasada_disponible"]
+    _, r = correr(paso, foto, {"detalle": 1, "refinar_bordes": 0, "motas": 0, "dureza": 0})
+    # La pieza queda entera, con la máscara de la primera pasada.
+    assert r.foto.alfa[300, 550] == 1 and r.medidas["piezas"] == 1
+    assert "segunda pasada" in r.nota
+    assert np.array_equal(r.foto.rgb, foto.rgb)
+
+
+def _pieza_con_huecos(rgb):
+    alto, ancho = rgb.shape[:2]
+    m = np.zeros((alto, ancho), np.float32)
+    m[100:300, 100:400] = 1
+    m[180:200, 200:230] = 0  # un reflejo que el modelo tomó por fondo
+    m[150:250, 500:700] = 1
+    m[170:230, 520:680] = 0  # el centro de un aro: es fondo de verdad
+    return m
+
+
+def test_rellenar_huecos_solo_tapa_los_chicos_y_no_cambia_colores(foto):
+    paso = Fondo(_pieza_con_huecos)
+    valores = {"detalle": 0, "refinar_bordes": 0, "motas": 0, "dureza": 0}
+    _, sin = correr(paso, foto, {**valores, "rellenar_huecos": 0})
+    _, con = correr(paso, foto, {**valores, "rellenar_huecos": 1})
+    assert sin.foto.alfa[190, 215] == 0
+    assert con.foto.alfa[190, 215] == 1
+    assert con.foto.alfa[200, 600] == 0  # el centro del aro sigue transparente
+    assert con.foto.alfa[50, 50] == 0  # y el fondo de afuera también
+    assert con.medidas["huecos_rellenados"] == 1
+    assert np.array_equal(con.foto.rgb, foto.rgb)
+
+
 def test_el_modelo_del_fondo_se_elige_por_la_memoria(monkeypatch):
     from mrb_imagenes.pasos import fondo
 

@@ -9,8 +9,15 @@ cerca de 8 GB de memoria. El liviano (isnet-general-use) usa poco más de 1 GB
 y, con la segunda pasada sobre la zona del producto, queda cerca. El
 trabajador elige según la memoria de la Mac.
 
+El modelo busca "el objeto" de cada imagen. Si en la segunda pasada el
+producto llena casi todo el recorte, toma una parte de la pieza por fondo (le
+pasaba a un pistón brillante sobre la caja de luz plateada). Por eso esa zona
+deja entorno alrededor, y si igual pierde un pedazo que la primera pasada sí
+vio, se descarta.
+
 No se usa el "refinado de bordes" de rembg (alpha matting), porque recalcula
 colores. El borde se ajusta con un filtro guiado que solo toca la transparencia.
+Rellenar huecos también: vuelve opaco lo que ya es de la pieza, no dibuja nada.
 """
 
 from __future__ import annotations
@@ -82,17 +89,39 @@ def segmentador_rembg(modelo: str | None = None) -> Segmentador:
 
 # La segunda pasada sirve si la zona del producto es bastante más chica que la foto.
 _DETALLE_HASTA = 0.85
+# En la zona de la segunda pasada el producto ocupa a lo sumo esta parte. Con más, el modelo falla.
+_OCUPA_HASTA = 0.5
+# Si la segunda pasada pierde un pedazo de la pieza más grande que esta parte, no se usa.
+_PERDIDA_HASTA = 0.10
+# Rellenar huecos solo toca los que son a lo sumo esta parte de la pieza que los rodea.
+_HUECO_HASTA = 0.10
 
 
 def zona_del_producto(mascara: np.ndarray) -> tuple[int, int, int, int] | None:
-    filas = np.where((mascara >= 0.5).any(axis=1))[0]
-    columnas = np.where((mascara >= 0.5).any(axis=0))[0]
+    """La caja del producto con un margen que crece hasta que el producto ocupe a lo sumo la mitad."""
+    solido = mascara >= 0.5
+    filas = np.where(solido.any(axis=1))[0]
+    columnas = np.where(solido.any(axis=0))[0]
     if len(filas) == 0:
         return None
     alto, ancho = mascara.shape
-    y0, y1, x0, x1 = filas[0], filas[-1] + 1, columnas[0], columnas[-1] + 1
-    margen = int(0.04 * max(y1 - y0, x1 - x0))
-    return max(0, x0 - margen), max(0, y0 - margen), min(ancho, x1 + margen), min(alto, y1 + margen)
+    y0, y1, x0, x1 = int(filas[0]), int(filas[-1]) + 1, int(columnas[0]), int(columnas[-1]) + 1
+    lado, area = max(y1 - y0, x1 - x0), int(solido.sum())
+    margen, paso = int(0.04 * lado), max(1, int(0.02 * lado))
+    while True:
+        zona = (max(0, x0 - margen), max(0, y0 - margen), min(ancho, x1 + margen), min(alto, y1 + margen))
+        if area <= _OCUPA_HASTA * (zona[2] - zona[0]) * (zona[3] - zona[1]) or zona == (0, 0, ancho, alto):
+            return zona
+        margen += paso
+
+
+def pedazo_perdido(primera: np.ndarray, segunda: np.ndarray) -> float:
+    """El pedazo más grande que la primera pasada ve como pieza y la segunda como fondo, en fracción de la pieza."""
+    perdido = ((primera >= 0.5) & (segunda < 0.5)).astype(np.uint8)
+    n, _, stats, _ = cv2.connectedComponentsWithStats(perdido, connectivity=8)
+    if n <= 1:
+        return 0.0
+    return float(stats[1:, cv2.CC_STAT_AREA].max() / max(1, int((primera >= 0.5).sum())))
 
 
 def _caja(img: np.ndarray, r: int) -> np.ndarray:
@@ -129,6 +158,38 @@ def quitar_motas(alfa: np.ndarray, minimo_pct: float) -> tuple[np.ndarray, int, 
     return limpia, int(n - 1 - len(chicas)), int(len(chicas))
 
 
+def rellenar_huecos(alfa: np.ndarray) -> tuple[np.ndarray, int]:
+    """Vuelve opacos los huecos chicos encerrados por una pieza. Los grandes, como el centro de un aro, quedan."""
+    solido = alfa >= 0.5
+    n, huecos, stats, _ = cv2.connectedComponentsWithStats((~solido).astype(np.uint8), connectivity=4)
+    if n <= 1:
+        return alfa, 0
+    alto, ancho = alfa.shape
+    # Lo que toca el borde de la foto es el fondo de afuera, no un hueco.
+    afuera = set(np.unique(np.concatenate([huecos[0], huecos[-1], huecos[:, 0], huecos[:, -1]])).tolist())
+    _, piezas, stats_piezas, _ = cv2.connectedComponentsWithStats(solido.astype(np.uint8), connectivity=8)
+    chicos = np.zeros(n, dtype=bool)
+    for i in range(1, n):
+        if i in afuera:
+            continue
+        x, y, w, h, area = stats[i]
+        x0, y0, x1, y1 = max(0, x - 1), max(0, y - 1), min(ancho, x + w + 1), min(alto, y + h + 1)
+        # La pieza que lo rodea: la que más toca su orilla.
+        orilla = cv2.dilate((huecos[y0:y1, x0:x1] == i).astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+        vecinas = piezas[y0:y1, x0:x1][orilla]
+        vecinas = vecinas[vecinas > 0]
+        if len(vecinas) and area <= _HUECO_HASTA * stats_piezas[np.bincount(vecinas).argmax(), cv2.CC_STAT_AREA]:
+            chicos[i] = True
+    if not chicos.any():
+        return alfa, 0
+    rellenar = chicos[huecos]
+    # El fondo de afuera y los huecos grandes conservan su borde suave; el resto de la pieza queda opaco.
+    abierto = ~solido & ~rellenar
+    r = max(3, round(min(alto, ancho) / 300))
+    cerca = cv2.dilate(abierto.astype(np.uint8), np.ones((2 * r + 1, 2 * r + 1), np.uint8)) > 0
+    return np.where(rellenar | ~cerca, 1.0, alfa).astype(np.float32), int(chicos.sum())
+
+
 def armar_alfa(mascara: np.ndarray, rgb: np.ndarray, valores: dict[str, float]) -> tuple[np.ndarray, dict]:
     alfa = mascara.astype(np.float32)
     if valores.get("refinar_bordes"):
@@ -141,8 +202,14 @@ def armar_alfa(mascara: np.ndarray, rgb: np.ndarray, valores: dict[str, float]) 
     dureza = float(valores.get("dureza", 0))
     if dureza > 0:
         alfa = np.clip((alfa - 0.5) * (1 + dureza / 25.0) + 0.5, 0, 1).astype(np.float32)
+    rellenados = 0
+    if valores.get("rellenar_huecos"):
+        alfa, rellenados = rellenar_huecos(alfa)
     alfa, piezas, sacadas = quitar_motas(alfa, float(valores.get("motas", 0)))
-    return alfa, {"piezas": piezas, "motas_sacadas": sacadas, "cubre_pct": round(float((alfa >= 0.5).mean()) * 100, 2)}
+    medidas = {"piezas": piezas, "motas_sacadas": sacadas, "cubre_pct": round(float((alfa >= 0.5).mean()) * 100, 2)}
+    if valores.get("rellenar_huecos"):
+        medidas["huecos_rellenados"] = rellenados
+    return alfa, medidas
 
 
 class Fondo(Paso):
@@ -152,9 +219,11 @@ class Fondo(Paso):
         "La foto muestra la pieza ya recortada sobre cuadros grises, que son transparencia. Revisá que el recorte "
         "incluya todo el producto (si es un kit, todas sus partes, incluida la caja si forma parte de lo que se vende) "
         "y nada del entorno. Proponé: detalle (1 para una segunda pasada sobre la zona del producto, que separa mejor "
-        "los espacios finos, como entre aros), refinar_bordes (1 para ajustar el borde a la foto), motas (tamaño mínimo "
-        "de una pieza suelta en % de la foto; más chico que eso se borra, poné 0 si hay piezas chicas como seguros o "
-        "clips) y dureza (0 deja el borde suave; más alto lo vuelve más nítido y reduce halos claros)."
+        "los espacios finos, como entre aros), refinar_bordes (1 para ajustar el borde a la foto), rellenar_huecos (1 "
+        "si es una sola pieza maciza y se ven manchas o agujeritos transparentes dentro de ella, por ejemplo por "
+        "reflejos en el metal; 0 si es un kit, si hay aros o si la pieza tiene agujeros que se ven de lado a lado), "
+        "motas (tamaño mínimo de una pieza suelta en % de la foto; más chico que eso se borra, poné 0 si hay piezas "
+        "chicas como seguros o clips) y dureza (0 deja el borde suave; más alto lo vuelve más nítido y reduce halos claros)."
     )
     parametros = (
         Parametro(
@@ -167,6 +236,15 @@ class Fondo(Paso):
             tipo="si_no",
         ),
         Parametro("refinar_bordes", "Refinar bordes", "Ajusta el borde de la silueta a los bordes reales de la foto.", 0, 1, 1, tipo="si_no"),
+        Parametro(
+            "rellenar_huecos",
+            "Rellenar huecos",
+            "Vuelve opacos los huecos chicos dentro de una pieza, como reflejos que el modelo tomó por fondo.",
+            0,
+            1,
+            0,
+            tipo="si_no",
+        ),
         Parametro("motas", "Motas", "Borra los pedacitos sueltos más chicos que este % de la foto.", 0, 2, 0.02, 0.01, " %"),
         Parametro("dureza", "Dureza del borde", "0 deja el borde suave; más alto lo vuelve más nítido.", 0, 100, 0, 1),
     )
@@ -183,6 +261,7 @@ class Fondo(Paso):
     def medir(self, foto: Foto, ajustes: dict) -> Medicion:
         mascara = self._segmentar(foto.rgb)
         extra = {"mascara": mascara, "mascara_detalle": None}
+        descartada = False
         zona = zona_del_producto(mascara)
         if zona is not None:
             x0, y0, x1, y1 = zona
@@ -190,10 +269,13 @@ class Fondo(Paso):
                 # El modelo mira la foto achicada: sobre la zona del producto ve más detalle.
                 detalle = np.zeros_like(mascara)
                 detalle[y0:y1, x0:x1] = self._segmentar(np.ascontiguousarray(foto.rgb[y0:y1, x0:x1]))
-                extra["mascara_detalle"] = detalle
+                # Si perdió un pedazo de la pieza que la primera pasada sí vio, no se usa.
+                descartada = pedazo_perdido(mascara, detalle) > _PERDIDA_HASTA
+                extra["mascara_detalle"] = None if descartada else detalle
         sugeridos = self.defectos(ajustes)
         _, medidas = armar_alfa(self._mascara(extra, sugeridos), foto.rgb, sugeridos)
         medidas["segunda_pasada_disponible"] = extra["mascara_detalle"] is not None
+        medidas["segunda_pasada_descartada"] = descartada
         medidas["modelo"] = getattr(self.segmentador, "modelo", "otro")
         medidas["borde_suave_pct"] = round(float(((mascara > 0.05) & (mascara < 0.95)).mean()) * 100, 2)
         return Medicion(medidas=medidas, sugeridos=sugeridos, extra=extra)
@@ -212,8 +294,16 @@ class Fondo(Paso):
 
     def aplicar(self, foto: Foto, valores: dict[str, float], ajustes: dict, medicion: Medicion) -> Resultado:
         alfa, medidas = armar_alfa(self._mascara(medicion.extra, valores), foto.rgb, valores)
-        nota = None
+        notas = []
         if medidas["piezas"] == 0:
-            nota = "El modelo no encontró ninguna pieza: revisá la foto."
+            notas.append("El modelo no encontró ninguna pieza: revisá la foto.")
+        if valores.get("detalle") and medicion.medidas.get("segunda_pasada_descartada"):
+            notas.append("La segunda pasada perdía parte del producto: se usó la primera.")
         # Los colores son los mismos de la entrada, sin tocar. Solo se suma la transparencia.
-        return Resultado(foto=Foto(rgb=foto.rgb, alfa=alfa, datos=foto.datos), valores=valores, medidas=medidas, nota=nota, mascara=alfa)
+        return Resultado(
+            foto=Foto(rgb=foto.rgb, alfa=alfa, datos=foto.datos),
+            valores=valores,
+            medidas=medidas,
+            nota=" ".join(notas) or None,
+            mascara=alfa,
+        )
