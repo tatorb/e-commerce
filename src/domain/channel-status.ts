@@ -8,3 +8,7 @@ export const CHANNEL_STATUS_LABEL: Record<ChannelStatus, string> = {
   INACTIVE: 'Inactiva',
   UNPUBLISHED: 'Sin publicar',
 };
+
+/** El código del canal, o "Sin publicar" si todavía no tiene. */
+export const codeOrUnpublished = (externalId: string | null | undefined): string =>
+  externalId || CHANNEL_STATUS_LABEL.UNPUBLISHED;

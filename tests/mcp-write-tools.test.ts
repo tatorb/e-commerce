@@ -22,7 +22,9 @@ describe('herramientas de escritura en la lista', () => {
     expect(tools.get('remove_from_pipeline')).toMatchObject({ destructiveHint: true });
     expect(tools.get('get_publication')).toEqual(expect.not.objectContaining({ destructiveHint: expect.anything() }));
     expect(tools.get('save_catalog_data')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
-    expect(tools.size).toBe(25);
+    expect(tools.get('create_publication')).toMatchObject({ readOnlyHint: false, destructiveHint: false });
+    expect(tools.get('update_publication')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+    expect(tools.size).toBe(27);
   });
 });
 
@@ -93,18 +95,46 @@ describe.skipIf(!url)('herramientas de escritura', () => {
     await call('move_pipeline_step', { publicacion: codigo, desde_paso: 'INFO', accion: 'avanzar' });
   };
 
-  it('add_to_pipeline: por código o link, con aviso de repetidas, a nombre de la persona', async () => {
+  it('add_to_pipeline: por código o link, con aviso de las del mismo producto, a nombre de la persona', async () => {
     const first = await call('add_to_pipeline', { publicaciones: ['https://articulo.mercadolibre.com.ar/MLA-1110001-kit', 'MLA9990009', 'cualquiera'] });
     expect(first.data).toMatchObject({ listo: true, agregadas: 1, no_estan_en_el_catalogo: ['MLA9990009'], no_se_entienden: ['cualquiera'] });
     const move = await db.pipelineMovement.findFirstOrThrow({ where: { publicationId: kitId } });
     expect(move).toMatchObject({ step: 'INFO', userId: 'u1' });
 
+    // La otra del mismo producto entra igual, con aviso.
     const dup = await call('add_to_pipeline', { publicaciones: ['MLA1110002'] });
-    expect(dup.data).toMatchObject({ listo: false, repetidas: [expect.objectContaining({ codigo: 'MLA1110002', motivo: 'Es del mismo producto que otra' })] });
-    expect((await state(copyId)).pipelineStatus).toBe('UNTOUCHED');
-    const forced = await call('add_to_pipeline', { publicaciones: ['MLA1110002'], agregar_repetidas: true });
-    expect(forced.data).toMatchObject({ listo: true, agregadas: 1 });
+    expect(dup.data).toMatchObject({
+      listo: true,
+      agregadas: 1,
+      avisos: [expect.objectContaining({ codigo: 'MLA1110002', motivo: 'Es del mismo producto que otra' })],
+    });
+    expect((await state(copyId)).pipelineStatus).toBe('IN_PIPELINE');
     expect((await call('add_to_pipeline', { publicaciones: ['MLA0000000'] })).isError).toBe(true);
+  });
+
+  it('create_publication y update_publication: nueva sin publicar, en Información, y después su código', async () => {
+    expect((await call('create_publication', {})).text).toContain('producto o producto_nuevo');
+    expect((await call('create_publication', { producto: 'P-100', tienda: 'Otra' })).text).toContain('No encontré la tienda');
+
+    const existing = await call('create_publication', { producto: 'P-100' });
+    expect(existing.data).toMatchObject({
+      listo: true,
+      producto: 'Kit de embrague Gol',
+      tienda: 'TIENDA',
+      codigo: null,
+      pipeline: 'En pipeline · Información',
+    });
+    const nuevo = await call('create_publication', { producto_nuevo: { nombre: 'Combo Gol', tipo: 'Kit de embrague', individual_o_combo: 'combo' } });
+    expect(nuevo.data).toMatchObject({ listo: true, producto: 'Combo Gol', codigo: null });
+    const pubId = nuevo.data.link_app.split('/').pop();
+    const created = await db.publication.findUniqueOrThrow({ where: { id: pubId }, include: { product: true } });
+    expect(created).toMatchObject({ channelStatus: 'UNPUBLISHED', pipelineStep: 'INFO', product: { kind: 'COMBO', productType: 'Kit de embrague' } });
+
+    // El código se busca por id, porque todavía no tiene código.
+    expect((await call('update_publication', { publicacion: pubId, codigo: 'MLA1110001' })).text).toContain('Ya hay una publicación con ese ID');
+    const coded = await call('update_publication', { publicacion: pubId, codigo: 'https://articulo.mercadolibre.com.ar/MLA-5550001-combo-_JM' });
+    expect(coded.data).toMatchObject({ listo: true, codigo: 'MLA5550001', link_canal: 'https://articulo.mercadolibre.com.ar/MLA-5550001' });
+    expect((await db.publication.findUniqueOrThrow({ where: { id: pubId } })).channelStatus).toBe('ACTIVE');
   });
 
   it('move_pipeline_step y remove_from_pipeline: con el paso esperado, igual que en la app', async () => {

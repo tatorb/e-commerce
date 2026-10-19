@@ -87,6 +87,37 @@ export async function insertPublication(tx: Prisma.TransactionClient, args: Crea
   return publication;
 }
 
+/**
+ * Carga el código del canal cuando la publicación ya está publicada. Si
+ * estaba sin publicar, pasa a activa. El código y el link llegan ya limpios.
+ */
+export async function setPublicationCode(
+  tx: Prisma.TransactionClient,
+  args: { publicationId: string; externalId: string; url: string | null },
+): Promise<void> {
+  const pub = await tx.publication.findUniqueOrThrow({
+    where: { id: args.publicationId },
+    select: { storeId: true, channelStatus: true },
+  });
+  const taken = await tx.publication.count({
+    where: { storeId: pub.storeId, externalId: args.externalId, id: { not: args.publicationId } },
+  });
+  if (taken > 0) throw new DuplicateExternalIdError();
+  try {
+    await tx.publication.update({
+      where: { id: args.publicationId },
+      data: {
+        externalId: args.externalId,
+        url: args.url,
+        ...(pub.channelStatus === 'UNPUBLISHED' ? { channelStatus: 'ACTIVE' as const } : {}),
+      },
+    });
+  } catch (e) {
+    if (isUniqueViolation(e)) throw new DuplicateExternalIdError();
+    throw e;
+  }
+}
+
 /** Actualiza los datos de la publicación. No cambia la etapa. */
 export async function updatePublication(
   db: PrismaClient,

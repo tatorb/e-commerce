@@ -11,6 +11,7 @@ import { ToConfirm } from '@/components/proposals/ProposalView';
 import { ReviewForm, type AiFieldInfo } from '@/components/proposals/ReviewForm';
 import { StartReviewButton } from '@/components/proposals/StartReviewButton';
 import { getChannelAdapter } from '@/channels';
+import { codeOrUnpublished } from '@/domain/channel-status';
 import { loadContent, sameValue, type ContentField, type ContentSnapshot } from '@/domain/content';
 import { parseNotes, parseProposalFields, parseReview } from '@/domain/proposals';
 import { initialReviewValue, type ReviewField } from '@/domain/review';
@@ -154,7 +155,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ cuenta:
             <ul className="space-y-0.5 pl-6 text-muted-foreground">
               {siblings.map((s) => (
                 <li key={s.id} className="break-words">
-                  {s.title ?? publication.product.name} · {s.store.name} · {s.externalId ?? 'sin código'}
+                  {s.title ?? publication.product.name} · {s.store.name} · {codeOrUnpublished(s.externalId)}
                 </li>
               ))}
             </ul>

@@ -123,7 +123,7 @@ export async function loadTitleContext(db: PrismaClient, accountId: string, publ
     product,
     // Cuántas publicaciones comparten la ficha y la investigación del producto.
     sharedWith: _count.publications,
-    titleLock: resolveTitleLock(adapter.titleLock(metrics), pub.titleLockedManual),
+    titleLock: resolveTitleLock(adapter.titleLock(metrics), pub.titleLockedManual, Boolean(pub.externalId)),
     rules,
     customRules: custom,
     seeds,

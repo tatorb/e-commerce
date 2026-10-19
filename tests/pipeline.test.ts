@@ -11,7 +11,7 @@ import {
   previousStep,
   stepFromSlug,
 } from '@/domain/pipeline';
-import { resolveTitleLock } from '@/domain/title-lock';
+import { resolveTitleLock, titleLockText } from '@/domain/title-lock';
 
 describe('pasos del pipeline', () => {
   it('van en orden, sin anterior al primero ni siguiente al último', () => {
@@ -111,5 +111,11 @@ describe('título bloqueado', () => {
     expect(resolveTitleLock(true, false)).toEqual({ locked: true, source: 'data' });
     expect(resolveTitleLock(null, true)).toEqual({ locked: true, source: 'manual' });
     expect(resolveTitleLock(null, null)).toEqual({ locked: null, source: null });
+  });
+
+  it('sin publicar, el título nunca está bloqueado', () => {
+    const lock = resolveTitleLock(true, true, false);
+    expect(lock).toEqual({ locked: false, source: 'unpublished' });
+    expect(titleLockText(lock)).toBe('Todavía no está publicada: el título se puede cambiar.');
   });
 });

@@ -8,6 +8,7 @@ import { Card } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ChannelStatusBadge, PipelineBadge } from '@/components/stages/StageBadge';
 import { ScoreBadge } from '@/components/stages/ScoreBadge';
+import { codeOrUnpublished } from '@/domain/channel-status';
 import type { PipelineState } from '@/domain/pipeline';
 import { titleLockText, type TitleLock } from '@/domain/title-lock';
 import type { ChannelStatus, ProductKind } from '@/generated/prisma/enums';
@@ -18,7 +19,7 @@ import { addToPipelineAction } from '@/app/a/[cuenta]/publicaciones/pipeline-act
 import { useAddToPipeline } from './useAddToPipeline';
 
 // La lista del Catálogo, con casillas para elegir publicaciones y agregarlas
-// al pipeline. Solo pueden entrar las que tienen código del canal.
+// al pipeline. Entran también las que todavía no están publicadas.
 
 export type CatalogRow = PipelineState & {
   id: string;
@@ -61,7 +62,7 @@ function Count({ value }: { value: number | null }) {
   return value === null ? <span className="text-muted-foreground">—</span> : <>{value}</>;
 }
 
-const canEnter = (r: CatalogRow) => Boolean(r.externalId) && r.pipelineStatus !== 'IN_PIPELINE';
+const canEnter = (r: CatalogRow) => r.pipelineStatus !== 'IN_PIPELINE';
 
 function Checkbox({
   checked,
@@ -102,14 +103,13 @@ function PipelineCell({ accountSlug, row }: { accountSlug: string; row: CatalogR
 }
 
 function rowHint(r: CatalogRow): string {
-  if (!r.externalId) return 'Sin código del canal: no puede entrar al pipeline.';
   if (r.pipelineStatus === 'IN_PIPELINE') return 'Ya está en el pipeline.';
   return `Elegir ${r.title}`;
 }
 
 export function CatalogTable({ accountSlug, rows }: { accountSlug: string; rows: CatalogRow[] }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const add = useAddToPipeline(accountSlug, () => setSelected(new Set()));
+  const add = useAddToPipeline(() => setSelected(new Set()));
   const base = `/a/${accountSlug}/productos`;
 
   // Solo cuentan las que se ven ahora: si un filtro esconde una elegida, no se agrega.
@@ -132,7 +132,7 @@ export function CatalogTable({ accountSlug, rows }: { accountSlug: string; rows:
     add.clearMessage();
   }
 
-  const submit = () => add.run(() => addToPipelineAction(accountSlug, chosen.map((r) => r.id), false));
+  const submit = () => add.run(() => addToPipelineAction(accountSlug, chosen.map((r) => r.id)));
 
   return (
     <>
@@ -158,7 +158,6 @@ export function CatalogTable({ accountSlug, rows }: { accountSlug: string; rows:
           ) : null}
         </div>
       ) : null}
-      {add.dialog}
 
       <Card className="flex flex-col flex-1 min-h-0 overflow-hidden">
         <div className="md:hidden divide-y overflow-y-auto flex-1 min-h-0">
@@ -201,7 +200,7 @@ export function CatalogTable({ accountSlug, rows }: { accountSlug: string; rows:
                   <ChannelStatusBadge status={p.channelStatus} />
                 </div>
                 <div className="text-xs text-muted-foreground truncate">
-                  {[p.externalId, p.skus.join(' / ')].filter(Boolean).join(' · ') || '—'}
+                  {[codeOrUnpublished(p.externalId), p.skus.join(' / ')].filter(Boolean).join(' · ')}
                   {p.visits !== null ? ` · ${plural(p.visits, 'visita')}` : ''}
                   {p.sales !== null ? ` · ${plural(p.sales, 'venta')}` : ''}
                 </div>
@@ -259,7 +258,7 @@ export function CatalogTable({ accountSlug, rows }: { accountSlug: string; rows:
                       <KindBadge kind={p.kind} className="mt-0.5" />
                     </div>
                     <div className="text-xs text-muted-foreground truncate">
-                      {[p.externalId, p.skus.join(' / ')].filter(Boolean).join(' · ') || '—'}
+                      {[codeOrUnpublished(p.externalId), p.skus.join(' / ')].filter(Boolean).join(' · ')}
                     </div>
                   </TableCell>
                   <TableCell>

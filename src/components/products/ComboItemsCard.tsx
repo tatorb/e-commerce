@@ -1,22 +1,19 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
-import { Plus, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { IconButton, SectionBody, SectionCard } from '@/components/ui/section-card';
 import { StatusText } from '@/components/pipeline/StatusText';
 import { useStepAction } from '@/components/pipeline/useStepAction';
 import { saveComboItemsAction, searchComboProductsAction } from '@/app/a/[cuenta]/productos/combo-actions';
 import { MAX_COMBO_QUANTITY } from '@/domain/combos';
 import type { ComboProduct } from '@/lib/queries/combos';
+import { productDetail, ProductSearch } from './ProductSearch';
 
-type Candidate = Omit<ComboProduct, 'quantity'>;
-type Row = Candidate & { quantity: string };
-
-const detail = (p: Candidate) => [p.brand, p.partNumber, p.productType].filter(Boolean).join(' · ');
+type Row = Omit<ComboProduct, 'quantity'> & { quantity: string };
 
 // Los productos individuales que forman un combo, con su cantidad. Se usa en
 // la ficha del combo y en el paso Información.
@@ -67,7 +64,7 @@ export function ComboItemsCard({ accountSlug, comboId, initial }: { accountSlug:
                   <Link href={`/a/${accountSlug}/productos/${r.id}`} className="block truncate text-sm font-medium hover:underline">
                     {r.name}
                   </Link>
-                  {detail(r) ? <p className="truncate text-xs text-muted-foreground">{detail(r)}</p> : null}
+                  {productDetail(r) ? <p className="truncate text-xs text-muted-foreground">{productDetail(r)}</p> : null}
                 </div>
                 <IconButton label={`Sacar ${r.name}`} disabled={action.pending} onClick={() => change(rows.filter((_, j) => j !== i))}>
                   <X className="h-4 w-4" />
@@ -78,11 +75,16 @@ export function ComboItemsCard({ accountSlug, comboId, initial }: { accountSlug:
         )}
 
         <ProductSearch
-          accountSlug={accountSlug}
-          comboId={comboId}
+          id={`combo-search-${comboId}`}
+          label="Sumar un producto individual"
+          search={(q) => searchComboProductsAction(accountSlug, comboId, q)}
+          pickLabel="Sumar"
+          emptyText="No hay productos individuales que coincidan, o ya están en el combo."
           exclude={rows.map((r) => r.id)}
           disabled={action.pending}
-          onPick={(p) => change([...rows, { ...p, quantity: '1' }])}
+          onPick={(p) =>
+            change([...rows, { id: p.id, name: p.name, brand: p.brand, partNumber: p.partNumber, productType: p.productType, quantity: '1' }])
+          }
         />
 
         <div className="flex flex-wrap items-center gap-3">
@@ -94,88 +96,5 @@ export function ComboItemsCard({ accountSlug, comboId, initial }: { accountSlug:
         </div>
       </SectionBody>
     </SectionCard>
-  );
-}
-
-function ProductSearch({
-  accountSlug,
-  comboId,
-  exclude,
-  disabled,
-  onPick,
-}: {
-  accountSlug: string;
-  comboId: string;
-  exclude: string[];
-  disabled: boolean;
-  onPick: (p: Candidate) => void;
-}) {
-  const [q, setQ] = useState('');
-  const [results, setResults] = useState<Candidate[]>([]);
-  const [searching, setSearching] = useState(false);
-  const last = useRef(0);
-
-  useEffect(() => {
-    const term = q.trim();
-    if (term.length < 2) return;
-    const id = ++last.current;
-    const timer = setTimeout(async () => {
-      setSearching(true);
-      const found = await searchComboProductsAction(accountSlug, comboId, term);
-      // Solo vale la respuesta de la última búsqueda.
-      if (id === last.current) {
-        setResults(found);
-        setSearching(false);
-      }
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [q, accountSlug, comboId]);
-
-  const term = q.trim();
-  const visible = term.length < 2 ? [] : results.filter((r) => !exclude.includes(r.id));
-  return (
-    <div className="space-y-2">
-      <Label htmlFor={`combo-search-${comboId}`}>Sumar un producto individual</Label>
-      <Input
-        id={`combo-search-${comboId}`}
-        value={q}
-        disabled={disabled}
-        placeholder="Nombre, marca, número de pieza o SKU"
-        onChange={(e) => setQ(e.target.value)}
-      />
-      {term.length >= 2 ? (
-        visible.length > 0 ? (
-          <ul className="divide-y rounded-md border" aria-label="Productos encontrados">
-            {visible.map((p) => (
-              <li key={p.id} className="flex items-center gap-3 px-3 py-2">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm">{p.name}</p>
-                  {detail(p) ? <p className="truncate text-xs text-muted-foreground">{detail(p)}</p> : null}
-                </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={disabled}
-                  aria-label={`Sumar ${p.name}`}
-                  onClick={() => {
-                    onPick(p);
-                    setQ('');
-                    setResults([]);
-                  }}
-                >
-                  <Plus className="h-4 w-4" />
-                  Sumar
-                </Button>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            {searching ? 'Buscando…' : 'No hay productos individuales que coincidan, o ya están en el combo.'}
-          </p>
-        )
-      ) : null}
-    </div>
   );
 }

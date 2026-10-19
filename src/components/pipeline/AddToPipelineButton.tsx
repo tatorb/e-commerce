@@ -16,13 +16,13 @@ export function AddToPipelineButton({
   publicationId: string;
   label?: string;
 }) {
-  const add = useAddToPipeline(accountSlug);
+  const add = useAddToPipeline();
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
       <Button
         size="sm"
         variant="outline"
-        onClick={() => add.run(() => addToPipelineAction(accountSlug, [publicationId], false))}
+        onClick={() => add.run(() => addToPipelineAction(accountSlug, [publicationId]))}
         disabled={add.pending}
       >
         <KanbanSquare className="h-4 w-4" />
@@ -33,7 +33,6 @@ export function AddToPipelineButton({
           {add.message.text}
         </span>
       ) : null}
-      {add.dialog}
     </span>
   );
 }

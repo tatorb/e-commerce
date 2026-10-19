@@ -22,7 +22,7 @@ import { useAddToPipeline } from './useAddToPipeline';
 export function AddByCodeDialog({ accountSlug, example }: { accountSlug: string; example: string }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
-  const add = useAddToPipeline(accountSlug, () => setText(''));
+  const add = useAddToPipeline(() => setText(''));
 
   return (
     <Dialog
@@ -70,7 +70,6 @@ export function AddByCodeDialog({ accountSlug, example }: { accountSlug: string;
             {add.pending ? 'Agregando…' : 'Agregar al pipeline'}
           </Button>
         </DialogFooter>
-        {add.dialog}
       </DialogContent>
     </Dialog>
   );

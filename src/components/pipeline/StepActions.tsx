@@ -15,11 +15,14 @@ export function StepActions({
   publicationId,
   title,
   step,
+  completeBlocked = null,
 }: {
   accountSlug: string;
   publicationId: string;
   title: string;
   step: PipelineStep;
+  // Por qué todavía no se puede marcar como corregida, por ejemplo si falta el ID.
+  completeBlocked?: string | null;
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -51,11 +54,12 @@ export function StepActions({
             <ArrowRight className="h-4 w-4" />
           </Button>
         ) : (
-          <Button onClick={() => move('complete')} disabled={pending}>
+          <Button onClick={() => move('complete')} disabled={pending || completeBlocked !== null}>
             <Check className="h-4 w-4" />
             {pending ? 'Guardando…' : 'Marcar como corregida'}
           </Button>
         )}
+        {!next && completeBlocked ? <span className="text-sm text-muted-foreground">{completeBlocked}</span> : null}
         <span className="sm:ml-auto">
           <RemoveFromPipelineDialog accountSlug={accountSlug} publicationId={publicationId} title={title} step={step} />
         </span>

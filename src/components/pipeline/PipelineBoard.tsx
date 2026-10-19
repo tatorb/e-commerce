@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { Clock, Lock } from 'lucide-react';
 import { ScoreBadge } from '@/components/stages/ScoreBadge';
 import { KindBadge } from '@/components/products/KindBadge';
+import { codeOrUnpublished } from '@/domain/channel-status';
 import { PIPELINE_STEPS, PIPELINE_STEP_LABEL } from '@/domain/pipeline';
 import { titleLockText } from '@/domain/title-lock';
 import type { BoardItem } from '@/lib/queries/pipeline';
@@ -10,7 +11,7 @@ import { RemoveFromPipelineDialog } from './RemoveFromPipelineDialog';
 
 // Tablero del pipeline: una columna por paso. En el celular se desliza de costado.
 
-function BoardCard({ accountSlug, item, now }: { accountSlug: string; item: BoardItem; now: Date }) {
+function BoardCard({ accountSlug, item, now, showStore }: { accountSlug: string; item: BoardItem; now: Date; showStore: boolean }) {
   const lock = item.titleLock.locked ? titleLockText(item.titleLock) : null;
   return (
     <li className="rounded-lg border bg-card text-card-foreground shadow-sm transition-colors hover:border-foreground/25">
@@ -23,8 +24,9 @@ function BoardCard({ accountSlug, item, now }: { accountSlug: string; item: Boar
             </span>
           ) : null}
         </div>
-        <p className="flex items-center gap-2 text-xs text-muted-foreground">
-          {item.externalId ?? '—'}
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+          {codeOrUnpublished(item.externalId)}
+          {showStore ? <span>· {item.storeName}</span> : null}
           <KindBadge kind={item.kind} />
         </p>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
@@ -53,7 +55,16 @@ function BoardCard({ accountSlug, item, now }: { accountSlug: string; item: Boar
   );
 }
 
-export function PipelineBoard({ accountSlug, items }: { accountSlug: string; items: BoardItem[] }) {
+export function PipelineBoard({
+  accountSlug,
+  items,
+  showStore = false,
+}: {
+  accountSlug: string;
+  items: BoardItem[];
+  // La tienda de cada tarjeta, cuando la cuenta tiene más de una.
+  showStore?: boolean;
+}) {
   const now = new Date();
   return (
     <div className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-3 md:mx-0 md:snap-none md:px-0">
@@ -78,7 +89,7 @@ export function PipelineBoard({ accountSlug, items }: { accountSlug: string; ite
             ) : (
               <ul className="space-y-2 px-2 pb-2">
                 {cards.map((item) => (
-                  <BoardCard key={item.id} accountSlug={accountSlug} item={item} now={now} />
+                  <BoardCard key={item.id} accountSlug={accountSlug} item={item} now={now} showStore={showStore} />
                 ))}
               </ul>
             )}

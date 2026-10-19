@@ -4,11 +4,13 @@ import { ListChecks } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
+import { NewPipelinePublicationDialog } from '@/components/pipeline/NewPipelinePublicationDialog';
 import { PipelineBoard } from '@/components/pipeline/PipelineBoard';
 import { UrlFilterDropdown } from '@/components/filters/UrlFilterDropdown';
 import { KIND_OPTIONS, parseKinds } from '@/lib/queries/catalog-filters';
 import { getAccountBySlug } from '@/lib/queries/accounts';
 import { listBoard } from '@/lib/queries/pipeline';
+import { listStores } from '@/lib/queries/products';
 import { plural } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
@@ -31,7 +33,7 @@ export default async function PipelinePage({
   if (!account) notFound();
 
   const kinds = parseKinds(tipo);
-  const all = await listBoard(account.id);
+  const [all, stores] = await Promise.all([listBoard(account.id), listStores(account.id)]);
   const items = kinds.length > 0 ? all.filter((i) => kinds.includes(i.kind)) : all;
   const catalogHref = `/a/${account.slug}/publicaciones?pipeline=UNTOUCHED,DISCARDED`;
 
@@ -46,12 +48,18 @@ export default async function PipelinePage({
               para abrir su paso.
             </p>
           </div>
-          <Button size="sm" variant="outline" asChild>
-            <Link href={catalogHref}>
-              <ListChecks className="h-4 w-4" />
-              Agregar desde el Catálogo
-            </Link>
-          </Button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button size="sm" variant="outline" asChild>
+              <Link href={catalogHref}>
+                <ListChecks className="h-4 w-4" />
+                Agregar desde el Catálogo
+              </Link>
+            </Button>
+            <NewPipelinePublicationDialog
+              accountSlug={account.slug}
+              stores={stores.map((s) => ({ id: s.id, name: s.name, channelName: s.channel.name }))}
+            />
+          </div>
         </div>
       </PageHeader>
       <PageBody className="max-w-none">
@@ -61,7 +69,7 @@ export default async function PipelinePage({
             <Link href={catalogHref} className="text-primary underline-offset-4 hover:underline">
               Catálogo
             </Link>{' '}
-            y tocá Agregar al pipeline.
+            y tocá Agregar al pipeline, o creá una con Nueva publicación.
           </div>
         ) : (
           <>
@@ -79,7 +87,7 @@ export default async function PipelinePage({
                 En cada paso, las que esperan hace más tiempo van primero.
               </p>
             </div>
-            <PipelineBoard accountSlug={account.slug} items={items} />
+            <PipelineBoard accountSlug={account.slug} items={items} showStore={stores.length > 1} />
           </>
         )}
       </PageBody>

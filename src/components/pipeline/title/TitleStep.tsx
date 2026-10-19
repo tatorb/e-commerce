@@ -86,7 +86,15 @@ export function TitleStep({
       >
         <WordMapPanel key={ctx.words.length} accountSlug={accountSlug} publicationId={id} words={words} />
       </Section>
-      <Section n={5} title="Posición actual" description="La foto del antes: dónde aparece hoy la publicación.">
+      <Section
+        n={5}
+        title="Posición actual"
+        description={
+          ctx.publication.externalId
+            ? 'La foto del antes: dónde aparece hoy la publicación.'
+            : 'Las búsquedas principales. La posición se mide después de publicar.'
+        }
+      >
         <PositionsPanel
           accountSlug={accountSlug}
           publicationId={id}
@@ -94,6 +102,7 @@ export function TitleStep({
           candidates={ctx.suggestions}
           positions={ctx.positions}
           auto={auto.positions}
+          published={Boolean(ctx.publication.externalId)}
           channelKind={ctx.channel.kind}
           channelName={ctx.channel.name}
           timeZone={timeZone}

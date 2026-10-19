@@ -13,6 +13,8 @@ import { useStepAction } from '../useStepAction';
 import { StatusText } from '../StatusText';
 
 // La posición actual en 3 a 5 búsquedas principales, como la foto del antes.
+// Si la publicación todavía no está en el canal, solo se eligen las búsquedas:
+// la posición se mide después de publicar.
 
 type Position = { id: string; query: string; page: number | null; position: number | null; source: 'AUTO' | 'MANUAL'; checkedAt: Date };
 
@@ -24,6 +26,7 @@ function SearchRow({
   query,
   last,
   auto,
+  published,
   url,
   channelName,
   timeZone,
@@ -35,6 +38,7 @@ function SearchRow({
   query: string;
   last: Position | null;
   auto: boolean;
+  published: boolean;
   url: string | null;
   channelName: string;
   timeZone: string;
@@ -56,7 +60,9 @@ function SearchRow({
               ? `${last.page ? `Página ${last.page}, posición ${last.position}` : 'No aparece en las primeras 3 páginas'} · ${
                   last.source === 'AUTO' ? 'leída por la app' : 'a mano'
                 } el ${formatDateTime(last.checkedAt, timeZone)}`
-              : 'Sin medir todavía.'}
+              : published
+                ? 'Sin medir todavía.'
+                : 'Se mide después de publicar.'}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
@@ -73,55 +79,57 @@ function SearchRow({
           </Button>
         </div>
       </div>
-      <div className="flex flex-wrap items-end gap-2">
-        <label className="space-y-1 text-xs text-muted-foreground">
-          Página
-          <select
-            className="block h-9 rounded-md border bg-background px-2 text-sm text-foreground"
-            value={page}
-            onChange={(e) => setPage(e.target.value)}
-            aria-label={`Página para ${query}`}
-          >
-            <option value="1">1</option>
-            <option value="2">2</option>
-            <option value="3">3</option>
-            <option value="no">No aparece</option>
-          </select>
-        </label>
-        {!notFound ? (
+      {published ? (
+        <div className="flex flex-wrap items-end gap-2">
           <label className="space-y-1 text-xs text-muted-foreground">
-            Posición
-            <Input
-              className="h-9 w-20"
-              inputMode="numeric"
-              value={position}
-              onChange={(e) => setPosition(e.target.value)}
-              aria-label={`Posición para ${query}`}
-            />
+            Página
+            <select
+              className="block h-9 rounded-md border bg-background px-2 text-sm text-foreground"
+              value={page}
+              onChange={(e) => setPage(e.target.value)}
+              aria-label={`Página para ${query}`}
+            >
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="no">No aparece</option>
+            </select>
           </label>
-        ) : null}
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() =>
-            action.run(
-              () =>
-                savePositionAction(accountSlug, publicationId, query, notFound ? null : Number(page), notFound ? null : Number(position)),
-              () => setPosition(''),
-            )
-          }
-          disabled={action.pending || (!notFound && !position.trim())}
-        >
-          Guardar
-        </Button>
-        {auto ? (
-          <Button size="sm" variant="outline" onClick={() => action.run(() => readPositionAction(accountSlug, publicationId, query))} disabled={action.pending}>
-            <Search className="h-3.5 w-3.5" />
-            {action.pending ? 'Leyendo…' : 'Leer sola'}
+          {!notFound ? (
+            <label className="space-y-1 text-xs text-muted-foreground">
+              Posición
+              <Input
+                className="h-9 w-20"
+                inputMode="numeric"
+                value={position}
+                onChange={(e) => setPosition(e.target.value)}
+                aria-label={`Posición para ${query}`}
+              />
+            </label>
+          ) : null}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() =>
+              action.run(
+                () =>
+                  savePositionAction(accountSlug, publicationId, query, notFound ? null : Number(page), notFound ? null : Number(position)),
+                () => setPosition(''),
+              )
+            }
+            disabled={action.pending || (!notFound && !position.trim())}
+          >
+            Guardar
           </Button>
-        ) : null}
-        <StatusText status={action.status} />
-      </div>
+          {auto ? (
+            <Button size="sm" variant="outline" onClick={() => action.run(() => readPositionAction(accountSlug, publicationId, query))} disabled={action.pending}>
+              <Search className="h-3.5 w-3.5" />
+              {action.pending ? 'Leyendo…' : 'Leer sola'}
+            </Button>
+          ) : null}
+          <StatusText status={action.status} />
+        </div>
+      ) : null}
     </li>
   );
 }
@@ -133,6 +141,7 @@ export function PositionsPanel({
   candidates,
   positions,
   auto,
+  published,
   channelKind,
   channelName,
   timeZone,
@@ -144,6 +153,8 @@ export function PositionsPanel({
   candidates: string[];
   positions: Position[];
   auto: boolean;
+  // Si ya está en el canal. Sin publicar, no hay posición que medir.
+  published: boolean;
   channelKind: ChannelKind;
   channelName: string;
   timeZone: string;
@@ -157,11 +168,18 @@ export function PositionsPanel({
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
-        Elegí de 3 a 5 búsquedas principales y anotá en qué página y posición aparece hoy la publicación, hasta la
-        página 3.{' '}
-        {auto ? 'La app también puede leerla sola.' : `Abrí la búsqueda en ${channelName}, buscá la publicación y cargá dónde está.`}
-      </p>
+      {published ? (
+        <p className="text-sm text-muted-foreground">
+          Elegí de 3 a 5 búsquedas principales y anotá en qué página y posición aparece hoy la publicación, hasta la
+          página 3.{' '}
+          {auto ? 'La app también puede leerla sola.' : `Abrí la búsqueda en ${channelName}, buscá la publicación y cargá dónde está.`}
+        </p>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Elegí de 3 a 5 búsquedas principales. Todavía no está publicada, así que no hay posición que medir: se mide
+          después de publicar.
+        </p>
+      )}
       {mainSearches.length > 0 ? (
         <ul className="divide-y rounded-md border">
           {mainSearches.map((q) => (
@@ -172,6 +190,7 @@ export function PositionsPanel({
               query={q}
               last={lastOf(q)}
               auto={auto}
+              published={published}
               url={adapter.searchUrl(q)}
               channelName={channelName}
               timeZone={timeZone}

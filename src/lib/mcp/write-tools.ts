@@ -42,6 +42,8 @@ import {
 } from '@/domain/title-work';
 import { checkTitle, parsePastedSuggestions, wordKey } from '@/domain/titles';
 import { resolveExternalIds } from '@/lib/catalog';
+import { createPipelinePublication } from '@/domain/pipeline-publications';
+import { savePublicationCode } from '@/lib/publication-code';
 import { loadCatalogData, saveCatalogData } from '@/lib/catalog-data';
 import { loadTitleContext } from '@/lib/queries/title-step';
 import { loadTitleRules } from '@/lib/title-rules';
@@ -97,15 +99,14 @@ const addToPipelineTool = defineTool({
   name: 'add_to_pipeline',
   title: 'Agregar al pipeline',
   description:
-    'Agrega publicaciones al pipeline. Entran en Información; una descartada retoma el paso donde estaba. Si alguna es del mismo producto o tiene el mismo título que otra que ya está, no agrega nada y devuelve las repetidas: preguntale a la persona y, si quiere, volvé a llamar con agregar_repetidas.',
+    'Agrega publicaciones al pipeline, estén publicadas o no. Entran en Información; una descartada retoma el paso donde estaba. Si alguna es del mismo producto o tiene el mismo título que otra del pipeline, entra igual y vuelve un aviso: contáselo a la persona.',
   input: z.object({
     cuenta: accountArg,
     publicaciones: z
       .array(z.string().min(1))
       .min(1)
       .max(50)
-      .describe('Ids, códigos del canal o links de las publicaciones, hasta 50.'),
-    agregar_repetidas: z.boolean().optional().describe('Agrega aunque haya repetidas. Solo si la persona lo confirmó.'),
+      .describe('Ids, códigos del canal o links de las publicaciones, hasta 50. Las que no están publicadas se buscan por id.'),
   }),
   readOnly: false,
   destructive: false,
@@ -131,28 +132,22 @@ const addToPipelineTool = defineTool({
       ...(invalid.length > 0 ? { no_se_entienden: invalid } : {}),
     };
     if (ids.length === 0) throw new McpToolError(`No encontré ninguna de esas publicaciones en el Catálogo. ${JSON.stringify(extra)}`);
-    const r = await ctx.db.$transaction((tx) =>
-      addToPipeline(tx, { accountId: account.id, publicationIds: ids, userId: ctx.userId, force: args.agregar_repetidas === true }),
-    );
-    if (!r.ok) {
-      return {
-        listo: false,
-        aviso: 'No se agregó nada: hay repetidas. Preguntale a la persona si las agrega igual.',
-        repetidas: r.duplicates.map((d) => ({
-          codigo: d.externalId,
-          titulo: d.title,
-          motivo: d.reason === 'product' ? 'Es del mismo producto que otra' : 'Tiene el mismo título que otra',
-          la_otra: { codigo: d.other.externalId, titulo: d.other.title, ya_en_el_pipeline: d.other.inPipeline },
-        })),
-        ...extra,
-      };
-    }
+    const r = await ctx.db.$transaction((tx) => addToPipeline(tx, { accountId: account.id, publicationIds: ids, userId: ctx.userId }));
     return {
       listo: true,
       agregadas: r.added,
       retomadas: r.resumed,
       ya_estaban: r.alreadyIn,
-      sin_codigo_del_canal: r.withoutId,
+      ...(r.related.length > 0
+        ? {
+            avisos: r.related.map((d) => ({
+              codigo: d.externalId,
+              titulo: d.title,
+              motivo: d.reason === 'product' ? 'Es del mismo producto que otra' : 'Tiene el mismo título que otra',
+              la_otra: { codigo: d.other.externalId, titulo: d.other.title, ya_en_el_pipeline: d.other.inPipeline },
+            })),
+          }
+        : {}),
       ...extra,
     };
   },
@@ -182,6 +177,89 @@ const moveStepTool = defineTool({
       else await completePipeline(tx, move);
     });
     return { listo: true, ...(await stateOf(ctx, account, id)) };
+  },
+});
+
+const createPublicationTool = defineTool({
+  name: 'create_publication',
+  title: 'Crear una publicación nueva',
+  description:
+    'Crea una publicación nueva, todavía sin publicar en el canal, y la deja en el pipeline en Información. Es de un producto que ya está (producto) o de uno nuevo con ficha corta (producto_nuevo), uno de los dos. Antes de crearla, mostrale a la persona qué vas a crear y esperá que confirme. Cuando ya esté publicada, su código se carga con update_publication.',
+  input: z.object({
+    cuenta: accountArg,
+    producto: z
+      .string()
+      .optional()
+      .describe('El producto que ya está: número de pieza, SKU, código de una de sus publicaciones, id o nombre.'),
+    producto_nuevo: z
+      .object({
+        nombre: z.string().describe('El nombre del producto.'),
+        tipo: z.string().optional().describe('Tipo de producto, por ejemplo "Kit de embrague".'),
+        individual_o_combo: z.enum(['individual', 'combo']).optional().describe('Sin mandar, individual.'),
+      })
+      .optional()
+      .describe('Ficha corta para un producto que todavía no está en la app. Lo demás se completa después en Información.'),
+    tienda: z.string().optional().describe('El nombre de la tienda. Si la cuenta tiene una sola, se puede omitir.'),
+  }),
+  readOnly: false,
+  destructive: false,
+  async run(ctx, args) {
+    const account = await resolveAccount(ctx.db, args.cuenta);
+    if (Boolean(args.producto?.trim()) === Boolean(args.producto_nuevo)) {
+      throw new McpToolError('Mandá producto o producto_nuevo, uno de los dos.');
+    }
+    const stores = await ctx.db.store.findMany({ where: { accountId: account.id }, orderBy: { name: 'asc' }, select: { id: true, name: true } });
+    const wanted = args.tienda?.trim().toLowerCase();
+    const store = wanted ? stores.find((s) => s.name.toLowerCase() === wanted) : stores.length === 1 ? stores[0] : undefined;
+    if (!store) {
+      throw new McpToolError(
+        wanted
+          ? `No encontré la tienda «${args.tienda}». Las tiendas son: ${stores.map((s) => s.name).join(', ')}.`
+          : `La cuenta tiene varias tiendas: decime en cuál (${stores.map((s) => s.name).join(', ')}).`,
+      );
+    }
+    const nuevo = args.producto_nuevo;
+    const r = await ctx.db.$transaction(async (tx) =>
+      createPipelinePublication(tx, {
+        accountId: account.id,
+        storeId: store.id,
+        productId: args.producto ? (await findProduct(tx, account.id, args.producto)).id : null,
+        newProduct: nuevo
+          ? { name: nuevo.nombre, productType: nuevo.tipo ?? '', kind: nuevo.individual_o_combo === 'combo' ? 'COMBO' : 'INDIVIDUAL' }
+          : null,
+        userId: ctx.userId,
+      }),
+    );
+    const product = await ctx.db.product.findUniqueOrThrow({ where: { id: r.productId }, select: { name: true } });
+    return {
+      listo: true,
+      producto: product.name,
+      tienda: store.name,
+      ...(await stateOf(ctx, account, r.publicationId)),
+      ...(r.related.length > 0
+        ? { aviso: `El producto ya tiene ${r.related.length === 1 ? 'otra publicación' : `${r.related.length} publicaciones`} en el pipeline.` }
+        : {}),
+    };
+  },
+});
+
+const updatePublicationTool = defineTool({
+  name: 'update_publication',
+  title: 'Cargar el código de una publicación',
+  description:
+    'Carga el código del canal de una publicación que ya se publicó: pegá el código o el link, la app lo limpia y arma el link. Si estaba sin publicar, pasa a activa. Si ya tenía un código, confirmalo con la persona antes de cambiarlo.',
+  input: z.object({
+    cuenta: accountArg,
+    publicacion: publicationArg,
+    codigo: z.string().min(1).describe('El código o el link de la publicación en el canal.'),
+  }),
+  readOnly: false,
+  destructive: true,
+  async run(ctx, args) {
+    const { account, id } = await target(ctx, args);
+    const r = await savePublicationCode(ctx.db, { accountId: account.id, publicationId: id, raw: args.codigo });
+    if (!r.ok) throw new McpToolError(r.error);
+    return { listo: true, ...(await stateOf(ctx, account, id)), link_canal: r.url };
   },
 });
 
@@ -852,6 +930,8 @@ const updateTitleRulesTool = defineTool({
 
 export const WRITE_TOOLS = [
   addToPipelineTool,
+  createPublicationTool,
+  updatePublicationTool,
   moveStepTool,
   removeTool,
   updateProductInfoTool,

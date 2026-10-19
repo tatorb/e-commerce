@@ -12,7 +12,12 @@ import {
   PipelineError,
   removeFromPipeline,
 } from '@/domain/pipeline';
+import { createPipelinePublication, type ShortProduct } from '@/domain/pipeline-publications';
+import { PRODUCT_KINDS } from '@/domain/combos';
 import type { PipelineRemoval, PipelineStep } from '@/generated/prisma/enums';
+import { getAccountBySlug } from '@/lib/queries/accounts';
+import { searchProducts, type ProductPick } from '@/lib/queries/product-search';
+import { savePublicationCode } from '@/lib/publication-code';
 
 type Result = { ok: true } | { ok: false; error: string };
 type Move = 'advance' | 'back' | 'complete';
@@ -67,4 +72,62 @@ export async function removeFromPipelineAction(
   }
   revalidatePath(`/a/${accountSlug}`, 'layout');
   return { ok: true };
+}
+
+/** Los productos que coinciden con lo que se escribe, para la publicación nueva. */
+export async function searchProductsAction(accountSlug: string, q: string): Promise<ProductPick[]> {
+  await requireUser();
+  const account = await getAccountBySlug(accountSlug);
+  if (!account) return [];
+  return searchProducts(prisma, account.id, String(q ?? ''));
+}
+
+/**
+ * Crea una publicación sin publicar, de un producto que ya está o de uno
+ * nuevo con ficha corta, y la deja en el pipeline en Información.
+ */
+export async function createPipelinePublicationAction(
+  accountSlug: string,
+  input: { storeId: string; productId: string | null; newProduct: ShortProduct | null },
+): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const account = await getAccountBySlug(accountSlug);
+  if (!account) return { ok: false, error: 'La cuenta no existe.' };
+  const str = (v: unknown) => (typeof v === 'string' ? v : '');
+  const raw = input?.newProduct;
+  const newProduct: ShortProduct | null =
+    raw && typeof raw === 'object'
+      ? { name: str(raw.name), productType: str(raw.productType), kind: PRODUCT_KINDS.includes(raw.kind) ? raw.kind : 'INDIVIDUAL' }
+      : null;
+  try {
+    const r = await prisma.$transaction((tx) =>
+      createPipelinePublication(tx, {
+        accountId: account.id,
+        storeId: str(input?.storeId),
+        productId: str(input?.productId) || null,
+        newProduct,
+        userId: user.id,
+      }),
+    );
+    revalidatePath(`/a/${accountSlug}`, 'layout');
+    return { ok: true, id: r.publicationId };
+  } catch (e) {
+    if (e instanceof PipelineError) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
+/** Carga el ID del canal cuando la publicación ya se publicó. */
+export async function savePublicationCodeAction(
+  accountSlug: string,
+  publicationId: string,
+  raw: string,
+): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
+  await requireUser();
+  const account = await getAccountBySlug(accountSlug);
+  if (!account) return { ok: false, error: 'La cuenta no existe.' };
+  const r = await savePublicationCode(prisma, { accountId: account.id, publicationId, raw: String(raw ?? '') });
+  if (!r.ok) return r;
+  revalidatePath(`/a/${accountSlug}`, 'layout');
+  return { ok: true, message: `Guardado: ${r.externalId}.` };
 }

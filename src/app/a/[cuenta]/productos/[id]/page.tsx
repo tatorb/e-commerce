@@ -169,31 +169,32 @@ export default async function ProductPage({ params }: { params: Promise<{ cuenta
                       <ChannelStatusBadge status={pub.channelStatus} />
                     </div>
                   </div>
-                  {pub.externalId ? (
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                      {pub.pipelineStatus === 'IN_PIPELINE' ? (
-                        <Button size="sm" variant="outline" asChild>
-                          <Link href={`/a/${account.slug}/pipeline/${pub.id}`}>
-                            <KanbanSquare className="h-4 w-4" />
-                            Abrir en el pipeline
-                          </Link>
-                        </Button>
-                      ) : (
-                        <AddToPipelineButton
-                          accountSlug={account.slug}
-                          publicationId={pub.id}
-                          label={
-                            pub.pipelineStatus === 'CORRECTED'
-                              ? 'Volver a corregirla'
-                              : pub.pipelineStatus === 'DISCARDED'
-                                ? 'Volver a agregarla al pipeline'
-                                : 'Agregar al pipeline'
-                          }
-                        />
-                      )}
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                    {pub.pipelineStatus === 'IN_PIPELINE' ? (
+                      <Button size="sm" variant="outline" asChild>
+                        <Link href={`/a/${account.slug}/pipeline/${pub.id}`}>
+                          <KanbanSquare className="h-4 w-4" />
+                          Abrir en el pipeline
+                        </Link>
+                      </Button>
+                    ) : (
+                      <AddToPipelineButton
+                        accountSlug={account.slug}
+                        publicationId={pub.id}
+                        label={
+                          pub.pipelineStatus === 'CORRECTED'
+                            ? 'Volver a corregirla'
+                            : pub.pipelineStatus === 'DISCARDED'
+                              ? 'Volver a agregarla al pipeline'
+                              : 'Agregar al pipeline'
+                        }
+                      />
+                    )}
+                    {/* Sin publicar, el título todavía no se puede bloquear. */}
+                    {pub.externalId ? (
                       <TitleLockControl accountSlug={account.slug} publicationId={pub.id} lock={titleLock} />
-                    </div>
-                  ) : null}
+                    ) : null}
+                  </div>
                   {pub.url ? (
                     <a
                       href={pub.url}

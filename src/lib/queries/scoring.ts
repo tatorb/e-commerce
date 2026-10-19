@@ -89,7 +89,7 @@ export async function listScoredPublications(
       pipelineStatus: p.pipelineStatus,
       pipelineStep: p.pipelineStep,
       pipelineRemoval: p.pipelineRemoval,
-      titleLock: resolveTitleLock(channel.titleLock(metrics), p.titleLockedManual),
+      titleLock: resolveTitleLock(channel.titleLock(metrics), p.titleLockedManual, Boolean(p.externalId)),
       family: p.product.productType?.trim() || null,
       kind: p.product.kind,
       visits: typeof metrics.visits_90d === 'number' ? metrics.visits_90d : null,

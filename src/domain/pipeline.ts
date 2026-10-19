@@ -113,8 +113,8 @@ export type Duplicate = {
 
 /**
  * Las que son del mismo producto que otra que ya está en el pipeline, o que
- * otra anterior de la misma tanda. Del mismo producto quiere decir la misma
- * ficha, o el mismo título.
+ * otra anterior de la misma tanda, o que tienen el mismo título. Es solo un
+ * aviso: varias publicaciones del mismo producto son un caso normal.
  */
 export function findDuplicates(candidates: DuplicateCandidate[], inPipeline: DuplicateCandidate[]): Duplicate[] {
   const already = new Set(inPipeline.map((o) => o.id));
@@ -145,26 +145,24 @@ export class PipelineError extends Error {}
 
 type Tx = Prisma.TransactionClient;
 
-export type AddResult =
-  | {
-      ok: true;
-      added: number;
-      // Las descartadas que volvieron, en el paso donde estaban.
-      resumed: number;
-      alreadyIn: number;
-      // Sin código del canal: no pueden entrar.
-      withoutId: number;
-    }
-  | { ok: false; duplicates: Duplicate[] };
+export type AddResult = {
+  added: number;
+  // Las descartadas que volvieron, en el paso donde estaban.
+  resumed: number;
+  alreadyIn: number;
+  // Del mismo producto o con el mismo título que otra del pipeline: entran
+  // igual, con aviso.
+  related: Duplicate[];
+};
 
 /**
- * Agrega publicaciones al pipeline. Si alguna es del mismo producto que otra
- * que ya está, no agrega nada y devuelve cuáles, salvo que se pida agregarlas
- * igual. Las que ya están en el pipeline se saltean.
+ * Agrega publicaciones al pipeline, tengan o no código del canal: las que
+ * todavía no están publicadas lo cargan en el paso Publicación. Las que ya
+ * están en el pipeline se saltean.
  */
 export async function addToPipeline(
   tx: Tx,
-  args: { accountId: string; publicationIds: string[]; userId: string | null; force?: boolean; now?: Date },
+  args: { accountId: string; publicationIds: string[]; userId: string | null; now?: Date },
 ): Promise<AddResult> {
   const ids = [...new Set(args.publicationIds)];
   if (ids.length === 0) throw new PipelineError('No elegiste ninguna publicación.');
@@ -190,11 +188,11 @@ export async function addToPipeline(
   const byId = new Map(rows.map((r) => [r.id, r]));
   const ordered = ids.map((id) => byId.get(id)!);
 
-  const withoutId = ordered.filter((r) => !r.externalId?.trim());
-  const alreadyIn = ordered.filter((r) => r.externalId?.trim() && r.pipelineStatus === 'IN_PIPELINE');
-  const toAdd = ordered.filter((r) => r.externalId?.trim() && r.pipelineStatus !== 'IN_PIPELINE');
+  const alreadyIn = ordered.filter((r) => r.pipelineStatus === 'IN_PIPELINE');
+  const toAdd = ordered.filter((r) => r.pipelineStatus !== 'IN_PIPELINE');
 
-  if (!args.force && toAdd.length > 0) {
+  let related: Duplicate[] = [];
+  if (toAdd.length > 0) {
     const inPipeline = await tx.publication.findMany({
       where: { pipelineStatus: 'IN_PIPELINE', product: { accountId: args.accountId } },
       select: { id: true, productId: true, title: true, externalId: true, product: { select: { name: true } } },
@@ -206,8 +204,7 @@ export async function addToPipeline(
       externalId: string | null;
       product: { name: string };
     }) => ({ id: r.id, productId: r.productId, title: r.title ?? r.product.name, externalId: r.externalId });
-    const duplicates = findDuplicates(toAdd.map(asCandidate), inPipeline.map(asCandidate));
-    if (duplicates.length > 0) return { ok: false, duplicates };
+    related = findDuplicates(toAdd.map(asCandidate), inPipeline.map(asCandidate));
   }
 
   const at = args.now ?? new Date();
@@ -221,7 +218,7 @@ export async function addToPipeline(
       data: { pipelineStatus: 'IN_PIPELINE', pipelineStep: step, pipelineRemoval: null },
     });
   }
-  return { ok: true, added: toAdd.length - resumed, resumed, alreadyIn: alreadyIn.length, withoutId: withoutId.length };
+  return { added: toAdd.length - resumed, resumed, alreadyIn: alreadyIn.length, related };
 }
 
 async function lockInPipeline(tx: Tx, publicationId: string, expected: PipelineStep) {
@@ -271,10 +268,14 @@ export async function backStep(tx: Tx, args: MoveArgs): Promise<{ step: Pipeline
   return moveTo(tx, args, to, 'BACK');
 }
 
-/** Termina el último paso: la publicación queda corregida. */
+/** Termina el último paso: la publicación queda corregida. Para eso tiene que estar publicada. */
 export async function completePipeline(tx: Tx, args: MoveArgs): Promise<void> {
   await lockInPipeline(tx, args.publicationId, args.expected);
   if (nextStep(args.expected)) throw new PipelineError('Todavía faltan pasos.');
+  const pub = await tx.publication.findUniqueOrThrow({ where: { id: args.publicationId }, select: { externalId: true } });
+  if (!pub.externalId?.trim()) {
+    throw new PipelineError('Falta el ID de la publicación en el canal. Cargalo en este paso para marcarla como corregida.');
+  }
   await closeOpen(tx, { publicationId: args.publicationId, at: args.now ?? new Date(), exitKind: 'COMPLETED', userId: args.userId });
   await tx.publication.update({
     where: { id: args.publicationId },

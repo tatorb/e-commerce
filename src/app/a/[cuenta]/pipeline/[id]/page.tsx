@@ -14,6 +14,9 @@ import { StepLine } from '@/components/pipeline/StepLine';
 import { StepActions } from '@/components/pipeline/StepActions';
 import { PipelineHistory } from '@/components/pipeline/PipelineHistory';
 import { AddToPipelineButton } from '@/components/pipeline/AddToPipelineButton';
+import { PublicationCodeCard } from '@/components/pipeline/PublicationCodeCard';
+import { channelInfo } from '@/channels';
+import { codeOrUnpublished } from '@/domain/channel-status';
 import { PIPELINE_REMOVAL_LABEL, PIPELINE_STEP_LABEL, PIPELINE_STEP_SLUG, stepFromSlug } from '@/domain/pipeline';
 import { titleLockText } from '@/domain/title-lock';
 import type { PipelineStep } from '@/generated/prisma/enums';
@@ -80,6 +83,12 @@ export default async function PipelineStepPage({
   const lock = pub.titleLock.locked ? titleLockText(pub.titleLock) : null;
   // Información y Título usan la ficha, la competencia y lo leído del buscador.
   const ctx = viewing === 'INFO' || viewing === 'TITLE' ? await loadTitleContext(prisma, account.id, pub.id) : null;
+  // Publicación carga el ID del canal, con el formato de cada canal.
+  const channel =
+    viewing === 'PUBLISH'
+      ? (await prisma.publication.findUniqueOrThrow({ where: { id: pub.id }, select: { store: { select: { channel: true } } } })).store
+          .channel
+      : null;
 
   return (
     <>
@@ -96,7 +105,7 @@ export default async function PipelineStepPage({
               ) : null}
             </h1>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-muted-foreground">
-              <span>{pub.externalId ?? 'Sin código'}</span>
+              <span>{codeOrUnpublished(pub.externalId)}</span>
               <KindBadge kind={pub.kind} />
               <ScoreBadge score={pub.score} />
               <span>{pub.sales === null ? 'Ventas sin dato' : `${plural(pub.sales, 'venta')} en 90 días`}</span>
@@ -152,21 +161,17 @@ export default async function PipelineStepPage({
                     ? `Se sacó del pipeline${pub.pipelineRemoval ? ` por «${PIPELINE_REMOVAL_LABEL[pub.pipelineRemoval].toLowerCase()}»` : ''}. Si la volvés a agregar, retoma en ${pub.pipelineStep ? PIPELINE_STEP_LABEL[pub.pipelineStep] : 'Información'}.`
                     : 'Esta publicación todavía no está en el pipeline.'}
               </p>
-              {pub.externalId ? (
-                <AddToPipelineButton
-                  accountSlug={account.slug}
-                  publicationId={pub.id}
-                  label={
-                    pub.pipelineStatus === 'CORRECTED'
-                      ? 'Volver a corregirla'
-                      : pub.pipelineStatus === 'DISCARDED'
-                        ? 'Volver a agregarla'
-                        : 'Agregar al pipeline'
-                  }
-                />
-              ) : (
-                <p className="text-sm text-muted-foreground">No tiene código del canal: no puede entrar.</p>
-              )}
+              <AddToPipelineButton
+                accountSlug={account.slug}
+                publicationId={pub.id}
+                label={
+                  pub.pipelineStatus === 'CORRECTED'
+                    ? 'Volver a corregirla'
+                    : pub.pipelineStatus === 'DISCARDED'
+                      ? 'Volver a agregarla'
+                      : 'Agregar al pipeline'
+                }
+              />
             </CardContent>
           </Card>
         ) : null}
@@ -208,6 +213,14 @@ export default async function PipelineStepPage({
             auto={await autoAvailable(prisma, ctx.channel, ctx.storeId)}
             aiDisabledReason={isAiConfigured() ? null : AI_NOT_CONFIGURED}
           />
+        ) : channel && viewing === 'PUBLISH' ? (
+          <PublicationCodeCard
+            accountSlug={account.slug}
+            publicationId={pub.id}
+            channel={channelInfo(channel.kind, channel.name)}
+            externalId={pub.externalId}
+            url={pub.url}
+          />
         ) : viewing ? (
           <Card>
             <CardContent className="space-y-4 p-6">
@@ -217,7 +230,15 @@ export default async function PipelineStepPage({
         ) : null}
 
         {/* Mover la publicación, solo desde su paso actual: así no se mueve por error desde otra pestaña. */}
-        {atCurrent ? <StepActions accountSlug={account.slug} publicationId={pub.id} title={pub.title} step={current} /> : null}
+        {atCurrent ? (
+          <StepActions
+            accountSlug={account.slug}
+            publicationId={pub.id}
+            title={pub.title}
+            step={current}
+            completeBlocked={pub.externalId ? null : 'Para marcarla como corregida, cargá antes su ID.'}
+          />
+        ) : null}
 
         {pub.movements.length > 0 ? (
           <div className="space-y-2">

@@ -30,7 +30,8 @@ export function LockPanel({
     return (
       <p className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
         <LockOpen className="h-4 w-4" />
-        {titleLockText(lock)} Se puede cambiar.
+        {titleLockText(lock)}
+        {lock.source === 'unpublished' ? '' : ' Se puede cambiar.'}
       </p>
     );
   }
