@@ -9,9 +9,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { RowList } from '@/components/products/RowList';
 import { saveProductAction } from '@/app/a/[cuenta]/productos/actions';
+import { PRODUCT_KINDS, PRODUCT_KIND_LABEL } from '@/domain/combos';
+import { cn } from '@/lib/utils/cn';
 
 export type ProductFormValues = {
   name: string;
+  kind: 'INDIVIDUAL' | 'COMBO';
   brand: string;
   partNumber: string;
   productType: string;
@@ -38,6 +41,7 @@ export type ProductFormValues = {
 
 export const EMPTY_PRODUCT: ProductFormValues = {
   name: '',
+  kind: 'INDIVIDUAL',
   brand: '',
   partNumber: '',
   productType: '',
@@ -88,6 +92,13 @@ export function ProductForm({
   }
 
   function handleSave() {
+    if (
+      saved.kind === 'COMBO' &&
+      values.kind === 'INDIVIDUAL' &&
+      !window.confirm('Al pasarlo a Individual se borra la lista de productos del combo. ¿Seguir?')
+    ) {
+      return;
+    }
     setStatus({ kind: 'idle' });
     startTransition(async () => {
       const result = await saveProductAction(accountSlug, productId, values);
@@ -131,6 +142,34 @@ export function ProductForm({
               required
             />
           </div>
+          <fieldset className="space-y-1.5">
+            <legend className="text-sm font-medium">Tipo</legend>
+            <div className="inline-flex rounded-md border p-0.5" role="radiogroup" aria-label="Tipo">
+              {PRODUCT_KINDS.map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  role="radio"
+                  aria-checked={values.kind === k}
+                  disabled={pending}
+                  onClick={() => set('kind', k)}
+                  className={cn(
+                    'rounded px-3 py-1 text-sm transition-colors',
+                    values.kind === k ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  {PRODUCT_KIND_LABEL[k]}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {values.kind === 'COMBO'
+                ? isNew || saved.kind !== 'COMBO'
+                  ? 'Un combo se arma con productos individuales. Los elegís después de guardar, en la tarjeta Productos del combo.'
+                  : 'Un combo se arma con productos individuales. Se eligen en la tarjeta Productos del combo.'
+                : 'Se vende tal cual. Puede formar parte de combos.'}
+            </p>
+          </fieldset>
           <div className="grid gap-4 sm:grid-cols-2">
             {GENERAL_FIELDS.map((f) => (
               <div key={f.key} className="space-y-1.5">

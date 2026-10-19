@@ -151,6 +151,17 @@ describe.skipIf(!url)('importación en la base', () => {
     expect((await db.importRun.findUniqueOrThrow({ where: { id: runId } })).status).toBe('UNDONE');
   });
 
+  it('deshacer deja un producto importado que después se puso en un combo armado a mano', async () => {
+    const { runId } = await run();
+    const imported = await db.product.findFirstOrThrow({ where: { importRunId: runId } });
+    const combo = await db.product.create({ data: { accountId, name: 'Combo armado a mano', kind: 'COMBO' } });
+    await db.comboItem.create({ data: { comboId: combo.id, productId: imported.id, quantity: 2 } });
+    const undone = await undoImportRun(db, { runId, accountId });
+    expect(undone.products).toBe(2);
+    expect(await db.product.findUnique({ where: { id: imported.id } })).toMatchObject({ importRunId: null });
+    expect(await db.comboItem.count({ where: { comboId: combo.id } })).toBe(1);
+  });
+
   it('deshacer una reimportación no borra las mediciones de antes', async () => {
     await run();
     const second = await run();

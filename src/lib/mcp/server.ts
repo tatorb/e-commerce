@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { CatalogError } from '@/domain/catalog-data';
+import { ComboError } from '@/domain/combos';
 import { PipelineError } from '@/domain/pipeline';
 import { ResearchError } from '@/domain/research';
 import { TitleError } from '@/domain/title-work';
@@ -67,7 +68,7 @@ async function callTool(ctx: McpContext, name: string, rawArgs: unknown) {
   } catch (e) {
     if (e instanceof McpToolError) return text(e.message, true);
     // Los avisos de la app hablan de la pantalla: para Claude, volver a consultar.
-    if (e instanceof PipelineError || e instanceof TitleError || e instanceof ResearchError || e instanceof CatalogError) {
+    if (e instanceof PipelineError || e instanceof TitleError || e instanceof ResearchError || e instanceof CatalogError || e instanceof ComboError) {
       return text(e.message.replace(/Recargá la página\./g, 'Volvé a consultarla antes de seguir.'), true);
     }
     console.error(`[mcp] ${name} falló: ${e instanceof Error ? e.name : 'error'}`);

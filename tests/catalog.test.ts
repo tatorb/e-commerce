@@ -20,6 +20,7 @@ const base: Filterable & { id: string } = {
   channelStatus: 'ACTIVE',
   pipelineStatus: 'UNTOUCHED',
   family: null,
+  kind: 'INDIVIDUAL',
   visits: null,
   sales: null,
   titleLock: { locked: null, source: null },
@@ -28,7 +29,7 @@ const base: Filterable & { id: string } = {
 const items = [
   { ...base, id: 'a', title: 'Kit embrague', family: 'Kit de embrague', visits: 0, sales: 0, titleLock: { locked: false, source: 'data' as const } },
   { ...base, id: 'b', title: 'Pistones', family: 'Subconjunto (pistones + aros)', visits: 30, sales: 2, titleLock: { locked: true, source: 'data' as const }, pipelineStatus: 'IN_PIPELINE' as const },
-  { ...base, id: 'c', title: 'Juntas', family: 'Juntas, varias', visits: 120, sales: null, stage: 'APPROVED' as const },
+  { ...base, id: 'c', title: 'Juntas', family: 'Juntas, varias', visits: 120, sales: null, stage: 'APPROVED' as const, kind: 'COMBO' as const },
   { ...base, id: 'd', title: 'Sin datos' },
 ];
 
@@ -39,6 +40,14 @@ describe('filtros del Catálogo', () => {
   it('por estado en el pipeline', () => {
     expect(ids({ pipeline: 'IN_PIPELINE' })).toEqual(['b']);
     expect(ids({ pipeline: 'UNTOUCHED,DISCARDED' }).sort()).toEqual(['a', 'c', 'd']);
+  });
+
+  it('individuales o combos', () => {
+    expect(ids({ tipo: 'combo' })).toEqual(['c']);
+    expect(ids({ tipo: 'individual' }).sort()).toEqual(['a', 'b', 'd']);
+    expect(ids({ tipo: 'individual,combo' })).toHaveLength(4);
+    expect(ids({ tipo: 'otro' })).toHaveLength(4);
+    expect(isFiltered(parsePublicationSearch({ tipo: 'combo' }))).toBe(true);
   });
 
   it('por familia, aunque tenga comas', () => {

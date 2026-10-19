@@ -56,6 +56,7 @@ export async function listScoredPublications(
           select: {
             id: true,
             name: true,
+            kind: true,
             productType: true,
             warranty: true,
             kitContents: true,
@@ -90,6 +91,7 @@ export async function listScoredPublications(
       pipelineRemoval: p.pipelineRemoval,
       titleLock: resolveTitleLock(channel.titleLock(metrics), p.titleLockedManual),
       family: p.product.productType?.trim() || null,
+      kind: p.product.kind,
       visits: typeof metrics.visits_90d === 'number' ? metrics.visits_90d : null,
       sales: typeof metrics.sales_90d === 'number' ? metrics.sales_90d : null,
       score: result.score,

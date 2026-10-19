@@ -15,6 +15,9 @@ import {
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { PipelineBadge } from '@/components/stages/StageBadge';
+import { KindBadge } from '@/components/products/KindBadge';
+import { UrlFilterDropdown } from '@/components/filters/UrlFilterDropdown';
+import { KIND_OPTIONS, parseKinds } from '@/lib/queries/catalog-filters';
 import { getAccountBySlug } from '@/lib/queries/accounts';
 import { listProducts, type ProductListItem } from '@/lib/queries/products';
 import { formatRelativeDate, plural } from '@/lib/format';
@@ -46,13 +49,14 @@ export default async function ProductsPage({
   searchParams,
 }: {
   params: Promise<{ cuenta: string }>;
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{ q?: string; tipo?: string }>;
 }) {
-  const [{ cuenta }, { q }] = await Promise.all([params, searchParams]);
+  const [{ cuenta }, { q, tipo }] = await Promise.all([params, searchParams]);
   const account = await getAccountBySlug(cuenta);
   if (!account) notFound();
 
-  const products = await listProducts(account.id, q);
+  const kinds = parseKinds(tipo);
+  const products = await listProducts(account.id, q, kinds);
   const base = `/a/${account.slug}/productos`;
 
   return (
@@ -78,6 +82,7 @@ export default async function ProductsPage({
         <Card>
           <div className="p-4">
             <form className="flex flex-wrap gap-3 items-end" action="" method="get">
+              {tipo ? <input type="hidden" name="tipo" value={tipo} /> : null}
               <Input
                 id="q"
                 name="q"
@@ -86,7 +91,13 @@ export default async function ProductsPage({
                 className="w-full sm:w-80"
               />
               <Button type="submit">Buscar</Button>
-              {q ? (
+              <UrlFilterDropdown
+                label="Tipo"
+                paramKey="tipo"
+                options={KIND_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+                selected={KIND_OPTIONS.filter((o) => kinds.includes(o.kind)).map((o) => o.value)}
+              />
+              {q || tipo ? (
                 <Button type="button" variant="ghost" size="sm" asChild>
                   <Link href="?">Limpiar</Link>
                 </Button>
@@ -99,7 +110,7 @@ export default async function ProductsPage({
 
         <Card className="flex flex-col flex-1 min-h-0 overflow-hidden">
           {products.length === 0 ? (
-            q ? (
+            q || kinds.length > 0 ? (
               <div className="flex-1 flex items-center justify-center p-10 text-center text-muted-foreground text-sm">
                 No hay productos que coincidan.
               </div>
@@ -120,9 +131,12 @@ export default async function ProductsPage({
                 {products.map((p) => (
                   <div key={p.id} className="px-3 py-3 space-y-1.5">
                     <div className="flex items-baseline justify-between gap-2">
-                      <Link href={`${base}/${p.id}`} className="font-medium hover:underline min-w-0 truncate">
-                        {p.name}
-                      </Link>
+                      <span className="flex min-w-0 items-center gap-2">
+                        <Link href={`${base}/${p.id}`} className="font-medium hover:underline min-w-0 truncate">
+                          {p.name}
+                        </Link>
+                        <KindBadge kind={p.kind} />
+                      </span>
                       <span className="text-xs text-muted-foreground tabular-nums shrink-0 inline-flex items-center gap-1">
                         <Clock className="h-3 w-3" />
                         {formatRelativeDate(p.updatedAt, account.timezone)}
@@ -156,9 +170,12 @@ export default async function ProductsPage({
                     {products.map((p) => (
                       <TableRow key={p.id}>
                         <TableCell>
-                          <Link href={`${base}/${p.id}`} className="font-medium hover:underline">
-                            {p.name}
-                          </Link>
+                          <span className="flex items-center gap-2">
+                            <Link href={`${base}/${p.id}`} className="font-medium hover:underline">
+                              {p.name}
+                            </Link>
+                            <KindBadge kind={p.kind} />
+                          </span>
                         </TableCell>
                         <TableCell className="text-muted-foreground">{p.brand ?? '—'}</TableCell>
                         <TableCell className="text-muted-foreground">{p.productType ?? '—'}</TableCell>

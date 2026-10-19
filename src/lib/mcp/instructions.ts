@@ -9,6 +9,7 @@ Conceptos:
 - Cuenta: un cliente del estudio. Tiene tiendas en uno o más canales.
 - Ficha: los datos del producto (tipo, marca, número de pieza, línea, medidas, compatibilidades, ficha técnica). Es la única fuente de verdad.
 - Publicación: el producto en una tienda, con su título, su descripción y su código en el canal.
+- Individual o combo: un combo es un producto armado con productos individuales, cada uno con su cantidad. En el canal, combos e individuales son publicaciones del mismo nivel. Un producto puede tener varias publicaciones y estar en varios combos.
 - Catálogo: todas las publicaciones de la cuenta, con puntaje de 0 a 100 según el estándar de la cuenta, y visitas y ventas de 90 días.
 - Pipeline: el recorrido para corregir una publicación de punta a punta. Los pasos, en orden: ${PIPELINE_STEPS.map((s) => PIPELINE_STEP_LABEL[s]).join(', ')}. Una publicación puede estar sin tocar, en el pipeline, corregida o descartada.
 - Investigación del producto, en el paso Información: lo del fabricante, aclaraciones para las imágenes, preguntas de los compradores, y sus dolores y objeciones. Es del producto: la comparten todas sus publicaciones.

@@ -11,6 +11,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { ProductForm, type ProductFormValues } from '@/components/products/ProductForm';
 import { DeleteProductButton } from '@/components/products/DeleteProductButton';
+import { ComboItemsCard } from '@/components/products/ComboItemsCard';
+import { InCombosCard } from '@/components/products/InCombosCard';
+import { KindBadge } from '@/components/products/KindBadge';
+import { loadCombo } from '@/lib/queries/combos';
+import { prisma } from '@/lib/db';
 import { PublicationForm } from '@/components/publications/PublicationForm';
 import { NewPublicationDialog } from '@/components/publications/NewPublicationDialog';
 import { ChannelStatusBadge, PipelineBadge, StageBadge } from '@/components/stages/StageBadge';
@@ -43,6 +48,7 @@ function toFormValues(p: ProductDetail): ProductFormValues {
   const s = (v: string | null) => v ?? '';
   return {
     name: p.name,
+    kind: p.kind,
     brand: s(p.brand),
     partNumber: s(p.partNumber),
     productType: s(p.productType),
@@ -79,12 +85,13 @@ export default async function ProductPage({ params }: { params: Promise<{ cuenta
   const { cuenta, id } = await params;
   const account = await getAccountBySlug(cuenta);
   if (!account) notFound();
-  const [product, stores, rules] = await Promise.all([
+  const [product, stores, rules, combo] = await Promise.all([
     getProduct(account.id, id),
     listStores(account.id),
     loadRulesByChannel(account.id),
+    loadCombo(prisma, id),
   ]);
-  if (!product) notFound();
+  if (!product || !combo) notFound();
   const aiReady = isAiConfigured();
 
   const base = `/a/${account.slug}/productos`;
@@ -102,7 +109,10 @@ export default async function ProductPage({ params }: { params: Promise<{ cuenta
         <div className="space-y-2">
           <Breadcrumb items={[{ label: account.name, href: base }, { label: 'Productos', href: base }, { label: product.name }]} />
           <div className="space-y-1">
-            <h1 className="text-2xl font-semibold tracking-tight">{product.name}</h1>
+            <h1 className="flex flex-wrap items-center gap-2 text-2xl font-semibold tracking-tight">
+              {product.name}
+              <KindBadge kind={product.kind} />
+            </h1>
             <p className="text-sm text-muted-foreground">{subtitle || 'Ficha maestra del producto.'}</p>
           </div>
         </div>
@@ -327,6 +337,11 @@ export default async function ProductPage({ params }: { params: Promise<{ cuenta
 
         <p className="text-xs uppercase tracking-wide text-muted-foreground pt-2">Ficha maestra</p>
         <ProductForm accountSlug={account.slug} productId={product.id} initial={toFormValues(product)} />
+        {combo.kind === 'COMBO' ? (
+          <ComboItemsCard accountSlug={account.slug} comboId={product.id} initial={combo.items} />
+        ) : (
+          <InCombosCard accountSlug={account.slug} combos={combo.inCombos} />
+        )}
 
         <Separator />
         <div>

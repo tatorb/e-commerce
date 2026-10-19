@@ -331,6 +331,34 @@ describe.skipIf(!url)('herramientas de escritura', () => {
     expect(back.data.datos_de_catalogo).toMatchObject({ categoria: 'Bombas de Agua (MLA60598)', categoria_elegida: 'por la familia' });
   });
 
+  it('combos: armar un combo con individuales y verlo en las publicaciones', async () => {
+    const r = await call('update_product_info', {
+      publicacion: 'MLA2220002',
+      individual_o_combo: 'combo',
+      productos_del_combo: [{ producto: 'p-100', cantidad: 2 }],
+    });
+    expect(r.data.productos_del_combo).toEqual([{ nombre: 'Kit de embrague Gol', cantidad: 2, numero_de_pieza: 'P-100' }]);
+    const combo = await call('get_publication', { publicacion: 'MLA2220002' });
+    expect(combo.data.ficha).toMatchObject({
+      individual_o_combo: 'Combo',
+      productos_del_combo: [{ nombre: 'Kit de embrague Gol', cantidad: 2, marca: 'Marca Uno', numero_de_pieza: 'P-100' }],
+    });
+    expect(combo.data.tipo).toBe('Combo');
+    const part = await call('get_publication', { publicacion: 'MLA1110001' });
+    expect(part.data.ficha).toMatchObject({ individual_o_combo: 'Individual', forma_parte_de_combos: [{ nombre: 'Bomba de agua', cantidad: 2 }] });
+
+    expect((await call('update_product_info', { publicacion: 'MLA1110001', individual_o_combo: 'combo' })).text).toContain('Forma parte de «Bomba de agua»');
+    expect((await call('update_product_info', { publicacion: 'MLA2220002', productos_del_combo: [{ producto: 'no existe', cantidad: 1 }] })).text).toContain(
+      'No encontré el producto «no existe»',
+    );
+    // Lo que falló no cambió nada.
+    expect((await call('get_publication', { publicacion: 'MLA2220002' })).data.ficha.productos_del_combo).toHaveLength(1);
+
+    const combos = await call('search_catalog', { tipo: ['combo'] });
+    expect(combos.data.publicaciones.map((p: { codigo: string }) => p.codigo)).toEqual(['MLA2220002']);
+    expect((await call('search_catalog', { tipo: ['individual'] })).data.total).toBe(2);
+  });
+
   it('update_title_rules: cambia solo lo que se manda, y restablecer vuelve a las del canal', async () => {
     const r = await call('update_title_rules', { largo_maximo: 50, palabras_no_permitidas: ['Oferta'] });
     expect(r.data.reglas).toMatchObject({ largo_maximo: 50, palabras_no_permitidas: ['Oferta'], son_de_la_cuenta: true });

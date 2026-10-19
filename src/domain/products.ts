@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { RecordSource } from '@/generated/prisma/enums';
 import { withEngineData } from './engine';
+import { setProductKind } from './combos';
 import { compactNameValues, nameValueSchema } from './name-value';
 
 // Ficha maestra del producto. Este módulo no sabe nada de canales ni de
@@ -45,6 +46,8 @@ function isHttpUrl(value: string): boolean {
 
 export const productInputSchema = z.object({
   name: z.string().trim().min(1, 'Poné un nombre para el producto.').max(300),
+  // Individual o combo. Sin mandar, queda como está (y uno nuevo es individual).
+  kind: z.enum(['INDIVIDUAL', 'COMBO']).optional(),
   brand: text(200),
   partNumber: text(200),
   productType: text(200),
@@ -147,6 +150,7 @@ export async function writeProduct(tx: Tx, args: SaveArgs): Promise<{ id: string
     if (!existing) throw new Error('El producto no existe en esta cuenta.');
     id = existing.id;
     await tx.product.update({ where: { id }, data: fields });
+    if (data.kind) await setProductKind(tx, { accountId, productId: id, kind: data.kind });
     await tx.productVariant.deleteMany({ where: { productId: id } });
     await tx.compatibility.deleteMany({ where: { productId: id } });
     await tx.asset.deleteMany({ where: { productId: id } });
@@ -154,6 +158,7 @@ export async function writeProduct(tx: Tx, args: SaveArgs): Promise<{ id: string
     const created = await tx.product.create({
       data: {
         ...fields,
+        kind: data.kind ?? 'INDIVIDUAL',
         accountId,
         source: args.source ?? RecordSource.MANUAL,
         importRunId: args.importRunId ?? null,

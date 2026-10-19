@@ -6,6 +6,7 @@ import { requireUser } from '@/lib/auth/session';
 import { getChannelAdapter } from '@/channels';
 import { parsePrice } from '@/domain/money';
 import { dropEmptyRows, productInputSchema, saveProduct, type ProductInput } from '@/domain/products';
+import { assertNotInCombos, ComboError } from '@/domain/combos';
 import {
   createPublication,
   DuplicateExternalIdError,
@@ -36,16 +37,30 @@ export async function saveProductAction(
   const parsed = productInputSchema.safeParse(dropEmptyRows(input));
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Revisá los datos.' };
 
-  const { id } = await saveProduct(prisma, { accountId, productId, data: parsed.data });
-  revalidatePath(`/a/${accountSlug}/productos`);
-  return { ok: true, id };
+  try {
+    const { id } = await saveProduct(prisma, { accountId, productId, data: parsed.data });
+    revalidatePath(`/a/${accountSlug}`, 'layout');
+    return { ok: true, id };
+  } catch (e) {
+    if (e instanceof ComboError) return { ok: false, error: e.message };
+    throw e;
+  }
 }
 
 export async function deleteProductAction(accountSlug: string, productId: string): Promise<SimpleResult> {
   await requireUser();
   const accountId = await accountIdFor(accountSlug);
   if (!accountId) return { ok: false, error: 'La cuenta no existe.' };
-  const { count } = await prisma.product.deleteMany({ where: { id: productId, accountId } });
+  let count = 0;
+  try {
+    count = await prisma.$transaction(async (tx) => {
+      await assertNotInCombos(tx, productId);
+      return (await tx.product.deleteMany({ where: { id: productId, accountId } })).count;
+    });
+  } catch (e) {
+    if (e instanceof ComboError) return { ok: false, error: e.message };
+    throw e;
+  }
   if (count === 0) return { ok: false, error: 'El producto ya no existe.' };
   revalidatePath(`/a/${accountSlug}/productos`);
   return { ok: true };

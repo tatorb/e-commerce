@@ -10,7 +10,8 @@ import { ChannelStatusBadge, PipelineBadge } from '@/components/stages/StageBadg
 import { ScoreBadge } from '@/components/stages/ScoreBadge';
 import type { PipelineState } from '@/domain/pipeline';
 import { titleLockText, type TitleLock } from '@/domain/title-lock';
-import type { ChannelStatus } from '@/generated/prisma/enums';
+import type { ChannelStatus, ProductKind } from '@/generated/prisma/enums';
+import { KindBadge } from '@/components/products/KindBadge';
 import { plural } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
 import { addToPipelineAction } from '@/app/a/[cuenta]/publicaciones/pipeline-actions';
@@ -23,6 +24,7 @@ export type CatalogRow = PipelineState & {
   id: string;
   productId: string;
   title: string;
+  kind: ProductKind;
   externalId: string | null;
   skus: string[];
   score: number | null;
@@ -190,6 +192,7 @@ export function CatalogTable({ accountSlug, rows }: { accountSlug: string; rows:
                     <span className="pt-1">
                       <LockIcon lock={p.titleLock} />
                     </span>
+                    <KindBadge kind={p.kind} className="mt-0.5" />
                   </div>
                   <ScoreBadge score={p.score} className="shrink-0" />
                 </div>
@@ -253,6 +256,7 @@ export function CatalogTable({ accountSlug, rows }: { accountSlug: string; rows:
                       <span className="pt-1">
                         <LockIcon lock={p.titleLock} />
                       </span>
+                      <KindBadge kind={p.kind} className="mt-0.5" />
                     </div>
                     <div className="text-xs text-muted-foreground truncate">
                       {[p.externalId, p.skus.join(' / ')].filter(Boolean).join(' · ') || '—'}

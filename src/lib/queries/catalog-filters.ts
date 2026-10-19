@@ -2,7 +2,7 @@ import { CHANNEL_STATUS_LABEL } from '@/domain/channel-status';
 import { PIPELINE_STATUSES } from '@/domain/pipeline';
 import { scoreBand } from '@/domain/standard';
 import type { TitleLock } from '@/domain/title-lock';
-import type { ChannelStatus, PipelineStatus, Stage } from '@/generated/prisma/enums';
+import type { ChannelStatus, PipelineStatus, ProductKind, Stage } from '@/generated/prisma/enums';
 
 // Filtros y orden del Catálogo (la lista de publicaciones). Los usan la
 // pantalla y la descarga de la planilla de contenido, así bajás exactamente
@@ -14,6 +14,7 @@ export type PublicationSearch = {
   estado?: string;
   pipeline?: string;
   familia?: string;
+  tipo?: string;
   visitas?: string;
   ventas?: string;
   bloqueado?: string;
@@ -47,6 +48,18 @@ export const VISIT_RANGES = [
   { value: '100', label: '100 o más', min: 100, max: Infinity },
   { value: 'sin-dato', label: 'Sin dato', min: null, max: null },
 ] as const;
+
+// Individual o combo, como en la ficha.
+export const KIND_OPTIONS = [
+  { value: 'individual', label: 'Individuales', kind: 'INDIVIDUAL' },
+  { value: 'combo', label: 'Combos', kind: 'COMBO' },
+] as const satisfies readonly { value: string; label: string; kind: ProductKind }[];
+
+/** Los tipos que pide la dirección, por ejemplo ?tipo=combo. */
+export function parseKinds(raw: string | undefined): ProductKind[] {
+  const wanted = (raw ?? '').split(',');
+  return KIND_OPTIONS.filter((o) => wanted.includes(o.value)).map((o) => o.kind);
+}
 
 export const SALES_OPTIONS = [
   { value: 'con', label: 'Con ventas en 90 días' },
@@ -82,6 +95,7 @@ export type CatalogFilters = {
   statuses: ChannelStatus[];
   pipeline: PipelineStatus[];
   families: string[];
+  kinds: ProductKind[];
   visits: string[];
   sales: string[];
   locked: string[];
@@ -104,6 +118,7 @@ export function parsePublicationSearch(search: PublicationSearch): CatalogFilter
       .filter(Boolean)
       .map(decodeFamily)
       .filter((f): f is string => Boolean(f)),
+    kinds: parseKinds(search.tipo),
     visits: list(search.visitas, VISIT_RANGES.map((r) => r.value)),
     sales: list(search.ventas, SALES_OPTIONS.map((o) => o.value)),
     locked: list(search.bloqueado, LOCK_OPTIONS.map((o) => o.value)),
@@ -119,6 +134,7 @@ export function isFiltered(f: CatalogFilters): boolean {
       f.statuses.length ||
       f.pipeline.length ||
       f.families.length ||
+      f.kinds.length ||
       f.visits.length ||
       f.sales.length ||
       f.locked.length ||
@@ -137,6 +153,7 @@ export type Filterable = {
   channelStatus: ChannelStatus;
   pipelineStatus: PipelineStatus;
   family: string | null;
+  kind: ProductKind;
   visits: number | null;
   sales: number | null;
   titleLock: TitleLock;
@@ -156,7 +173,7 @@ function lockOption(lock: TitleLock): string {
 }
 
 export function filterPublications<T extends Filterable>(all: T[], f: CatalogFilters): T[] {
-  const { band, statuses, pipeline, families, visits, sales, locked, proposal, sort, q } = f;
+  const { band, statuses, pipeline, families, kinds, visits, sales, locked, proposal, sort, q } = f;
   const proposalStages = proposal ? PROPOSAL_SHORTCUTS[proposal].stages : null;
   const familySet = new Set(families.map((x) => x.toLowerCase()));
   return all
@@ -164,6 +181,7 @@ export function filterPublications<T extends Filterable>(all: T[], f: CatalogFil
     .filter((p) => statuses.length === 0 || statuses.includes(p.channelStatus))
     .filter((p) => pipeline.length === 0 || pipeline.includes(p.pipelineStatus))
     .filter((p) => familySet.size === 0 || familySet.has((p.family ?? '').toLowerCase()))
+    .filter((p) => kinds.length === 0 || kinds.includes(p.kind))
     .filter((p) => visits.length === 0 || visits.includes(visitRange(p.visits)))
     .filter((p) => sales.length === 0 || sales.includes(salesOption(p.sales)))
     .filter((p) => locked.length === 0 || locked.includes(lockOption(p.titleLock)))

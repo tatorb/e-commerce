@@ -331,6 +331,15 @@ export async function undoImportRun(
   const deleted = await db.$transaction(async (tx) => {
     const measurements = await tx.measurement.deleteMany({ where: { importRunId: run.id } });
     const publications = await tx.publication.deleteMany({ where: { importRunId: run.id } });
+    // Un producto de esta importación que después se puso en un combo que no
+    // es de la importación se queda: sin él, el combo quedaría incompleto.
+    const inCombos = await tx.comboItem.findMany({
+      where: { product: { importRunId: run.id }, combo: { OR: [{ importRunId: null }, { importRunId: { not: run.id } }] } },
+      select: { productId: true },
+    });
+    if (inCombos.length > 0) {
+      await tx.product.updateMany({ where: { id: { in: inCombos.map((c) => c.productId) } }, data: { importRunId: null } });
+    }
     const products = await tx.product.deleteMany({ where: { importRunId: run.id } });
     await tx.importRun.update({ where: { id: run.id }, data: { status: 'UNDONE', undoneAt: new Date() } });
     return { products: products.count, publications: publications.count, measurements: measurements.count };

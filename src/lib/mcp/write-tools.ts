@@ -13,6 +13,9 @@ import {
   removeFromPipeline,
 } from '@/domain/pipeline';
 import { productInfoSchema, updateProductInfo } from '@/domain/product-info';
+import { MAX_COMBO_ITEMS, MAX_COMBO_QUANTITY, setComboItems, setProductKind } from '@/domain/combos';
+import type { Prisma } from '@/generated/prisma/client';
+import { loadCombo } from '@/lib/queries/combos';
 import {
   addInsight,
   manufacturerSchema,
@@ -205,13 +208,37 @@ const removeTool = defineTool({
 
 // ───────────────────────────── Información ─────────────────────────────
 
+/**
+ * Un producto de la cuenta por número de pieza, SKU, código de publicación o
+ * id; si no, por nombre. Si coincide con varios, pide algo más preciso.
+ */
+async function findProduct(tx: Prisma.TransactionClient, accountId: string, ref: string) {
+  const term = ref.trim();
+  if (!term) throw new McpToolError('Falta el producto.');
+  const equals = { equals: term, mode: 'insensitive' as const };
+  const select = { id: true, name: true, partNumber: true } as const;
+  const exact = await tx.product.findMany({
+    where: {
+      accountId,
+      OR: [{ id: term }, { partNumber: equals }, { variants: { some: { sku: equals } } }, { publications: { some: { externalId: equals } } }],
+    },
+    select,
+    take: 6,
+  });
+  const found = exact.length > 0 ? exact : await tx.product.findMany({ where: { accountId, name: { contains: term, mode: 'insensitive' } }, select, take: 6 });
+  if (found.length === 1) return found[0];
+  if (found.length === 0) throw new McpToolError(`No encontré el producto «${term}» en la cuenta.`);
+  const names = found.slice(0, 5).map((p) => `${p.name}${p.partNumber ? ` (${p.partNumber})` : ''}`);
+  throw new McpToolError(`«${term}» coincide con varios productos: ${names.join('; ')}. Usá el número de pieza o un SKU.`);
+}
+
 const optionalText = (what: string) => z.string().optional().describe(`${what}. Vacío lo borra; sin mandar, queda como está.`);
 
 const updateProductInfoTool = defineTool({
   name: 'update_product_info',
   title: 'Corregir la ficha',
   description:
-    'Corrige la ficha del producto de una publicación: tipo, marca, número de pieza, línea, origen, medidas y compatibilidades. La ficha es la fuente de verdad y la comparten todas las publicaciones del producto. Lo que no se manda queda como está; las listas reemplazan la lista entera. Usá solo datos que te dio la persona o que están en la ficha, nunca supuestos.',
+    'Corrige la ficha del producto de una publicación: tipo, marca, número de pieza, línea, origen, medidas y compatibilidades. También si es individual o combo, y los productos del combo: un combo se arma solo con productos individuales, y un producto que está dentro de un combo no puede ser combo. La ficha es la fuente de verdad y la comparten todas las publicaciones del producto. Lo que no se manda queda como está; las listas reemplazan la lista entera. Usá solo datos que te dio la persona o que están en la ficha, nunca supuestos.',
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg,
@@ -241,6 +268,20 @@ const updateProductInfoTool = defineTool({
       .max(500)
       .optional()
       .describe('Las compatibilidades con vehículos. Reemplaza la lista entera.'),
+    individual_o_combo: z
+      .enum(['individual', 'combo'])
+      .optional()
+      .describe('Individual se vende tal cual; combo se arma con productos individuales. Pasar un combo a individual borra su lista de productos.'),
+    productos_del_combo: z
+      .array(
+        z.object({
+          producto: z.string().describe('El producto individual: su número de pieza, un SKU, el código de una de sus publicaciones o el nombre.'),
+          cantidad: z.number().int().min(1).max(MAX_COMBO_QUANTITY),
+        }),
+      )
+      .max(MAX_COMBO_ITEMS)
+      .optional()
+      .describe('Solo para combos. Reemplaza la lista entera, en este orden.'),
   }),
   readOnly: false,
   destructive: true,
@@ -327,8 +368,29 @@ const updateProductInfoTool = defineTool({
       compatibilities,
     });
     if (!parsed.success) throw new McpToolError(parsed.error.issues[0]?.message ?? 'Revisá los datos.');
-    await ctx.db.$transaction((tx) => updateProductInfo(tx, { accountId: account.id, productId: pub.productId, data: parsed.data }));
-    return { listo: true, mensaje: 'Guardado en la ficha.', link_app: appLink(ctx, account, id) };
+    await ctx.db.$transaction(async (tx) => {
+      await updateProductInfo(tx, { accountId: account.id, productId: pub.productId, data: parsed.data });
+      if (args.individual_o_combo) {
+        await setProductKind(tx, { accountId: account.id, productId: pub.productId, kind: args.individual_o_combo === 'combo' ? 'COMBO' : 'INDIVIDUAL' });
+      }
+      if (args.productos_del_combo) {
+        const items = [];
+        for (const item of args.productos_del_combo) {
+          const product = await findProduct(tx, account.id, item.producto);
+          items.push({ productId: product.id, quantity: item.cantidad });
+        }
+        await setComboItems(tx, { accountId: account.id, comboId: pub.productId, items });
+      }
+    });
+    const combo = await loadCombo(ctx.db, pub.productId);
+    return {
+      listo: true,
+      mensaje: 'Guardado en la ficha.',
+      ...(combo?.kind === 'COMBO'
+        ? { productos_del_combo: combo.items.map((i) => ({ nombre: i.name, cantidad: i.quantity, numero_de_pieza: i.partNumber })) }
+        : {}),
+      link_app: appLink(ctx, account, id),
+    };
   },
 });
 

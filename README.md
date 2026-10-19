@@ -17,6 +17,7 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
 | Activo | `Asset` | Foto o video del producto. Por ahora solo el link. |
 | Canal | `Channel` | Mercado Libre, tienda web, etc. |
 | Tienda | `Store` | La presencia de una cuenta en un canal, por ejemplo INSURMOTOR. Guarda la forma de aplicar: manual, planilla o API. |
+| Individual o combo | `Product.kind`, `ComboItem` | Un producto individual se vende tal cual. Un combo se arma con productos individuales, cada uno con su cantidad; no puede tener otro combo adentro. En el canal los dos son publicaciones del mismo nivel. Un individual que está en un combo no se puede borrar ni pasar a combo. Productos, Catálogo y Pipeline filtran por tipo (`?tipo=individual`, `?tipo=combo`). |
 | Publicación | `Publication` | El producto armado para una tienda: título, descripción, atributos, precio, ID externo, link, estado. |
 | Catálogo | (pantalla) | La lista de todas las publicaciones, en `/publicaciones`. Desde ahí se eligen las que entran al pipeline. |
 | Pipeline | `Publication.pipelineStatus` | La etapa que se ve de cada publicación: Sin tocar, En pipeline (con su paso), Corregida o Descartada (con su motivo). Solo entran las que tienen código del canal. |

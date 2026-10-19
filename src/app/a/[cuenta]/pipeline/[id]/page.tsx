@@ -8,6 +8,8 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { PipelineBadge } from '@/components/stages/StageBadge';
 import { ScoreBadge } from '@/components/stages/ScoreBadge';
+import { KindBadge } from '@/components/products/KindBadge';
+import { loadCombo } from '@/lib/queries/combos';
 import { StepLine } from '@/components/pipeline/StepLine';
 import { StepActions } from '@/components/pipeline/StepActions';
 import { PipelineHistory } from '@/components/pipeline/PipelineHistory';
@@ -95,6 +97,7 @@ export default async function PipelineStepPage({
             </h1>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-muted-foreground">
               <span>{pub.externalId ?? 'Sin código'}</span>
+              <KindBadge kind={pub.kind} />
               <ScoreBadge score={pub.score} />
               <span>{pub.sales === null ? 'Ventas sin dato' : `${plural(pub.sales, 'venta')} en 90 días`}</span>
               <PipelineBadge state={pub} />
@@ -194,6 +197,7 @@ export default async function PipelineStepPage({
             ctx={ctx}
             research={await loadResearch(prisma, ctx.publication.productId)}
             catalog={await loadCatalogData(prisma, ctx.publication.id)}
+            combo={await loadCombo(prisma, ctx.publication.productId)}
             blobReady={isBlobConfigured()}
           />
         ) : ctx && viewing === 'TITLE' ? (

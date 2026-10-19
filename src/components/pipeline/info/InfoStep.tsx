@@ -1,18 +1,22 @@
 import { SectionBody, SectionCard } from '@/components/ui/section-card';
 import type { CatalogData } from '@/lib/catalog-data';
+import type { ComboData } from '@/lib/queries/combos';
+import { ComboItemsCard } from '@/components/products/ComboItemsCard';
+import { InCombosCard } from '@/components/products/InCombosCard';
 import type { ResearchData } from '@/lib/queries/research';
 import type { TitleContext } from '@/lib/queries/title-step';
 import { BuyerPainsCard } from './BuyerPainsCard';
 import { CapturedMaterial } from './CapturedMaterial';
 import { CatalogCard } from './CatalogCard';
 import { ClarificationsCard } from './ClarificationsCard';
-import { CompetitorsForm } from './CompetitorsForm';
+import { CompetitorsCard } from './CompetitorsCard';
 import { ManufacturerCard } from './ManufacturerCard';
 import { ProductInfoForm } from './ProductInfoForm';
 
-// Paso Información: los datos de la ficha, lo del fabricante, los datos de
-// catálogo del canal, las aclaraciones para las imágenes, los dolores del
-// comprador, la competencia y lo que se fue juntando en el paso Título. La
+// Paso Información, en este orden: los datos de la ficha (y los del combo), lo
+// del fabricante, los datos de catálogo del canal, la competencia, los dolores
+// del comprador, las aclaraciones para las imágenes y lo que se fue juntando
+// en el paso Título. La
 // investigación es del producto: la comparten todas sus publicaciones. Los
 // datos de catálogo son de la publicación, porque cada canal tiene los suyos.
 export function InfoStep({
@@ -21,6 +25,7 @@ export function InfoStep({
   ctx,
   research,
   catalog,
+  combo,
   blobReady,
 }: {
   accountSlug: string;
@@ -28,6 +33,7 @@ export function InfoStep({
   ctx: TitleContext;
   research: ResearchData;
   catalog: CatalogData | null;
+  combo: ComboData | null;
   blobReady: boolean;
 }) {
   const s = (v: string | null | undefined) => v ?? '';
@@ -65,6 +71,11 @@ export function InfoStep({
           />
         </SectionBody>
       </SectionCard>
+      {combo?.kind === 'COMBO' ? (
+        <ComboItemsCard accountSlug={accountSlug} comboId={ctx.publication.productId} initial={combo.items} />
+      ) : combo ? (
+        <InCombosCard accountSlug={accountSlug} combos={combo.inCombos} />
+      ) : null}
       <ManufacturerCard
         accountSlug={accountSlug}
         publicationId={publicationId}
@@ -80,7 +91,11 @@ export function InfoStep({
           data={catalog}
         />
       ) : null}
-      <ClarificationsCard accountSlug={accountSlug} publicationId={publicationId} initial={s(r?.clarifications)} />
+      <CompetitorsCard
+        accountSlug={accountSlug}
+        publicationId={publicationId}
+        initial={ctx.competitors.map((c) => ({ url: c.url ?? '', title: c.title, soldQuantity: c.soldQuantity?.toString() ?? '' }))}
+      />
       <BuyerPainsCard
         accountSlug={accountSlug}
         publicationId={publicationId}
@@ -88,19 +103,7 @@ export function InfoStep({
         pains={research.pains.map((i) => ({ id: i.id, text: i.text }))}
         objections={research.objections.map((i) => ({ id: i.id, text: i.text }))}
       />
-      <SectionCard
-        title="Competencia"
-        count={ctx.competitors.length}
-        description="Las publicaciones de otros vendedores que más venden este producto. Conviene cargar al menos 3. Sus títulos suman palabras al paso Título."
-      >
-        <SectionBody>
-          <CompetitorsForm
-            accountSlug={accountSlug}
-            publicationId={publicationId}
-            initial={ctx.competitors.map((c) => ({ url: c.url ?? '', title: c.title, soldQuantity: c.soldQuantity?.toString() ?? '' }))}
-          />
-        </SectionBody>
-      </SectionCard>
+      <ClarificationsCard accountSlug={accountSlug} publicationId={publicationId} initial={s(r?.clarifications)} />
       <SectionCard title="Material capturado" description="Lo que se juntó en el paso Título, con su fecha.">
         <SectionBody>
           <CapturedMaterial captures={ctx.captures} positions={ctx.positions} timeZone={timeZone} />

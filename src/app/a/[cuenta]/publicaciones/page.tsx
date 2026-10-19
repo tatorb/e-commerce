@@ -30,6 +30,7 @@ import {
   VISIT_RANGES,
   encodeFamily,
   familyOptions,
+  KIND_OPTIONS,
   filterPublications,
   isFiltered,
   parsePublicationSearch,
@@ -89,6 +90,7 @@ export default async function PublicationsPage({
     id: p.id,
     productId: p.productId,
     title: p.title,
+    kind: p.kind,
     externalId: p.externalId,
     skus: p.skus,
     score: p.score,
@@ -192,6 +194,12 @@ export default async function PublicationsPage({
             paramKey="pipeline"
             options={PIPELINE_STATUSES.map((s) => ({ value: s, label: PIPELINE_STATUS_LABEL[s] }))}
             selected={filters.pipeline}
+          />
+          <UrlFilterDropdown
+            label="Tipo"
+            paramKey="tipo"
+            options={KIND_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+            selected={KIND_OPTIONS.filter((o) => filters.kinds.includes(o.kind)).map((o) => o.value)}
           />
           <UrlFilterDropdown
             label="Familia"

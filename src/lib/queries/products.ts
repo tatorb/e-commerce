@@ -1,25 +1,36 @@
 import { prisma } from '@/lib/db';
 import type { Prisma } from '@/generated/prisma/client';
+import type { ProductKind } from '@/generated/prisma/enums';
 
-export async function listProducts(accountId: string, q?: string) {
+/** Lo que busca el buscador de productos: nombre, marca, número de pieza, SKU o código de publicación. */
+export function productSearchWhere(q: string | undefined): Prisma.ProductWhereInput {
   const term = q?.trim();
-  const where: Prisma.ProductWhereInput = { accountId };
-  if (term) {
-    const contains = { contains: term, mode: 'insensitive' as const };
-    where.OR = [
+  if (!term) return {};
+  const contains = { contains: term, mode: 'insensitive' as const };
+  return {
+    OR: [
       { name: contains },
       { brand: contains },
       { partNumber: contains },
       { variants: { some: { sku: contains } } },
       { publications: { some: { externalId: contains } } },
-    ];
-  }
+    ],
+  };
+}
+
+export async function listProducts(accountId: string, q?: string, kinds: ProductKind[] = []) {
+  const where: Prisma.ProductWhereInput = {
+    accountId,
+    ...productSearchWhere(q),
+    ...(kinds.length > 0 ? { kind: { in: kinds } } : {}),
+  };
   return prisma.product.findMany({
     where,
     orderBy: { updatedAt: 'desc' },
     select: {
       id: true,
       name: true,
+      kind: true,
       brand: true,
       productType: true,
       partNumber: true,

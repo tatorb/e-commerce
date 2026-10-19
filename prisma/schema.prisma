@@ -177,11 +177,19 @@ enum RecordSource {
   IMPORT
 }
 
+// Individual: se vende tal cual. Combo: se arma con productos individuales
+// (ComboItem). En el canal los dos son publicaciones del mismo nivel.
+enum ProductKind {
+  INDIVIDUAL
+  COMBO
+}
+
 model Product {
   id              String           @id @default(cuid())
   accountId       String
   account         Account          @relation(fields: [accountId], references: [id], onDelete: Cascade)
   name            String
+  kind            ProductKind      @default(INDIVIDUAL)
   brand           String? // marca del repuesto
   partNumber      String? // nº de pieza u OEM
   productType     String? // tipo de producto, por ejemplo "Kit de embrague"
@@ -207,10 +215,30 @@ model Product {
   research        ProductResearch?
   files           ProductFile[]
   insights        BuyerInsight[]
+  // Si es combo, los productos que lo forman.
+  comboItems      ComboItem[]      @relation("ComboItems")
+  // Si es individual, los combos de los que forma parte.
+  inCombos        ComboItem[]      @relation("ComboComponent")
 
   @@index([accountId])
   @@index([importRunId])
   @@map("products")
+}
+
+// Un producto individual dentro de un combo, con su cantidad. Borrar el combo
+// borra su lista; un individual que está en un combo no se puede borrar.
+model ComboItem {
+  id        String  @id @default(cuid())
+  comboId   String
+  combo     Product @relation("ComboItems", fields: [comboId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation("ComboComponent", fields: [productId], references: [id], onDelete: NoAction)
+  quantity  Int     @default(1)
+  position  Int     @default(0)
+
+  @@unique([comboId, productId])
+  @@index([productId])
+  @@map("combo_items")
 }
 
 // Variante por medida, por ejemplo STD, 0.25 o 0.50, cada una con su SKU.

@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { PipelineBoard } from '@/components/pipeline/PipelineBoard';
+import { UrlFilterDropdown } from '@/components/filters/UrlFilterDropdown';
+import { KIND_OPTIONS, parseKinds } from '@/lib/queries/catalog-filters';
 import { getAccountBySlug } from '@/lib/queries/accounts';
 import { listBoard } from '@/lib/queries/pipeline';
 import { plural } from '@/lib/format';
@@ -17,12 +19,20 @@ export async function generateMetadata({ params }: { params: Promise<{ cuenta: s
   return { title: account ? `Pipeline · ${account.name}` : 'Pipeline' };
 }
 
-export default async function PipelinePage({ params }: { params: Promise<{ cuenta: string }> }) {
-  const { cuenta } = await params;
+export default async function PipelinePage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ cuenta: string }>;
+  searchParams: Promise<{ tipo?: string }>;
+}) {
+  const [{ cuenta }, { tipo }] = await Promise.all([params, searchParams]);
   const account = await getAccountBySlug(cuenta);
   if (!account) notFound();
 
-  const items = await listBoard(account.id);
+  const kinds = parseKinds(tipo);
+  const all = await listBoard(account.id);
+  const items = kinds.length > 0 ? all.filter((i) => kinds.includes(i.kind)) : all;
   const catalogHref = `/a/${account.slug}/publicaciones?pipeline=UNTOUCHED,DISCARDED`;
 
   return (
@@ -45,7 +55,7 @@ export default async function PipelinePage({ params }: { params: Promise<{ cuent
         </div>
       </PageHeader>
       <PageBody className="max-w-none">
-        {items.length === 0 ? (
+        {all.length === 0 ? (
           <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">
             Todavía no hay publicaciones en el pipeline. Elegilas en el{' '}
             <Link href={catalogHref} className="text-primary underline-offset-4 hover:underline">
@@ -55,10 +65,20 @@ export default async function PipelinePage({ params }: { params: Promise<{ cuent
           </div>
         ) : (
           <>
-            <p className="text-sm text-muted-foreground">
-              {plural(items.length, 'publicación', 'publicaciones')} en el pipeline. En cada paso, las que esperan hace
-              más tiempo van primero.
-            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <UrlFilterDropdown
+                label="Tipo"
+                paramKey="tipo"
+                options={KIND_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+                selected={KIND_OPTIONS.filter((o) => kinds.includes(o.kind)).map((o) => o.value)}
+              />
+              <p className="text-sm text-muted-foreground">
+                {kinds.length > 0
+                  ? `${items.length} de ${plural(all.length, 'publicación', 'publicaciones')} en el pipeline.`
+                  : `${plural(items.length, 'publicación', 'publicaciones')} en el pipeline.`}{' '}
+                En cada paso, las que esperan hace más tiempo van primero.
+              </p>
+            </div>
             <PipelineBoard accountSlug={account.slug} items={items} />
           </>
         )}

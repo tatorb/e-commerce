@@ -29,8 +29,11 @@ import {
 } from '@/lib/queries/catalog-filters';
 import { listBoard, listPipelineMovements } from '@/lib/queries/pipeline';
 import { listScoredPublications, type ScoredPublication } from '@/lib/queries/scoring';
+import { KIND_OPTIONS, parseKinds } from '@/lib/queries/catalog-filters';
 import { fileHref } from '@/lib/file-rules';
 import { loadResearch } from '@/lib/queries/research';
+import { loadCombo } from '@/lib/queries/combos';
+import { PRODUCT_KIND_LABEL } from '@/domain/combos';
 import { loadCatalogData } from '@/lib/catalog-data';
 import { catalogForClaude } from './catalog';
 import { loadTitleContext } from '@/lib/queries/title-step';
@@ -77,6 +80,7 @@ function summary(ctx: McpContext, account: AccountRef, p: ScoredPublication) {
     codigo: p.externalId,
     titulo: p.title,
     tienda: `${p.channelName} · ${p.storeName}`,
+    tipo: PRODUCT_KIND_LABEL[p.kind],
     familia: p.family,
     puntaje: p.score,
     visitas_90d: p.visits,
@@ -146,7 +150,7 @@ const searchCatalog = defineTool({
   name: 'search_catalog',
   title: 'Buscar en el Catálogo',
   description:
-    'Busca publicaciones en el Catálogo de una cuenta, con los mismos filtros de la pantalla. Devuelve título, código, familia, puntaje, visitas y ventas de 90 días, si el título está bloqueado y el estado en el pipeline. Los filtros con varios valores aceptan cualquiera de ellos.',
+    'Busca publicaciones en el Catálogo de una cuenta, con los mismos filtros de la pantalla. Devuelve título, código, si es individual o combo, familia, puntaje, visitas y ventas de 90 días, si el título está bloqueado y el estado en el pipeline. Los filtros con varios valores aceptan cualquiera de ellos.',
   input: z.object({
     cuenta: accountArg,
     texto: z.string().optional().describe('Busca en el título, el código del canal y los SKU.'),
@@ -158,6 +162,10 @@ const searchCatalog = defineTool({
       .array(asEnum(PIPELINE_STEPS))
       .optional()
       .describe(`Paso, para las que están en el pipeline: ${labels(PIPELINE_STEPS.map((s) => [s, PIPELINE_STEP_LABEL[s]]))}.`),
+    tipo: z
+      .array(asEnum(KIND_OPTIONS.map((o) => o.value)))
+      .optional()
+      .describe('individual = productos individuales; combo = combos armados con productos individuales.'),
     familia: z
       .array(z.string())
       .optional()
@@ -211,6 +219,7 @@ const searchCatalog = defineTool({
       q: args.texto,
       pipeline: join(args.pipeline),
       familia: join(wantedFamilies.map(encodeFamily)),
+      tipo: join(args.tipo),
       visitas: join(args.visitas),
       ventas: join(args.ventas),
       bloqueado: join(args.bloqueado),
@@ -246,13 +255,20 @@ const getPipelineBoard = defineTool({
   name: 'get_pipeline_board',
   title: 'Ver el tablero del pipeline',
   description:
-    'Muestra el tablero del pipeline de una cuenta: cuántas publicaciones hay en cada paso, cuáles son y hace cuántos días esperan en ese paso. Las que esperan hace más van primero.',
-  input: z.object({ cuenta: accountArg }),
+    'Muestra el tablero del pipeline de una cuenta: cuántas publicaciones hay en cada paso, cuáles son y hace cuántos días esperan en ese paso. Las que esperan hace más van primero. Se puede ver solo individuales o solo combos.',
+  input: z.object({
+    cuenta: accountArg,
+    tipo: z
+      .array(asEnum(KIND_OPTIONS.map((o) => o.value)))
+      .optional()
+      .describe('individual = productos individuales; combo = combos armados con productos individuales.'),
+  }),
   readOnly: true,
   async run(ctx, args) {
     const account = await resolveAccount(ctx.db, args.cuenta);
     const now = new Date();
-    const [items, completed] = await Promise.all([
+    const kinds = parseKinds(args.tipo?.join(','));
+    const [board, completed] = await Promise.all([
       listBoard(account.id, ctx.db),
       ctx.db.pipelineMovement.count({
         where: {
@@ -262,6 +278,7 @@ const getPipelineBoard = defineTool({
         },
       }),
     ]);
+    const items = kinds.length > 0 ? board.filter((i) => kinds.includes(i.kind)) : board;
     return {
       cuenta: account.slug,
       en_el_pipeline: items.length,
@@ -342,6 +359,7 @@ const getPublication = defineTool({
       loadCatalogData(ctx.db, id),
     ]);
     const product = pub.product;
+    const combo = await loadCombo(ctx.db, product.id);
     const r = research.research;
     const manufacturerText = withoutPrices(r?.manufacturerText ?? null);
     const measurement = pub.measurements[0] ?? null;
@@ -354,6 +372,19 @@ const getPublication = defineTool({
       ficha: {
         producto_id: product.id,
         nombre: product.name,
+        individual_o_combo: combo ? PRODUCT_KIND_LABEL[combo.kind] : null,
+        ...(combo?.kind === 'COMBO'
+          ? {
+              productos_del_combo: combo.items.map((i) => ({
+                nombre: i.name,
+                cantidad: i.quantity,
+                marca: i.brand,
+                numero_de_pieza: i.partNumber,
+              })),
+            }
+          : combo && combo.inCombos.length > 0
+            ? { forma_parte_de_combos: combo.inCombos.map((c) => ({ nombre: c.name, cantidad: c.quantity })) }
+            : {}),
         tipo: product.productType,
         marca: product.brand,
         numero_de_pieza: product.partNumber,

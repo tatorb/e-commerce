@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { Clock, Lock } from 'lucide-react';
 import { ScoreBadge } from '@/components/stages/ScoreBadge';
+import { KindBadge } from '@/components/products/KindBadge';
 import { PIPELINE_STEPS, PIPELINE_STEP_LABEL } from '@/domain/pipeline';
 import { titleLockText } from '@/domain/title-lock';
 import type { BoardItem } from '@/lib/queries/pipeline';
@@ -22,7 +23,10 @@ function BoardCard({ accountSlug, item, now }: { accountSlug: string; item: Boar
             </span>
           ) : null}
         </div>
-        <p className="text-xs text-muted-foreground">{item.externalId ?? '—'}</p>
+        <p className="flex items-center gap-2 text-xs text-muted-foreground">
+          {item.externalId ?? '—'}
+          <KindBadge kind={item.kind} />
+        </p>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
           <ScoreBadge score={item.score} />
           <span>{item.sales === null ? 'Ventas sin dato' : plural(item.sales, 'venta')}</span>
