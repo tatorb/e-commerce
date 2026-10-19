@@ -14,6 +14,11 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 mkdir -p "$DATOS"
 uv sync --project "$CARPETA" --frozen --no-dev
-echo "Bajando el modelo para quitar el fondo (cerca de 1 GB, una sola vez)…"
-uv run --project "$CARPETA" --frozen --no-dev python -c "import sys; sys.path.insert(0, '$CARPETA'); from mrb_imagenes.pasos.fondo import preparar_modelo; preparar_modelo()"
+echo "Bajando el modelo para quitar el fondo (una sola vez)…"
+uv run --project "$CARPETA" --frozen --no-dev python -c "
+import sys; sys.path.insert(0, '$CARPETA')
+from mrb_imagenes.pasos.fondo import elegir_modelo, memoria_gb, preparar_modelo
+print(f'Memoria de esta Mac: {memoria_gb():.0f} GB. Modelo: {elegir_modelo()}.')
+preparar_modelo()
+"
 echo "Listo. Ahora cargá la clave de Claude con ./configurar.sh"

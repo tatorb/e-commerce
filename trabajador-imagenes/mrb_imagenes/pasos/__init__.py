@@ -6,15 +6,16 @@ from .base import Medicion, Parametro, Paso, Resultado
 from .blancos import Blancos
 from .color import Color
 from .exportar import Exportar
-from .fondo import Fondo, Segmentador
+from .fondo import Fondo, Segmentador, segmentador_rembg
 from .lente import Lente
 from .luces import Luces
 from .perspectiva import Perspectiva
 from .recorte import Recorte
 
 
-def armar_pasos(segmentador: Segmentador | None = None) -> list[Paso]:
-    return [Lente(), Perspectiva(), Blancos(), Luces(), Color(), Fondo(segmentador), Recorte(), Exportar()]
+def armar_pasos(segmentador: Segmentador | None = None, modelo_fondo: str | None = None) -> list[Paso]:
+    fondo = Fondo(segmentador or segmentador_rembg(modelo_fondo))
+    return [Lente(), Perspectiva(), Blancos(), Luces(), Color(), fondo, Recorte(), Exportar()]
 
 
 CLAVES = [p.clave for p in armar_pasos(lambda rgb: rgb[..., 0])]

@@ -1,8 +1,13 @@
 """Paso 6. Quitar el fondo.
 
-El modelo birefnet-general, a través de rembg, decide qué partes de la foto
-son fondo. No dibuja nada: solo devuelve una silueta, la máscara. Con ella se
-arma la transparencia. Los colores de la pieza quedan exactamente iguales.
+Un modelo, a través de rembg, decide qué partes de la foto son fondo. No
+dibuja nada: solo devuelve una silueta, la máscara. Con ella se arma la
+transparencia. Los colores de la pieza quedan exactamente iguales.
+
+Hay dos modelos. El completo (birefnet-general) es el más preciso, pero usa
+cerca de 8 GB de memoria. El liviano (isnet-general-use) usa poco más de 1 GB
+y, con la segunda pasada sobre la zona del producto, queda cerca. El
+trabajador elige según la memoria de la Mac.
 
 No se usa el "refinado de bordes" de rembg (alpha matting), porque recalcula
 colores. El borde se ajusta con un filtro guiado que solo toca la transparencia.
@@ -10,6 +15,7 @@ colores. El borde se ajusta con un filtro guiado que solo toca la transparencia.
 
 from __future__ import annotations
 
+import os
 from typing import Callable
 
 import cv2
@@ -19,36 +25,59 @@ from PIL import Image
 from ..imagen import Foto, achicar
 from .base import Medicion, Parametro, Paso, Resultado
 
-MODELO = "birefnet-general"
+MODELOS = {"completo": "birefnet-general", "liviano": "isnet-general-use"}
+# Con menos memoria que esto, el modelo completo dejaría la Mac sin memoria.
+MEMORIA_PARA_EL_COMPLETO_GB = 14
 
 # Recibe la foto (alto x ancho x 3, de 0 a 1) y devuelve la máscara (alto x ancho, de 0 a 1).
 Segmentador = Callable[[np.ndarray], np.ndarray]
 
-_SESION = None
+_SESIONES: dict = {}
 
 
-def preparar_modelo():
-    """Carga el modelo. La primera vez lo baja de internet (cerca de 1 GB)."""
-    global _SESION
+def memoria_gb() -> float:
+    try:
+        return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 1024**3
+    except (ValueError, OSError, AttributeError):
+        return 0.0
+
+
+def elegir_modelo(pedido: str | None = None) -> str:
+    """El modelo pedido (completo o liviano), el de MRB_MODELO_FONDO, o el que entra en la memoria de la Mac."""
+    pedido = pedido or os.environ.get("MRB_MODELO_FONDO")
+    if pedido:
+        return MODELOS.get(pedido, pedido)
+    return MODELOS["completo"] if memoria_gb() >= MEMORIA_PARA_EL_COMPLETO_GB else MODELOS["liviano"]
+
+
+def preparar_modelo(modelo: str | None = None):
+    """Carga el modelo. La primera vez lo baja de internet."""
     import onnxruntime as ort
     from rembg import new_session
 
-    if _SESION is None:
-        # Sin reservar memoria de más: así usa unos 8 GB y no crece de una foto a la otra.
+    nombre = elegir_modelo(modelo)
+    if nombre not in _SESIONES:
+        # Sin reservar memoria de más: no crece de una foto a la otra.
         opciones = ort.SessionOptions()
         opciones.enable_cpu_mem_arena = False
         opciones.enable_mem_pattern = False
-        _SESION = new_session(MODELO, sess_opts=opciones)
-    return _SESION
+        _SESIONES[nombre] = new_session(nombre, sess_opts=opciones)
+    return _SESIONES[nombre]
 
 
-def segmentar_con_rembg(rgb: np.ndarray) -> np.ndarray:
-    from rembg import remove
+def segmentador_rembg(modelo: str | None = None) -> Segmentador:
+    nombre = elegir_modelo(modelo)
 
-    sesion = preparar_modelo()
-    im = Image.fromarray(np.round(np.clip(rgb, 0, 1) * 255).astype(np.uint8), "RGB")
-    mascara = remove(im, session=sesion, only_mask=True, post_process_mask=False)
-    return np.asarray(mascara.convert("L"), dtype=np.float32) / 255.0
+    def segmentar(rgb: np.ndarray) -> np.ndarray:
+        from rembg import remove
+
+        sesion = preparar_modelo(nombre)
+        im = Image.fromarray(np.round(np.clip(rgb, 0, 1) * 255).astype(np.uint8), "RGB")
+        mascara = remove(im, session=sesion, only_mask=True, post_process_mask=False)
+        return np.asarray(mascara.convert("L"), dtype=np.float32) / 255.0
+
+    segmentar.modelo = nombre  # type: ignore[attr-defined]
+    return segmentar
 
 
 # La segunda pasada sirve si la zona del producto es bastante más chica que la foto.
@@ -143,7 +172,7 @@ class Fondo(Paso):
     )
 
     def __init__(self, segmentador: Segmentador | None = None):
-        self.segmentador = segmentador or segmentar_con_rembg
+        self.segmentador = segmentador or segmentador_rembg()
 
     def _segmentar(self, rgb: np.ndarray) -> np.ndarray:
         mascara = np.clip(self.segmentador(rgb), 0, 1).astype(np.float32)
@@ -165,6 +194,7 @@ class Fondo(Paso):
         sugeridos = self.defectos(ajustes)
         _, medidas = armar_alfa(self._mascara(extra, sugeridos), foto.rgb, sugeridos)
         medidas["segunda_pasada_disponible"] = extra["mascara_detalle"] is not None
+        medidas["modelo"] = getattr(self.segmentador, "modelo", "otro")
         medidas["borde_suave_pct"] = round(float(((mascara > 0.05) & (mascara < 0.95)).mean()) * 100, 2)
         return Medicion(medidas=medidas, sugeridos=sugeridos, extra=extra)
 

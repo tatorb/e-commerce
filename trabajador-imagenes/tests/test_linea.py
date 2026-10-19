@@ -60,3 +60,9 @@ def test_probar_rechaza_una_foto_que_no_existe(tmp_path):
     raiz = Path(__file__).resolve().parents[1]
     r = subprocess.run([sys.executable, str(raiz / "probar.py"), str(tmp_path / "no-esta.jpg"), "--simulado"], capture_output=True, text=True)
     assert r.returncode == 1 and "No encuentro la foto" in r.stdout
+
+
+def test_probar_sin_foto_explica_como_escribirlo():
+    raiz = Path(__file__).resolve().parents[1]
+    r = subprocess.run([sys.executable, str(raiz / "probar.py")], capture_output=True, text=True)
+    assert r.returncode == 1 and "en una sola línea" in r.stdout

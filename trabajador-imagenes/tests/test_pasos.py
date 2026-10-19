@@ -253,3 +253,16 @@ def test_la_segunda_pasada_mira_solo_la_zona_del_producto(foto):
     assert not np.array_equal(a, b)
     # Fuera de la zona del producto, la segunda pasada no agrega nada.
     assert a[12, 12] == 0
+
+
+def test_el_modelo_del_fondo_se_elige_por_la_memoria(monkeypatch):
+    from mrb_imagenes.pasos import fondo
+
+    monkeypatch.delenv("MRB_MODELO_FONDO", raising=False)
+    monkeypatch.setattr(fondo, "memoria_gb", lambda: 8.0)
+    assert fondo.elegir_modelo() == "isnet-general-use"
+    monkeypatch.setattr(fondo, "memoria_gb", lambda: 16.0)
+    assert fondo.elegir_modelo() == "birefnet-general"
+    assert fondo.elegir_modelo("liviano") == "isnet-general-use"
+    monkeypatch.setenv("MRB_MODELO_FONDO", "liviano")
+    assert fondo.elegir_modelo() == "isnet-general-use"

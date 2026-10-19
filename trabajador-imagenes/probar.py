@@ -24,6 +24,7 @@ from mrb_imagenes.imagen import FotoIlegible, exif_legible, guardar_intermedia, 
 from mrb_imagenes.inspector import Inspector
 from mrb_imagenes.linea import Corrida, aplicar, medir_y_proponer, saltear
 from mrb_imagenes.pasos import armar_pasos
+from mrb_imagenes.pasos.fondo import memoria_gb
 
 
 def huella(ruta: Path) -> str:
@@ -65,14 +66,24 @@ def mostrar(n: int, corrida: Corrida) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Pasa una foto por los 8 pasos de la línea de corrección.")
-    parser.add_argument("foto", type=Path)
+    parser.add_argument("foto", type=Path, nargs="?")
     parser.add_argument("--salida", type=Path, help="Carpeta de resultados. Por defecto, al lado de la foto.")
     parser.add_argument("--simulado", action="store_true", help="Sin Claude: usa los valores que mide el código.")
     parser.add_argument("--preguntar", action="store_true", help="Frena después de cada paso para aprobar, saltear o rehacer.")
     parser.add_argument("--producto", help="Qué es la pieza, para que Claude tenga contexto.")
     parser.add_argument("--ajustes", type=Path, help="Archivo JSON con márgenes, fondo, calidad y topes.")
     parser.add_argument("--intermedios", action="store_true", help="Guarda también cada paso en tamaño completo (PNG de 16 bits, pesado).")
+    parser.add_argument(
+        "--modelo",
+        choices=["completo", "liviano"],
+        help="Modelo para quitar el fondo. Por defecto, el que entra en la memoria de la Mac.",
+    )
     args = parser.parse_args()
+    if args.foto is None:
+        print("Falta la foto. Escribí todo en una sola línea, por ejemplo:")
+        print('  bash probar.sh /Users/vos/Downloads/IMG_7356.HEIC --preguntar --producto "Kit de pistones"')
+        print("Para no escribir la ruta, arrastrá la foto a la Terminal después de «bash probar.sh ».")
+        return 1
 
     original: Path = args.foto.expanduser().resolve()
     if not original.is_file():
@@ -103,8 +114,10 @@ def main() -> int:
     if args.intermedios:
         guardar_intermedia(foto, salida / "00-original.png")
 
+    pasos = armar_pasos(modelo_fondo=args.modelo)
+    print(f"Modelo para quitar el fondo: {getattr(pasos[5].segmentador, 'modelo', '?')} (memoria de esta Mac: {memoria_gb():.0f} GB)")
     recetas = []
-    for n, paso in enumerate(armar_pasos(), start=1):
+    for n, paso in enumerate(pasos, start=1):
         comienzo = time.monotonic()
         medicion, propuesta = medir_y_proponer(paso, foto, ajustes, inspector, args.producto)
         corrida = aplicar(paso, foto, ajustes, medicion, propuesta)

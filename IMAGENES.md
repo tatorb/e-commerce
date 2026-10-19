@@ -19,8 +19,11 @@ Por ahora el trabajador se prueba solo, desde la Terminal. Más adelante se cone
 ## Qué necesitás
 
 - **Una Mac con chip Apple**, M1 o más nuevo, y macOS 14 Sonoma o más nuevo.
-- **16 GB de memoria, recomendado.** Quitar el fondo usa cerca de 8 GB.
-- **Unos 3 GB libres en el disco**, para Python, las librerías y el modelo que quita el fondo.
+- **Memoria:** anda con 8 GB.
+  - Para quitar el fondo hay dos modelos, y el trabajador elige solo según la memoria de la Mac.
+  - **Con 8 GB usa el liviano:** necesita poco más de 1 GB y tarda unos segundos.
+  - **Con 16 GB o más usa el completo,** que separa un poco mejor los detalles finos pero necesita cerca de 8 GB.
+- **Unos 2 GB libres en el disco**, para Python, las librerías y el modelo.
 - **Una clave de Claude**, que se crea en [console.anthropic.com](https://console.anthropic.com), en API Keys.
   - Conviene crear una propia para el trabajador, por ejemplo con el nombre "Trabajador de imágenes".
   - Así su gasto se ve por separado.
@@ -42,7 +45,7 @@ Por ahora el trabajador se prueba solo, desde la Terminal. Más adelante se cone
    ```
 
    - Tarda unos minutos.
-   - Instala Python sin tocar el de la Mac, las librerías y el modelo para quitar el fondo, que pesa cerca de 1 GB.
+   - Instala Python sin tocar el de la Mac, las librerías y el modelo para quitar el fondo.
    - Si en algún momento dice `command not found`, cerrá la Terminal, abrila de nuevo, volvé a entrar a la carpeta y repetí.
 5. **Guardar la clave de Claude:**
 
@@ -55,12 +58,13 @@ Por ahora el trabajador se prueba solo, desde la Terminal. Más adelante se cone
 
 ## Probar con una foto
 
-1. Escribí `bash probar.sh` y un espacio.
-2. Arrastrá la foto a la Terminal. Puede ser JPG, PNG, HEIC del iPhone o TIFF.
-3. Agregá las opciones y apretá Enter. Por ejemplo:
+Todo va **en una sola línea**, y recién al final se aprieta Enter:
+1. Escribí `bash probar.sh` y un espacio. **No apretes Enter todavía.**
+2. Arrastrá la foto a la Terminal. Aparece su ruta en la misma línea. Puede ser JPG, PNG, HEIC del iPhone o TIFF.
+3. Escribí un espacio y las opciones, y recién ahí apretá Enter. Queda así:
 
    ```
-   bash probar.sh /Users/vos/Desktop/IMG_7346.HEIC --preguntar --producto "Subconjunto de pistones y aros Persan"
+   bash probar.sh /Users/vos/Downloads/IMG_7356.HEIC --preguntar --producto "Subconjunto de pistones y aros Persan"
    ```
 
 **Las opciones:**
@@ -71,6 +75,7 @@ Por ahora el trabajador se prueba solo, desde la Terminal. Más adelante se cone
   - **Valores para rehacer**, por ejemplo `giro=1.5` o `intensidad=80 tinte=5`, rehace el paso con esos valores. Los nombres de los valores aparecen en pantalla.
 - **`--simulado`:** prueba sin Claude, con los valores que mide el programa. No gasta nada.
 - **`--intermedios`:** guarda además cada paso en tamaño completo, sin pérdida. Ocupa mucho lugar.
+- **`--modelo liviano`** o **`--modelo completo`:** fuerza uno de los dos modelos para quitar el fondo. En una Mac de 8 GB, el completo la deja casi sin memoria.
 
 **El resultado** queda en una carpeta al lado de la foto, con el mismo nombre y `-corregida` al final:
 - **`resumen.html`:** abrilo con doble clic. Muestra el antes y el después de cada paso, lo que dijo Claude y los valores usados.
@@ -80,7 +85,7 @@ Por ahora el trabajador se prueba solo, desde la Terminal. Más adelante se cone
 - **`receta.json`:** todos los valores de cada paso, para rehacerla igual.
 
 **Tiempos y costo:**
-- Cada foto tarda alrededor de un minuto. El paso más pesado es quitar el fondo.
+- Cada foto tarda menos de un minuto con el modelo liviano. El paso más pesado es quitar el fondo.
 - Claude cuesta unos US$ 0,15 por foto. Al final se muestra el costo de esa foto.
 
 ## Si algo no anda
@@ -89,7 +94,9 @@ Por ahora el trabajador se prueba solo, desde la Terminal. Más adelante se cone
 - **El Llavero pregunta si Python puede usar la clave** guardada en "MRB Imagenes": tocá Permitir siempre.
 - **"Falta la clave de Claude":** corré de nuevo `bash configurar.sh`.
 - **"Claude no respondió":** el paso sigue con los valores que midió el programa y lo avisa. Revisá la conexión a internet o la clave.
-- **La Mac se pone lenta en el paso del fondo:** es el modelo trabajando. Con 8 GB de memoria puede tardar bastante más.
+- **"permission denied" con el nombre de la foto:** la foto quedó sola en una línea. Volvé a escribir todo junto, empezando por `bash probar.sh`.
+- **"Falta la foto":** se apretó Enter antes de arrastrar la foto. Escribí todo en una sola línea.
+- **La Mac se pone lenta en el paso del fondo:** es el modelo trabajando. Si forzaste `--modelo completo` en una Mac de 8 GB, volvé al liviano.
 
 ## Para el equipo técnico
 
