@@ -17,6 +17,8 @@ import type { PipelineStep } from '@/generated/prisma/enums';
 import { getAccountBySlug } from '@/lib/queries/accounts';
 import { getPipelinePublication } from '@/lib/queries/pipeline';
 import { loadTitleContext } from '@/lib/queries/title-step';
+import { loadResearch } from '@/lib/queries/research';
+import { isBlobConfigured } from '@/lib/files';
 import { autoAvailable } from '@/lib/research';
 import { prisma } from '@/lib/db';
 import { AI_NOT_CONFIGURED, isAiConfigured } from '@/ai/claude';
@@ -118,7 +120,13 @@ export default async function PipelineStepPage({ params }: { params: Promise<{ c
               </p>
             ) : null}
             {ctx && pub.pipelineStep === 'INFO' ? (
-              <InfoStep accountSlug={account.slug} timeZone={account.timezone} ctx={ctx} />
+              <InfoStep
+                accountSlug={account.slug}
+                timeZone={account.timezone}
+                ctx={ctx}
+                research={await loadResearch(prisma, ctx.publication.productId)}
+                blobReady={isBlobConfigured()}
+              />
             ) : ctx && pub.pipelineStep === 'TITLE' ? (
               <TitleStep
                 accountSlug={account.slug}

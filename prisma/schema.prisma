@@ -43,6 +43,8 @@ model User {
   connectAttempts  ConnectAttempt[]
   mcpCodes         McpAuthCode[]
   mcpTokens        McpToken[]
+  researchEdits    ProductResearch[]
+  uploadedFiles    ProductFile[]
 
   @@map("users")
 }
@@ -202,6 +204,9 @@ model Product {
   assets          Asset[]
   publications    Publication[]
   importChanges   ImportChange[]
+  research        ProductResearch?
+  files           ProductFile[]
+  insights        BuyerInsight[]
 
   @@index([accountId])
   @@index([importRunId])
@@ -307,6 +312,9 @@ model Publication {
   pipelineRemoval   PipelineRemoval?
   // Título bloqueado marcado a mano, para cuando no hay datos de ventas.
   titleLockedManual Boolean?
+  // La categoría del canal, cuando se elige a mano. Sin elegir, sale de la
+  // familia del producto (src/channels/<canal>/).
+  channelCategory   String?
   source            RecordSource         @default(MANUAL)
   // Importación que la creó, para poder deshacerla.
   importRunId       String?
@@ -630,6 +638,70 @@ model CompetitorListing {
 
   @@index([publicationId])
   @@map("competitor_listings")
+}
+
+// La investigación del producto que se junta en el paso Información: lo del
+// fabricante, las aclaraciones para las imágenes y las preguntas de los
+// compradores. Es del producto: la comparten todas sus publicaciones.
+model ProductResearch {
+  id                     String   @id @default(cuid())
+  productId              String   @unique
+  product                Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  manufacturerSite       String?
+  manufacturerProductUrl String?
+  manufacturerText       String?
+  // Texto con formato, en HTML limpio: solo negrita, cursiva y listas.
+  clarifications         String?
+  ownQuestions           String?
+  competitorQuestions    String?
+  updatedById            String?
+  updatedBy              User?    @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+  updatedAt              DateTime @updatedAt
+
+  @@map("product_research")
+}
+
+enum ProductFileKind {
+  IMAGE
+  PDF
+}
+
+// Un archivo del fabricante subido al depósito de archivos.
+model ProductFile {
+  id           String          @id @default(cuid())
+  productId    String
+  product      Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  kind         ProductFileKind
+  name         String
+  contentType  String
+  size         Int
+  url          String          @unique
+  uploadedById String?
+  uploadedBy   User?           @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  createdAt    DateTime        @default(now())
+
+  @@index([productId])
+  @@map("product_files")
+}
+
+enum InsightKind {
+  PAIN
+  OBJECTION
+}
+
+// Un dolor o una objeción de los compradores, en el orden que se eligió.
+model BuyerInsight {
+  id        String      @id @default(cuid())
+  productId String
+  product   Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  kind      InsightKind
+  text      String
+  position  Int         @default(0)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@index([productId, kind, position])
+  @@map("buyer_insights")
 }
 
 // ───────────────────────────── Paso Título ─────────────────────────────

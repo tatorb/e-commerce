@@ -34,6 +34,9 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
 | Prueba de conexión | `ChannelProbe` | Si la app puede leer sola las sugerencias y las posiciones del canal, sin cuenta o con la cuenta conectada de la tienda. Se corre en Ajustes, Conexión, y habilita la lectura automática. |
 | Conexión por API | `ChannelConnection` | La cuenta del canal de una tienda, autorizada con OAuth. Cada cliente crea su propia aplicación en el canal y carga su App ID y clave secreta en Ajustes, Conexión. La clave secreta y las llaves se guardan cifradas con `CHANNEL_TOKEN_KEY` y nunca se muestran. Las llaves se renuevan solas, una sola vez a la vez. |
 | Pedido de permiso | `ConnectAttempt` | Un link de autorización en curso: un código de control de un solo uso que vence a los 10 minutos, o a las 24 horas si es el link para mandarle al cliente. |
+| Investigación del producto | `ProductResearch` | Lo que se junta en el paso Información y es del producto: sitio y página del fabricante, texto pegado del fabricante, aclaraciones para las imágenes (texto con formato, guardado como HTML limpio con solo negrita, cursiva y listas) y las preguntas de los compradores. La comparten todas las publicaciones del producto. |
+| Archivo del fabricante | `ProductFile` | Imagen o PDF del fabricante, subido directo del navegador al depósito de Vercel (Vercel Blob) con un permiso que da `/api/archivos` solo con sesión. La app anota tipo y peso reales que informa el depósito. |
+| Dolor u objeción | `BuyerInsight` | Lo que preocupa o frena al comprador, en dos listas ordenables por producto. |
 | Conexión con Claude | `McpToken` | El permiso para que Claude use la app en nombre de una persona, desde claude.ai u otro programa de Claude. Se agrega como conector con la dirección `/api/mcp`, dura 30 días y se corta en Equipo. Cada cambio queda a nombre de esa persona. En la base se guarda solo la huella de la llave. |
 | Título bloqueado | (se calcula) | Cuando el canal no deja cambiar el título. Lo dicen las ventas de la última medición, con la regla de cada canal; si no hay datos, se marca a mano en la publicación. |
 | Estado de la propuesta | `Stage` | Sin propuesta, Propuesta generada, En revisión, Aprobado, Aplicado en canal, Medido. Es el recorrido de la propuesta completa con IA, no la etapa de la publicación. |
@@ -66,6 +69,10 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
   API (OAuth): link de permiso, llaves y renovación. Para probar sin el canal real, `MERCADOLIBRE_SUGGEST_URL`,
   `MERCADOLIBRE_API_URL`, `MERCADOLIBRE_LISTING_URL` y `MERCADOLIBRE_AUTH_URL` cambian las direcciones.
   El resto de la app usa la interfaz `ChannelAdapter`.
+- `src/lib/files.ts` y `src/lib/file-rules.ts`: los archivos del fabricante en el depósito de Vercel. Sin
+  `BLOB_READ_WRITE_TOKEN`, el paso Información muestra los pasos para crearlo. Para probar sin Vercel,
+  `VERCEL_BLOB_API_URL` y `NEXT_PUBLIC_VERCEL_BLOB_API_URL` apuntan a un depósito simulado y
+  `BLOB_TEST_URL_PREFIX` acepta sus direcciones.
 - `src/lib/mcp/`: la conexión con Claude (MCP). `oauth.ts` es el permiso: registro del programa, código de un solo
   uso con PKCE, llaves de 30 días y desconexión. `redirect-allowlist.ts` dice a qué direcciones puede volver el
   permiso (las de Claude, las de la propia computadora y las de `MCP_OAUTH_REDIRECT_URIS`). `read-tools.ts` y
