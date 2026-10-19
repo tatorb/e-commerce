@@ -1,0 +1,189 @@
+"""Paso 6. Quitar el fondo.
+
+El modelo birefnet-general, a través de rembg, decide qué partes de la foto
+son fondo. No dibuja nada: solo devuelve una silueta, la máscara. Con ella se
+arma la transparencia. Los colores de la pieza quedan exactamente iguales.
+
+No se usa el "refinado de bordes" de rembg (alpha matting), porque recalcula
+colores. El borde se ajusta con un filtro guiado que solo toca la transparencia.
+"""
+
+from __future__ import annotations
+
+from typing import Callable
+
+import cv2
+import numpy as np
+from PIL import Image
+
+from ..imagen import Foto, achicar
+from .base import Medicion, Parametro, Paso, Resultado
+
+MODELO = "birefnet-general"
+
+# Recibe la foto (alto x ancho x 3, de 0 a 1) y devuelve la máscara (alto x ancho, de 0 a 1).
+Segmentador = Callable[[np.ndarray], np.ndarray]
+
+_SESION = None
+
+
+def preparar_modelo():
+    """Carga el modelo. La primera vez lo baja de internet (cerca de 1 GB)."""
+    global _SESION
+    import onnxruntime as ort
+    from rembg import new_session
+
+    if _SESION is None:
+        # Sin reservar memoria de más: así usa unos 8 GB y no crece de una foto a la otra.
+        opciones = ort.SessionOptions()
+        opciones.enable_cpu_mem_arena = False
+        opciones.enable_mem_pattern = False
+        _SESION = new_session(MODELO, sess_opts=opciones)
+    return _SESION
+
+
+def segmentar_con_rembg(rgb: np.ndarray) -> np.ndarray:
+    from rembg import remove
+
+    sesion = preparar_modelo()
+    im = Image.fromarray(np.round(np.clip(rgb, 0, 1) * 255).astype(np.uint8), "RGB")
+    mascara = remove(im, session=sesion, only_mask=True, post_process_mask=False)
+    return np.asarray(mascara.convert("L"), dtype=np.float32) / 255.0
+
+
+# La segunda pasada sirve si la zona del producto es bastante más chica que la foto.
+_DETALLE_HASTA = 0.85
+
+
+def zona_del_producto(mascara: np.ndarray) -> tuple[int, int, int, int] | None:
+    filas = np.where((mascara >= 0.5).any(axis=1))[0]
+    columnas = np.where((mascara >= 0.5).any(axis=0))[0]
+    if len(filas) == 0:
+        return None
+    alto, ancho = mascara.shape
+    y0, y1, x0, x1 = filas[0], filas[-1] + 1, columnas[0], columnas[-1] + 1
+    margen = int(0.04 * max(y1 - y0, x1 - x0))
+    return max(0, x0 - margen), max(0, y0 - margen), min(ancho, x1 + margen), min(alto, y1 + margen)
+
+
+def _caja(img: np.ndarray, r: int) -> np.ndarray:
+    return cv2.boxFilter(img, -1, (2 * r + 1, 2 * r + 1), normalize=True, borderType=cv2.BORDER_REFLECT)
+
+
+def filtro_guiado(guia: np.ndarray, p: np.ndarray, r: int, eps: float) -> np.ndarray:
+    """Ajusta el borde de la máscara a los bordes reales de la foto (He y otros, 2010)."""
+    media_i, media_p = _caja(guia, r), _caja(p, r)
+    var_i = _caja(guia * guia, r) - media_i * media_i
+    cov_ip = _caja(guia * p, r) - media_i * media_p
+    a = cov_ip / (var_i + eps)
+    b = media_p - a * media_i
+    return _caja(a, r) * guia + _caja(b, r)
+
+
+def quitar_motas(alfa: np.ndarray, minimo_pct: float) -> tuple[np.ndarray, int, int]:
+    """Saca los pedacitos sueltos más chicos que el mínimo. Devuelve cuántas piezas quedan y cuántas se sacaron."""
+    solido = (alfa >= 0.5).astype(np.uint8)
+    n, etiquetas, stats, _ = cv2.connectedComponentsWithStats(solido, connectivity=8)
+    if n <= 1:
+        return alfa, 0, 0
+    minimo = alfa.size * minimo_pct / 100.0
+    areas = stats[1:, cv2.CC_STAT_AREA]
+    chicas = np.where(areas < minimo)[0] + 1
+    if len(chicas) == 0:
+        return alfa, int(n - 1), 0
+    # Se saca la zona de cada mota con un pequeño margen, para no dejar su borde semitransparente.
+    fuera = np.isin(etiquetas, chicas).astype(np.uint8)
+    fuera = cv2.dilate(fuera, np.ones((5, 5), np.uint8)) > 0
+    resto = np.isin(etiquetas, np.setdiff1d(np.arange(1, n), chicas))
+    resto = cv2.dilate(resto.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
+    limpia = np.where(fuera & ~resto, 0.0, alfa).astype(np.float32)
+    return limpia, int(n - 1 - len(chicas)), int(len(chicas))
+
+
+def armar_alfa(mascara: np.ndarray, rgb: np.ndarray, valores: dict[str, float]) -> tuple[np.ndarray, dict]:
+    alfa = mascara.astype(np.float32)
+    if valores.get("refinar_bordes"):
+        gris = cv2.cvtColor(np.clip(rgb, 0, 1).astype(np.float32), cv2.COLOR_RGB2GRAY)
+        r = max(2, round(min(alfa.shape) / 600))
+        refinada = np.clip(filtro_guiado(gris, alfa, r, 1e-3), 0, 1)
+        # Solo en la franja del borde: el interior y el fondo lejano no cambian.
+        franja = cv2.dilate(((alfa > 0.02) & (alfa < 0.98)).astype(np.uint8), np.ones((2 * r + 1, 2 * r + 1), np.uint8)) > 0
+        alfa = np.where(franja, refinada, alfa).astype(np.float32)
+    dureza = float(valores.get("dureza", 0))
+    if dureza > 0:
+        alfa = np.clip((alfa - 0.5) * (1 + dureza / 25.0) + 0.5, 0, 1).astype(np.float32)
+    alfa, piezas, sacadas = quitar_motas(alfa, float(valores.get("motas", 0)))
+    return alfa, {"piezas": piezas, "motas_sacadas": sacadas, "cubre_pct": round(float((alfa >= 0.5).mean()) * 100, 2)}
+
+
+class Fondo(Paso):
+    clave = "fondo"
+    nombre = "Quitar fondo"
+    consigna = (
+        "La foto muestra la pieza ya recortada sobre cuadros grises, que son transparencia. Revisá que el recorte "
+        "incluya todo el producto (si es un kit, todas sus partes, incluida la caja si forma parte de lo que se vende) "
+        "y nada del entorno. Proponé: detalle (1 para una segunda pasada sobre la zona del producto, que separa mejor "
+        "los espacios finos, como entre aros), refinar_bordes (1 para ajustar el borde a la foto), motas (tamaño mínimo "
+        "de una pieza suelta en % de la foto; más chico que eso se borra, poné 0 si hay piezas chicas como seguros o "
+        "clips) y dureza (0 deja el borde suave; más alto lo vuelve más nítido y reduce halos claros)."
+    )
+    parametros = (
+        Parametro(
+            "detalle",
+            "Segunda pasada",
+            "Vuelve a buscar el fondo solo en la zona del producto, para separar mejor los espacios finos.",
+            0,
+            1,
+            1,
+            tipo="si_no",
+        ),
+        Parametro("refinar_bordes", "Refinar bordes", "Ajusta el borde de la silueta a los bordes reales de la foto.", 0, 1, 1, tipo="si_no"),
+        Parametro("motas", "Motas", "Borra los pedacitos sueltos más chicos que este % de la foto.", 0, 2, 0.02, 0.01, " %"),
+        Parametro("dureza", "Dureza del borde", "0 deja el borde suave; más alto lo vuelve más nítido.", 0, 100, 0, 1),
+    )
+
+    def __init__(self, segmentador: Segmentador | None = None):
+        self.segmentador = segmentador or segmentar_con_rembg
+
+    def _segmentar(self, rgb: np.ndarray) -> np.ndarray:
+        mascara = np.clip(self.segmentador(rgb), 0, 1).astype(np.float32)
+        if mascara.shape != rgb.shape[:2]:
+            mascara = cv2.resize(mascara, (rgb.shape[1], rgb.shape[0]), interpolation=cv2.INTER_LINEAR)
+        return mascara
+
+    def medir(self, foto: Foto, ajustes: dict) -> Medicion:
+        mascara = self._segmentar(foto.rgb)
+        extra = {"mascara": mascara, "mascara_detalle": None}
+        zona = zona_del_producto(mascara)
+        if zona is not None:
+            x0, y0, x1, y1 = zona
+            if (x1 - x0) * (y1 - y0) <= _DETALLE_HASTA * foto.alto * foto.ancho:
+                # El modelo mira la foto achicada: sobre la zona del producto ve más detalle.
+                detalle = np.zeros_like(mascara)
+                detalle[y0:y1, x0:x1] = self._segmentar(np.ascontiguousarray(foto.rgb[y0:y1, x0:x1]))
+                extra["mascara_detalle"] = detalle
+        sugeridos = self.defectos(ajustes)
+        _, medidas = armar_alfa(self._mascara(extra, sugeridos), foto.rgb, sugeridos)
+        medidas["segunda_pasada_disponible"] = extra["mascara_detalle"] is not None
+        medidas["borde_suave_pct"] = round(float(((mascara > 0.05) & (mascara < 0.95)).mean()) * 100, 2)
+        return Medicion(medidas=medidas, sugeridos=sugeridos, extra=extra)
+
+    @staticmethod
+    def _mascara(extra: dict, valores: dict[str, float]) -> np.ndarray:
+        if valores.get("detalle") and extra.get("mascara_detalle") is not None:
+            return extra["mascara_detalle"]
+        return extra["mascara"]
+
+    def vista_para_claude(self, foto: Foto, medicion: Medicion) -> Foto:
+        chica = achicar(foto, 1600)
+        mascara = self._mascara(medicion.extra, medicion.sugeridos)
+        mascara = cv2.resize(mascara, (chica.ancho, chica.alto), interpolation=cv2.INTER_AREA)
+        return Foto(rgb=chica.rgb, alfa=mascara, datos=foto.datos)
+
+    def aplicar(self, foto: Foto, valores: dict[str, float], ajustes: dict, medicion: Medicion) -> Resultado:
+        alfa, medidas = armar_alfa(self._mascara(medicion.extra, valores), foto.rgb, valores)
+        nota = None
+        if medidas["piezas"] == 0:
+            nota = "El modelo no encontró ninguna pieza: revisá la foto."
+        # Los colores son los mismos de la entrada, sin tocar. Solo se suma la transparencia.
+        return Resultado(foto=Foto(rgb=foto.rgb, alfa=alfa, datos=foto.datos), valores=valores, medidas=medidas, nota=nota, mascara=alfa)

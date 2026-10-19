@@ -1,0 +1,29 @@
+# El trabajador de imágenes: corre en la Mac del estudio y corrige las fotos
+# paso a paso. Ver IMAGENES.md en la raíz del proyecto.
+[project]
+name = "mrb-imagenes"
+version = "0.1.0"
+description = "Trabajador de la línea de corrección de fotos de E-commerce Studio MRB"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "anthropic>=1.15,<2",
+  "keyring>=25",
+  "lensfunpy>=1.18",
+  "numpy>=2",
+  "opencv-python-headless>=4.10",
+  "pillow>=11",
+  "pillow-heif>=1.0",
+  "pydantic>=2.9",
+  "rembg[cpu]>=2.0.70",
+  "tifffile>=2024.8",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

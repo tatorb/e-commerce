@@ -1,0 +1,22 @@
+"""Los 8 pasos de la línea, en orden."""
+
+from __future__ import annotations
+
+from .base import Medicion, Parametro, Paso, Resultado
+from .blancos import Blancos
+from .color import Color
+from .exportar import Exportar
+from .fondo import Fondo, Segmentador
+from .lente import Lente
+from .luces import Luces
+from .perspectiva import Perspectiva
+from .recorte import Recorte
+
+
+def armar_pasos(segmentador: Segmentador | None = None) -> list[Paso]:
+    return [Lente(), Perspectiva(), Blancos(), Luces(), Color(), Fondo(segmentador), Recorte(), Exportar()]
+
+
+CLAVES = [p.clave for p in armar_pasos(lambda rgb: rgb[..., 0])]
+
+__all__ = ["CLAVES", "Medicion", "Parametro", "Paso", "Resultado", "armar_pasos"]

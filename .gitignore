@@ -21,3 +21,10 @@ next-env.d.ts
 .DS_Store
 npm-debug.log*
 /coverage
+
+# trabajador de imágenes (Python): el entorno y el modelo viven fuera del proyecto
+__pycache__/
+.pytest_cache/
+/trabajador-imagenes/.venv/
+*.onnx
+*-corregida/
