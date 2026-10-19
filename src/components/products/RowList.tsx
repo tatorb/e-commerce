@@ -10,6 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { OpenLinkButton } from '@/components/ui/open-link-button';
 import { cn } from '@/lib/utils/cn';
 
 export type RowColumn<T> = {
@@ -18,6 +19,8 @@ export type RowColumn<T> = {
   placeholder?: string;
   inputMode?: 'text' | 'numeric' | 'url';
   options?: { value: string; label: string }[];
+  /** Suma al lado un botón para abrir el link en una pestaña nueva. */
+  openLink?: boolean;
 };
 
 /**
@@ -85,6 +88,19 @@ export function RowList<T extends Record<string, string>>({
                         ))}
                       </SelectContent>
                     </Select>
+                  ) : c.openLink ? (
+                    <div key={c.key} className="flex min-w-0 items-center gap-2">
+                      <Input
+                        id={`${idPrefix}-${index}-${c.key}`}
+                        aria-label={c.label}
+                        value={row[c.key]}
+                        placeholder={c.placeholder ?? c.label.toLowerCase()}
+                        type={c.inputMode === 'url' ? 'url' : 'text'}
+                        onChange={(e) => update(index, c.key, e.target.value)}
+                        disabled={disabled}
+                      />
+                      <OpenLinkButton url={row[c.key]} label={`Abrir ${c.label.toLowerCase()} en una pestaña nueva`} />
+                    </div>
                   ) : (
                     <Input
                       key={c.key}

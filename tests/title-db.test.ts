@@ -214,7 +214,7 @@ describe.skipIf(!url)('paso Información', () => {
     ]);
   });
 
-  it('la competencia: hasta 5, con título y vendidos', async () => {
+  it('la competencia: más de 5, con título y vendidos', async () => {
     const rows = competitorsSchema.parse([
       { url: 'https://example.com/1', title: 'Kit de otro vendedor', soldQuantity: '1.500' },
       { url: '', title: 'Otro kit', soldQuantity: '' },
@@ -225,7 +225,8 @@ describe.skipIf(!url)('paso Información', () => {
       ['https://example.com/1', 'Kit de otro vendedor', 1500],
       [null, 'Otro kit', null],
     ]);
-    expect(competitorsSchema.safeParse(Array(6).fill({ url: '', title: 't', soldQuantity: '' })).success).toBe(false);
+    expect(competitorsSchema.safeParse(Array(12).fill({ url: '', title: 't', soldQuantity: '' })).success).toBe(true);
+    expect(competitorsSchema.safeParse(Array(101).fill({ url: '', title: 't', soldQuantity: '' })).success).toBe(false);
     expect(competitorsSchema.safeParse([{ url: 'ftp://x', title: 't', soldQuantity: '' }]).success).toBe(false);
   });
 });

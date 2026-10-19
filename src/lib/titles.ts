@@ -19,8 +19,9 @@ export async function generateTitles(
 ): Promise<TitlesOutcome> {
   const ctx = await loadTitleContext(db, args.accountId, args.publicationId);
   if (!ctx) return { ok: false, error: 'La publicación no existe en esta cuenta.', costUsd: 0 };
-  if (ctx.publication.pipelineStatus !== 'IN_PIPELINE' || ctx.publication.pipelineStep !== 'TITLE') {
-    return { ok: false, error: 'La publicación ya no está en el paso Título. Recargá la página.', costUsd: 0 };
+  // Se puede pedir desde cualquier paso, para trabajar el título antes de llegar; no fuera del pipeline.
+  if (ctx.publication.pipelineStatus !== 'IN_PIPELINE') {
+    return { ok: false, error: 'La publicación no está en el pipeline. Agregala para pedir títulos a la IA.', costUsd: 0 };
   }
   const words = ctx.words
     .filter((w) => w.status === 'use')

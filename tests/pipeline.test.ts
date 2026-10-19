@@ -6,7 +6,10 @@ import {
   nextStep,
   normalizeTitle,
   pipelineLabel,
+  PIPELINE_STEPS,
+  PIPELINE_STEP_SLUG,
   previousStep,
+  stepFromSlug,
 } from '@/domain/pipeline';
 import { resolveTitleLock } from '@/domain/title-lock';
 
@@ -17,6 +20,15 @@ describe('pasos del pipeline', () => {
     expect(nextStep('PUBLISH')).toBeNull();
     expect(previousStep('TITLE')).toBe('INFO');
     expect(previousStep('INFO')).toBeNull();
+  });
+
+  it('cada paso tiene su nombre en la dirección, de ida y vuelta', () => {
+    for (const step of PIPELINE_STEPS) expect(stepFromSlug(PIPELINE_STEP_SLUG[step])).toBe(step);
+    expect(stepFromSlug('informacion')).toBe('INFO');
+    expect(stepFromSlug(' Titulo ')).toBe('TITLE');
+    expect(stepFromSlug(['multimedia', 'titulo'])).toBe('MEDIA');
+    expect(stepFromSlug('otro')).toBeNull();
+    expect(stepFromSlug(undefined)).toBeNull();
   });
 
   it('una descartada retoma en su paso; el resto empieza en Información', () => {

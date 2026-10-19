@@ -16,6 +16,23 @@ export const PIPELINE_STEP_LABEL: Record<PipelineStep, string> = {
   PUBLISH: 'Publicación',
 };
 
+/** Cómo va cada paso en la dirección de la página, por ejemplo ?paso=informacion. */
+export const PIPELINE_STEP_SLUG: Record<PipelineStep, string> = {
+  INFO: 'informacion',
+  TITLE: 'titulo',
+  IMAGES: 'imagenes',
+  VIDEOS: 'videos',
+  MEDIA: 'multimedia',
+  DESCRIPTION: 'descripcion',
+  PUBLISH: 'publicacion',
+};
+
+/** El paso de una dirección. Null si no es ninguno. */
+export function stepFromSlug(slug: string | string[] | null | undefined): PipelineStep | null {
+  const value = (Array.isArray(slug) ? slug[0] : slug)?.trim().toLowerCase();
+  return PIPELINE_STEPS.find((s) => PIPELINE_STEP_SLUG[s] === value) ?? null;
+}
+
 export const PIPELINE_STATUSES: PipelineStatus[] = ['UNTOUCHED', 'IN_PIPELINE', 'CORRECTED', 'DISCARDED'];
 
 export const PIPELINE_STATUS_LABEL: Record<PipelineStatus, string> = {

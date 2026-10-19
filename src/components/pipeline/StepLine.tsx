@@ -1,11 +1,26 @@
+import Link from 'next/link';
 import { Check } from 'lucide-react';
-import { PIPELINE_STEPS, PIPELINE_STEP_LABEL } from '@/domain/pipeline';
+import { PIPELINE_STEPS, PIPELINE_STEP_LABEL, PIPELINE_STEP_SLUG } from '@/domain/pipeline';
 import type { PipelineStep } from '@/generated/prisma/enums';
 import { cn } from '@/lib/utils/cn';
 
 // La línea de los siete pasos, con el actual marcado. "active" es falso si la
-// publicación no está en el pipeline: el paso guardado se ve apagado.
-export function StepLine({ current, active, done }: { current: PipelineStep | null; active: boolean; done?: boolean }) {
+// publicación no está en el pipeline: el paso guardado se ve apagado. Cada
+// paso es un link a ese paso, así se puede mirar cualquiera, también en otra
+// pestaña; el que se está mirando va en negrita y subrayado.
+export function StepLine({
+  current,
+  active,
+  done,
+  viewing,
+  baseHref,
+}: {
+  current: PipelineStep | null;
+  active: boolean;
+  done?: boolean;
+  viewing: PipelineStep | null;
+  baseHref: string;
+}) {
   const at = current ? PIPELINE_STEPS.indexOf(current) : done ? PIPELINE_STEPS.length : -1;
   return (
     <ol
@@ -15,31 +30,42 @@ export function StepLine({ current, active, done }: { current: PipelineStep | nu
       {PIPELINE_STEPS.map((step, i) => {
         const isCurrent = i === at;
         const isDone = i < at;
+        const isViewing = step === viewing;
         return (
           <li key={step} className="flex shrink-0 items-center gap-2" aria-current={isCurrent && active ? 'step' : undefined}>
             {i > 0 ? <span aria-hidden className={cn('h-px w-4', isDone || isCurrent ? 'bg-primary/50' : 'bg-border')} /> : null}
-            <span
-              className={cn(
-                'inline-flex h-6 w-6 items-center justify-center rounded-full border text-xs font-semibold tabular-nums',
-                isCurrent && active
-                  ? 'border-primary bg-primary text-primary-foreground'
-                  : isCurrent
-                    ? 'border-primary/50 text-primary'
-                    : isDone
-                      ? 'border-primary/40 bg-primary/10 text-primary'
-                      : 'border-border text-muted-foreground',
-              )}
+            <Link
+              href={`${baseHref}?paso=${PIPELINE_STEP_SLUG[step]}`}
+              aria-label={`Ver ${PIPELINE_STEP_LABEL[step]}${isViewing ? ', es el que estás viendo' : ''}`}
+              className="group flex items-center gap-2 rounded-md focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
-              {isDone ? <Check className="h-3.5 w-3.5" /> : i + 1}
-            </span>
-            <span
-              className={cn(
-                'text-sm whitespace-nowrap',
-                isCurrent ? 'font-semibold text-foreground' : isDone ? 'text-foreground/80' : 'text-muted-foreground',
-              )}
-            >
-              {PIPELINE_STEP_LABEL[step]}
-            </span>
+              <span
+                className={cn(
+                  'inline-flex h-6 w-6 items-center justify-center rounded-full border text-xs font-semibold tabular-nums',
+                  isCurrent && active
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : isCurrent
+                      ? 'border-primary/50 text-primary'
+                      : isDone
+                        ? 'border-primary/40 bg-primary/10 text-primary'
+                        : 'border-border text-muted-foreground',
+                )}
+              >
+                {isDone ? <Check className="h-3.5 w-3.5" /> : i + 1}
+              </span>
+              <span
+                className={cn(
+                  'text-sm whitespace-nowrap underline-offset-4 group-hover:underline',
+                  isViewing
+                    ? 'font-semibold text-foreground underline decoration-2'
+                    : isCurrent || isDone
+                      ? 'text-foreground/80'
+                      : 'text-muted-foreground',
+                )}
+              >
+                {PIPELINE_STEP_LABEL[step]}
+              </span>
+            </Link>
           </li>
         );
       })}

@@ -5,7 +5,7 @@
 //   CUENTA
 //   Nombre de la cuenta        ▼
 //
-// Dos destinos distintos: el nombre lleva a los productos de la cuenta y la
+// Dos destinos distintos: el nombre lleva al pipeline de la cuenta y la
 // flechita abre el menú para saltar a otra cuenta.
 
 import Link from 'next/link';
@@ -31,7 +31,7 @@ export interface AccountOption {
 // vuelve a la lista.
 function accountSwitchHref(pathname: string, slug: string): string {
   const parts = pathname.split('/').filter(Boolean);
-  const section = parts[0] === 'a' && parts[2] ? parts[2] : 'productos';
+  const section = parts[0] === 'a' && parts[2] ? parts[2] : 'pipeline';
   return `/a/${slug}/${section}`;
 }
 
@@ -44,7 +44,7 @@ export function SidebarAccountHeader({
 }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
-  const nameHref = `/a/${current.slug}/productos`;
+  const nameHref = `/a/${current.slug}/pipeline`;
 
   return (
     <>

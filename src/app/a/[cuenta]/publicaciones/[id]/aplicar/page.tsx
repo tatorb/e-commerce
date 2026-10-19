@@ -57,7 +57,7 @@ export default async function ApplyPage({ params }: { params: Promise<{ cuenta: 
         <div className="space-y-2">
           <Breadcrumb
             items={[
-              { label: account.name, href: `/a/${account.slug}/productos` },
+              { label: account.name, href: `/a/${account.slug}/pipeline` },
               { label: 'Publicaciones', href: `/a/${account.slug}/publicaciones` },
               { label: title, href: productUrl },
               { label: `Aplicar en ${adapter.name}` },

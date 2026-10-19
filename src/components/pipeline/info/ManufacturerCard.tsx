@@ -3,10 +3,11 @@
 import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { upload } from '@vercel/blob/client';
-import { ExternalLink, FileText, Upload, X } from 'lucide-react';
+import { FileText, Upload, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { OpenLinkButton } from '@/components/ui/open-link-button';
 import { Textarea } from '@/components/ui/textarea';
 import { IconButton, SectionBody, SectionCard } from '@/components/ui/section-card';
 import { StatusText } from '@/components/pipeline/StatusText';
@@ -25,14 +26,6 @@ const ACCEPT = Object.keys(FILE_TYPES)
 function formatSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   return `${(bytes / (1024 * 1024)).toLocaleString('es-AR', { maximumFractionDigits: 1 })} MB`;
-}
-
-function isHttpUrl(value: string): boolean {
-  try {
-    return ['http:', 'https:'].includes(new URL(value).protocol);
-  } catch {
-    return false;
-  }
 }
 
 // Información del fabricante: links, archivos y texto pegado. Es del producto.
@@ -115,17 +108,12 @@ function LinkField({
   value: string;
   onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }) {
-  const valid = isHttpUrl(value.trim());
   return (
     <div className="space-y-2">
       <Label htmlFor={id}>{label}</Label>
       <div className="flex items-center gap-2">
         <Input id={id} type="url" inputMode="url" placeholder="https://" value={value} onChange={onChange} />
-        <Button asChild variant="outline" size="icon" className={cn('shrink-0', !valid && 'pointer-events-none opacity-40')}>
-          <a href={valid ? value.trim() : undefined} target="_blank" rel="noreferrer" aria-label={`Abrir ${label.toLowerCase()}`}>
-            <ExternalLink className="h-4 w-4" />
-          </a>
-        </Button>
+        <OpenLinkButton url={value} label={`Abrir ${label.toLowerCase()}`} />
       </div>
     </div>
   );

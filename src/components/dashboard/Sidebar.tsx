@@ -28,7 +28,7 @@ export async function Sidebar({
   className?: string;
 }) {
   const accountHome = `/a/${account.slug}`;
-  const logoHref = `${accountHome}/productos`;
+  const logoHref = `${accountHome}/pipeline`;
   const collapsed = (await cookies()).get('sidebar_collapsed')?.value === '1';
 
   return (
@@ -61,14 +61,14 @@ export async function Sidebar({
       {/* En escritorio, la única región que scrollea. */}
       <div className="md:flex-1 md:min-h-0 md:overflow-y-auto">
         <nav className="flex flex-col gap-0.5">
+          <NavLink href={`${accountHome}/pipeline`} label="Pipeline">
+            <KanbanSquare className="h-4 w-4" />
+          </NavLink>
           <NavLink href={`${accountHome}/productos`} label="Productos">
             <Package className="h-4 w-4" />
           </NavLink>
           <NavLink href={`${accountHome}/publicaciones`} label="Catálogo">
             <ListChecks className="h-4 w-4" />
-          </NavLink>
-          <NavLink href={`${accountHome}/pipeline`} label="Pipeline">
-            <KanbanSquare className="h-4 w-4" />
           </NavLink>
           <NavLink href={`${accountHome}/importar`} label="Importar">
             <Upload className="h-4 w-4" />

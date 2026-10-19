@@ -4,7 +4,8 @@ import type { Prisma } from '@/generated/prisma/client';
 // Publicaciones de la competencia que más venden, cargadas a mano en el paso
 // Información. Sus títulos suman palabras al mapa del paso Título.
 
-export const MAX_COMPETITORS = 5;
+// Sin tope en la práctica: este es solo de protección.
+export const MAX_COMPETITORS = 100;
 
 function isHttpUrl(value: string): boolean {
   try {

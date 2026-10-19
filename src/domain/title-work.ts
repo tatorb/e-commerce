@@ -49,7 +49,7 @@ async function lockAtTitle(tx: Tx, publicationId: string) {
     SELECT "pipelineStatus", "pipelineStep" FROM publications WHERE id = ${publicationId} FOR UPDATE`;
   if (!row) throw new TitleError('La publicación no existe.');
   if (row.pipelineStatus !== 'IN_PIPELINE' || row.pipelineStep !== 'TITLE') {
-    throw new TitleError('La publicación ya no está en el paso Título. Recargá la página.');
+    throw new TitleError('Para aprobar el título o decidir sobre el título bloqueado, la publicación tiene que estar en el paso Título.');
   }
 }
 

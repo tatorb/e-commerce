@@ -134,6 +134,19 @@ describe.skipIf(!url)('generar títulos', () => {
     ]);
   });
 
+  it('se puede pedir desde otro paso del pipeline, pero no fuera del pipeline', async () => {
+    await db.$transaction((tx) => setWordStatus(tx, publicationId, 'kit', 'use'));
+    const ok = async () => ({
+      output: { proposals: [{ title: 'Kit Gol', reason: 'r' }] },
+      usage: usageOf('claude-opus-5-5', { input_tokens: 10, output_tokens: 10 }),
+      model: 'claude-opus-5-5',
+    });
+    await db.publication.update({ where: { id: publicationId }, data: { pipelineStep: 'INFO' } });
+    expect(await generateTitles(db, { accountId, publicationId }, ok)).toMatchObject({ ok: true });
+    await db.publication.update({ where: { id: publicationId }, data: { pipelineStatus: 'CORRECTED', pipelineStep: null } });
+    expect(await generateTitles(db, { accountId, publicationId }, ok)).toMatchObject({ ok: false, error: expect.stringContaining('no está en el pipeline') });
+  });
+
   it('si Claude falla, avisa con su mensaje', async () => {
     await db.$transaction((tx) => setWordStatus(tx, publicationId, 'kit', 'use'));
     // Una palabra tildada que no está en ningún lado no cuenta: hace falta que esté en el mapa.

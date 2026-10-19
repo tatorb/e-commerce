@@ -159,13 +159,15 @@ describe.skipIf(!url)('herramientas de escritura', () => {
     expect(bad.text).toContain('año desde');
   });
 
-  it('save_competitors: reemplaza la lista, hasta 5', async () => {
+  it('save_competitors: reemplaza la lista, también con más de 5', async () => {
     const r = await call('save_competitors', {
       publicacion: 'MLA1110001',
       competencia: [{ titulo: 'Kit Embrague Gol Original', vendidos: 120, link: 'https://ejemplo.com/a' }, { titulo: 'Kit Embrague Vw Gol' }],
     });
     expect(r.data).toMatchObject({ listo: true, guardadas: 2 });
     expect(await db.competitorListing.count({ where: { publicationId: kitId } })).toBe(2);
+    const seven = Array.from({ length: 7 }, (_, i) => ({ titulo: `Kit Embrague Gol ${i + 1}` }));
+    expect((await call('save_competitors', { publicacion: 'MLA1110001', competencia: seven })).data.guardadas).toBe(7);
     expect((await call('save_competitors', { publicacion: 'MLA1110001', competencia: [] })).data.guardadas).toBe(0);
     expect((await call('save_competitors', { publicacion: 'MLA1110001', competencia: [{ titulo: 'x', link: 'no-es-link' }] })).isError).toBe(true);
   });

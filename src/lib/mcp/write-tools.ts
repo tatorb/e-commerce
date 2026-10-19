@@ -335,7 +335,7 @@ const updateProductInfoTool = defineTool({
 const saveCompetitorsTool = defineTool({
   name: 'save_competitors',
   title: 'Cargar la competencia',
-  description: `Guarda las publicaciones de la competencia que más venden, hasta ${MAX_COMPETITORS}. Sus títulos suman palabras al mapa del paso Título. Reemplaza la lista entera; una lista vacía la borra. Solo publicaciones reales que te pasó la persona o que vio en el canal.`,
+  description: `Guarda las publicaciones de la competencia que más venden; conviene al menos 3 y no hay un tope práctico. Sus títulos suman palabras al mapa del paso Título. Reemplaza la lista entera; una lista vacía la borra. Solo publicaciones reales que te pasó la persona o que vio en el canal.`,
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg,

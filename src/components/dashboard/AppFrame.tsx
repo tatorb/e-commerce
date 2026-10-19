@@ -23,7 +23,7 @@ export async function AppFrame({
     <Sidebar user={user} account={{ slug: account.slug, name: account.name }} accounts={options} />
   );
   return (
-    <AppShell sidebar={sidebar} homeHref={`/a/${account.slug}/productos`}>
+    <AppShell sidebar={sidebar} homeHref={`/a/${account.slug}/pipeline`}>
       {children}
     </AppShell>
   );

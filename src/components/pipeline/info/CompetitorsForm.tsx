@@ -7,11 +7,11 @@ import { saveCompetitorsAction } from '@/app/a/[cuenta]/pipeline/step-actions';
 import { useStepAction } from '../useStepAction';
 import { StatusText } from '../StatusText';
 
-// De 3 a 5 publicaciones de la competencia que más venden, cargadas a mano.
+// Las publicaciones de la competencia que más venden, cargadas a mano. Conviene
+// cargar al menos 3.
 
 export type CompetitorRow = { url: string; title: string; soldQuantity: string };
 
-const MAX = 5;
 const MIN = 3;
 
 export function CompetitorsForm({
@@ -35,17 +35,17 @@ export function CompetitorsForm({
         idPrefix="competitor"
         rows={rows}
         onChange={(next) => {
-          setRows(next.slice(0, MAX));
+          setRows(next);
           action.clear();
         }}
         template={{ url: '', title: '', soldQuantity: '' }}
         columns={[
-          { key: 'url', label: 'Link', placeholder: 'https://articulo.mercadolibre.com.ar/…', inputMode: 'url' },
+          { key: 'url', label: 'Link', placeholder: 'https://articulo.mercadolibre.com.ar/…', inputMode: 'url', openLink: true },
           { key: 'title', label: 'Título', placeholder: 'Como aparece en la publicación' },
           { key: 'soldQuantity', label: 'Vendidos', placeholder: '150', inputMode: 'numeric' },
         ]}
         gridClassName="sm:grid-cols-[1fr_1.4fr_6rem]"
-        addLabel={rows.length >= MAX ? `Máximo ${MAX}` : 'Agregar publicación'}
+        addLabel="Agregar publicación"
         emptyLabel="Sin publicaciones de la competencia."
         disabled={action.pending}
       />

@@ -91,7 +91,7 @@ export function InfoStep({
       <SectionCard
         title="Competencia"
         count={ctx.competitors.length}
-        description="De 3 a 5 publicaciones de otros vendedores que más venden este producto. Sus títulos suman palabras al paso Título."
+        description="Las publicaciones de otros vendedores que más venden este producto. Conviene cargar al menos 3. Sus títulos suman palabras al paso Título."
       >
         <SectionBody>
           <CompetitorsForm
