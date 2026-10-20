@@ -54,7 +54,8 @@ describe.skipIf(!url)('etapas de una publicación', () => {
 
   it('mover de etapa cierra la anterior y abre la nueva', async () => {
     const { id } = await createPublication(db, { productId, storeId, data: emptyData, userId: null });
-    const at = new Date('2026-10-20T12:00:00Z');
+    // Un minuto después de crearla: con una fecha fija, la prueba falla cuando esa fecha queda en el pasado.
+    const at = new Date(Date.now() + 60_000);
     await db.$transaction((tx) => moveToStage(tx, { publicationId: id, stage: 'IN_REVIEW', userId: null, at }));
 
     const all = await db.stageMovement.findMany({ where: { publicationId: id }, orderBy: { enteredAt: 'asc' } });
