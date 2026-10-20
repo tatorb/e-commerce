@@ -203,7 +203,7 @@ export async function addToPipeline(
       title: string | null;
       externalId: string | null;
       product: { name: string };
-    }) => ({ id: r.id, productId: r.productId, title: r.title ?? r.product.name, externalId: r.externalId });
+    }) => ({ id: r.id, productId: r.productId, title: r.title, externalId: r.externalId });
     related = findDuplicates(toAdd.map(asCandidate), inPipeline.map(asCandidate));
   }
 

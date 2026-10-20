@@ -39,6 +39,8 @@ export async function createPipelinePublication(
     storeId: string;
     productId?: string | null;
     newProduct?: ShortProduct | null;
+    // El título de la publicación, ya chequeado con las reglas del canal. Sin título, queda vacío.
+    title?: string | null;
     userId: string | null;
   },
 ): Promise<{ publicationId: string; productId: string; related: Duplicate[] }> {
@@ -65,7 +67,7 @@ export async function createPipelinePublication(
     data: {
       externalId: null,
       url: null,
-      title: null,
+      title: args.title?.trim() || null,
       description: null,
       attributes: [],
       price: null,

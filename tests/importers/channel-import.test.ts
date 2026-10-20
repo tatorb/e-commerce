@@ -46,7 +46,7 @@ describe('del canal a una fila', () => {
     const record = toRecord(listingToRow(listing(), 1, mercadolibre), mercadolibre);
     expect(record.error).toBeNull();
     expect(record.skus).toEqual(['EMB-001']);
-    expect(record.product).toMatchObject({ name: 'Kit Embrague Ford Ka 1.6 Sachs', brand: 'Sachs', partNumber: '3000 951 001', productType: 'Kit de embrague' });
+    expect(record.product).toMatchObject({ name: 'Kit de embrague 3000 951 001', brand: 'Sachs', partNumber: '3000 951 001', productType: 'Kit de embrague' });
     expect(record.product?.assets.map((a) => a.url)).toEqual(['https://foto/1.jpg', 'https://foto/2.jpg']);
     expect(record.publication).toMatchObject({
       externalId: 'MLA1000000111',

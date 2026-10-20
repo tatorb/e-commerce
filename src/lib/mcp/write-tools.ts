@@ -47,6 +47,10 @@ import { savePublicationCode } from '@/lib/publication-code';
 import { loadCatalogData, saveCatalogData } from '@/lib/catalog-data';
 import { loadTitleContext } from '@/lib/queries/title-step';
 import { loadTitleRules } from '@/lib/title-rules';
+import { mergeSpecs, MAX_SPECS } from '@/domain/technical-sheet';
+import { parseNameValueList } from '@/domain/name-value';
+import { writeContentField } from '@/domain/content';
+import { technicalSheetState } from '@/lib/technical-sheet';
 import {
   McpToolError,
   accountArg,
@@ -193,13 +197,17 @@ const createPublicationTool = defineTool({
       .describe('El producto que ya está: número de pieza, SKU, código de una de sus publicaciones, id o nombre.'),
     producto_nuevo: z
       .object({
-        nombre: z.string().describe('El nombre del producto.'),
+        nombre: z.string().describe('El nombre del producto: lo que es y su código, por ejemplo "Subconjunto SP-413". No es el título de la publicación.'),
         tipo: z.string().optional().describe('Tipo de producto, por ejemplo "Kit de embrague".'),
         individual_o_combo: z.enum(['individual', 'combo']).optional().describe('Sin mandar, individual.'),
       })
       .optional()
       .describe('Ficha corta para un producto que todavía no está en la app. Lo demás se completa después en Información.'),
     tienda: z.string().optional().describe('El nombre de la tienda. Si la cuenta tiene una sola, se puede omitir.'),
+    titulo: z
+      .string()
+      .optional()
+      .describe('El título de la publicación, si ya lo tiene. Se chequea igual que con check_title y no se crea si tiene errores. Es de la publicación: no es el nombre del producto.'),
   }),
   readOnly: false,
   destructive: false,
@@ -208,7 +216,11 @@ const createPublicationTool = defineTool({
     if (Boolean(args.producto?.trim()) === Boolean(args.producto_nuevo)) {
       throw new McpToolError('Mandá producto o producto_nuevo, uno de los dos.');
     }
-    const stores = await ctx.db.store.findMany({ where: { accountId: account.id }, orderBy: { name: 'asc' }, select: { id: true, name: true } });
+    const stores = await ctx.db.store.findMany({
+      where: { accountId: account.id },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true, channel: { select: { id: true, kind: true, name: true } } },
+    });
     const wanted = args.tienda?.trim().toLowerCase();
     const store = wanted ? stores.find((s) => s.name.toLowerCase() === wanted) : stores.length === 1 ? stores[0] : undefined;
     if (!store) {
@@ -217,6 +229,14 @@ const createPublicationTool = defineTool({
           ? `No encontré la tienda «${args.tienda}». Las tiendas son: ${stores.map((s) => s.name).join(', ')}.`
           : `La cuenta tiene varias tiendas: decime en cuál (${stores.map((s) => s.name).join(', ')}).`,
       );
+    }
+    const title = args.titulo?.trim() || null;
+    let titleWarnings: string[] = [];
+    if (title) {
+      const { rules } = await loadTitleRules(ctx.db, account.id, store.channel);
+      const check = checkTitle(title, rules);
+      if (check.errors.length > 0) throw new McpToolError(`El título tiene errores: ${check.errors.join(' ')} No se creó la publicación.`);
+      titleWarnings = check.warnings;
     }
     const nuevo = args.producto_nuevo;
     const r = await ctx.db.$transaction(async (tx) =>
@@ -227,6 +247,7 @@ const createPublicationTool = defineTool({
         newProduct: nuevo
           ? { name: nuevo.nombre, productType: nuevo.tipo ?? '', kind: nuevo.individual_o_combo === 'combo' ? 'COMBO' : 'INDIVIDUAL' }
           : null,
+        title,
         userId: ctx.userId,
       }),
     );
@@ -236,6 +257,7 @@ const createPublicationTool = defineTool({
       producto: product.name,
       tienda: store.name,
       ...(await stateOf(ctx, account, r.publicationId)),
+      ...(titleWarnings.length > 0 ? { avisos_del_titulo: titleWarnings } : {}),
       ...(r.related.length > 0
         ? { aviso: `El producto ya tiene ${r.related.length === 1 ? 'otra publicación' : `${r.related.length} publicaciones`} en el pipeline.` }
         : {}),
@@ -654,6 +676,83 @@ const saveCatalogTool = defineTool({
   },
 });
 
+// ───────────────────────────── Ficha técnica y contenido del kit ─────────────────────────────
+
+async function sheetResult(ctx: McpContext, account: AccountRef, productId: string, publicationId: string) {
+  const state = await technicalSheetState(ctx.db, account.id, productId);
+  return {
+    ficha_tecnica: state.specs.map((s) => ({ nombre: s.name, valor: s.value })),
+    datos_cargados: state.specs.length,
+    ...(state.minimum !== null ? { minimo_del_estandar: state.minimum } : {}),
+    campos_esperados_por_la_familia:
+      state.expected.length > 0
+        ? state.expected
+        : state.family
+          ? `La familia «${state.family}» no tiene campos esperados en los canales de la cuenta.`
+          : 'El producto no tiene tipo cargado: sin familia no hay campos esperados.',
+    link_app: appLink(ctx, account, publicationId),
+  };
+}
+
+const saveTechnicalSheetTool = defineTool({
+  name: 'save_technical_sheet',
+  title: 'Cargar la ficha técnica',
+  description: `Carga o corrige la ficha técnica del producto: datos técnicos como nombre y valor con su unidad, por ejemplo «Diámetro del cilindro: 83,00 mm». Es la que cuenta en el puntaje como «Ficha técnica completa». Es del producto: la comparten todas sus publicaciones. completar cambia los datos que tienen el mismo nombre y suma los nuevos; un valor vacío borra ese dato. reemplazar cambia la ficha técnica entera: confirmalo con la persona antes. Hasta ${MAX_SPECS} datos. Usá solo datos de la ficha, del fabricante o que te dio la persona, nunca supuestos, calculados ni de memoria. La respuesta trae los campos esperados para la familia del producto en cada canal y cuáles faltan.`,
+  input: z.object({
+    cuenta: accountArg,
+    publicacion: publicationArg,
+    accion: z
+      .enum(['completar', 'reemplazar'])
+      .default('completar')
+      .describe('completar cambia o suma dato por dato; reemplazar cambia la ficha técnica entera.'),
+    datos: z
+      .array(
+        z.object({
+          nombre: z.string().min(1).describe('Por ejemplo "Diámetro del cilindro".'),
+          valor: z.string().nullable().describe('Con su unidad, por ejemplo "83,00 mm". Vacío o null borra ese dato.'),
+        }),
+      )
+      .max(MAX_SPECS),
+  }),
+  readOnly: false,
+  destructive: true,
+  async run(ctx, args) {
+    const { account, id, productId } = await productTarget(ctx, args);
+    if (args.accion === 'completar' && args.datos.length === 0) throw new McpToolError('Mandá al menos un dato.');
+    await ctx.db.$transaction(async (tx) => {
+      const product = await tx.product.findUniqueOrThrow({ where: { id: productId }, select: { specs: true } });
+      const specs = mergeSpecs(
+        parseNameValueList(product.specs),
+        args.datos.map((d) => ({ name: d.nombre, value: d.valor })),
+        args.accion === 'reemplazar' ? 'replace' : 'merge',
+      );
+      await writeContentField(tx, { productId, publicationId: null }, 'specs', specs);
+    });
+    return { listo: true, ...(await sheetResult(ctx, account, productId, id)) };
+  },
+});
+
+const MAX_KIT = 5000;
+
+const saveKitContentsTool = defineTool({
+  name: 'save_kit_contents',
+  title: 'Cargar el contenido del kit',
+  description: `Carga qué trae la caja del producto, por ejemplo «4 pistones, 4 juegos de aros, 4 pernos, 8 seguros». Es la que cuenta en el puntaje como «Contenido del kit declarado». Es del producto: la comparten todas sus publicaciones. Reemplaza el texto entero; vacío lo borra. Usá solo datos confirmados: de la ficha, del fabricante o que te dio la persona, nunca supuestos.`,
+  input: z.object({
+    cuenta: accountArg,
+    publicacion: publicationArg,
+    contenido: z.string().max(MAX_KIT).describe('Qué trae la caja, con cantidades. Vacío lo borra.'),
+  }),
+  readOnly: false,
+  destructive: true,
+  async run(ctx, args) {
+    const { account, id, productId } = await productTarget(ctx, args);
+    const text = args.contenido.replace(/\r\n?/g, '\n').trim();
+    await ctx.db.$transaction((tx) => writeContentField(tx, { productId, publicationId: null }, 'kitContents', text || null));
+    return { listo: true, contenido_del_kit: text || null, link_app: appLink(ctx, account, id) };
+  },
+});
+
 // ───────────────────────────── Título ─────────────────────────────
 
 const saveSeedsTool = defineTool({
@@ -859,6 +958,125 @@ const approveTitleTool = defineTool({
   },
 });
 
+const setTitleTool = defineTool({
+  name: 'set_publication_title',
+  title: 'Poner el título sin aprobarlo',
+  description:
+    'Pone o corrige el título de una publicación sin aprobarlo y sin mover el paso del pipeline: sirve para cargar un título provisorio o corregir uno. Usa el mismo chequeo que check_title (largo, signos y palabras no permitidas) y no guarda un título con errores. El título es de la publicación, no el nombre del producto. Si la publicación tiene ventas, el canal no deja cambiar el título: eso se decide en el paso Título. Para aprobarlo y pasar a Imágenes, usá approve_title.',
+  input: z.object({
+    cuenta: accountArg,
+    publicacion: publicationArg,
+    titulo: z.string().min(1).describe('El título nuevo.'),
+  }),
+  readOnly: false,
+  destructive: true,
+  async run(ctx, args) {
+    const { account, id, tc } = await titleTarget(ctx, args);
+    const title = args.titulo.trim();
+    if (tc.titleLock.locked && tc.publication.title?.trim()) {
+      throw new McpToolError(
+        'El título está bloqueado porque la publicación tiene ventas: el canal no deja cambiarlo. Para probar uno nuevo, decidí en el paso Título si se prueba en la copia con cuotas (decide_title_lock).',
+      );
+    }
+    const usable = tc.words.filter((w) => w.status === 'use').map((w) => w.word);
+    const check = checkTitle(title, tc.rules, usable.length > 0 ? { usableWords: usable } : {});
+    if (check.errors.length > 0) throw new McpToolError(`No se guardó: ${check.errors.join(' ')}`);
+    const before = tc.publication.title;
+    await ctx.db.$transaction((tx) => writeContentField(tx, { productId: tc.publication.productId, publicationId: id }, 'title', title));
+    return {
+      listo: true,
+      antes: before,
+      ...(await stateOf(ctx, account, id)),
+      caracteres: check.length,
+      ...(check.warnings.length > 0 ? { avisos: check.warnings } : {}),
+    };
+  },
+});
+
+// ───────────────────────────── Copiar entre publicaciones ─────────────────────────────
+
+const COPYABLE = {
+  competencia: 'la competencia',
+  preguntas_propias: 'las preguntas propias',
+  busquedas_principales: 'las búsquedas principales',
+  semillas: 'las semillas',
+} as const;
+type Copyable = keyof typeof COPYABLE;
+
+const copyResearchTool = defineTool({
+  name: 'copy_publication_data',
+  title: 'Copiar datos de otra publicación del mismo producto',
+  description: `Copia a una publicación los datos que son de cada publicación desde otra del mismo producto, eligiendo qué copiar: ${Object.entries(COPYABLE)
+    .map(([k, v]) => `${k} (${v})`)
+    .join(', ')}. Lo que se copia reemplaza lo que tenía la de destino; lo que la de origen no tiene no se toca. La ficha y la investigación del producto no hace falta copiarlas: ya las comparten. Confirmalo con la persona antes.`,
+  input: z.object({
+    cuenta: accountArg,
+    publicacion: publicationArg.describe('La publicación a la que se copia: su id, su código en el canal o su link.'),
+    desde: z.string().min(1).describe('La publicación de la que se copia, del mismo producto: su id, su código en el canal o su link.'),
+    copiar: z
+      .array(z.enum(Object.keys(COPYABLE) as [Copyable, ...Copyable[]]))
+      .min(1)
+      .describe('Qué copiar.'),
+  }),
+  readOnly: false,
+  destructive: true,
+  async run(ctx, args) {
+    const { account, id } = await target(ctx, args);
+    const fromId = await resolvePublication(ctx.db, account.id, args.desde);
+    if (fromId === id) throw new McpToolError('La publicación de origen y la de destino son la misma.');
+    const select = {
+      productId: true,
+      title: true,
+      externalId: true,
+      ownQuestions: true,
+      competitors: { orderBy: { position: 'asc' as const }, select: { title: true, url: true, soldQuantity: true } },
+      titleWork: { select: { seeds: true, mainSearches: true } },
+    };
+    const [from, to] = await Promise.all([
+      ctx.db.publication.findUniqueOrThrow({ where: { id: fromId }, select }),
+      ctx.db.publication.findUniqueOrThrow({ where: { id }, select }),
+    ]);
+    if (from.productId !== to.productId) throw new McpToolError('Solo se copia entre publicaciones del mismo producto.');
+
+    const wanted = [...new Set(args.copiar)];
+    const copied: Record<string, unknown> = {};
+    const skipped: string[] = [];
+    const seeds = Array.isArray(from.titleWork?.seeds) ? (from.titleWork.seeds as string[]) : null;
+    const searches = Array.isArray(from.titleWork?.mainSearches) ? (from.titleWork.mainSearches as string[]) : [];
+    await ctx.db.$transaction(async (tx) => {
+      for (const what of wanted) {
+        if (what === 'competencia') {
+          if (from.competitors.length === 0) skipped.push(COPYABLE[what]);
+          else {
+            await saveCompetitors(tx, id, from.competitors.map((c) => ({ title: c.title, url: c.url, soldQuantity: c.soldQuantity })));
+            copied.competencia = from.competitors.length;
+          }
+        } else if (what === 'preguntas_propias') {
+          if (!from.ownQuestions?.trim()) skipped.push(COPYABLE[what]);
+          else {
+            await tx.publication.update({ where: { id }, data: { ownQuestions: from.ownQuestions } });
+            copied.preguntas_propias = true;
+          }
+        } else if (what === 'busquedas_principales') {
+          if (searches.length === 0) skipped.push(COPYABLE[what]);
+          else copied.busquedas_principales = await setMainSearches(tx, id, searches);
+        } else if (!seeds || seeds.length === 0) {
+          skipped.push(COPYABLE[what]);
+        } else {
+          copied.semillas = await saveSeeds(tx, id, seeds);
+        }
+      }
+    });
+    return {
+      listo: Object.keys(copied).length > 0,
+      desde: { codigo: from.externalId, titulo: from.title },
+      copiado: copied,
+      ...(skipped.length > 0 ? { no_se_copio_porque_la_de_origen_no_tiene: skipped } : {}),
+      link_app: appLink(ctx, account, id),
+    };
+  },
+});
+
 // ───────────────────────────── Reglas de título ─────────────────────────────
 
 const updateTitleRulesTool = defineTool({
@@ -941,6 +1159,8 @@ export const WRITE_TOOLS = [
   saveQuestionsTool,
   saveInsightsTool,
   saveCatalogTool,
+  saveTechnicalSheetTool,
+  saveKitContentsTool,
   saveSeedsTool,
   saveSuggestionsTool,
   setWordsTool,
@@ -949,5 +1169,7 @@ export const WRITE_TOOLS = [
   decideLockTool,
   saveProposalsTool,
   approveTitleTool,
+  setTitleTool,
+  copyResearchTool,
   updateTitleRulesTool,
 ];

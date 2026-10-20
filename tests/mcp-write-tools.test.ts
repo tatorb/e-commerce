@@ -24,7 +24,10 @@ describe('herramientas de escritura en la lista', () => {
     expect(tools.get('save_catalog_data')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('create_publication')).toMatchObject({ readOnlyHint: false, destructiveHint: false });
     expect(tools.get('update_publication')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
-    expect(tools.size).toBe(27);
+    for (const name of ['save_technical_sheet', 'save_kit_contents', 'set_publication_title', 'copy_publication_data']) {
+      expect(tools.get(name)).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+    }
+    expect(tools.size).toBe(31);
   });
 });
 
@@ -400,6 +403,120 @@ describe.skipIf(!url)('herramientas de escritura', () => {
     expect((await call('search_catalog', { individual_o_combo: ['individual'] })).data.total).toBe(2);
     const board = await call('get_pipeline_board', { individual_o_combo: ['combo'] });
     expect(board.isError).toBeFalsy();
+  });
+
+  it('save_technical_sheet: completa por nombre, borra con vacío y dice qué campos de la familia faltan', async () => {
+    const first = await call('save_technical_sheet', {
+      publicacion: 'MLA1110001',
+      datos: [
+        { nombre: 'Diámetro del disco', valor: '200 mm' },
+        { nombre: 'Cantidad de estrías', valor: '28' },
+      ],
+    });
+    expect(first.data).toMatchObject({ listo: true, datos_cargados: 2 });
+    // Es del producto: la otra publicación ve la misma ficha técnica.
+    const other = await call('save_technical_sheet', {
+      publicacion: 'MLA1110002',
+      datos: [
+        { nombre: 'diametro del DISCO', valor: '  210   mm ' },
+        { nombre: 'Cantidad de estrías', valor: '' },
+        { nombre: 'Material', valor: 'Acero' },
+      ],
+    });
+    expect(other.data.ficha_tecnica).toEqual([
+      { nombre: 'diametro del DISCO', valor: '210 mm' },
+      { nombre: 'Material', valor: 'Acero' },
+    ]);
+    const expected = other.data.campos_esperados_por_la_familia;
+    expect(Array.isArray(expected)).toBe(true);
+    expect(expected[0]).toMatchObject({ canal: 'Mercado Libre' });
+    expect(expected[0].faltan.length).toBeGreaterThan(0);
+    // Marca, número de pieza y origen salen de la ficha: no se piden en la ficha técnica.
+    expect(expected[0].campos.map((c: { nombre: string }) => c.nombre)).not.toContain('Marca');
+
+    const replaced = await call('save_technical_sheet', { publicacion: 'MLA1110001', accion: 'reemplazar', datos: [{ nombre: 'Peso', valor: '3,2 kg' }] });
+    expect(replaced.data.ficha_tecnica).toEqual([{ nombre: 'Peso', valor: '3,2 kg' }]);
+    expect((await call('save_technical_sheet', { publicacion: 'MLA1110001', datos: [{ nombre: '  ', valor: 'x' }] })).text).toContain('necesita un nombre');
+    expect((await call('save_technical_sheet', { publicacion: 'MLA1110001', datos: [] })).isError).toBe(true);
+
+    // Sin tipo de producto no hay familia: lo dice en lugar de inventar campos.
+    await db.product.updateMany({ where: { name: 'Bomba de agua' }, data: { productType: null } });
+    const bomba = await call('save_technical_sheet', { publicacion: 'MLA2220002', datos: [{ nombre: 'Caudal', valor: '40 l/min' }] });
+    expect(typeof bomba.data.campos_esperados_por_la_familia).toBe('string');
+  });
+
+  it('save_kit_contents: es del producto, reemplaza el texto y vacío lo borra', async () => {
+    const r = await call('save_kit_contents', { publicacion: 'MLA1110002', contenido: '  4 pistones, 4 juegos de aros, 4 pernos, 8 seguros ' });
+    expect(r.data).toMatchObject({ listo: true, contenido_del_kit: '4 pistones, 4 juegos de aros, 4 pernos, 8 seguros' });
+    expect((await db.product.findUniqueOrThrow({ where: { id: productId } })).kitContents).toBe('4 pistones, 4 juegos de aros, 4 pernos, 8 seguros');
+    expect((await call('get_publication', { publicacion: 'MLA1110001' })).data.ficha.contenido_del_kit).toBe('4 pistones, 4 juegos de aros, 4 pernos, 8 seguros');
+    await call('save_kit_contents', { publicacion: 'MLA1110001', contenido: '' });
+    expect((await db.product.findUniqueOrThrow({ where: { id: productId } })).kitContents).toBeNull();
+  });
+
+  it('set_publication_title: pone el título sin aprobarlo ni mover el paso, con el mismo chequeo', async () => {
+    await call('add_to_pipeline', { publicaciones: ['MLA1110001'] });
+    const r = await call('set_publication_title', { publicacion: 'MLA1110001', titulo: '  Kit Embrague Volkswagen Gol 1.6 Marca Uno  ' });
+    expect(r.data).toMatchObject({ listo: true, antes: 'Kit Embrague Gol', titulo: 'Kit Embrague Volkswagen Gol 1.6 Marca Uno', pipeline: 'En pipeline · Información' });
+    expect(await state(kitId)).toMatchObject({ pipelineStep: 'INFO', title: 'Kit Embrague Volkswagen Gol 1.6 Marca Uno' });
+    expect(await db.titleApproval.count()).toBe(0);
+
+    const tooLong = await call('set_publication_title', { publicacion: 'MLA1110001', titulo: 'Kit '.repeat(20) });
+    expect(tooLong.isError).toBe(true);
+    expect(tooLong.text).toContain('No se guardó');
+    expect((await state(kitId)).title).toBe('Kit Embrague Volkswagen Gol 1.6 Marca Uno');
+    expect((await call('set_publication_title', { publicacion: 'MLA1110001', titulo: 'Kit Embrague Gol!!' })).isError).toBe(true);
+
+    // Con ventas, el canal no deja cambiar el título.
+    const locked = await call('set_publication_title', { publicacion: 'MLA2220002', titulo: 'Bomba de Agua Fiat Palio' });
+    expect(locked.text).toContain('bloqueado');
+    expect((await state(bombaId)).title).toBe('Bomba Agua Fiat');
+  });
+
+  it('create_publication con título: chequeado, y no crea nada si tiene errores', async () => {
+    const bad = await call('create_publication', { producto: 'P-100', titulo: 'Kit '.repeat(20) });
+    expect(bad.text).toContain('No se creó');
+    expect(await db.publication.count()).toBe(3);
+    const ok = await call('create_publication', { producto: 'P-100', titulo: 'Kit Embrague Gol Trend 1.6 Marca Uno' });
+    expect(ok.data).toMatchObject({ listo: true, titulo: 'Kit Embrague Gol Trend 1.6 Marca Uno', producto: 'Kit de embrague Gol' });
+    // Sin título, queda sin título: no toma el nombre del producto.
+    const untitled = await call('create_publication', { producto: 'P-100' });
+    expect(untitled.data.titulo).toBeNull();
+    const board = (await call('get_pipeline_board', {})).data;
+    expect(JSON.stringify(board)).not.toContain('"titulo":"Kit de embrague Gol"');
+  });
+
+  it('copy_publication_data: copia lo elegido desde otra del mismo producto', async () => {
+    await call('save_competitors', { publicacion: 'MLA1110001', competencia: [{ titulo: 'Kit Embrague Otro', vendidos: 30 }] });
+    await call('save_buyer_questions', { publicacion: 'MLA1110001', propia: '¿Sirve para el Gol Trend?' });
+    await call('set_main_searches', { publicacion: 'MLA1110001', busquedas: ['kit embrague gol'] });
+    await call('save_title_seeds', { publicacion: 'MLA1110001', semillas: ['kit embrague gol'] });
+
+    const r = await call('copy_publication_data', {
+      publicacion: 'MLA1110002',
+      desde: 'MLA1110001',
+      copiar: ['competencia', 'preguntas_propias', 'busquedas_principales', 'semillas'],
+    });
+    expect(r.data).toMatchObject({
+      listo: true,
+      desde: { codigo: 'MLA1110001' },
+      copiado: { competencia: 1, preguntas_propias: true, busquedas_principales: ['kit embrague gol'], semillas: ['kit embrague gol'] },
+    });
+    const copy = await db.publication.findUniqueOrThrow({ where: { id: copyId }, include: { competitors: true, titleWork: true } });
+    expect(copy.ownQuestions).toBe('¿Sirve para el Gol Trend?');
+    expect(copy.competitors.map((c) => c.title)).toEqual(['Kit Embrague Otro']);
+    expect(copy.titleWork).toMatchObject({ seeds: ['kit embrague gol'], mainSearches: ['kit embrague gol'] });
+
+    // Lo que la de origen no tiene no se toca.
+    const back = await call('copy_publication_data', { publicacion: 'MLA1110001', desde: 'MLA1110002', copiar: ['competencia'] });
+    expect(back.data.copiado).toEqual({ competencia: 1 });
+    await db.competitorListing.deleteMany({ where: { publicationId: copyId } });
+    const none = await call('copy_publication_data', { publicacion: 'MLA1110001', desde: 'MLA1110002', copiar: ['competencia'] });
+    expect(none.data).toMatchObject({ listo: false, no_se_copio_porque_la_de_origen_no_tiene: ['la competencia'] });
+    expect(await db.competitorListing.count({ where: { publicationId: kitId } })).toBe(1);
+
+    expect((await call('copy_publication_data', { publicacion: 'MLA1110001', desde: 'MLA2220002', copiar: ['semillas'] })).text).toContain('mismo producto');
+    expect((await call('copy_publication_data', { publicacion: 'MLA1110001', desde: 'MLA1110001', copiar: ['semillas'] })).text).toContain('la misma');
   });
 
   it('update_title_rules: cambia solo lo que se manda, y restablecer vuelve a las del canal', async () => {

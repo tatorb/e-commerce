@@ -97,7 +97,7 @@ describe.skipIf(!url)('importación en la base', () => {
 
   it('importar de nuevo no duplica ni pisa lo editado', async () => {
     await run();
-    const product = await db.product.findFirstOrThrow({ where: { name: 'Kit de prueba' } });
+    const product = await db.product.findFirstOrThrow({ where: { name: 'Kit de embrague PD-1' } });
     await db.product.update({ where: { id: product.id }, data: { name: 'Kit editado a mano' } });
 
     const { result } = await run();

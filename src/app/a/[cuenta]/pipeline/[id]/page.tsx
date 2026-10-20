@@ -37,6 +37,7 @@ import { countChannelPhotos, loadPhotoLine } from '@/lib/photos';
 import { workerState } from '@/lib/image-worker';
 import { formatDateTime, formatDuration, plural } from '@/lib/format';
 import { SectionCard } from '@/components/ui/section-card';
+import { titleOrUntitled } from '@/domain/publication-title';
 
 export const dynamic = 'force-dynamic';
 // Leer el buscador letra por letra o pedir títulos a la IA puede tardar.
@@ -46,7 +47,7 @@ export async function generateMetadata({ params }: { params: Promise<{ cuenta: s
   const { cuenta, id } = await params;
   const account = await accountForTitle(cuenta);
   const pub = account ? await getPipelinePublication(account.id, id) : null;
-  return { title: pub ? `${pub.title} · Pipeline` : 'Pipeline' };
+  return { title: pub ? `${titleOrUntitled(pub.title)} · Pipeline` : 'Pipeline' };
 }
 
 // Los pasos que todavía no tienen contenido.
@@ -114,10 +115,10 @@ export default async function PipelineStepPage({
     <>
       <PageHeader staticOnMobile className="max-w-5xl">
         <div className="space-y-2">
-          <Breadcrumb items={[{ label: account.name, href: boardHref }, { label: 'Pipeline', href: boardHref }, { label: pub.title }]} />
+          <Breadcrumb items={[{ label: account.name, href: boardHref }, { label: 'Pipeline', href: boardHref }, { label: titleOrUntitled(pub.title) }]} />
           <div className="space-y-1.5">
             <h1 className="flex items-start gap-2 text-2xl font-semibold tracking-tight">
-              <span>{pub.title}</span>
+              <span className={pub.title ? undefined : 'text-muted-foreground'}>{titleOrUntitled(pub.title)}</span>
               {lock ? (
                 <span title={lock} aria-label={lock} className="mt-2 shrink-0 text-amber-700">
                   <Lock className="h-4 w-4" />
@@ -269,7 +270,7 @@ export default async function PipelineStepPage({
           <StepActions
             accountSlug={account.slug}
             publicationId={pub.id}
-            title={pub.title}
+            title={titleOrUntitled(pub.title)}
             step={current}
             completeBlocked={pub.externalId ? null : 'Para marcarla como corregida, cargá antes su ID.'}
           />

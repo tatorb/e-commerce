@@ -13,6 +13,7 @@ import { approvedAt, approvedFields, todayIn } from '@/domain/applications';
 import { loadContent } from '@/domain/content';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { formatDateTime } from '@/lib/format';
+import { titleOrUntitled } from '@/domain/publication-title';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,7 +40,7 @@ export default async function ApplyPage({ params }: { params: Promise<{ cuenta: 
 
   const adapter = getChannelAdapter(publication.store.channel.kind, publication.store.channel.name);
   const productUrl = `/a/${account.slug}/productos/${publication.product.id}`;
-  const title = publication.title ?? publication.product.name;
+  const title = titleOrUntitled(publication.title);
   const proposal = publication.proposals[0] ?? null;
   const application = publication.applications[0] ?? null;
   const isApproved = publication.stage === 'APPROVED';

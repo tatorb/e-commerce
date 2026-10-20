@@ -8,6 +8,8 @@ import { titleLockText } from '@/domain/title-lock';
 import type { BoardItem } from '@/lib/queries/pipeline';
 import { formatDuration, plural } from '@/lib/format';
 import { RemoveFromPipelineDialog } from './RemoveFromPipelineDialog';
+import { titleOrUntitled } from '@/domain/publication-title';
+import { cn } from '@/lib/utils/cn';
 
 // Tablero del pipeline: una columna por paso. En el celular se desliza de costado.
 
@@ -17,7 +19,7 @@ function BoardCard({ accountSlug, item, now, showStore }: { accountSlug: string;
     <li className="rounded-lg border bg-card text-card-foreground shadow-sm transition-colors hover:border-foreground/25">
       <Link href={`/a/${accountSlug}/pipeline/${item.id}`} className="block space-y-2 px-3 pt-3 pb-2">
         <div className="flex items-start justify-between gap-2">
-          <p className="line-clamp-3 text-sm font-medium leading-snug">{item.title}</p>
+          <p className={cn('line-clamp-3 text-sm font-medium leading-snug', !item.title && 'text-muted-foreground')}>{titleOrUntitled(item.title)}</p>
           {lock ? (
             <span title={lock} aria-label={lock} className="mt-0.5 shrink-0 text-amber-700">
               <Lock className="h-3.5 w-3.5" />
@@ -45,7 +47,7 @@ function BoardCard({ accountSlug, item, now, showStore }: { accountSlug: string;
           <RemoveFromPipelineDialog
             accountSlug={accountSlug}
             publicationId={item.id}
-            title={item.title}
+            title={titleOrUntitled(item.title)}
             step={item.pipelineStep}
             compact
           />

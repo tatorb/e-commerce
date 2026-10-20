@@ -77,7 +77,7 @@ export async function listScoredPublications(
     const channel = getChannelAdapter(p.store.channel.kind, p.store.channel.name);
     return {
       id: p.id,
-      title: p.title ?? p.product.name,
+      title: p.title,
       productId: p.product.id,
       externalId: p.externalId,
       url: p.url,

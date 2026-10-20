@@ -109,7 +109,11 @@ export function toRecord(row: RowInput, adapter: ChannelAdapter): ImportRecord {
   const warnings: string[] = [];
 
   const title = text(get('pub.title')) || null;
-  const name = text(get('product.name')) || title;
+  // El producto se nombra por lo que es y su código, por ejemplo «Subconjunto
+  // SP-413»: el título es de la publicación. Sin código, se usa el título.
+  const partNumber = text(get('product.partNumber'));
+  const byCode = partNumber ? [text(get('product.productType')), partNumber].filter(Boolean).join(' ') : '';
+  const name = text(get('product.name')) || byCode || title;
 
   // Estado en el canal.
   const rawStatus = text(get('pub.channelStatus'));

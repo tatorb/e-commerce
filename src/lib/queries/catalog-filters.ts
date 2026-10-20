@@ -145,7 +145,7 @@ export function isFiltered(f: CatalogFilters): boolean {
 
 /** Lo que necesita el filtro de cada publicación. */
 export type Filterable = {
-  title: string;
+  title: string | null;
   externalId: string | null;
   skus: string[];
   score: number | null;
@@ -189,7 +189,7 @@ export function filterPublications<T extends Filterable>(all: T[], f: CatalogFil
     .filter(
       (p) =>
         !q ||
-        p.title.toLowerCase().includes(q) ||
+        (p.title ?? '').toLowerCase().includes(q) ||
         (p.externalId ?? '').toLowerCase().includes(q) ||
         p.skus.some((s) => s.toLowerCase().includes(q)),
     )
@@ -201,6 +201,8 @@ export function filterPublications<T extends Filterable>(all: T[], f: CatalogFil
       if (sort === 'puntaje-desc') return sb - sa || (b.visits ?? 0) - (a.visits ?? 0);
       if (sort === 'visitas') return (b.visits ?? -1) - (a.visits ?? -1) || sa - sb;
       if (sort === 'ventas') return (b.sales ?? -1) - (a.sales ?? -1) || (b.visits ?? -1) - (a.visits ?? -1);
+      // Las que no tienen título, al final.
+      if (!a.title || !b.title) return Number(!a.title) - Number(!b.title);
       return a.title.localeCompare(b.title, 'es');
     });
 }

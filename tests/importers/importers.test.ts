@@ -114,7 +114,9 @@ describe('filas a importar', () => {
     const [first, second, unpublished, noTitle, odd] = records;
 
     expect(first.error).toBeNull();
-    expect(first.product?.name).toBe('Subconjunto de prueba 1.6');
+    // El producto se nombra por su tipo y su código; el título es de la publicación.
+    expect(first.product?.name).toBe('Subconjunto PA-1');
+    expect(first.publication.title).toBe('Subconjunto de prueba 1.6');
     expect(first.product?.warranty).toBeNull();
     expect(first.product?.variants).toEqual([
       { measure: null, sku: 'PA-1-00' },

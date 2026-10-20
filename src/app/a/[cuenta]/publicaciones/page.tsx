@@ -38,6 +38,7 @@ import {
 import { listScoredPublications } from '@/lib/queries/scoring';
 import { plural } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
+import { titleOrUntitled } from '@/domain/publication-title';
 
 export const dynamic = 'force-dynamic';
 // Cada propuesta de la tanda es un pedido que puede tardar más de un minuto.
@@ -160,7 +161,7 @@ export default async function PublicationsPage({
           ) : null}
           <BulkProposalDialog
             accountSlug={account.slug}
-            items={ready.slice(0, BULK_LIMIT).map((p) => ({ id: p.id, title: p.title }))}
+            items={ready.slice(0, BULK_LIMIT).map((p) => ({ id: p.id, title: titleOrUntitled(p.title) }))}
             readyTotal={ready.length}
             viewing={items.length}
             disabledReason={isAiConfigured() ? null : AI_NOT_CONFIGURED}

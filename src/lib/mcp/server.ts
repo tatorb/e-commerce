@@ -4,6 +4,7 @@ import { ComboError } from '@/domain/combos';
 import { PipelineError } from '@/domain/pipeline';
 import { ResearchError } from '@/domain/research';
 import { TitleError } from '@/domain/title-work';
+import { TechnicalSheetError } from '@/domain/technical-sheet';
 import { READ_TOOLS } from './read-tools';
 import { WRITE_TOOLS } from './write-tools';
 import { MCP_INSTRUCTIONS } from './instructions';
@@ -68,7 +69,14 @@ async function callTool(ctx: McpContext, name: string, rawArgs: unknown) {
   } catch (e) {
     if (e instanceof McpToolError) return text(e.message, true);
     // Los avisos de la app hablan de la pantalla: para Claude, volver a consultar.
-    if (e instanceof PipelineError || e instanceof TitleError || e instanceof ResearchError || e instanceof CatalogError || e instanceof ComboError) {
+    if (
+      e instanceof PipelineError ||
+      e instanceof TitleError ||
+      e instanceof ResearchError ||
+      e instanceof CatalogError ||
+      e instanceof ComboError ||
+      e instanceof TechnicalSheetError
+    ) {
       return text(e.message.replace(/Recargá la página\./g, 'Volvé a consultarla antes de seguir.'), true);
     }
     console.error(`[mcp] ${name} falló: ${e instanceof Error ? e.name : 'error'}`);

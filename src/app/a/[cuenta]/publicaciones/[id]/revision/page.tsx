@@ -17,6 +17,7 @@ import { parseNotes, parseProposalFields, parseReview } from '@/domain/proposals
 import { initialReviewValue, type ReviewField } from '@/domain/review';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { formatDateTime } from '@/lib/format';
+import { titleOrUntitled } from '@/domain/publication-title';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,7 +44,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ cuenta:
   const productUrl = `/a/${account.slug}/productos/${publication.product.id}`;
   const adapter = getChannelAdapter(publication.store.channel.kind, publication.store.channel.name);
   const proposal = publication.proposals[0] ?? null;
-  const title = publication.title ?? publication.product.name;
+  const title = titleOrUntitled(publication.title);
 
   const header = (
     <PageHeader staticOnMobile className="max-w-5xl">
@@ -154,7 +155,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ cuenta:
             <ul className="space-y-0.5 pl-6 text-muted-foreground">
               {siblings.map((s) => (
                 <li key={s.id} className="break-words">
-                  {s.title ?? publication.product.name} · {s.store.name} · {codeOrUnpublished(s.externalId)}
+                  {titleOrUntitled(s.title)} · {s.store.name} · {codeOrUnpublished(s.externalId)}
                 </li>
               ))}
             </ul>

@@ -17,6 +17,7 @@ import { plural } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
 import { addToPipelineAction } from '@/app/a/[cuenta]/publicaciones/pipeline-actions';
 import { useAddToPipeline } from './useAddToPipeline';
+import { titleOrUntitled } from '@/domain/publication-title';
 
 // La lista del Catálogo, con casillas para elegir publicaciones y agregarlas
 // al pipeline. Entran también las que todavía no están publicadas.
@@ -24,7 +25,7 @@ import { useAddToPipeline } from './useAddToPipeline';
 export type CatalogRow = PipelineState & {
   id: string;
   productId: string;
-  title: string;
+  title: string | null;
   kind: ProductKind;
   externalId: string | null;
   skus: string[];
@@ -104,7 +105,7 @@ function PipelineCell({ accountSlug, row }: { accountSlug: string; row: CatalogR
 
 function rowHint(r: CatalogRow): string {
   if (r.pipelineStatus === 'IN_PIPELINE') return 'Ya está en el pipeline.';
-  return `Elegir ${r.title}`;
+  return `Elegir ${titleOrUntitled(r.title)}`;
 }
 
 export function CatalogTable({ accountSlug, rows }: { accountSlug: string; rows: CatalogRow[] }) {
@@ -186,7 +187,7 @@ export function CatalogTable({ accountSlug, rows }: { accountSlug: string; rows:
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex min-w-0 items-start gap-1.5">
                     <Link href={`${base}/${p.productId}`} className="font-medium hover:underline min-w-0">
-                      {p.title}
+                      {titleOrUntitled(p.title)}
                     </Link>
                     <span className="pt-1">
                       <LockIcon lock={p.titleLock} />
@@ -250,7 +251,7 @@ export function CatalogTable({ accountSlug, rows }: { accountSlug: string; rows:
                   <TableCell className="max-w-[22rem]">
                     <div className="flex items-start gap-1.5">
                       <Link href={`${base}/${p.productId}`} className="font-medium hover:underline line-clamp-2">
-                        {p.title}
+                        {titleOrUntitled(p.title)}
                       </Link>
                       <span className="pt-1">
                         <LockIcon lock={p.titleLock} />
