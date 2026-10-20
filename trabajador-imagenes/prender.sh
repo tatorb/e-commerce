@@ -36,7 +36,18 @@ cat > "$PLIST" <<PLIST
 </dict>
 </plist>
 PLIST
-launchctl bootout "gui/$(id -u)/$SERVICIO" >/dev/null 2>&1 || true
-launchctl bootstrap "gui/$(id -u)" "$PLIST"
+# Si ya estaba prendido, se apaga primero. macOS tarda un poco en soltarlo:
+# si se prende antes, falla con "Bootstrap failed: 5". Se espera hasta 15 segundos.
+if launchctl print "gui/$(id -u)/$SERVICIO" >/dev/null 2>&1; then
+  launchctl bootout "gui/$(id -u)/$SERVICIO" >/dev/null 2>&1 || true
+  for _ in $(seq 1 30); do
+    launchctl print "gui/$(id -u)/$SERVICIO" >/dev/null 2>&1 || break
+    sleep 0.5
+  done
+fi
+if ! launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null; then
+  sleep 3
+  launchctl bootstrap "gui/$(id -u)" "$PLIST"
+fi
 echo "El trabajador está prendido y arranca solo cada vez que iniciás sesión."
 echo "Para ver qué está haciendo: bash estado.sh"
