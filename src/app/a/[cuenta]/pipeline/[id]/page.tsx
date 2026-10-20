@@ -36,6 +36,7 @@ import { openPhotoIds } from '@/components/pipeline/images/open-photos';
 import { countChannelPhotos, loadPhotoLine } from '@/lib/photos';
 import { workerState } from '@/lib/image-worker';
 import { formatDateTime, formatDuration, plural } from '@/lib/format';
+import { SectionCard } from '@/components/ui/section-card';
 
 export const dynamic = 'force-dynamic';
 // Leer el buscador letra por letra o pedir títulos a la IA puede tardar.
@@ -275,10 +276,9 @@ export default async function PipelineStepPage({
         ) : null}
 
         {pub.movements.length > 0 ? (
-          <div className="space-y-2">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">Historial del pipeline</p>
+          <SectionCard title="Historial del pipeline" description="Cuánto estuvo en cada paso, quién la movió y por qué salió.">
             <PipelineHistory movements={[...pub.movements].reverse()} timeZone={account.timezone} />
-          </div>
+          </SectionCard>
         ) : null}
       </PageBody>
     </>

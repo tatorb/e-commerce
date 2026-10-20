@@ -60,6 +60,7 @@ import {
 } from '@/app/a/[cuenta]/importar/actions';
 import { ChannelSourceCard, type ChannelStoreInfo, type ReadPacing } from './ChannelSourceCard';
 import { BrandMark } from '@/components/ui/brand-loader';
+import { SubHeader } from '@/components/ui/section-card';
 
 export type StoreInfo = { id: string; name: string; channelKind: ChannelKind; channelName: string };
 
@@ -795,15 +796,17 @@ export function ImportWizard({
 
           {notes.length > 0 && step === 'review' ? (
             <div className="space-y-2">
-              <p className="text-xs uppercase tracking-wide text-muted-foreground">Avisos y errores</p>
-              <ul className="max-h-48 overflow-y-auto divide-y rounded-md border text-sm">
-                {notes.slice(0, 100).map((n, i) => (
-                  <li key={i} className="px-3 py-2">
-                    <span className="text-muted-foreground tabular-nums">Fila {n.row}: </span>
-                    <span className={n.error ? 'text-destructive' : ''}>{n.message}</span>
-                  </li>
-                ))}
-              </ul>
+              <div className="overflow-hidden rounded-md border">
+                <SubHeader title="Avisos y errores" count={notes.length} />
+                <ul className="max-h-48 overflow-y-auto divide-y text-sm">
+                  {notes.slice(0, 100).map((n, i) => (
+                    <li key={i} className="px-3 py-2">
+                      <span className="text-muted-foreground tabular-nums">Fila {n.row}: </span>
+                      <span className={n.error ? 'text-destructive' : ''}>{n.message}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
               {notes.length > 100 ? (
                 <p className="text-xs text-muted-foreground">Y {notes.length - 100} más.</p>
               ) : null}
@@ -812,8 +815,8 @@ export function ImportWizard({
 
           {classification && step === 'review' ? (
             <div className="space-y-2">
-              <p className="text-xs uppercase tracking-wide text-muted-foreground">Filas</p>
               <div className="rounded-md border overflow-hidden">
+                <SubHeader title="Filas" count={records.length} />
                 <div className="md:hidden divide-y max-h-[60vh] overflow-y-auto">
                   {records.map((r, i) => (
                     <div key={r.rowNumber} className="px-3 py-3 space-y-1">

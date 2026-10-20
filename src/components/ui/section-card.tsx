@@ -21,7 +21,7 @@ export function SectionCard({
   children?: React.ReactNode;
 }) {
   return (
-    <section className={cn('overflow-hidden rounded-lg border', className)}>
+    <section className={cn('overflow-hidden rounded-lg border bg-card text-card-foreground shadow-sm', className)}>
       <header className="flex flex-wrap items-start justify-between gap-3 border-b bg-muted/50 px-4 py-3">
         <div className="min-w-0">
           <h2 className="flex items-baseline gap-2 text-base font-semibold tracking-tight">

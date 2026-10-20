@@ -10,6 +10,7 @@ import { ProposalView } from './ProposalView';
 import { StartReviewButton } from './StartReviewButton';
 import { UndoAppliedButton } from '@/components/apply/UndoAppliedButton';
 import { StageBadge } from '@/components/stages/StageBadge';
+import { SubHeader } from '@/components/ui/section-card';
 
 // La sección "Propuesta de la IA" de una publicación, en la ficha del producto.
 
@@ -97,73 +98,72 @@ export function PublicationProposal({
     : '';
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">Propuesta de la IA</p>
-            {stage !== 'IMPORTED' ? <StageBadge stage={stage} /> : null}
+    <div className="overflow-hidden rounded-md border">
+      <SubHeader title="Propuesta de la IA" action={stage !== 'IMPORTED' ? <StageBadge stage={stage} /> : null} />
+      <div className="space-y-3 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-1">
+            {!active && !decided ? (
+              <p className="text-sm text-muted-foreground">
+                La IA propone cómo mejorar esta publicación según el estándar, sin inventar datos. No cambia nada hasta
+                que se apruebe.
+              </p>
+            ) : null}
+            {decided ? <p className="text-sm">{decisionText(decided, timeZone)}</p> : null}
+            {applied ? (
+              <p className="text-sm">
+                Aplicada en {channelName} el {formatDateTime(applied.appliedAt, timeZone)} por{' '}
+                {applied.createdBy?.name ?? '—'}, {METHOD_LABEL[applied.method]}.
+              </p>
+            ) : null}
           </div>
-          {!active && !decided ? (
-            <p className="text-sm text-muted-foreground">
-              La IA propone cómo mejorar esta publicación según el estándar, sin inventar datos. No cambia nada hasta
-              que se apruebe.
-            </p>
-          ) : null}
-          {decided ? <p className="text-sm">{decisionText(decided, timeZone)}</p> : null}
-          {applied ? (
-            <p className="text-sm">
-              Aplicada en {channelName} el {formatDateTime(applied.appliedAt, timeZone)} por{' '}
-              {applied.createdBy?.name ?? '—'}, {METHOD_LABEL[applied.method]}.
-            </p>
-          ) : null}
-        </div>
-        <div className="flex flex-wrap items-start gap-2">
-          {active && stage === 'PROPOSAL_GENERATED' ? (
-            <StartReviewButton accountSlug={accountSlug} proposalId={active.id} href={reviewUrl} />
-          ) : null}
-          {active && stage === 'IN_REVIEW' ? (
-            <Button size="sm" asChild>
-              <Link href={reviewUrl}>
-                <ClipboardCheck className="h-4 w-4" />
-                Seguir revisando
-              </Link>
-            </Button>
-          ) : null}
-          {stage === 'APPROVED' ? (
-            <Button size="sm" asChild>
-              <Link href={applyUrl}>
-                <Send className="h-4 w-4" />
-                Aplicar en {channelName}
-              </Link>
-            </Button>
-          ) : null}
-          {applied ? (
-            <>
-              <Button size="sm" variant="outline" asChild>
-                <Link href={applyUrl}>Ver lo aplicado</Link>
+          <div className="flex flex-wrap items-start gap-2">
+            {active && stage === 'PROPOSAL_GENERATED' ? (
+              <StartReviewButton accountSlug={accountSlug} proposalId={active.id} href={reviewUrl} />
+            ) : null}
+            {active && stage === 'IN_REVIEW' ? (
+              <Button size="sm" asChild>
+                <Link href={reviewUrl}>
+                  <ClipboardCheck className="h-4 w-4" />
+                  Seguir revisando
+                </Link>
               </Button>
-              {stage === 'APPLIED' ? <UndoAppliedButton accountSlug={accountSlug} publicationId={publicationId} /> : null}
-            </>
-          ) : null}
-          {canGenerateProposal(stage) ? (
-            <GenerateProposalButton
-              accountSlug={accountSlug}
-              publicationId={publicationId}
-              hasProposal={active !== null}
-              disabledReason={disabledReason}
-            />
-          ) : null}
+            ) : null}
+            {stage === 'APPROVED' ? (
+              <Button size="sm" asChild>
+                <Link href={applyUrl}>
+                  <Send className="h-4 w-4" />
+                  Aplicar en {channelName}
+                </Link>
+              </Button>
+            ) : null}
+            {applied ? (
+              <>
+                <Button size="sm" variant="outline" asChild>
+                  <Link href={applyUrl}>Ver lo aplicado</Link>
+                </Button>
+                {stage === 'APPLIED' ? <UndoAppliedButton accountSlug={accountSlug} publicationId={publicationId} /> : null}
+              </>
+            ) : null}
+            {canGenerateProposal(stage) ? (
+              <GenerateProposalButton
+                accountSlug={accountSlug}
+                publicationId={publicationId}
+                hasProposal={active !== null}
+                disabledReason={disabledReason}
+              />
+            ) : null}
+          </div>
         </div>
+        {active ? (
+          <ProposalView
+            summary={active.summary}
+            fields={parseProposalFields(active.fields)}
+            notes={parseNotes(active.notes)}
+            meta={meta}
+          />
+        ) : null}
       </div>
-      {active ? (
-        <ProposalView
-          summary={active.summary}
-          fields={parseProposalFields(active.fields)}
-          notes={parseNotes(active.notes)}
-          meta={meta}
-        />
-      ) : null}
     </div>
   );
 }

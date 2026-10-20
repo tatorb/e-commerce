@@ -290,7 +290,7 @@ function RunPanel({ accountSlug, run, photo, compact }: { accountSlug: string; r
           ) : null}
 
           {/* Los ajustes ocupan mucho: los botones quedan siempre a la vista abajo de la pantalla. */}
-          <div className="sticky bottom-0 z-10 -mx-4 space-y-1 border-t bg-background px-4 py-3">
+          <div className="sticky bottom-0 z-10 -mx-4 space-y-1 border-t bg-card px-4 py-3">
             <div className="flex flex-wrap items-center gap-2">
               {run.status === 'REVIEW' ? (
                 <Button
@@ -349,8 +349,8 @@ function PartCard({
   // Sin Exportar no hay foto final; lo que no aplica no se puede prender.
   const switchable = part.no_aplica === null && part.paso !== 'exportar';
   return (
-    <section aria-labelledby={id} className="space-y-2 rounded-md border p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <section aria-labelledby={id} className="overflow-hidden rounded-md border">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/50 px-3 py-2">
         <h4 id={id} className="text-sm font-semibold">
           {label}
         </h4>
@@ -367,49 +367,51 @@ function PartCard({
           </label>
         ) : null}
       </div>
-      {part.no_aplica ? (
-        <p className="text-sm text-muted-foreground">Se salteó solo: {part.no_aplica}</p>
-      ) : !edit.on ? (
-        <p className="text-sm text-muted-foreground">
-          {part.aplicado ? 'Lo apagaste: al rehacer, la foto pasa sin este ajuste.' : 'Apagado: la foto pasa sin este ajuste.'}
-        </p>
-      ) : (
-        <>
-          {part.propuesta ? (
-            <div className="flex items-start gap-2 text-sm">
-              <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-              <p>
-                <span className="font-medium">{ORIGIN_LABEL[part.propuesta.origen] ?? part.propuesta.origen}:</span> {part.propuesta.razon}
-                {part.propuesta.aviso ? <span className="block text-amber-700">{part.propuesta.aviso}</span> : null}
-              </p>
-            </div>
-          ) : !part.aplicado ? (
-            <p className="text-sm text-muted-foreground">Al rehacer, Claude propone los valores.</p>
-          ) : null}
-          {part.nota ? <p className="rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-sm">{part.nota}</p> : null}
-          {part.parametros.length > 0 && part.aplicado ? (
-            <ValuesForm
-              idPrefix={part.paso}
-              params={part.parametros}
-              values={edit.values}
-              onChange={(values) => onChange({ ...edit, values })}
-              disabled={disabled}
-            />
-          ) : null}
-          {Object.keys(part.medidas).length > 0 ? (
-            <details className="text-xs text-muted-foreground">
-              <summary className="cursor-pointer">Lo que midió el programa</summary>
-              <ul className="mt-1 space-y-0.5 pl-4">
-                {Object.entries(part.medidas).map(([k, v]) => (
-                  <li key={k}>
-                    {k.replaceAll('_', ' ')}: {typeof v === 'object' ? JSON.stringify(v) : String(v)}
-                  </li>
-                ))}
-              </ul>
-            </details>
-          ) : null}
-        </>
-      )}
+      <div className="space-y-2 p-3">
+        {part.no_aplica ? (
+          <p className="text-sm text-muted-foreground">Se salteó solo: {part.no_aplica}</p>
+        ) : !edit.on ? (
+          <p className="text-sm text-muted-foreground">
+            {part.aplicado ? 'Lo apagaste: al rehacer, la foto pasa sin este ajuste.' : 'Apagado: la foto pasa sin este ajuste.'}
+          </p>
+        ) : (
+          <>
+            {part.propuesta ? (
+              <div className="flex items-start gap-2 text-sm">
+                <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                <p>
+                  <span className="font-medium">{ORIGIN_LABEL[part.propuesta.origen] ?? part.propuesta.origen}:</span> {part.propuesta.razon}
+                  {part.propuesta.aviso ? <span className="block text-amber-700">{part.propuesta.aviso}</span> : null}
+                </p>
+              </div>
+            ) : !part.aplicado ? (
+              <p className="text-sm text-muted-foreground">Al rehacer, Claude propone los valores.</p>
+            ) : null}
+            {part.nota ? <p className="rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-sm">{part.nota}</p> : null}
+            {part.parametros.length > 0 && part.aplicado ? (
+              <ValuesForm
+                idPrefix={part.paso}
+                params={part.parametros}
+                values={edit.values}
+                onChange={(values) => onChange({ ...edit, values })}
+                disabled={disabled}
+              />
+            ) : null}
+            {Object.keys(part.medidas).length > 0 ? (
+              <details className="text-xs text-muted-foreground">
+                <summary className="cursor-pointer">Lo que midió el programa</summary>
+                <ul className="mt-1 space-y-0.5 pl-4">
+                  {Object.entries(part.medidas).map(([k, v]) => (
+                    <li key={k}>
+                      {k.replaceAll('_', ' ')}: {typeof v === 'object' ? JSON.stringify(v) : String(v)}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            ) : null}
+          </>
+        )}
+      </div>
     </section>
   );
 }

@@ -32,6 +32,7 @@ import { getProduct, listStores, type ProductDetail } from '@/lib/queries/produc
 import { formatDateTime, formatDuration } from '@/lib/format';
 import { PublicationProposal } from '@/components/proposals/PublicationProposal';
 import { isAiConfigured } from '@/ai/claude';
+import { SubHeader } from '@/components/ui/section-card';
 
 export const dynamic = 'force-dynamic';
 // Generar una propuesta con IA puede tardar más de un minuto.
@@ -223,18 +224,20 @@ export default async function ProductPage({ params }: { params: Promise<{ cuenta
                   />
                   <Separator />
                   {score.results.length > 0 ? (
-                    <div className="space-y-2">
-                      <div className="flex flex-wrap items-baseline justify-between gap-2">
-                        <p className="text-xs uppercase tracking-wide text-muted-foreground">Estándar</p>
-                        <p className="text-sm text-muted-foreground">
-                          {score.score === null
-                            ? 'Ninguna regla aplica.'
-                            : score.missing.length === 0
-                              ? `Puntaje ${score.score}. Cumple todo el estándar.`
-                              : `Puntaje ${score.score}. ${score.missing.length === 1 ? 'Le falta 1 cosa' : `Le faltan ${score.missing.length} cosas`}.`}
-                        </p>
-                      </div>
-                      <ul className="divide-y rounded-md border">
+                    <div className="overflow-hidden rounded-md border">
+                      <SubHeader
+                        title="Estándar"
+                        action={
+                          <p className="text-xs text-muted-foreground">
+                            {score.score === null
+                              ? 'Ninguna regla aplica.'
+                              : score.missing.length === 0
+                                ? `Puntaje ${score.score}. Cumple todo el estándar.`
+                                : `Puntaje ${score.score}. ${score.missing.length === 1 ? 'Le falta 1 cosa' : `Le faltan ${score.missing.length} cosas`}.`}
+                          </p>
+                        }
+                      />
+                      <ul className="divide-y">
                         {[...score.results]
                           .sort((a, b) => {
                             const order = { fail: 0, pass: 1, na: 2 };
@@ -258,8 +261,8 @@ export default async function ProductPage({ params }: { params: Promise<{ cuenta
                     </div>
                   ) : null}
                   {pub.pipelineMovements.length > 0 ? (
-                    <div className="space-y-2">
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Historial del pipeline</p>
+                    <div className="overflow-hidden rounded-md border">
+                      <SubHeader title="Historial del pipeline" />
                       <PipelineHistory movements={pub.pipelineMovements} timeZone={account.timezone} />
                     </div>
                   ) : null}
@@ -276,11 +279,9 @@ export default async function ProductPage({ params }: { params: Promise<{ cuenta
                   />
                   {/* Sin propuestas todavía, el historial es solo el comienzo: no se muestra. */}
                   {pub.stageMovements.length > 1 ? (
-                    <div className="space-y-2">
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                        Historial de la propuesta con IA
-                      </p>
-                      <ul className="divide-y rounded-md border">
+                    <div className="overflow-hidden rounded-md border">
+                      <SubHeader title="Historial de la propuesta con IA" />
+                      <ul className="divide-y">
                         {pub.stageMovements.map((m) => (
                           <li key={m.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-sm">
                             <div className="w-40 shrink-0">
@@ -301,14 +302,14 @@ export default async function ProductPage({ params }: { params: Promise<{ cuenta
                     </div>
                   ) : null}
                   {pub.measurements.length > 0 ? (
-                    <div className="space-y-2">
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Mediciones</p>
-                      <div className="space-y-3">
+                    <div className="overflow-hidden rounded-md border">
+                      <SubHeader title="Mediciones" />
+                      <div className="divide-y">
                         {pub.measurements.map((m) => {
                           const metrics = parseMetrics(m.metrics);
                           const keys = METRIC_KEYS.filter((k) => metrics[k] !== undefined);
                           return (
-                            <div key={m.id} className="rounded-md border px-4 py-3 space-y-2">
+                            <div key={m.id} className="px-4 py-3 space-y-2">
                               <p className="text-sm font-medium">
                                 Datos del {new Intl.DateTimeFormat('es-AR', { dateStyle: 'medium', timeZone: 'UTC' }).format(m.takenAt)}
                                 <span className="text-muted-foreground font-normal">

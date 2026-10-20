@@ -130,59 +130,63 @@ export function TitleComposer({
           {proposals.map((p, i) => {
             const c = checkTitle(p.title, rules, { usableWords });
             return (
-              <li key={`${i}-${p.title}`} className={cn('space-y-2 rounded-md border p-3', aiTitle === p.title && 'border-primary')}>
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">Propuesta {i + 1}</p>
-                <p className="font-medium">{p.title}</p>
-                {p.reason ? <p className="text-sm text-muted-foreground">{p.reason}</p> : null}
-                <Checks check={c} max={rules.maxLength} />
-                <Coverage title={p.title} searches={suggestions} />
-                <Button
-                  size="sm"
-                  variant={aiTitle === p.title ? 'default' : 'outline'}
-                  onClick={() => {
-                    setTitle(p.title);
-                    setAiTitle(p.title);
-                    approve.clear();
-                  }}
-                >
-                  {aiTitle === p.title ? 'Elegida' : 'Elegir'}
-                </Button>
+              <li key={`${i}-${p.title}`} className={cn('overflow-hidden rounded-md border', aiTitle === p.title && 'border-primary')}>
+                <p className="border-b bg-muted/50 px-3 py-2 text-sm font-semibold">Propuesta {i + 1}</p>
+                <div className="space-y-2 p-3">
+                  <p className="font-medium">{p.title}</p>
+                  {p.reason ? <p className="text-sm text-muted-foreground">{p.reason}</p> : null}
+                  <Checks check={c} max={rules.maxLength} />
+                  <Coverage title={p.title} searches={suggestions} />
+                  <Button
+                    size="sm"
+                    variant={aiTitle === p.title ? 'default' : 'outline'}
+                    onClick={() => {
+                      setTitle(p.title);
+                      setAiTitle(p.title);
+                      approve.clear();
+                    }}
+                  >
+                    {aiTitle === p.title ? 'Elegida' : 'Elegir'}
+                  </Button>
+                </div>
               </li>
             );
           })}
         </ul>
       ) : null}
 
-      <div className="space-y-3 rounded-md border p-4">
-        <label htmlFor="title-editor" className="text-sm font-medium">
+      <div className="overflow-hidden rounded-md border">
+        <label htmlFor="title-editor" className="block border-b bg-muted/50 px-4 py-2.5 text-sm font-semibold">
           {copy ? 'Título para la copia con cuotas' : 'Título'}
         </label>
-        <Input
-          id="title-editor"
-          value={title}
-          onChange={(e) => {
-            setTitle(e.target.value);
-            approve.clear();
-          }}
-          placeholder="Elegí una propuesta o escribilo"
-        />
-        <Checks check={check} max={rules.maxLength} />
-        <Coverage title={title} searches={suggestions} />
-        {aiTitle && aiTitle !== title ? (
-          <p className="text-xs text-muted-foreground">Cambiaste la propuesta de la IA: queda guardado qué propuso y qué quedó.</p>
-        ) : null}
-        <div className="flex flex-wrap items-center gap-3 pt-1">
-          <Button
-            pending={approve.pending}
-            onClick={() => approve.run(() => approveTitleAction(accountSlug, publicationId, title, aiTitle))}
-            disabled={approve.pending || blocked || check.errors.length > 0}
-          >
-            {approve.pending ? 'Guardando…' : copy ? 'Guardar para la copia y pasar a Imágenes' : 'Aprobar título y pasar a Imágenes'}
-          </Button>
-          {blocked ? (
-            <span className="text-sm text-amber-700">Primero elegí arriba qué hacer con el título bloqueado.</span>
+        <div className="space-y-3 p-4">
+          <Input
+            id="title-editor"
+            value={title}
+            onChange={(e) => {
+              setTitle(e.target.value);
+              approve.clear();
+            }}
+            placeholder="Elegí una propuesta o escribilo"
+          />
+          <Checks check={check} max={rules.maxLength} />
+          <Coverage title={title} searches={suggestions} />
+          {aiTitle && aiTitle !== title ? (
+            <p className="text-xs text-muted-foreground">Cambiaste la propuesta de la IA: queda guardado qué propuso y qué quedó.</p>
           ) : null}
-          <StatusText status={approve.status} />
+          <div className="flex flex-wrap items-center gap-3 pt-1">
+            <Button
+              pending={approve.pending}
+              onClick={() => approve.run(() => approveTitleAction(accountSlug, publicationId, title, aiTitle))}
+              disabled={approve.pending || blocked || check.errors.length > 0}
+            >
+              {approve.pending ? 'Guardando…' : copy ? 'Guardar para la copia y pasar a Imágenes' : 'Aprobar título y pasar a Imágenes'}
+            </Button>
+            {blocked ? (
+              <span className="text-sm text-amber-700">Primero elegí arriba qué hacer con el título bloqueado.</span>
+            ) : null}
+            <StatusText status={approve.status} />
+          </div>
         </div>
       </div>
     </div>

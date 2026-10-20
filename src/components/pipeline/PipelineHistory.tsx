@@ -24,7 +24,7 @@ function exitText(m: Movement): string {
 export function PipelineHistory({ movements, timeZone }: { movements: Movement[]; timeZone: string }) {
   const now = new Date();
   return (
-    <ul className="divide-y rounded-md border">
+    <ul className="divide-y">
       {movements.map((m) => (
         <li key={m.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-sm">
           <span className="w-44 shrink-0 font-medium">{PIPELINE_STEP_LABEL[m.step]}</span>
