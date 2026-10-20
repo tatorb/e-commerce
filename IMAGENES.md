@@ -124,8 +124,9 @@ Todo va **en una sola línea**, y recién al final se aprieta Enter:
 - **`receta.json`:** todos los valores de cada ajuste, para rehacerla igual.
 
 **Tiempos y costo:**
-- Cada foto tarda menos de un minuto con el modelo liviano. El ajuste más pesado es quitar el fondo.
-- Claude cuesta unos US$ 0,15 por foto. Al final se muestra el costo de esa foto.
+- En una Mac de 8 GB, cada foto tarda alrededor de un minuto y medio con los 8 ajustes. El más pesado es quitar el fondo.
+- Claude cuesta unos US$ 0,12 por foto. Al final se muestra el costo de esa foto.
+- Rehacer con valores que pediste cuesta menos, porque Claude solo mira los ajustes que no tienen valores pedidos.
 
 ## Si algo no anda
 

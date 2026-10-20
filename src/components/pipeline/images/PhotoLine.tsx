@@ -183,7 +183,7 @@ function RunPanel({ accountSlug, run, photo }: { accountSlug: string; run: RunVi
           <div className="space-y-1">
             <p>
               {run.status === 'PROCESSING'
-                ? 'El trabajador está haciendo los ajustes en la Mac. Tarda menos de un minuto y la pantalla se actualiza sola.'
+                ? 'El trabajador está haciendo los ajustes en la Mac. Tarda un par de minutos y la pantalla se actualiza sola.'
                 : 'En cola: el trabajador lo toma en cuanto se desocupe. Si está apagado, lo toma cuando se prenda.'}
             </p>
             {run.requested ? <p className="text-muted-foreground">Con los valores que pediste.</p> : null}
