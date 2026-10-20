@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2, WandSparkles } from 'lucide-react';
+import { WandSparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { generateProposalAction } from '@/app/a/[cuenta]/publicaciones/proposal-actions';
 
@@ -42,13 +42,14 @@ export function GenerateProposalButton({
     <div className="space-y-1.5">
       <div className="flex flex-wrap items-center gap-3">
         <Button
+          pending={pending}
           type="button"
           size="sm"
           variant={hasProposal ? 'outline' : 'default'}
           onClick={generate}
           disabled={pending || disabledReason !== null}
         >
-          {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <WandSparkles className="h-4 w-4" />}
+          <WandSparkles className="h-4 w-4" />
           {pending ? 'Generando…' : hasProposal ? 'Volver a generar' : 'Generar propuesta con IA'}
         </Button>
         {pending ? (

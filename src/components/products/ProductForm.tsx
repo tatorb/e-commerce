@@ -350,7 +350,7 @@ export function ProductForm({
       </Card>
 
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit" disabled={pending || !dirty || !values.name.trim()}>
+        <Button type="submit" pending={pending} disabled={pending || !dirty || !values.name.trim()}>
           {isNew ? (pending ? 'Creando…' : 'Crear producto') : pending ? 'Guardando…' : 'Guardar cambios'}
         </Button>
         {status.kind === 'success' ? <span className="text-sm text-green-600">Guardado.</span> : null}

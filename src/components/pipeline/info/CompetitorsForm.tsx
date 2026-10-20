@@ -51,6 +51,7 @@ export function CompetitorsForm({
       />
       <div className="flex flex-wrap items-center gap-3">
         <Button
+          pending={action.pending}
           onClick={() => action.run(() => saveCompetitorsAction(accountSlug, publicationId, filled), () => setSaved(JSON.stringify(filled)))}
           disabled={action.pending || !dirty}
         >

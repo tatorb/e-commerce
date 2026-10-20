@@ -141,7 +141,7 @@ export function CatalogTable({ accountSlug, rows }: { accountSlug: string; rows:
           {chosen.length > 0 ? (
             <>
               <span className="font-medium">{plural(chosen.length, 'elegida', 'elegidas')}</span>
-              <Button size="sm" onClick={submit} disabled={add.pending}>
+              <Button pending={add.pending} size="sm" onClick={submit} disabled={add.pending}>
                 <KanbanSquare className="h-4 w-4" />
                 {add.pending ? 'Agregando…' : 'Agregar al pipeline'}
               </Button>

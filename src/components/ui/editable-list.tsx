@@ -152,7 +152,7 @@ function Editor({
         className="bg-background"
       />
       <div className="flex items-center gap-2">
-        <Button size="sm" disabled={pending || !text.trim()} onClick={() => onSave(text)}>
+        <Button pending={pending} size="sm" disabled={pending || !text.trim()} onClick={() => onSave(text)}>
           {pending ? 'Guardando…' : 'Guardar'}
         </Button>
         <Button size="sm" variant="ghost" disabled={pending} onClick={onCancel}>

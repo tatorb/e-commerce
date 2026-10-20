@@ -13,6 +13,7 @@ export function ProbeButton({ accountSlug, storeId, label }: { accountSlug: stri
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
       <Button
+        pending={pending}
         onClick={() => {
           setError(null);
           startTransition(async () => {

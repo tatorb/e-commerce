@@ -202,7 +202,7 @@ function CatalogFields({
         ))}
       </div>
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit" disabled={pending || !dirty}>
+        <Button pending={pending} type="submit" disabled={pending || !dirty}>
           {pending ? 'Guardando…' : 'Guardar'}
         </Button>
         <span className="text-sm text-muted-foreground">

@@ -14,6 +14,7 @@ import { PhotoLine } from './PhotoLine';
 import { PhotoUploader } from './PhotoUploader';
 import { ArchivePhotoButton, ChannelPhotosButton } from './PhotoListActions';
 import { WorkerStatusLine } from './WorkerStatusLine';
+import { BrandMark } from '@/components/ui/brand-loader';
 
 // El paso Imágenes: las fotos del producto, cada una con su línea de
 // corrección. El trabajador de la Mac procesa cada paso; acá se aprueba.
@@ -137,7 +138,8 @@ export function ImagesStep({
                         // eslint-disable-next-line @next/next/no-img-element
                         <img src={p.thumbHref} alt="" className="h-16 w-16 shrink-0 rounded border bg-muted object-contain" />
                       ) : (
-                        <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded border bg-muted text-center text-[10px] leading-tight text-muted-foreground">
+                        <div className="flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-1 rounded border bg-muted text-center text-[10px] leading-tight text-muted-foreground">
+                          <BrandMark />
                           Preparando
                         </div>
                       )}

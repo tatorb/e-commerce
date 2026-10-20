@@ -78,7 +78,7 @@ export function UndoImportButton({
             <Button variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={pending}>
               Cancelar
             </Button>
-            <Button variant="destructive" size="sm" onClick={submit} disabled={pending}>
+            <Button pending={pending} variant="destructive" size="sm" onClick={submit} disabled={pending}>
               {pending ? 'Deshaciendo…' : 'Deshacer importación'}
             </Button>
           </div>

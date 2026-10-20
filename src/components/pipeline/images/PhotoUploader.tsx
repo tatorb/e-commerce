@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils/cn';
 import { BLOB_ACCESS } from '@/lib/file-rules';
 import { ORIGINAL_MAX_BYTES, originalPathname, originalTypeFor } from '@/lib/photo-rules';
 import { addUploadedPhotosAction } from '@/app/a/[cuenta]/pipeline/image-actions';
+import { BrandMark } from '@/components/ui/brand-loader';
 
 // Sube los originales directo al depósito de Vercel y después la app los
 // suma a la línea. Acepta las HEIC del iPhone, que el navegador no muestra.
@@ -81,7 +82,7 @@ export function PhotoUploader({ accountSlug, publicationId, productId }: { accou
           dragging ? 'border-foreground bg-muted/40' : 'border-border hover:border-foreground/40',
         )}
       >
-        <ImagePlus className="h-7 w-7 text-muted-foreground" aria-hidden />
+        {progress ? <BrandMark className="h-7 w-7 rounded" /> : <ImagePlus className="h-7 w-7 text-muted-foreground" aria-hidden />}
         <span className="text-sm">{progress ?? 'Arrastrá los originales o tocá para elegirlos'}</span>
         <span className="text-xs text-muted-foreground">
           Tal como salen de la cámara, sin editar. JPG, PNG, HEIC o TIFF, hasta 100 MB cada una.

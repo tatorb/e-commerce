@@ -144,7 +144,7 @@ export function TitleRulesForm({
         />
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="submit" disabled={pending}>
+        <Button pending={pending} type="submit" disabled={pending}>
           {pending ? 'Guardando…' : 'Guardar reglas'}
         </Button>
         {custom ? (

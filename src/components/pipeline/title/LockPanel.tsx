@@ -24,7 +24,7 @@ export function LockPanel({
   productHref: string;
 }) {
   const action = useStepAction();
-  const decide = (d: TitleLockDecision | null) => action.run(() => decideLockAction(accountSlug, publicationId, d));
+  const decide = (d: TitleLockDecision | null) => action.run(() => decideLockAction(accountSlug, publicationId, d), undefined, String(d));
 
   if (lock.locked === false) {
     return (
@@ -60,7 +60,7 @@ export function LockPanel({
             Decidiste <strong>probar el título nuevo en la copia con cuotas</strong>. Al aprobarlo se guarda como título
             para la copia y esta publicación no cambia.
           </span>
-          <Button size="sm" variant="ghost" onClick={() => decide(null)} disabled={action.pending}>
+          <Button size="sm" variant="ghost" pending={action.running('null')} onClick={() => decide(null)} disabled={action.pending}>
             Cambiar decisión
           </Button>
         </div>
@@ -68,10 +68,10 @@ export function LockPanel({
         <div className="space-y-2">
           <p className="text-sm">Elegí qué hacer:</p>
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" onClick={() => decide('KEEP')} disabled={action.pending}>
+            <Button size="sm" variant="outline" pending={action.running('KEEP')} onClick={() => decide('KEEP')} disabled={action.pending}>
               Mantener título
             </Button>
-            <Button size="sm" onClick={() => decide('TRY_IN_COPY')} disabled={action.pending}>
+            <Button size="sm" pending={action.running('TRY_IN_COPY')} onClick={() => decide('TRY_IN_COPY')} disabled={action.pending}>
               Probar en la copia con cuotas
             </Button>
           </div>

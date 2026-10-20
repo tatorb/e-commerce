@@ -106,7 +106,7 @@ export function RemoveFromPipelineDialog({
           <Button variant="ghost" onClick={() => setOpen(false)} disabled={pending}>
             Cancelar
           </Button>
-          <Button onClick={submit} disabled={pending || !reason}>
+          <Button pending={pending} onClick={submit} disabled={pending || !reason}>
             {pending ? 'Sacando…' : 'Sacar del pipeline'}
           </Button>
         </DialogFooter>

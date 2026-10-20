@@ -74,7 +74,7 @@ export function AppCredentialsForm({
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit" variant="outline" disabled={action.pending || !dirty || !id.trim()}>
+        <Button pending={action.pending} type="submit" variant="outline" disabled={action.pending || !dirty || !id.trim()}>
           {action.pending ? 'Guardando…' : 'Guardar datos de la aplicación'}
         </Button>
         <StatusText status={action.status} />

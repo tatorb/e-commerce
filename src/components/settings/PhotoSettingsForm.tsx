@@ -156,7 +156,7 @@ export function PhotoSettingsForm({ accountSlug, settings, custom }: { accountSl
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="submit" disabled={pending}>
+        <Button pending={pending} type="submit" disabled={pending}>
           {pending ? 'Guardando…' : 'Guardar ajustes'}
         </Button>
         {custom ? (

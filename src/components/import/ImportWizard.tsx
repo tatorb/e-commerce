@@ -59,6 +59,7 @@ import {
   type RunTotals,
 } from '@/app/a/[cuenta]/importar/actions';
 import { ChannelSourceCard, type ChannelStoreInfo, type ReadPacing } from './ChannelSourceCard';
+import { BrandMark } from '@/components/ui/brand-loader';
 
 export type StoreInfo = { id: string; name: string; channelKind: ChannelKind; channelName: string };
 
@@ -391,7 +392,12 @@ export function ImportWizard({
             onRead={(read) => readFromChannel(s, read)}
           />
         ))}
-        {pending ? <p className="text-sm text-muted-foreground">Revisando qué cambia en lo que ya está en la app…</p> : null}
+        {pending ? (
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+            <BrandMark />
+            Revisando qué cambia en lo que ya está en la app…
+          </p>
+        ) : null}
         {reviewError && !pending ? <p className="text-sm text-destructive">{reviewError}</p> : null}
       </>
     ) : null;
@@ -471,7 +477,12 @@ export function ImportWizard({
                 disabled={reading}
                 className="max-w-md"
               />
-              {reading ? <p className="text-sm text-muted-foreground">Leyendo el archivo…</p> : null}
+              {reading ? (
+                <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <BrandMark />
+                  Leyendo el archivo…
+                </p>
+              ) : null}
               {fileError ? <p className="text-sm text-destructive">{fileError}</p> : null}
             </div>
             {table ? (
@@ -615,7 +626,7 @@ export function ImportWizard({
                     className="max-w-sm"
                     maxLength={120}
                   />
-                  <Button type="button" variant="outline" onClick={saveMapping} disabled={pending || !mappingName.trim()}>
+                  <Button pending={pending} type="button" variant="outline" onClick={saveMapping} disabled={pending || !mappingName.trim()}>
                     {pending ? 'Guardando…' : 'Guardar relación'}
                   </Button>
                   {mappingStatus.kind === 'saved' ? <span className="text-sm text-green-600">Guardada.</span> : null}
@@ -629,7 +640,7 @@ export function ImportWizard({
                 <Button type="button" variant="outline" onClick={() => setStep('file')} disabled={pending}>
                   Volver
                 </Button>
-                <Button type="button" onClick={goToReview} disabled={pending || !hasTitle}>
+                <Button pending={pending} type="button" onClick={goToReview} disabled={pending || !hasTitle}>
                   {pending ? 'Revisando…' : 'Siguiente: revisión'}
                 </Button>
                 {reviewError ? <span className="text-sm text-destructive">{reviewError}</span> : null}

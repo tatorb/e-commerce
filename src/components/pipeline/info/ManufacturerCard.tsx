@@ -91,6 +91,7 @@ export function ManufacturerCard({
 
         <div className="flex flex-wrap items-center gap-3">
           <Button
+            pending={pending}
             disabled={pending || !changed}
             onClick={() => run(() => saveManufacturerAction(accountSlug, publicationId, values))}
           >

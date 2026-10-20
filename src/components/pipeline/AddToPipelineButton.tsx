@@ -20,6 +20,7 @@ export function AddToPipelineButton({
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
       <Button
+        pending={add.pending}
         size="sm"
         variant="outline"
         onClick={() => add.run(() => addToPipelineAction(accountSlug, [publicationId]))}

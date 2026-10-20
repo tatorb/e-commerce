@@ -88,7 +88,7 @@ export function BuyerPainsCard({
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <Button disabled={pending || !changed} onClick={() => run(() => saveQuestionsAction(accountSlug, publicationId, values))}>
+          <Button pending={pending} disabled={pending || !changed} onClick={() => run(() => saveQuestionsAction(accountSlug, publicationId, values))}>
             {pending ? 'Guardando…' : 'Guardar preguntas'}
           </Button>
           <StatusText status={status} />

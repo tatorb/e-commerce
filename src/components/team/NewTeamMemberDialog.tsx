@@ -111,7 +111,7 @@ export function NewTeamMemberDialog({ passwordMin }: { passwordMin: number }) {
             <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={pending}>
               Cancelar
             </Button>
-            <Button type="submit" disabled={pending || !name.trim() || !email.trim() || !password}>
+            <Button pending={pending} type="submit" disabled={pending || !name.trim() || !email.trim() || !password}>
               {pending ? 'Creando…' : 'Crear usuario'}
             </Button>
           </DialogFooter>

@@ -10,9 +10,12 @@ export function useStepAction() {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [status, setStatus] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+  // Cuál botón la disparó, para que solo ese muestre que está trabajando.
+  const [key, setKey] = useState<string | null>(null);
 
-  function run(action: () => Promise<Result>, onOk?: () => void) {
+  function run(action: () => Promise<Result>, onOk?: () => void, which?: string) {
     setStatus(null);
+    setKey(which ?? null);
     startTransition(async () => {
       const r = await action();
       if (!r.ok) {
@@ -25,5 +28,5 @@ export function useStepAction() {
     });
   }
 
-  return { run, pending, status, clear: () => setStatus(null) };
+  return { run, pending, running: (which: string) => pending && key === which, status, clear: () => setStatus(null) };
 }

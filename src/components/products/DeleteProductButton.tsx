@@ -76,7 +76,7 @@ export function DeleteProductButton({
             <Button variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={pending}>
               Cancelar
             </Button>
-            <Button variant="destructive" size="sm" onClick={submit} disabled={pending}>
+            <Button pending={pending} variant="destructive" size="sm" onClick={submit} disabled={pending}>
               {pending ? 'Eliminando…' : 'Eliminar definitivamente'}
             </Button>
           </div>

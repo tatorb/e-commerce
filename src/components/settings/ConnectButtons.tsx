@@ -94,7 +94,7 @@ export function ConnectButtons({
                 <Button size="sm" variant="ghost" onClick={() => setConfirming(false)} disabled={pending}>
                   Cancelar
                 </Button>
-                <Button size="sm" variant="destructive" onClick={doDisconnect} disabled={pending}>
+                <Button size="sm" variant="destructive" pending={pending} onClick={doDisconnect} disabled={pending}>
                   Desconectar
                 </Button>
               </div>

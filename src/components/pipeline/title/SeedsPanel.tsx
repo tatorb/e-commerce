@@ -50,7 +50,7 @@ export function SeedsPanel({
         disabled={action.pending}
       />
       <div className="flex flex-wrap items-center gap-2">
-        <Button onClick={() => action.run(() => saveSeedsAction(accountSlug, publicationId, current))} disabled={action.pending || !dirty}>
+        <Button pending={action.pending} onClick={() => action.run(() => saveSeedsAction(accountSlug, publicationId, current))} disabled={action.pending || !dirty}>
           {action.pending ? 'Guardando…' : 'Guardar semillas'}
         </Button>
         {fromFicha.length > 0 ? (

@@ -84,7 +84,7 @@ export function PublicationCodeCard({
                 placeholder={channel.externalIdPlaceholder}
                 disabled={action.pending}
               />
-              <Button type="submit" disabled={action.pending || !value.trim()}>
+              <Button pending={action.pending} type="submit" disabled={action.pending || !value.trim()}>
                 {action.pending ? 'Guardando…' : 'Guardar'}
               </Button>
               {externalId ? (

@@ -59,7 +59,7 @@ export function UndoAppliedButton({ accountSlug, publicationId }: { accountSlug:
             <Button variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={pending}>
               Cancelar
             </Button>
-            <Button variant="destructive" size="sm" onClick={submit} disabled={pending}>
+            <Button pending={pending} variant="destructive" size="sm" onClick={submit} disabled={pending}>
               {pending ? 'Volviendo…' : 'Volver a Aprobado'}
             </Button>
           </div>

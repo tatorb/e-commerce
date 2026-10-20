@@ -136,7 +136,7 @@ export function ProductInfoForm({
         />
       </div>
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit" disabled={action.pending || !dirty}>
+        <Button pending={action.pending} type="submit" disabled={action.pending || !dirty}>
           {action.pending ? 'Guardando…' : 'Guardar en la ficha'}
         </Button>
         {dirty ? <span className="text-sm text-muted-foreground">Hay cambios sin guardar.</span> : null}

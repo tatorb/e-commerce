@@ -41,7 +41,7 @@ export function ClarificationsCard({
           disabled={pending}
         />
         <div className="flex flex-wrap items-center gap-3">
-          <Button disabled={pending || html === initial} onClick={() => run(() => saveClarificationsAction(accountSlug, publicationId, html))}>
+          <Button pending={pending} disabled={pending || html === initial} onClick={() => run(() => saveClarificationsAction(accountSlug, publicationId, html))}>
             {pending ? 'Guardando…' : 'Guardar'}
           </Button>
           <StatusText status={status} />

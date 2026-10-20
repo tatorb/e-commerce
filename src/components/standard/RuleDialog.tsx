@@ -218,7 +218,7 @@ export function RuleDialog({
             <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={pending}>
               Cancelar
             </Button>
-            <Button type="submit" disabled={pending || !values.name.trim()}>
+            <Button pending={pending} type="submit" disabled={pending || !values.name.trim()}>
               {pending ? 'Guardando…' : rule ? 'Guardar regla' : 'Crear regla'}
             </Button>
           </DialogFooter>

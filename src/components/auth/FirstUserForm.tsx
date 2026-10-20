@@ -83,7 +83,7 @@ export function FirstUserForm({ passwordMin }: { passwordMin: number }) {
             />
           </div>
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
-          <Button type="submit" className="w-full" disabled={pending}>
+          <Button pending={pending} type="submit" className="w-full" disabled={pending}>
             {pending ? 'Creando…' : 'Crear usuario y entrar'}
           </Button>
         </form>

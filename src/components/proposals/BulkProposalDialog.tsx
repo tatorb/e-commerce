@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2, WandSparkles } from 'lucide-react';
+import { WandSparkles } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { formatUsd, plural } from '@/lib/format';
 import { generateProposalAction } from '@/app/a/[cuenta]/publicaciones/proposal-actions';
 import type { GenerateOutcome } from '@/lib/proposals';
+import { BrandMark } from '@/components/ui/brand-loader';
 
 type Item = { id: string; title: string };
 type Phase = 'idle' | 'running' | 'done';
@@ -165,7 +166,7 @@ export function BulkProposalDialog({
             <p className="tabular-nums">
               {phase === 'running' ? (
                 <span className="inline-flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <BrandMark />
                   Van {done} de {total} · {ok} {ok === 1 ? 'lista' : 'listas'} · gastado {formatUsd(spent)}
                 </span>
               ) : (

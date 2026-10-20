@@ -79,7 +79,7 @@ export function ChangePasswordForm({ passwordMin }: { passwordMin: number }) {
         </div>
       </div>
       <div className="flex items-center gap-3">
-        <Button type="submit" disabled={pending || !current || !p1 || !p2}>
+        <Button pending={pending} type="submit" disabled={pending || !current || !p1 || !p2}>
           {pending ? 'Guardando…' : 'Cambiar contraseña'}
         </Button>
         {status.kind === 'success' ? (

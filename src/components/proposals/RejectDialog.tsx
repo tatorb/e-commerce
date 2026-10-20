@@ -90,7 +90,7 @@ export function RejectDialog({
           <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={pending}>
             Cancelar
           </Button>
-          <Button type="button" variant="destructive" onClick={submit} disabled={pending}>
+          <Button pending={pending} type="button" variant="destructive" onClick={submit} disabled={pending}>
             {pending ? 'Rechazando…' : 'Rechazar propuesta'}
           </Button>
         </DialogFooter>

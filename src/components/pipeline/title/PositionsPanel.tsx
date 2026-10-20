@@ -115,16 +115,24 @@ function SearchRow({
                 () =>
                   savePositionAction(accountSlug, publicationId, query, notFound ? null : Number(page), notFound ? null : Number(position)),
                 () => setPosition(''),
+                'save',
               )
             }
+            pending={action.running('save')}
             disabled={action.pending || (!notFound && !position.trim())}
           >
             Guardar
           </Button>
           {auto ? (
-            <Button size="sm" variant="outline" onClick={() => action.run(() => readPositionAction(accountSlug, publicationId, query))} disabled={action.pending}>
+            <Button
+              pending={action.running('read')}
+              size="sm"
+              variant="outline"
+              onClick={() => action.run(() => readPositionAction(accountSlug, publicationId, query), undefined, 'read')}
+              disabled={action.pending}
+            >
               <Search className="h-3.5 w-3.5" />
-              {action.pending ? 'Leyendo…' : 'Leer sola'}
+              {action.running('read') ? 'Leyendo…' : 'Leer sola'}
             </Button>
           ) : null}
           <StatusText status={action.status} />

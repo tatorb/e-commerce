@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { AlertTriangle, Check, ChevronDown, Clock, Download, Loader2, RotateCcw, SkipForward, Sparkles } from 'lucide-react';
+import { AlertTriangle, Check, ChevronDown, Clock, Download, RotateCcw, SkipForward, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -19,6 +19,7 @@ import {
 } from '@/app/a/[cuenta]/pipeline/image-actions';
 import { CompareView } from './CompareView';
 import type { PhotoView, RunView } from './types';
+import { BrandMark } from '@/components/ui/brand-loader';
 
 // La línea de una foto: el antes y el después y cada uno de sus ajustes, con
 // lo que dijo Claude, los valores y si se aplica, para aprobar o cambiar los
@@ -43,7 +44,7 @@ function StepIcon({ run }: { run: RunView | null }) {
     case 'REVIEW':
       return <span className={cn(cls, 'rounded-full bg-amber-500')} />;
     case 'PROCESSING':
-      return <Loader2 className={cn(cls, 'animate-spin text-primary')} />;
+      return <BrandMark className={cls} />;
     case 'QUEUED':
       return <Clock className={cn(cls, 'text-muted-foreground')} />;
     case 'FAILED':
@@ -140,7 +141,7 @@ function requestFrom(parts: StepPart[], edits: Edits): StepRequest | null {
 
 function RunPanel({ accountSlug, run, photo, compact }: { accountSlug: string; run: RunView; photo: PhotoView; compact: boolean }) {
   const step = PHOTO_STEPS[run.step];
-  const { run: act, pending, status } = useStepAction();
+  const { run: act, pending, running, status } = useStepAction();
   const [edits, setEdits] = useState<Edits>(() => initialEdits(run.parts));
   const [showParts, setShowParts] = useState(!compact);
   // Al abrir o cerrar otras fotos, los ajustes se pliegan o se despliegan, sin perder lo que se cambió.
@@ -159,10 +160,13 @@ function RunPanel({ accountSlug, run, photo, compact }: { accountSlug: string; r
 
   function redo() {
     const request = requestFrom(run.parts, edits);
-    act(() =>
-      request
-        ? redoPhotoStepAction(accountSlug, run.id, request)
-        : Promise.resolve({ ok: false as const, error: 'Revisá los valores: tienen que ser números.' }),
+    act(
+      () =>
+        request
+          ? redoPhotoStepAction(accountSlug, run.id, request)
+          : Promise.resolve({ ok: false as const, error: 'Revisá los valores: tienen que ser números.' }),
+      undefined,
+      'redo',
     );
   }
 
@@ -184,7 +188,7 @@ function RunPanel({ accountSlug, run, photo, compact }: { accountSlug: string; r
       {working ? (
         <div className="flex items-start gap-3 rounded-md border bg-muted/40 p-4 text-sm">
           {run.status === 'PROCESSING' ? (
-            <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />
+            <BrandMark className="mt-0.5 h-5 w-5" />
           ) : (
             <Clock className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
           )}
@@ -211,12 +215,18 @@ function RunPanel({ accountSlug, run, photo, compact }: { accountSlug: string; r
             <span>Este paso falló 3 veces. {run.error}</span>
           </p>
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" disabled={pending} onClick={() => act(() => retryPhotoStepAction(accountSlug, run.id))}>
+            <Button size="sm" pending={running('retry')} disabled={pending} onClick={() => act(() => retryPhotoStepAction(accountSlug, run.id), undefined, 'retry')}>
               <RotateCcw className="h-4 w-4" />
               Reintentar
             </Button>
             {run.step < PHOTO_STEPS.length - 1 ? (
-              <Button size="sm" variant="outline" disabled={pending} onClick={() => act(() => skipPhotoStepAction(accountSlug, run.id))}>
+              <Button
+                size="sm"
+                variant="outline"
+                pending={running('skip')}
+                disabled={pending}
+                onClick={() => act(() => skipPhotoStepAction(accountSlug, run.id), undefined, 'skip')}
+              >
                 <SkipForward className="h-4 w-4" />
                 Saltar paso
               </Button>
@@ -283,12 +293,23 @@ function RunPanel({ accountSlug, run, photo, compact }: { accountSlug: string; r
           <div className="sticky bottom-0 z-10 -mx-4 space-y-1 border-t bg-background px-4 py-3">
             <div className="flex flex-wrap items-center gap-2">
               {run.status === 'REVIEW' ? (
-                <Button size="sm" disabled={pending || edited} onClick={() => act(() => approvePhotoStepAction(accountSlug, run.id))}>
+                <Button
+                  size="sm"
+                  pending={running('approve')}
+                  disabled={pending || edited}
+                  onClick={() => act(() => approvePhotoStepAction(accountSlug, run.id), undefined, 'approve')}
+                >
                   <Check className="h-4 w-4" />
                   Aprobar
                 </Button>
               ) : null}
-              <Button size="sm" variant={run.status === 'REVIEW' && !edited ? 'outline' : 'default'} disabled={pending} onClick={redo}>
+              <Button
+                size="sm"
+                variant={run.status === 'REVIEW' && !edited ? 'outline' : 'default'}
+                pending={running('redo')}
+                disabled={pending}
+                onClick={redo}
+              >
                 <RotateCcw className="h-4 w-4" />
                 {run.status === 'REVIEW' || run.step === PHOTO_STEPS.length - 1 ? 'Rehacer con estos valores' : 'Rehacer desde acá con estos valores'}
               </Button>

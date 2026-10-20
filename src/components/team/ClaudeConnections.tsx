@@ -77,6 +77,7 @@ export function ClaudeConnections({ rows }: { rows: ClaudeConnectionRow[] }) {
               <Button
                 size="sm"
                 variant="destructive"
+                pending={pending}
                 disabled={pending}
                 onClick={() => run(disconnectAllClaudeAction, 'Se desconectaron todas.')}
               >

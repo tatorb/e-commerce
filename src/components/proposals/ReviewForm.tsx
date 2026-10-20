@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, Check, ListChecks, Loader2, Pencil, RotateCcw, X } from 'lucide-react';
+import { AlertTriangle, Check, ListChecks, Pencil, RotateCcw, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -298,8 +298,8 @@ export function ReviewForm({
           </div>
         ) : null}
         <div className="flex flex-wrap items-center gap-2">
-          <Button type="button" onClick={() => approve(false)} disabled={disabled || problems.length > 0}>
-            {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+          <Button type="button" pending={pending} onClick={() => approve(false)} disabled={disabled || problems.length > 0}>
+            <Check className="h-4 w-4" />
             Aprobar
           </Button>
           <Button

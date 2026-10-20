@@ -40,6 +40,7 @@ export function DeleteRuleButton({ accountSlug, ruleId, name }: { accountSlug: s
               Cancelar
             </Button>
             <Button
+              pending={pending}
               variant="destructive"
               size="sm"
               disabled={pending}
@@ -68,6 +69,7 @@ export function LoadSuggestedButton({ accountSlug, channelId }: { accountSlug: s
   return (
     <div className="flex flex-col items-center gap-2">
       <Button
+        pending={pending}
         size="sm"
         variant="outline"
         disabled={pending}

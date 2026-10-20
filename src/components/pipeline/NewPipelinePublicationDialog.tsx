@@ -237,7 +237,7 @@ export function NewPipelinePublicationDialog({ accountSlug, stores }: { accountS
           <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={pending}>
             Cancelar
           </Button>
-          <Button type="button" onClick={submit} disabled={pending || !ready}>
+          <Button pending={pending} type="button" onClick={submit} disabled={pending || !ready}>
             {pending ? 'Creando…' : 'Crear y abrir'}
           </Button>
         </DialogFooter>

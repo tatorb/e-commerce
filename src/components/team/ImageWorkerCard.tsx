@@ -73,14 +73,14 @@ export function ImageWorkerCard({ hasKey, keyHint }: { hasKey: boolean; keyHint:
                 <Button size="sm" variant="ghost" onClick={() => setConfirming(null)} disabled={pending}>
                   Cancelar
                 </Button>
-                <Button size="sm" onClick={create} disabled={pending}>
+                <Button size="sm" pending={pending} onClick={create} disabled={pending}>
                   Crear llave nueva
                 </Button>
               </div>
             </PopoverContent>
           </Popover>
         ) : (
-          <Button size="sm" onClick={create} disabled={pending}>
+          <Button size="sm" pending={pending} onClick={create} disabled={pending}>
             <KeyRound className="h-4 w-4" />
             Crear llave
           </Button>
@@ -101,7 +101,7 @@ export function ImageWorkerCard({ hasKey, keyHint }: { hasKey: boolean; keyHint:
                 <Button size="sm" variant="ghost" onClick={() => setConfirming(null)} disabled={pending}>
                   Cancelar
                 </Button>
-                <Button size="sm" variant="destructive" onClick={revoke} disabled={pending}>
+                <Button size="sm" variant="destructive" pending={pending} onClick={revoke} disabled={pending}>
                   Cortar llave
                 </Button>
               </div>

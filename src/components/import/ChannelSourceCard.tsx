@@ -207,7 +207,7 @@ export function ChannelSourceCard({
               </p>
             </fieldset>
             <div className="flex flex-wrap items-center gap-3">
-              <Button type="button" onClick={read} disabled={reading || disabled || total === 0}>
+              <Button type="button" pending={reading} onClick={read} disabled={reading || disabled || total === 0}>
                 {reading
                   ? 'Leyendo…'
                   : resumable

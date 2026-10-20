@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState, useSyncExternalStore, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { CheckCheck, Loader2 } from 'lucide-react';
+import { CheckCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -197,8 +197,8 @@ export function ApplyGuideView({
                 disabled={pending}
               />
             </div>
-            <Button type="button" onClick={mark} disabled={pending || !day}>
-              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCheck className="h-4 w-4" />}
+            <Button type="button" pending={pending} onClick={mark} disabled={pending || !day}>
+              <CheckCheck className="h-4 w-4" />
               Marcar como aplicada
             </Button>
             {error ? <span className="text-sm text-destructive">{error}</span> : null}

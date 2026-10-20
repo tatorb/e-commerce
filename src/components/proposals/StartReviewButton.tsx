@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { ClipboardCheck, Loader2 } from 'lucide-react';
+import { ClipboardCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { startReviewAction } from '@/app/a/[cuenta]/publicaciones/review-actions';
 
@@ -39,8 +39,8 @@ export function StartReviewButton({
 
   return (
     <div className="space-y-1.5">
-      <Button type="button" size={size} onClick={start} disabled={pending}>
-        {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardCheck className="h-4 w-4" />}
+      <Button type="button" size={size} pending={pending} onClick={start} disabled={pending}>
+        <ClipboardCheck className="h-4 w-4" />
         Revisar propuesta
       </Button>
       {error ? <p className="text-sm text-destructive">{error}</p> : null}

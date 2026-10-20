@@ -223,13 +223,13 @@ export function PublicationForm({
             <Button type="button" variant="outline" onClick={onCancel} disabled={pending}>
               Cancelar
             </Button>
-            <Button type="submit" disabled={pending || titleTooLong}>
+            <Button pending={pending} type="submit" disabled={pending || titleTooLong}>
               {pending ? 'Creando…' : 'Crear publicación'}
             </Button>
           </>
         ) : (
           <>
-            <Button type="submit" disabled={pending || !dirty || titleTooLong}>
+            <Button pending={pending} type="submit" disabled={pending || !dirty || titleTooLong}>
               {pending ? 'Guardando…' : 'Guardar publicación'}
             </Button>
             {status.kind === 'success' ? <span className="text-sm text-green-600">Guardado.</span> : null}

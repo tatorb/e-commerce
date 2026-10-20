@@ -10,6 +10,7 @@ import type { Capture } from '@/lib/queries/title-step';
 import { deleteCaptureAction, pasteSuggestionsAction, readSuggestionsAction } from '@/app/a/[cuenta]/pipeline/step-actions';
 import { useStepAction } from '../useStepAction';
 import { StatusText } from '../StatusText';
+import { BrandMark } from '@/components/ui/brand-loader';
 
 // Lo que sugiere el buscador del canal para cada semilla: leído por la app o
 // pegado a mano. Todo queda guardado con fecha.
@@ -66,7 +67,8 @@ function SeedRow({
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => action.run(() => readSuggestionsAction(accountSlug, publicationId, seed, false))}
+                onClick={() => action.run(() => readSuggestionsAction(accountSlug, publicationId, seed, false), undefined, 'read')}
+                pending={action.running('read')}
                 disabled={action.pending}
               >
                 <Search className="h-3.5 w-3.5" />
@@ -75,7 +77,8 @@ function SeedRow({
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => action.run(() => readSuggestionsAction(accountSlug, publicationId, seed, true))}
+                onClick={() => action.run(() => readSuggestionsAction(accountSlug, publicationId, seed, true), undefined, 'expand')}
+                pending={action.running('expand')}
                 disabled={action.pending}
                 title="Suma la semilla con cada letra de la a a la z"
               >
@@ -89,7 +92,12 @@ function SeedRow({
           </Button>
         </div>
       </div>
-      {action.pending ? <p className="text-xs text-muted-foreground">Leyendo… puede tardar unos segundos.</p> : null}
+      {action.running('read') || action.running('expand') ? (
+        <p className="flex items-center gap-2 text-xs text-muted-foreground">
+          <BrandMark />
+          Leyendo… puede tardar unos segundos.
+        </p>
+      ) : null}
       <StatusText status={action.status} className="block" />
       {pasting ? (
         <div className="space-y-2">
@@ -107,8 +115,10 @@ function SeedRow({
                   setPasting(false);
                   setOpen(true);
                 },
+                'paste',
               )
             }
+            pending={action.running('paste')}
             disabled={action.pending || !text.trim()}
           >
             Guardar sugerencias

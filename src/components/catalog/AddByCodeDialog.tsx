@@ -66,7 +66,7 @@ export function AddByCodeDialog({ accountSlug, example }: { accountSlug: string;
           <Button variant="ghost" onClick={() => setOpen(false)} disabled={add.pending}>
             Cerrar
           </Button>
-          <Button onClick={() => add.run(() => addByCodeAction(accountSlug, text))} disabled={add.pending || !text.trim()}>
+          <Button pending={add.pending} onClick={() => add.run(() => addByCodeAction(accountSlug, text))} disabled={add.pending || !text.trim()}>
             {add.pending ? 'Agregando…' : 'Agregar al pipeline'}
           </Button>
         </DialogFooter>

@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils/cn';
 import { approveTitleAction, generateTitlesAction } from '@/app/a/[cuenta]/pipeline/step-actions';
 import { useStepAction } from '../useStepAction';
 import { StatusText } from '../StatusText';
+import { BrandLoader } from '@/components/ui/brand-loader';
 
 // Las 3 propuestas de la IA, el título que se está armando con el chequeo en
 // vivo y el botón para aprobarlo. El chequeo y la cobertura los hace la app.
@@ -102,6 +103,7 @@ export function TitleComposer({
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-3">
           <Button
+            pending={ai.pending}
             variant="outline"
             onClick={() => ai.run(() => generateTitlesAction(accountSlug, publicationId))}
             disabled={ai.pending || usableWords.length === 0 || aiDisabledReason !== null}
@@ -118,6 +120,10 @@ export function TitleComposer({
         </div>
         <StatusText status={ai.status} />
       </div>
+
+      {ai.pending ? (
+        <BrandLoader label="La IA está armando 3 títulos…" hint="Puede tardar hasta un minuto." className="rounded-md border py-8" />
+      ) : null}
 
       {proposals.length > 0 ? (
         <ul className="grid gap-3 lg:grid-cols-3">
@@ -167,6 +173,7 @@ export function TitleComposer({
         ) : null}
         <div className="flex flex-wrap items-center gap-3 pt-1">
           <Button
+            pending={approve.pending}
             onClick={() => approve.run(() => approveTitleAction(accountSlug, publicationId, title, aiTitle))}
             disabled={approve.pending || blocked || check.errors.length > 0}
           >

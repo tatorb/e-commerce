@@ -49,12 +49,12 @@ export function StepActions({
           </Button>
         ) : null}
         {next ? (
-          <Button onClick={() => move('advance')} disabled={pending}>
+          <Button pending={pending} onClick={() => move('advance')} disabled={pending}>
             {pending ? 'Moviendo…' : `Avanzar a ${PIPELINE_STEP_LABEL[next]}`}
             <ArrowRight className="h-4 w-4" />
           </Button>
         ) : (
-          <Button onClick={() => move('complete')} disabled={pending || completeBlocked !== null}>
+          <Button pending={pending} onClick={() => move('complete')} disabled={pending || completeBlocked !== null}>
             <Check className="h-4 w-4" />
             {pending ? 'Guardando…' : 'Marcar como corregida'}
           </Button>

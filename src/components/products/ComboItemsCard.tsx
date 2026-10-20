@@ -88,7 +88,7 @@ export function ComboItemsCard({ accountSlug, comboId, initial }: { accountSlug:
         />
 
         <div className="flex flex-wrap items-center gap-3">
-          <Button onClick={save} disabled={action.pending || !dirty}>
+          <Button pending={action.pending} onClick={save} disabled={action.pending || !dirty}>
             {action.pending ? 'Guardando…' : 'Guardar'}
           </Button>
           {dirty ? <span className="text-sm text-muted-foreground">Hay cambios sin guardar.</span> : null}

@@ -74,11 +74,19 @@ const config: Config = {
           from: { transform: 'translateX(-100%)' },
           to: { transform: 'translateX(250%)' },
         },
+        // El logo en las esperas: un latido doble y una pausa, como un corazón.
+        'brand-beat': {
+          '0%, 60%, 100%': { transform: 'scale(1)', opacity: '0.8' },
+          '15%': { transform: 'scale(1.1)', opacity: '1' },
+          '30%': { transform: 'scale(1)', opacity: '0.9' },
+          '45%': { transform: 'scale(1.06)', opacity: '1' },
+        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
         'accordion-up': 'accordion-up 0.2s ease-out',
         'nav-progress': 'nav-progress 1.1s ease-in-out infinite',
+        'brand-beat': 'brand-beat 1.4s ease-in-out infinite',
       },
     },
   },

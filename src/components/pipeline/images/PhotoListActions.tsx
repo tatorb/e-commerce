@@ -23,6 +23,7 @@ export function ChannelPhotosButton({
   return (
     <div className="flex flex-wrap items-center gap-2">
       <Button
+        pending={pending}
         size="sm"
         variant="outline"
         disabled={pending || count === 0}
@@ -46,7 +47,7 @@ export function ArchivePhotoButton({ accountSlug, editId }: { accountSlug: strin
       {confirming ? (
         <>
           <span className="text-sm">¿La sacás? El original queda guardado.</span>
-          <Button size="sm" variant="destructive" disabled={pending} onClick={() => run(() => archivePhotoAction(accountSlug, editId))}>
+          <Button size="sm" variant="destructive" pending={pending} disabled={pending} onClick={() => run(() => archivePhotoAction(accountSlug, editId))}>
             Sacar
           </Button>
           <Button size="sm" variant="ghost" disabled={pending} onClick={() => setConfirming(false)}>
