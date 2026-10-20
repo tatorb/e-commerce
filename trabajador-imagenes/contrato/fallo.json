@@ -1,6 +1,6 @@
 {
   "protocolo": 2,
-  "id": "corrida-terminar",
+  "id": "corrida-corregir",
   "turno": 2,
   "ok": false,
   "error": "La Mac se quedó sin memoria procesando la foto."

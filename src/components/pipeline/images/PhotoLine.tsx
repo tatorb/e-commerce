@@ -20,9 +20,10 @@ import {
 import { CompareView } from './CompareView';
 import type { PhotoView, RunView } from './types';
 
-// La línea de una foto: los 2 pasos arriba y, abajo, el paso elegido con su
-// antes y después y cada uno de sus ajustes, con lo que dijo Claude, los
-// valores y si se aplica, para aprobar o rehacer.
+// La línea de una foto: el antes y el después y cada uno de sus ajustes, con
+// lo que dijo Claude, los valores y si se aplica, para aprobar o cambiar los
+// valores que haga falta y rehacer todo junto. Con más de un paso, los pasos
+// van arriba.
 
 const ORIGIN_LABEL: Record<string, string> = {
   claude: 'Claude',
@@ -65,32 +66,34 @@ export function PhotoLine({ accountSlug, photo }: { accountSlug: string; photo: 
 
   return (
     <div className="space-y-4">
-      <ol className="flex gap-1 overflow-x-auto pb-1" aria-label="Pasos de la foto">
-        {PHOTO_STEPS.map((s, i) => {
-          const r = photo.steps[i];
-          return (
-            <li key={s.key} className="shrink-0">
-              <button
-                type="button"
-                onClick={() => setSelected(i)}
-                disabled={!r}
-                aria-current={selected === i ? 'step' : undefined}
-                title={r ? `${s.label}: ${RUN_STATUS_LABEL[r.status]}` : s.label}
-                className={cn(
-                  'flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs transition-colors',
-                  selected === i ? 'border-foreground bg-muted font-medium' : 'hover:bg-muted/60',
-                  !r && 'cursor-default opacity-50 hover:bg-transparent',
-                )}
-              >
-                <StepIcon run={r} />
-                <span>
-                  {i + 1}. {s.label}
-                </span>
-              </button>
-            </li>
-          );
-        })}
-      </ol>
+      {PHOTO_STEPS.length > 1 ? (
+        <ol className="flex gap-1 overflow-x-auto pb-1" aria-label="Pasos de la foto">
+          {PHOTO_STEPS.map((s, i) => {
+            const r = photo.steps[i];
+            return (
+              <li key={s.key} className="shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setSelected(i)}
+                  disabled={!r}
+                  aria-current={selected === i ? 'step' : undefined}
+                  title={r ? `${s.label}: ${RUN_STATUS_LABEL[r.status]}` : s.label}
+                  className={cn(
+                    'flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs transition-colors',
+                    selected === i ? 'border-foreground bg-muted font-medium' : 'hover:bg-muted/60',
+                    !r && 'cursor-default opacity-50 hover:bg-transparent',
+                  )}
+                >
+                  <StepIcon run={r} />
+                  <span>
+                    {i + 1}. {s.label}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+      ) : null}
       {/* Con el estado en la clave: cuando el paso llega para revisar, los valores arrancan de lo que hizo el trabajador. */}
       {run ? <RunPanel key={`${run.id}:${run.status}`} accountSlug={accountSlug} run={run} photo={photo} /> : null}
     </div>
@@ -159,7 +162,8 @@ function RunPanel({ accountSlug, run, photo }: { accountSlug: string; run: RunVi
     <div className="space-y-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 className="text-base font-semibold">
-          Paso {run.step + 1} de {PHOTO_STEPS.length} · {step.label}
+          {PHOTO_STEPS.length > 1 ? `Paso ${run.step + 1} de ${PHOTO_STEPS.length} · ` : ''}
+          {step.label}
         </h3>
         <span className="text-sm text-muted-foreground">
           {run.decided ?? RUN_STATUS_LABEL[run.status]}
@@ -179,7 +183,7 @@ function RunPanel({ accountSlug, run, photo }: { accountSlug: string; run: RunVi
           <div className="space-y-1">
             <p>
               {run.status === 'PROCESSING'
-                ? 'El trabajador está haciendo los ajustes en la Mac. La pantalla se actualiza sola.'
+                ? 'El trabajador está haciendo los ajustes en la Mac. Tarda menos de un minuto y la pantalla se actualiza sola.'
                 : 'En cola: el trabajador lo toma en cuanto se desocupe. Si está apagado, lo toma cuando se prenda.'}
             </p>
             {run.requested ? <p className="text-muted-foreground">Con los valores que pediste.</p> : null}
@@ -259,25 +263,28 @@ function RunPanel({ accountSlug, run, photo }: { accountSlug: string; run: RunVi
             </div>
           ) : null}
 
-          <div className="flex flex-wrap items-center gap-2">
-            {run.status === 'REVIEW' ? (
-              <Button size="sm" disabled={pending || edited} onClick={() => act(() => approvePhotoStepAction(accountSlug, run.id))}>
-                <Check className="h-4 w-4" />
-                Aprobar
+          {/* Los ajustes ocupan mucho: los botones quedan siempre a la vista abajo de la pantalla. */}
+          <div className="sticky bottom-0 z-10 -mx-4 space-y-1 border-t bg-background px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              {run.status === 'REVIEW' ? (
+                <Button size="sm" disabled={pending || edited} onClick={() => act(() => approvePhotoStepAction(accountSlug, run.id))}>
+                  <Check className="h-4 w-4" />
+                  Aprobar
+                </Button>
+              ) : null}
+              <Button size="sm" variant={run.status === 'REVIEW' && !edited ? 'outline' : 'default'} disabled={pending} onClick={redo}>
+                <RotateCcw className="h-4 w-4" />
+                {run.status === 'REVIEW' || run.step === PHOTO_STEPS.length - 1 ? 'Rehacer con estos valores' : 'Rehacer desde acá con estos valores'}
               </Button>
+              <StatusText status={status} />
+            </div>
+            {edited && run.status === 'REVIEW' ? (
+              <p className="text-xs text-muted-foreground">Cambiaste valores: rehacé para ver cómo queda antes de aprobar.</p>
             ) : null}
-            <Button size="sm" variant={run.status === 'REVIEW' && !edited ? 'outline' : 'default'} disabled={pending} onClick={redo}>
-              <RotateCcw className="h-4 w-4" />
-              {run.status === 'REVIEW' ? 'Rehacer con estos valores' : 'Rehacer desde acá con estos valores'}
-            </Button>
-            <StatusText status={status} />
+            {run.status !== 'REVIEW' && run.step < PHOTO_STEPS.length - 1 ? (
+              <p className="text-xs text-muted-foreground">Rehacer este paso vuelve a hacer también el que viene después.</p>
+            ) : null}
           </div>
-          {edited && run.status === 'REVIEW' ? (
-            <p className="text-xs text-muted-foreground">Cambiaste valores: rehacé el paso para ver cómo queda antes de aprobarlo.</p>
-          ) : null}
-          {run.status !== 'REVIEW' && run.step < PHOTO_STEPS.length - 1 ? (
-            <p className="text-xs text-muted-foreground">Rehacer este paso vuelve a hacer también el que viene después.</p>
-          ) : null}
         </>
       ) : null}
 

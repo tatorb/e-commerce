@@ -1,9 +1,89 @@
 {
   "protocolo": 2,
-  "id": "corrida-terminar",
+  "id": "corrida-corregir",
   "turno": 2,
   "ok": true,
   "partes": [
+    {
+      "paso": "lente",
+      "aplicado": false,
+      "no_aplica": "La foto no trae datos de lente: el teléfono ya la corrigió.",
+      "propuesta": null,
+      "valores": {},
+      "medidas": { "camara": "Apple iPhone 13" },
+      "parametros": [
+        { "clave": "distorsion", "etiqueta": "Corregir deformación", "ayuda": "Endereza las líneas que el lente curva.", "minimo": 0, "maximo": 1, "defecto": 1, "paso": 1, "unidad": "", "tipo": "si_no" },
+        { "clave": "aberracion", "etiqueta": "Corregir bordes de color", "ayuda": "Quita los bordes de color en los contornos.", "minimo": 0, "maximo": 1, "defecto": 1, "paso": 1, "unidad": "", "tipo": "si_no" },
+        { "clave": "vineta", "etiqueta": "Corregir viñeta", "ayuda": "Aclara las esquinas oscurecidas por el lente.", "minimo": 0, "maximo": 1, "defecto": 1, "paso": 1, "unidad": "", "tipo": "si_no" }
+      ],
+      "nota": null,
+      "uso_claude": null,
+      "segundos": 0.2
+    },
+    {
+      "paso": "perspectiva",
+      "aplicado": true,
+      "no_aplica": null,
+      "propuesta": { "valores": { "giro": 0.3, "vertical": 0, "horizontal": 0 }, "razon": "La base está apenas torcida: con 0,3° queda derecha.", "origen": "claude", "aviso": null },
+      "valores": { "giro": 0.3, "vertical": 0, "horizontal": 0 },
+      "medidas": { "angulo_lineas": -0.3, "lineas": 14 },
+      "parametros": [
+        { "clave": "giro", "etiqueta": "Giro", "ayuda": "Gira la foto. Positivo, en sentido horario.", "minimo": -10, "maximo": 10, "defecto": 0, "paso": 0.1, "unidad": "°", "tipo": "numero" },
+        { "clave": "vertical", "etiqueta": "Perspectiva vertical", "ayuda": "Positivo abre la parte de arriba, para verticales que se juntan arriba.", "minimo": -15, "maximo": 15, "defecto": 0, "paso": 0.5, "unidad": " %", "tipo": "numero" },
+        { "clave": "horizontal", "etiqueta": "Perspectiva horizontal", "ayuda": "Positivo abre el lado izquierdo.", "minimo": -15, "maximo": 15, "defecto": 0, "paso": 0.5, "unidad": " %", "tipo": "numero" }
+      ],
+      "nota": null,
+      "uso_claude": { "modelo": "claude-opus-5-5", "input_tokens": 2100, "output_tokens": 80, "costo_usd": 0.01 },
+      "segundos": 4.8
+    },
+    {
+      "paso": "blancos",
+      "aplicado": true,
+      "no_aplica": null,
+      "propuesta": null,
+      "valores": { "intensidad": 60, "temperatura": 0, "tinte": 2 },
+      "medidas": { "fondo_rgb": [231, 226, 214] },
+      "parametros": [
+        { "clave": "intensidad", "etiqueta": "Intensidad", "ayuda": "Cuánto de la corrección medida se aplica.", "minimo": 0, "maximo": 100, "defecto": 100, "paso": 1, "unidad": " %", "tipo": "numero" },
+        { "clave": "temperatura", "etiqueta": "Tono", "ayuda": "Ajuste fino: positivo más cálido, negativo más frío.", "minimo": -30, "maximo": 30, "defecto": 0, "paso": 1, "unidad": "", "tipo": "numero" },
+        { "clave": "tinte", "etiqueta": "Tinte", "ayuda": "Ajuste fino: positivo más magenta, negativo más verde.", "minimo": -30, "maximo": 30, "defecto": 0, "paso": 1, "unidad": "", "tipo": "numero" }
+      ],
+      "nota": null,
+      "uso_claude": null,
+      "segundos": 1.9
+    },
+    {
+      "paso": "luces",
+      "aplicado": false,
+      "no_aplica": null,
+      "propuesta": null,
+      "valores": {},
+      "medidas": {},
+      "parametros": [
+        { "clave": "exposicion", "etiqueta": "Exposición", "ayuda": "Aclara u oscurece toda la foto, en pasos de luz.", "minimo": -1, "maximo": 1, "defecto": 0, "paso": 0.05, "unidad": " EV", "tipo": "numero" },
+        { "clave": "sombras", "etiqueta": "Sombras", "ayuda": "Abre las zonas oscuras.", "minimo": 0, "maximo": 60, "defecto": 0, "paso": 1, "unidad": "", "tipo": "numero" },
+        { "clave": "luces", "etiqueta": "Luces", "ayuda": "Recupera detalle en las zonas claras.", "minimo": 0, "maximo": 60, "defecto": 0, "paso": 1, "unidad": "", "tipo": "numero" },
+        { "clave": "claridad", "etiqueta": "Claridad", "ayuda": "Realza el contraste local, el detalle de la pieza.", "minimo": 0, "maximo": 40, "defecto": 15, "paso": 1, "unidad": "", "tipo": "numero" }
+      ],
+      "nota": null,
+      "uso_claude": null,
+      "segundos": 0
+    },
+    {
+      "paso": "color",
+      "aplicado": true,
+      "no_aplica": null,
+      "propuesta": { "valores": { "saturacion": -5, "vivacidad": 0 }, "razon": "El metal tira a amarillo: bajar un poco el color lo deja natural.", "origen": "claude", "aviso": null },
+      "valores": { "saturacion": -5, "vivacidad": 0 },
+      "medidas": { "saturacion_media": 0.18 },
+      "parametros": [
+        { "clave": "saturacion", "etiqueta": "Saturación", "ayuda": "Más o menos color en toda la foto.", "minimo": -30, "maximo": 30, "defecto": 0, "paso": 1, "unidad": " %", "tipo": "numero" },
+        { "clave": "vivacidad", "etiqueta": "Vivacidad", "ayuda": "Realza los colores apagados, cuidando los fuertes.", "minimo": 0, "maximo": 30, "defecto": 0, "paso": 1, "unidad": "", "tipo": "numero" }
+      ],
+      "nota": null,
+      "uso_claude": { "modelo": "claude-opus-5-5", "input_tokens": 2100, "output_tokens": 80, "costo_usd": 0.01 },
+      "segundos": 3.6
+    },
     {
       "paso": "fondo",
       "aplicado": true,
@@ -12,7 +92,10 @@
       "valores": { "detalle": 1, "refinar_bordes": 1, "rellenar_huecos": 0, "motas": 0, "dureza": 20 },
       "medidas": { "piezas": 2, "motas_sacadas": 0, "cubre_pct": 31.5, "segunda_pasada_disponible": true, "modelo": "isnet-general-use" },
       "parametros": [
-        { "clave": "detalle", "etiqueta": "Segunda pasada", "ayuda": "Vuelve a buscar el fondo solo en la zona del producto.", "minimo": 0, "maximo": 1, "defecto": 1, "paso": 1, "unidad": "", "tipo": "si_no" },
+        { "clave": "detalle", "etiqueta": "Segunda pasada", "ayuda": "Vuelve a buscar el fondo solo en la zona del producto, para separar mejor los espacios finos.", "minimo": 0, "maximo": 1, "defecto": 1, "paso": 1, "unidad": "", "tipo": "si_no" },
+        { "clave": "refinar_bordes", "etiqueta": "Refinar bordes", "ayuda": "Ajusta el borde de la silueta a los bordes reales de la foto.", "minimo": 0, "maximo": 1, "defecto": 1, "paso": 1, "unidad": "", "tipo": "si_no" },
+        { "clave": "rellenar_huecos", "etiqueta": "Rellenar huecos", "ayuda": "Vuelve opacos los huecos chicos dentro de una pieza, como reflejos que el modelo tomó por fondo.", "minimo": 0, "maximo": 1, "defecto": 0, "paso": 1, "unidad": "", "tipo": "si_no" },
+        { "clave": "motas", "etiqueta": "Motas", "ayuda": "Borra los pedacitos sueltos más chicos que este % de la foto.", "minimo": 0, "maximo": 2, "defecto": 0.02, "paso": 0.01, "unidad": " %", "tipo": "numero" },
         { "clave": "dureza", "etiqueta": "Dureza del borde", "ayuda": "0 deja el borde suave; más alto lo vuelve más nítido.", "minimo": 0, "maximo": 100, "defecto": 0, "paso": 1, "unidad": "", "tipo": "numero" }
       ],
       "nota": null,
@@ -48,7 +131,7 @@
       "segundos": 4.1
     }
   ],
-  "segundos": 29.8,
-  "archivos": ["vista", "mascara", "png", "jpg"],
-  "original": null
+  "segundos": 39.2,
+  "archivos": ["antes", "vista", "mascara", "png", "jpg"],
+  "original": { "ancho": 4032, "alto": 3024, "camara": { "marca": "Apple", "modelo": "iPhone 13" } }
 }

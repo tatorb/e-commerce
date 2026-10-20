@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { heartbeatSchema, nextRequestSchema, PHOTO_PROTOCOL, resultSchema } from '@/domain/photo-contract';
-import { currentRuns, photoProgress, photoProgressText } from '@/domain/photo-steps';
+import { currentRuns, PHOTO_STEPS, photoProgress, photoProgressText } from '@/domain/photo-steps';
 import { DEFAULT_PHOTO_SETTINGS, parsePhotoSettings, photoSettingsSchema } from '@/domain/photo-settings';
 import { mercadolibreFullSizePhoto } from '@/channels/mercadolibre/photos';
 import { channelPhotoUrl } from '@/channels';
@@ -15,8 +15,8 @@ describe('lo que se dicen la app y el trabajador', () => {
     const done = resultSchema.parse(example('resultado.json'));
     expect(done.ok).toBe(true);
     if (done.ok) {
-      expect(done.archivos).toEqual(['vista', 'mascara', 'png', 'jpg']);
-      expect(done.partes.map((p) => p.paso)).toEqual(['fondo', 'recorte', 'exportar']);
+      expect(done.archivos).toEqual(['antes', 'vista', 'mascara', 'png', 'jpg']);
+      expect(done.partes.map((p) => p.paso)).toEqual(PHOTO_STEPS[0].parts);
       expect(done.partes[0].parametros[0].tipo).toBe('si_no');
     }
     const failed = resultSchema.parse(example('fallo.json'));
@@ -42,15 +42,16 @@ describe('pasos de una foto', () => {
   const at = (s: number) => new Date(2026, 9, 20, 10, 0, s);
   it('el vigente de cada paso es el último que no se reemplazó', () => {
     const runs = [
-      { id: 'a', step: 0, status: 'SKIPPED' as const, createdAt: at(1) },
-      { id: 'b', step: 1, status: 'REPLACED' as const, createdAt: at(2) },
+      { id: 'z', step: 0, status: 'REPLACED' as const, createdAt: at(0) },
+      { id: 'a', step: 0, status: 'REVIEW' as const, createdAt: at(1) },
       { id: 'c', step: 1, status: 'REVIEW' as const, createdAt: at(3) },
     ];
-    expect(currentRuns(runs).map((r) => r?.id ?? null)).toEqual(['a', 'c']);
-    const p = photoProgress(runs);
-    expect(p).toEqual({ kind: 'open', step: 1, status: 'REVIEW' });
-    expect(photoProgressText(p)).toBe('Paso 2 de 2 · Recortar y exportar · esperando tu aprobación');
-    expect(photoProgressText(photoProgress([{ step: 1, status: 'APPROVED' }]))).toBe('Lista');
+    // Un intento de un paso que ya no existe no cuenta.
+    expect(currentRuns(runs).map((r) => r?.id ?? null)).toEqual(['a']);
+    expect(photoProgressText(photoProgress([{ step: 0, status: 'REVIEW' }]))).toBe('Esperando tu aprobación');
+    expect(photoProgressText(photoProgress([{ step: 0, status: 'QUEUED' }]))).toBe('En cola');
+    expect(photoProgressText(photoProgress([{ step: 0, status: 'APPROVED' }]))).toBe('Lista');
+    expect(photoProgressText(photoProgress([{ step: 0, status: 'REPLACED' }]))).toBe('Sin empezar');
   });
 });
 

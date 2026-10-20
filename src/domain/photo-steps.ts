@@ -1,10 +1,12 @@
 import type { PhotoRunStatus } from '@/generated/prisma/enums';
 
 // La línea de imágenes tiene 8 ajustes, en el orden del trabajador
-// (trabajador-imagenes/mrb_imagenes/pasos/), agrupados en 2 pasos: la Mac
-// hace los ajustes de un paso de corrido y frena para que una persona apruebe.
+// (trabajador-imagenes/mrb_imagenes/pasos/). La Mac los hace de corrido, en un
+// solo paso, y frena para que una persona apruebe; si algo no convence, se
+// cambian los valores de los ajustes que haga falta y se rehace todo junto.
 // La app muestra y guarda lo que pasó; cómo se corrige la foto es cosa del
-// trabajador.
+// trabajador. Los pasos son una lista por si algún día conviene frenar más
+// de una vez.
 
 export const PHOTO_ADJUSTMENT_LABEL: Record<string, string> = {
   lente: 'Lente',
@@ -23,14 +25,16 @@ export type PhotoStep = {
   // Los ajustes del paso, en orden.
   parts: string[];
   // Los que cambian el encuadre no se comparan superpuestos con el deslizador.
-  // Corregir endereza y recorta apenas: el deslizador igual sirve para ver
-  // colores y luz.
   reframes: boolean;
 };
 
 export const PHOTO_STEPS: readonly PhotoStep[] = [
-  { key: 'corregir', label: 'Corregir la foto', parts: ['lente', 'perspectiva', 'blancos', 'luces', 'color'], reframes: false },
-  { key: 'terminar', label: 'Recortar y exportar', parts: ['fondo', 'recorte', 'exportar'], reframes: true },
+  {
+    key: 'corregir',
+    label: 'Corrección de la foto',
+    parts: ['lente', 'perspectiva', 'blancos', 'luces', 'color', 'fondo', 'recorte', 'exportar'],
+    reframes: true,
+  },
 ];
 
 export const LAST_PHOTO_STEP = PHOTO_STEPS.length - 1;
@@ -77,9 +81,11 @@ export function photoProgress(runs: RunLike[]): PhotoProgress {
   return last ? { kind: 'done' } : { kind: 'empty' };
 }
 
-/** "Paso 3 de 8 · Balance de blancos y tinte · esperando tu aprobación". */
+/** "Esperando tu aprobación", o con varios pasos "Paso 1 de 2 · Corrección de la foto · esperando tu aprobación". */
 export function photoProgressText(p: PhotoProgress): string {
   if (p.kind === 'done') return 'Lista';
   if (p.kind === 'empty') return 'Sin empezar';
-  return `Paso ${p.step + 1} de ${PHOTO_STEPS.length} · ${PHOTO_STEPS[p.step].label} · ${RUN_STATUS_LABEL[p.status]}`;
+  const status = RUN_STATUS_LABEL[p.status];
+  if (PHOTO_STEPS.length === 1) return status.charAt(0).toUpperCase() + status.slice(1);
+  return `Paso ${p.step + 1} de ${PHOTO_STEPS.length} · ${PHOTO_STEPS[p.step].label} · ${status}`;
 }

@@ -1,11 +1,11 @@
 {
   "trabajo": {
-    "id": "corrida-terminar",
+    "id": "corrida-corregir",
     "turno": 2,
     "foto": "foto-1",
-    "grupo": "terminar",
-    "indice": 1,
-    "pasos": ["fondo", "recorte", "exportar"],
+    "grupo": "corregir",
+    "indice": 0,
+    "pasos": ["lente", "perspectiva", "blancos", "luces", "color", "fondo", "recorte", "exportar"],
     "producto": "Pistón: Kit de pistones de ejemplo",
     "ajustes": {
       "margen": 8,
@@ -14,34 +14,24 @@
       "topes": { "giro": 10, "perspectiva": 15, "blancos": 100, "temperatura": 30, "exposicion": 1, "sombras": 60, "luces": 60, "claridad": 40, "saturacion": 30, "vivacidad": 30 }
     },
     "pedidos": {
-      "valores": { "fondo": { "detalle": 1, "refinar_bordes": 1, "rellenar_huecos": 0, "motas": 0, "dureza": 20 } },
-      "apagados": []
+      "valores": {
+        "blancos": { "intensidad": 60, "temperatura": 0, "tinte": 2 },
+        "fondo": { "detalle": 1, "refinar_bordes": 1, "rellenar_huecos": 0, "motas": 0, "dureza": 20 }
+      },
+      "apagados": ["luces"]
     },
     "original": {
       "nombre": "IMG_0001.HEIC",
       "tipo": "image/heic",
       "bajar": { "url": "https://ejemplo.private.blob.vercel-storage.com/imagenes/p/originales/img_0001-ab12.heic?vercel-blob-signature=x", "metodo": "GET", "encabezados": {} }
     },
-    "receta": [
-      {
-        "id": "corrida-corregir",
-        "grupo": "corregir",
-        "indice": 0,
-        "partes": [
-          { "paso": "lente", "valores": {}, "aplicado": false },
-          { "paso": "perspectiva", "valores": { "giro": 0.3, "vertical": 0, "horizontal": 0 }, "aplicado": true },
-          { "paso": "blancos", "valores": { "intensidad": 80, "temperatura": 0, "tinte": 2 }, "aplicado": true },
-          { "paso": "luces", "valores": {}, "aplicado": false },
-          { "paso": "color", "valores": { "saturacion": -5, "vivacidad": 0 }, "aplicado": true }
-        ],
-        "ajustes": { "margen": 8, "fondo": "#FFFFFF", "calidad_jpg": 95, "topes": { "giro": 10 } }
-      }
-    ],
+    "receta": [],
     "subidas": {
-      "vista": { "url": "https://vercel.com/api/blob/?pathname=imagenes%2Fp%2Ffoto-1%2Fcorrida-terminar%2Fvista.jpg&vercel-blob-signature=x", "metodo": "PUT", "encabezados": { "x-api-version": "12", "x-content-type": "image/jpeg" } },
-      "mascara": { "url": "https://vercel.com/api/blob/?pathname=imagenes%2Fp%2Ffoto-1%2Fcorrida-terminar%2Fmascara.png&vercel-blob-signature=x", "metodo": "PUT", "encabezados": { "x-api-version": "12", "x-content-type": "image/png" } },
-      "png": { "url": "https://vercel.com/api/blob/?pathname=imagenes%2Fp%2Ffoto-1%2Fcorrida-terminar%2Ffinal.png&vercel-blob-signature=x", "metodo": "PUT", "encabezados": { "x-api-version": "12", "x-content-type": "image/png" } },
-      "jpg": { "url": "https://vercel.com/api/blob/?pathname=imagenes%2Fp%2Ffoto-1%2Fcorrida-terminar%2Ffinal.jpg&vercel-blob-signature=x", "metodo": "PUT", "encabezados": { "x-api-version": "12", "x-content-type": "image/jpeg" } }
+      "antes": { "url": "https://vercel.com/api/blob/?pathname=imagenes%2Fp%2Ffoto-1%2Fcorrida-corregir%2Fantes.jpg&vercel-blob-signature=x", "metodo": "PUT", "encabezados": { "x-api-version": "12", "x-content-type": "image/jpeg" } },
+      "vista": { "url": "https://vercel.com/api/blob/?pathname=imagenes%2Fp%2Ffoto-1%2Fcorrida-corregir%2Fvista.jpg&vercel-blob-signature=x", "metodo": "PUT", "encabezados": { "x-api-version": "12", "x-content-type": "image/jpeg" } },
+      "mascara": { "url": "https://vercel.com/api/blob/?pathname=imagenes%2Fp%2Ffoto-1%2Fcorrida-corregir%2Fmascara.png&vercel-blob-signature=x", "metodo": "PUT", "encabezados": { "x-api-version": "12", "x-content-type": "image/png" } },
+      "png": { "url": "https://vercel.com/api/blob/?pathname=imagenes%2Fp%2Ffoto-1%2Fcorrida-corregir%2Ffinal.png&vercel-blob-signature=x", "metodo": "PUT", "encabezados": { "x-api-version": "12", "x-content-type": "image/png" } },
+      "jpg": { "url": "https://vercel.com/api/blob/?pathname=imagenes%2Fp%2Ffoto-1%2Fcorrida-corregir%2Ffinal.jpg&vercel-blob-signature=x", "metodo": "PUT", "encabezados": { "x-api-version": "12", "x-content-type": "image/jpeg" } }
     }
   },
   "volver_en": 5

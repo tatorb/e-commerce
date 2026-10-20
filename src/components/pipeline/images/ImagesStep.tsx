@@ -60,7 +60,7 @@ export function ImagesStep({
         title="Fotos"
         count={photos.length}
         description={withSharedNote(
-          'Cada foto pasa por 2 pasos: corregir la foto, y recortar y exportar. La Mac hace los ajustes de cada paso de corrido y espera tu aprobación. Solo se corrige la foto original: nada se genera ni se inventa, y el original no se toca.',
+          'La Mac le hace a cada foto los 8 ajustes de corrido, de la lente a la exportación, y espera tu aprobación. Si querés cambiar algo, cambiás los valores que quieras y se rehace todo junto. Solo se corrige la foto original: nada se genera ni se inventa, y el original no se toca.',
           sharedWith,
         )}
       >
@@ -114,6 +114,8 @@ export function ImagesStep({
 
       {selected ? (
         <SectionCard
+          // Recorta sin volverse una caja con scroll propio, así los botones de la foto quedan fijos abajo al bajar.
+          className="overflow-clip"
           title={selected.name}
           description={[selected.size, selected.camera].filter(Boolean).join(' · ') || 'El trabajador anota el tamaño y la cámara al preparar la foto.'}
           action={

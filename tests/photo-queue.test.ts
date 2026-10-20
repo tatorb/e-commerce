@@ -16,7 +16,6 @@ import {
   PhotoQueueError,
   redoStep,
   retryStep,
-  skipStep,
   submitFailure,
   submitResult,
 } from '@/lib/photo-queue';
@@ -101,7 +100,7 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
       id: job.id,
       turno: job.turno,
       ok: true,
-      partes: (job.pasos ?? ['lente', 'perspectiva', 'blancos', 'luces', 'color']).map((p) => part(p)),
+      partes: (job.pasos ?? ['lente', 'perspectiva', 'blancos', 'luces', 'color', 'fondo', 'recorte', 'exportar']).map((p) => part(p)),
       segundos: 10,
       archivos: ['vista'],
       original: null,
@@ -207,11 +206,11 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     expect(run.error).toMatch(/3 veces/);
   });
 
-  it('el pedido lleva los ajustes del paso, lo que hay que subir, la receta y el contexto', async () => {
+  it('el pedido lleva los 8 ajustes, lo que hay que subir y el contexto', async () => {
     const w = await worker();
     const edit = await photo();
     const { job } = await work(w);
-    expect([job.grupo, job.indice, job.pasos]).toEqual(['corregir', 0, ['lente', 'perspectiva', 'blancos', 'luces', 'color']]);
+    expect([job.grupo, job.indice, job.pasos]).toEqual(['corregir', 0, ['lente', 'perspectiva', 'blancos', 'luces', 'color', 'fondo', 'recorte', 'exportar']]);
     expect(job.producto).toBe('Pistón: Kit de pistones');
     expect(job.pedidos).toBeNull();
     expect(job.original).toEqual({
@@ -219,24 +218,9 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
       tipo: 'image/heic',
       bajar: { url: `${edit.originalUrl}?firmado=1`, metodo: 'GET', encabezados: {} },
     });
-    expect(Object.keys(job.subidas).sort()).toEqual(['antes', 'vista']);
+    expect(Object.keys(job.subidas).sort()).toEqual(['antes', 'jpg', 'mascara', 'png', 'vista']);
     expect(job.subidas.vista!.url).toContain(`imagenes/${productId}/${edit.id}/${job.id}/vista.jpg`);
     expect(job.receta).toEqual([]);
-
-    await approveStep(db, { runId: job.id, userId });
-    // Paso 2: la receta trae lo que se aplicó en el paso 1.
-    const second = await work(w);
-    expect([second.job.grupo, second.job.pasos]).toEqual(['terminar', ['fondo', 'recorte', 'exportar']]);
-    expect(Object.keys(second.job.subidas).sort()).toEqual(['jpg', 'mascara', 'png', 'vista']);
-    expect(second.job.receta).toEqual([
-      {
-        id: job.id,
-        grupo: 'corregir',
-        indice: 0,
-        partes: job.pasos.map((paso) => ({ paso, valores: { giro: 1.5 }, aplicado: true })),
-        ajustes: DEFAULT_PHOTO_SETTINGS,
-      },
-    ]);
   });
 
   it('el pedido tiene la misma forma que el ejemplo que lee el trabajador', async () => {
@@ -250,11 +234,9 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     const example = JSON.parse(readFileSync(new URL('../trabajador-imagenes/contrato/trabajo.json', import.meta.url), 'utf8'));
     const w = await worker();
     await photo();
-    const first = await work(w);
-    await approveStep(db, { runId: first.job.id, userId });
     const claimed = await claimNext(db, w);
     const job = await buildJob(db, claimed!.runId, deps);
-    const built = { ...job, pedidos: { valores: {}, apagados: [] }, subidas: { vista: job.subidas.vista } };
+    const built = { ...job, pedidos: { valores: {}, apagados: ['luces'] }, subidas: { vista: job.subidas.vista } };
     const expected = { ...example.trabajo, subidas: { vista: example.trabajo.subidas.vista } };
     expect(shape(built)).toEqual(shape(expected));
   });
@@ -270,7 +252,7 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     expect((run.parts as StepPart[]).map((p) => p.paso)).toEqual(job.pasos);
     expect((run.parts as StepPart[])[1].propuesta).toEqual({ valores: { giro: 1.5 }, razon: 'Propuesta para perspectiva.', origen: 'claude' });
     // El costo de Claude es la suma de los ajustes.
-    expect(run.aiUsage).toEqual({ costo_usd: 0.05 });
+    expect(run.aiUsage).toEqual({ costo_usd: 0.08 });
     expect(run.previewUrl).toBe(`${BLOB}${outputPathname(productId, edit.id, job.id, 'vista')}`);
     expect(run.leaseUntil).toBeNull();
     const e = await db.photoEdit.findUniqueOrThrow({ where: { id: edit.id } });
@@ -286,7 +268,7 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     const opts = { verify, pathnameFor: outputPathname };
     // Faltan los archivos.
     expect(await submitResult(db, w, done(job), opts)).toEqual({ aceptado: false, motivo: 'Falta subir el archivo «vista».' });
-    for (const kind of ['vista', 'antes'] as const) uploaded.add(outputPathname(productId, job.foto, job.id, kind));
+    for (const kind of ['vista', 'antes', 'png', 'jpg'] as const) uploaded.add(outputPathname(productId, job.foto, job.id, kind));
     // La Mac se reinició y lo volvió a tomar: el turno 1 ya no vale.
     await claimNext(db, w);
     expect((await submitResult(db, w, done(job), opts)).aceptado).toBe(false);
@@ -297,30 +279,34 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     const w = await worker();
     const edit = await photo();
     const lente = part('lente', { aplicado: false, no_aplica: 'La foto no tiene datos de lente.', propuesta: null, valores: {} });
-    const { job } = await work(w, { partes: [lente, ...['perspectiva', 'blancos', 'luces', 'color'].map((p) => part(p))] });
+    const { job } = await work(w, { partes: [lente, ...['perspectiva', 'blancos', 'luces', 'color', 'fondo', 'recorte', 'exportar'].map((p) => part(p))] });
     const run = await openRun(edit.id);
     expect([run.id, run.status]).toEqual([job.id, 'REVIEW']);
     expect((run.parts as StepPart[])[0]).toMatchObject({ paso: 'lente', aplicado: false, no_aplica: 'La foto no tiene datos de lente.' });
   });
 
-  it('avisar que sigue vivo estira el turno; si se rehízo, le dice que ya no es suyo', async () => {
+  it('avisar que sigue vivo estira el turno; si se sacó la foto, le dice que ya no es suyo', async () => {
     const w = await worker();
     const edit = await photo();
-    const { job } = await work(w);
-    await approveStep(db, { runId: job.id, userId });
     const claimed = await claimNext(db, w);
     const run = await db.photoStepRun.findUniqueOrThrow({ where: { id: claimed!.runId } });
     expect(await heartbeat(db, w, run.id, run.lease)).toBe(true);
     expect(await heartbeat(db, w, run.id, run.lease - 1)).toBe(false);
-    // Se rehace la corrección mientras procesa el recorte.
-    await redoStep(db, { runId: job.id, userId, request: null });
+    await archivePhoto(db, edit.id);
     expect(await heartbeat(db, w, run.id, run.lease)).toBe(false);
-    const runs = await runsOf(edit.id);
-    expect(runs.map((r) => [r.step, r.status])).toEqual([
+  });
+
+  it('rehacer después de aprobar vuelve a abrir la foto y el trabajador la toma de nuevo', async () => {
+    const w = await worker();
+    const edit = await photo();
+    const { job } = await work(w);
+    await approveStep(db, { runId: job.id, userId });
+    await redoStep(db, { runId: job.id, userId, request: null });
+    expect((await runsOf(edit.id)).map((r) => [r.step, r.status])).toEqual([
       [0, 'REPLACED'],
-      [1, 'REPLACED'],
       [0, 'QUEUED'],
     ]);
+    expect(await claimNext(db, w)).not.toBeNull();
   });
 
   it('sin trabajo pregunta cada minuto, y cada 5 segundos si alguien está trabajando en la línea', async () => {
@@ -333,34 +319,31 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     expect(await idlePollSeconds(db, new Date(Date.now() + 2 * 3600_000))).toBe(60);
   });
 
-  it('aprobar pone el siguiente en cola con los ajustes de ese momento; el último deja la foto lista', async () => {
+  it('cada paso guarda los ajustes de la cuenta de ese momento, y aprobar deja la foto lista', async () => {
     const w = await worker();
-    const edit = await photo();
     await savePhotoSettings(db, { accountId, userId, input: { ...DEFAULT_PHOTO_SETTINGS, margen: 12 } });
+    const edit = await photo();
     const { job } = await work(w);
+    expect(job.ajustes.margen).toBe(12);
     await approveStep(db, { runId: job.id, userId });
-    const next = await openRun(edit.id);
-    expect([next.step, next.status]).toEqual([1, 'QUEUED']);
-    expect((next.settings as { margen: number }).margen).toBe(12);
     const approved = await db.photoStepRun.findUniqueOrThrow({ where: { id: job.id } });
     expect([approved.status, approved.openFor, approved.decidedById]).toEqual(['APPROVED', null, userId]);
+    expect((await runsOf(edit.id)).filter((r) => r.openFor !== null)).toEqual([]);
     // Aprobar dos veces no se puede.
     await expect(approveStep(db, { runId: job.id, userId })).rejects.toThrow(PhotoQueueError);
-    const { job: last } = await work(w);
-    await approveStep(db, { runId: last.id, userId });
-    const runs = await runsOf(edit.id);
-    expect(runs.filter((r) => r.openFor !== null)).toEqual([]);
-    expect(runs.map((r) => r.step)).toEqual([0, 1]);
   });
 
-  it('rehacer con valores y ajustes apagados reemplaza ese paso y los siguientes, y conserva lo que dijo Claude', async () => {
+  it('rehacer con valores de varios ajustes y ajustes apagados conserva lo que dijo Claude', async () => {
     const w = await worker();
     const edit = await photo();
     const { job } = await work(w);
     const redo = (request: Parameters<typeof redoStep>[1]['request']) => redoStep(db, { runId: job.id, userId, request });
     await expect(redo({ valores: { perspectiva: { giro: 30 } }, apagados: [] })).rejects.toThrow('va de -10 a 10');
-    const again = await redo({ valores: { perspectiva: { giro: -2, otro: 5 }, otro: { giro: 1 } }, apagados: ['luces', 'luces', 'fondo'] });
-    expect(again.requested).toMatchObject({ valores: { perspectiva: { giro: -2 } }, apagados: ['luces'] });
+    const again = await redo({
+      valores: { perspectiva: { giro: -2, otro: 5 }, fondo: { giro: 3 }, otro: { giro: 1 } },
+      apagados: ['luces', 'luces', 'otro'],
+    });
+    expect(again.requested).toMatchObject({ valores: { perspectiva: { giro: -2 }, fondo: { giro: 3 } }, apagados: ['luces'] });
     expect((again.requested as { propuestas: Record<string, unknown> }).propuestas.perspectiva).toEqual({
       valores: { giro: 1.5 },
       razon: 'Propuesta para perspectiva.',
@@ -368,13 +351,13 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     });
     const claimed = await claimNext(db, w);
     const next = await buildJob(db, claimed!.runId, deps);
-    expect(next.pedidos).toEqual({ valores: { perspectiva: { giro: -2 } }, apagados: ['luces'] });
+    expect(next.pedidos).toEqual({ valores: { perspectiva: { giro: -2 }, fondo: { giro: 3 } }, apagados: ['luces'] });
     // El trabajador no vuelve a preguntarle a Claude: la explicación anterior queda.
     for (const kind of Object.keys(next.subidas) as UploadKind[]) uploaded.add(outputPathname(productId, edit.id, next.id, kind));
     const partes = next.pasos.map((p) =>
       p === 'luces' ? part(p, { aplicado: false, propuesta: null, valores: {} }) : part(p, p === 'perspectiva' ? { propuesta: null, valores: { giro: -2 } } : {}),
     );
-    await submitResult(db, w, done(next, { partes, archivos: ['vista', 'antes'] }), { verify, pathnameFor: outputPathname });
+    await submitResult(db, w, done(next, { partes, archivos: ['vista', 'antes', 'png', 'jpg'] }), { verify, pathnameFor: outputPathname });
     const run = await db.photoStepRun.findUniqueOrThrow({ where: { id: next.id } });
     const parts = run.parts as StepPart[];
     expect(parts[1]).toMatchObject({ paso: 'perspectiva', valores: { giro: -2 }, propuesta: { razon: 'Propuesta para perspectiva.' } });
@@ -385,14 +368,12 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     const w = await worker();
     await photo();
     const { job } = await work(w);
-    await approveStep(db, { runId: job.id, userId });
-    const { job: last } = await work(w);
-    await expect(redoStep(db, { runId: last.id, userId, request: { valores: {}, apagados: ['exportar'] } })).rejects.toThrow(
+    await expect(redoStep(db, { runId: job.id, userId, request: { valores: {}, apagados: ['exportar'] } })).rejects.toThrow(
       'Exportar no se puede apagar',
     );
   });
 
-  it('si falla, vuelve a la cola; al tercer error queda fallido y se puede reintentar o saltear', async () => {
+  it('si falla, vuelve a la cola; al tercer error queda fallido y se puede reintentar', async () => {
     const w = await worker();
     const edit = await photo();
     for (let i = 1; i <= 3; i++) {
@@ -413,8 +394,7 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     }
     const r = await db.photoStepRun.findUniqueOrThrow({ where: { id: run.id } });
     await submitFailure(db, w, { id: r.id, turno: r.lease, error: 'x' });
-    await skipStep(db, { runId: r.id, userId });
-    expect((await openRun(edit.id)).step).toBe(1);
+    expect((await openRun(edit.id)).status).toBe('FAILED');
   });
 
   it('sacar la foto cierra lo que tenía abierto y el trabajador ya no la toma', async () => {
