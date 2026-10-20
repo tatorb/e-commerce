@@ -32,6 +32,7 @@ import { AI_NOT_CONFIGURED, isAiConfigured } from '@/ai/claude';
 import { InfoStep } from '@/components/pipeline/info/InfoStep';
 import { TitleStep } from '@/components/pipeline/title/TitleStep';
 import { ImagesStep } from '@/components/pipeline/images/ImagesStep';
+import { openPhotoIds } from '@/components/pipeline/images/open-photos';
 import { countChannelPhotos, loadPhotoLine } from '@/lib/photos';
 import { workerState } from '@/lib/image-worker';
 import { formatDateTime, formatDuration, plural } from '@/lib/format';
@@ -64,10 +65,10 @@ export default async function PipelineStepPage({
   searchParams,
 }: {
   params: Promise<{ cuenta: string; id: string }>;
-  searchParams: Promise<{ paso?: string | string[]; foto?: string | string[] }>;
+  searchParams: Promise<{ paso?: string | string[]; foto?: string | string[]; fotos?: string | string[] }>;
 }) {
   const { cuenta, id } = await params;
-  const { paso, foto } = await searchParams;
+  const { paso, foto, fotos } = await searchParams;
   const account = await getAccountBySlug(cuenta);
   if (!account) notFound();
   const pub = await getPipelinePublication(account.id, id);
@@ -224,7 +225,7 @@ export default async function PipelineStepPage({
             pageHref={`${pageHref}?paso=${PIPELINE_STEP_SLUG.IMAGES}`}
             timeZone={account.timezone}
             edits={await loadPhotoLine(prisma, pub.productId)}
-            selectedId={typeof foto === 'string' ? foto : null}
+            openIds={openPhotoIds({ foto, fotos })}
             worker={await workerState(prisma)}
             channelPhotos={await countChannelPhotos(prisma, pub.productId)}
             channelName={pub.channelName}

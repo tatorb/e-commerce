@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { AlertTriangle, Check, Clock, Download, Loader2, RotateCcw, SkipForward, Sparkles } from 'lucide-react';
+import { AlertTriangle, Check, ChevronDown, Clock, Download, Loader2, RotateCcw, SkipForward, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -23,7 +23,8 @@ import type { PhotoView, RunView } from './types';
 // La línea de una foto: el antes y el después y cada uno de sus ajustes, con
 // lo que dijo Claude, los valores y si se aplica, para aprobar o cambiar los
 // valores que haga falta y rehacer todo junto. Con más de un paso, los pasos
-// van arriba.
+// van arriba. Con varias fotos abiertas (compact), los ajustes arrancan
+// plegados para ver más fotos de una vez.
 
 const ORIGIN_LABEL: Record<string, string> = {
   claude: 'Claude',
@@ -52,7 +53,7 @@ function StepIcon({ run }: { run: RunView | null }) {
   }
 }
 
-export function PhotoLine({ accountSlug, photo }: { accountSlug: string; photo: PhotoView }) {
+export function PhotoLine({ accountSlug, photo, compact = false }: { accountSlug: string; photo: PhotoView; compact?: boolean }) {
   const open = photo.progress.kind === 'open' ? photo.progress.step : null;
   const lastDone = photo.steps.reduce((acc, r, i) => (r ? i : acc), 0);
   const [selected, setSelected] = useState<number>(open ?? lastDone);
@@ -95,7 +96,7 @@ export function PhotoLine({ accountSlug, photo }: { accountSlug: string; photo: 
         </ol>
       ) : null}
       {/* Con el estado en la clave: cuando el paso llega para revisar, los valores arrancan de lo que hizo el trabajador. */}
-      {run ? <RunPanel key={`${run.id}:${run.status}`} accountSlug={accountSlug} run={run} photo={photo} /> : null}
+      {run ? <RunPanel key={`${run.id}:${run.status}`} accountSlug={accountSlug} run={run} photo={photo} compact={compact} /> : null}
     </div>
   );
 }
@@ -137,10 +138,17 @@ function requestFrom(parts: StepPart[], edits: Edits): StepRequest | null {
   return { valores, apagados };
 }
 
-function RunPanel({ accountSlug, run, photo }: { accountSlug: string; run: RunView; photo: PhotoView }) {
+function RunPanel({ accountSlug, run, photo, compact }: { accountSlug: string; run: RunView; photo: PhotoView; compact: boolean }) {
   const step = PHOTO_STEPS[run.step];
   const { run: act, pending, status } = useStepAction();
   const [edits, setEdits] = useState<Edits>(() => initialEdits(run.parts));
+  const [showParts, setShowParts] = useState(!compact);
+  // Al abrir o cerrar otras fotos, los ajustes se pliegan o se despliegan, sin perder lo que se cambió.
+  const [wasCompact, setWasCompact] = useState(compact);
+  if (compact !== wasCompact) {
+    setWasCompact(compact);
+    setShowParts(!compact);
+  }
   const edited = run.parts.some(
     (part) =>
       (part.no_aplica === null && edits[part.paso].on !== part.aplicado) ||
@@ -222,17 +230,25 @@ function RunPanel({ accountSlug, run, photo }: { accountSlug: string; run: RunVi
           <CompareView before={run.beforeHref} after={run.afterHref} canOverlay={!step.reframes} />
           {run.requested ? <p className="text-xs text-muted-foreground">Rehecho con los valores que pediste.</p> : null}
 
-          <div className="space-y-3">
-            {run.parts.map((part) => (
-              <PartCard
-                key={part.paso}
-                part={part}
-                edit={edits[part.paso]}
-                onChange={(e) => setEdits({ ...edits, [part.paso]: e })}
-                disabled={pending}
-              />
-            ))}
-          </div>
+          {compact ? (
+            <Button type="button" size="sm" variant="ghost" aria-expanded={showParts} onClick={() => setShowParts(!showParts)}>
+              <ChevronDown className={cn('h-4 w-4 transition-transform', showParts && 'rotate-180')} />
+              {showParts ? 'Ocultar los ajustes' : `Ver los ${run.parts.length} ajustes y sus valores`}
+            </Button>
+          ) : null}
+          {showParts ? (
+            <div className="space-y-3">
+              {run.parts.map((part) => (
+                <PartCard
+                  key={part.paso}
+                  part={part}
+                  edit={edits[part.paso]}
+                  onChange={(e) => setEdits({ ...edits, [part.paso]: e })}
+                  disabled={pending}
+                />
+              ))}
+            </div>
+          ) : null}
 
           {run.pngHref || run.jpgHref || run.maskHref ? (
             <div className="flex flex-wrap gap-2">

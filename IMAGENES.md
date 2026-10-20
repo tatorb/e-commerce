@@ -71,7 +71,10 @@ El trabajador se conecta con la app y arranca solo cada vez que iniciás sesión
 2. Sumá fotos de dos formas:
    - **Arrastrá los originales**, tal como salen de la cámara. Pueden ser JPG, PNG, HEIC del iPhone o TIFF, de hasta 100 MB.
    - **Usar las fotos publicadas** baja las que ya están en Mercado Libre, en su tamaño más grande.
-3. Tocá una foto para ver su corrección. Arriba está el antes y el después, y abajo los 8 ajustes, cada uno con lo que dijo Claude y sus valores.
+3. Tocá las fotos que quieras revisar. Cada una que tocás se abre abajo, una debajo de otra, y se marca con un tilde en la lista. Tocala de nuevo para cerrarla.
+   - **Abrir las que esperan tu aprobación** abre de una todas las que la Mac ya terminó.
+   - **Abrir todas** y **Cerrar todas** hacen lo que dicen.
+   - Cada foto muestra el antes y el después, y abajo los 8 ajustes, cada uno con lo que dijo Claude y sus valores. Con varias abiertas, los ajustes arrancan plegados: tocá **Ver los 8 ajustes** en la foto que quieras cambiar.
 4. Si querés cambiar algo, cambiá los valores de todos los ajustes que quieras y tocá **Rehacer con estos valores** una sola vez:
    - la Mac vuelve a hacer los 8 desde el original
    - los ajustes que cambiaste usan tus valores
