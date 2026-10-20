@@ -80,8 +80,10 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
   solo pedido (`/items/visits`), o de a una si Mercado Libre no lo acepta. Para probar sin el canal real, `MERCADOLIBRE_SUGGEST_URL`,
   `MERCADOLIBRE_API_URL`, `MERCADOLIBRE_LISTING_URL` y `MERCADOLIBRE_AUTH_URL` cambian las direcciones.
   El resto de la app usa la interfaz `ChannelAdapter`.
-- `src/lib/files.ts` y `src/lib/file-rules.ts`: los archivos del fabricante en el depósito de Vercel. Sin
-  `BLOB_READ_WRITE_TOKEN`, el paso Información muestra los pasos para crearlo. Para probar sin Vercel,
+- `src/lib/files.ts` y `src/lib/file-rules.ts`: los archivos del fabricante en el depósito de Vercel. La app
+  entra con el permiso automático de Vercel (OIDC, `BLOB_STORE_ID`) o con la clave `BLOB_READ_WRITE_TOKEN`.
+  El navegador y el trabajador suben y bajan con links firmados (`src/lib/blob-uploads.ts`), que andan con
+  cualquiera de los dos. Sin depósito, el paso Información muestra los pasos para crearlo. Para probar sin Vercel,
   `VERCEL_BLOB_API_URL` y `NEXT_PUBLIC_VERCEL_BLOB_API_URL` apuntan a un depósito simulado y
   `BLOB_TEST_URL_PREFIX` acepta sus direcciones.
 - `src/lib/photo-queue.ts`: la cola de la línea de imágenes. El trabajador toma un paso con `FOR UPDATE SKIP LOCKED`,

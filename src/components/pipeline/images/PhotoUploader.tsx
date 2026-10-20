@@ -2,7 +2,7 @@
 
 import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { upload } from '@vercel/blob/client';
+import { uploadPresigned } from '@vercel/blob/client';
 import { ImagePlus } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
 import { BLOB_ACCESS } from '@/lib/file-rules';
@@ -38,7 +38,7 @@ export function PhotoUploader({ accountSlug, publicationId, productId }: { accou
       for (const [i, file] of ok.entries()) {
         setProgress(ok.length === 1 ? `Subiendo ${file.name}…` : `Subiendo ${i + 1} de ${ok.length}…`);
         try {
-          const blob = await upload(originalPathname(productId, file.name), file, {
+          const blob = await uploadPresigned(originalPathname(productId, file.name), file, {
             access: BLOB_ACCESS,
             handleUploadUrl: '/api/imagenes/originales',
             contentType: originalTypeFor(file.name)!,

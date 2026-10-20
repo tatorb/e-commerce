@@ -2,7 +2,7 @@
 
 import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { upload } from '@vercel/blob/client';
+import { uploadPresigned } from '@vercel/blob/client';
 import { FileText, Upload, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -162,7 +162,7 @@ function Uploader({
       for (const [i, file] of queue.entries()) {
         setProgress(queue.length === 1 ? `Subiendo ${file.name}…` : `Subiendo ${i + 1} de ${queue.length}…`);
         try {
-          const blob = await upload(`${filesPrefix(productId)}${safeFileName(file.name)}`, file, {
+          const blob = await uploadPresigned(`${filesPrefix(productId)}${safeFileName(file.name)}`, file, {
             access: BLOB_ACCESS,
             handleUploadUrl: '/api/archivos',
             contentType: FILE_TYPES[extensionOf(file.name)].contentType,

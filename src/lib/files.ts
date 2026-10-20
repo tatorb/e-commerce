@@ -1,4 +1,4 @@
-import { del, head } from '@vercel/blob';
+import { del, head, issueSignedToken, presignUrl } from '@vercel/blob';
 import type { PrismaClient } from '@/generated/prisma/client';
 import { extensionOf, FILE_TYPES, filesPrefix, MAX_FILES } from './file-rules';
 
@@ -11,8 +11,11 @@ export { extensionOf, FILE_TYPES, fileHref, filesPrefix, MAX_FILES, safeFileName
 
 export const BLOB_NOT_CONFIGURED = 'Falta conectar el depósito de archivos de Vercel.';
 
+// La app entra al depósito con el permiso automático de Vercel (OIDC), que
+// llega con BLOB_STORE_ID al conectar el depósito al proyecto, o con la clave
+// BLOB_READ_WRITE_TOKEN si está cargada. La librería de Vercel elige sola.
 export function isBlobConfigured(): boolean {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+  return Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID);
 }
 
 /** Si la dirección es de un depósito de Vercel. En pruebas vale también BLOB_TEST_URL_PREFIX. */
@@ -62,13 +65,32 @@ export async function registerProductFile(
   });
 }
 
+/** Un link para bajar un archivo del depósito privado que vence solo. */
+export async function signedDownloadUrl(url: string, validMs: number, download = false): Promise<string> {
+  if (!isOwnBlobUrl(url)) throw new FileError('El archivo no está en el depósito de la app.');
+  // En pruebas, el depósito simulado está en otra dirección.
+  const testPrefix = process.env.BLOB_TEST_URL_PREFIX;
+  const local = testPrefix && url.startsWith(testPrefix) ? url.slice(testPrefix.length).split('?')[0] : new URL(url).pathname.slice(1);
+  const pathname = decodeURIComponent(local);
+  const validUntil = Date.now() + validMs;
+  const token = await issueSignedToken({ pathname, operations: ['get'], validUntil });
+  let { presignedUrl } = await presignUrl(token, { operation: 'get', pathname, access: 'private', validUntil });
+  if (testPrefix) presignedUrl = presignedUrl.replace(/^https:\/\/[^/]+\//, testPrefix);
+  if (!download) return presignedUrl;
+  const u = new URL(presignedUrl);
+  u.searchParams.set('download', '1');
+  return u.toString();
+}
+
 /**
- * Lee un archivo del depósito privado con la clave de la app, para mostrarlo
- * a quien tiene sesión. Null si ya no está.
+ * Lee un archivo del depósito privado para mostrarlo a quien tiene sesión:
+ * con la clave si está cargada, o con un link firmado de un minuto. Null si
+ * ya no está.
  */
 export async function readBlob(url: string): Promise<Response | null> {
   if (!isOwnBlobUrl(url)) throw new FileError('El archivo no está en el depósito de la app.');
-  const res = await fetch(url, { headers: { authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN ?? ''}` } });
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+  const res = token ? await fetch(url, { headers: { authorization: `Bearer ${token}` } }) : await fetch(await signedDownloadUrl(url, 60_000));
   if (res.status === 404) return null;
   if (!res.ok || !res.body) throw new FileError(`El depósito respondió ${res.status}.`);
   return res;
