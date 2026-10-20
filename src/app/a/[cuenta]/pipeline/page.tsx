@@ -5,12 +5,15 @@ import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { NewPipelinePublicationDialog } from '@/components/pipeline/NewPipelinePublicationDialog';
 import { PipelineBoard } from '@/components/pipeline/PipelineBoard';
+import { ToPushList } from '@/components/sync/ToPushList';
 import { UrlFilterDropdown } from '@/components/filters/UrlFilterDropdown';
 import { KIND_OPTIONS, parseKinds } from '@/lib/queries/catalog-filters';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { listBoard } from '@/lib/queries/pipeline';
 import { listStores } from '@/lib/queries/products';
+import { listToPush } from '@/lib/queries/sync';
 import { plural } from '@/lib/format';
+import { cn } from '@/lib/utils/cn';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,13 +28,19 @@ export default async function PipelinePage({
   searchParams,
 }: {
   params: Promise<{ cuenta: string }>;
-  searchParams: Promise<{ tipo?: string }>;
+  searchParams: Promise<{ tipo?: string; vista?: string }>;
 }) {
-  const [{ cuenta }, { tipo }] = await Promise.all([params, searchParams]);
+  const [{ cuenta }, { tipo, vista }] = await Promise.all([params, searchParams]);
   const { account } = await requireAccount(cuenta);
 
   const kinds = parseKinds(tipo);
-  const [all, stores] = await Promise.all([listBoard(account.id), listStores(account.id)]);
+  const toPushView = vista === 'por-subir';
+  // Por subir mira todas las publicaciones de la cuenta: se carga solo en su pestaña.
+  const [all, stores, toPush] = await Promise.all([
+    toPushView ? Promise.resolve([]) : listBoard(account.id),
+    listStores(account.id),
+    toPushView ? listToPush(account.id) : Promise.resolve([]),
+  ]);
   const items = kinds.length > 0 ? all.filter((i) => kinds.includes(i.kind)) : all;
   const catalogHref = `/a/${account.slug}/publicaciones?pipeline=UNTOUCHED,DISCARDED`;
 
@@ -61,7 +70,45 @@ export default async function PipelinePage({
         </div>
       </PageHeader>
       <PageBody className="max-w-none">
-        {all.length === 0 ? (
+        <div className="inline-flex w-full rounded-lg border bg-muted/50 p-1 sm:w-auto" role="tablist" aria-label="Vista del pipeline">
+          {(
+            [
+              ['', 'Tablero'],
+              ['por-subir', 'Por subir'],
+            ] as const
+          ).map(([key, label]) => (
+            <Link
+              key={key}
+              href={key ? `?vista=${key}` : '?'}
+              role="tab"
+              aria-selected={(key === 'por-subir') === toPushView}
+              className={cn(
+                'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-1.5 text-sm font-medium transition-colors sm:flex-none',
+                (key === 'por-subir') === toPushView ? 'bg-card shadow-sm' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {label}
+              {key === 'por-subir' && toPushView && toPush.length > 0 ? (
+                <span className="rounded-full bg-foreground px-1.5 text-[11px] tabular-nums text-background">{toPush.length}</span>
+              ) : null}
+            </Link>
+          ))}
+        </div>
+        {toPushView ? (
+          <>
+            <p className="text-sm text-muted-foreground">
+              Las publicaciones con cambios de la app que todavía no están en el canal, vengan del pipeline o de un cambio suelto. Las que
+              tienen datos para elegir se resuelven en su página.
+            </p>
+            {toPush.length > 0 ? (
+              <ToPushList accountSlug={account.slug} rows={toPush} />
+            ) : (
+              <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">
+                No hay cambios para subir: todo lo de la app ya está en el canal.
+              </div>
+            )}
+          </>
+        ) : all.length === 0 ? (
           <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">
             Todavía no hay publicaciones en el pipeline. Elegilas en el{' '}
             <Link href={catalogHref} className="text-primary underline-offset-4 hover:underline">

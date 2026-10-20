@@ -7,6 +7,7 @@ import type { ChannelAdapter } from '@/channels/types';
 import {
   FACE_FIELDS,
   faceSummary,
+  faceValues,
   fingerprintsOf,
   parseFingerprints,
   planFaces,
@@ -15,7 +16,7 @@ import {
   type Fingerprints,
 } from '@/domain/channel-sync';
 import { parseMetrics, type Metrics } from '@/domain/measurements';
-import { parseNameValueList, type NameValue } from '@/domain/name-value';
+import type { NameValue } from '@/domain/name-value';
 import { isUniqueViolation } from '@/domain/publications';
 import { listingAttributes } from '@/importers/channel-listings';
 import { withAccessToken } from '@/lib/connections';
@@ -120,10 +121,6 @@ function needsDescription(copy: CopyRow | null | undefined, listing: ChannelList
   return changedAt.getTime() > copy.channelUpdatedAt.getTime();
 }
 
-function faceValuesOf(p: { title: string | null; description: string | null; attributes: unknown }): FaceValues {
-  return { title: p.title, description: p.description, attributes: parseNameValueList(p.attributes) };
-}
-
 function writeFace(field: FaceField, value: FaceValues[FaceField]): Prisma.PublicationUpdateInput {
   if (field === 'attributes') return { attributes: value as NameValue[] };
   return { [field]: (value as string | null) ?? null };
@@ -145,7 +142,7 @@ function listingMetrics(listing: ChannelListing): Metrics {
 /** Guarda la cara del canal de una publicación y trae a la app lo que cambió solo allá. Devuelve los datos que tomó. */
 async function applyListing(
   tx: Tx,
-  ctx: { syncId: string; adapter: ChannelAdapter; day: Date; now: Date },
+  ctx: { syncId: string | null; adapter: ChannelAdapter; day: Date; now: Date },
   publicationId: string,
   listing: ChannelListing,
   descriptionRead: boolean,
@@ -159,7 +156,7 @@ async function applyListing(
       channelCopy: { select: { description: true, descriptionReadAt: true, agreed: true } },
     },
   });
-  const app = faceValuesOf(p);
+  const app = faceValues(p);
   const channel: FaceValues = {
     title: listing.title,
     description: descriptionRead ? listing.description : (p.channelCopy?.description ?? null),
@@ -364,7 +361,7 @@ async function countToChoose(db: Db, storeId: string): Promise<number> {
     where: { storeId, channelCopy: { isNot: null } },
     select: { title: true, description: true, attributes: true, channelCopy: { select: { fingerprints: true, agreed: true, missingSince: true } } },
   });
-  return publications.filter((p) => !p.channelCopy?.missingSince && faceSummary(fingerprintsOf(faceValuesOf(p)), p.channelCopy).choose.length > 0)
+  return publications.filter((p) => !p.channelCopy?.missingSince && faceSummary(fingerprintsOf(faceValues(p)), p.channelCopy).choose.length > 0)
     .length;
 }
 
@@ -399,6 +396,40 @@ export async function syncAllStores(db: Db, opts: { budgetMs: number; now?: () =
   return { pending, stores: out };
 }
 
+/**
+ * Lee una sola publicación del canal, con su descripción, y la guarda como en
+ * una pasada. Sirve para ver enseguida algo que se cambió allá, y para
+ * confirmar lo que se subió. Devuelve los datos que tomó, o null si el canal
+ * no la devolvió.
+ */
+export async function readOne(db: Db, args: { accountId: string; publicationId: string; now?: Date }): Promise<FaceField[] | null> {
+  const now = args.now ?? new Date();
+  const p = await db.publication.findFirst({
+    where: { id: args.publicationId, product: { accountId: args.accountId } },
+    select: {
+      id: true,
+      externalId: true,
+      store: { select: { id: true, channel: { select: { kind: true, name: true } }, account: { select: { timezone: true } } } },
+    },
+  });
+  if (!p) throw new SyncError('La publicación no está en la cuenta.');
+  if (!p.externalId) throw new SyncError('Todavía no está publicada: no hay nada para leer del canal.');
+  const listings = getChannelListings(p.store.channel.kind);
+  const adapter = getChannelAdapter(p.store.channel.kind, p.store.channel.name);
+  if (!listings) throw new SyncError(`Todavía no se pueden leer las publicaciones de ${adapter.name}.`);
+  const externalId = p.externalId;
+  const result = await withAccessToken(db, p.store.id, (token, userId) =>
+    listings.readListings(token, userId, [externalId], { description: () => true }),
+  );
+  const listing = result.listings.find((l) => l.externalId === externalId);
+  if (!listing) {
+    await db.channelCopy.updateMany({ where: { publicationId: p.id, missingSince: null }, data: { missingSince: now } });
+    return null;
+  }
+  const ctx = { syncId: null, adapter, day: dayIn(p.store.account.timezone, now), now };
+  return db.$transaction((tx) => applyListing(tx, ctx, p.id, listing, true));
+}
+
 // ───────────────────────────── Elegir ─────────────────────────────
 
 export type ChoiceSide = 'channel' | 'app';
@@ -428,8 +459,8 @@ export async function chooseFaces(
       });
       const copy = p?.channelCopy;
       if (!p || !copy || copy.missingSince) return 0;
-      const app = faceValuesOf(p);
-      const channel = faceValuesOf(copy);
+      const app = faceValues(p);
+      const channel = faceValues(copy);
       const prints = parseFingerprints(copy.fingerprints);
       const agreed = parseFingerprints(copy.agreed);
       const pending = faceSummary(fingerprintsOf(app), copy).choose.filter((f) => fields.includes(f));
@@ -459,4 +490,36 @@ export async function chooseFaces(
     }
   }
   return { publications, fields: changed };
+}
+
+/** Descarta el borrador de esos datos: la app vuelve a tener lo que está en el canal. */
+export async function discardDrafts(
+  db: Db,
+  args: { accountId: string; publicationId: string; fields?: FaceField[]; userId: string | null },
+): Promise<FaceField[]> {
+  return db.$transaction(async (tx) => {
+    const p = await tx.publication.findFirst({
+      where: { id: args.publicationId, product: { accountId: args.accountId } },
+      select: {
+        title: true,
+        description: true,
+        attributes: true,
+        channelCopy: { select: { title: true, description: true, attributes: true, fingerprints: true, agreed: true, missingSince: true } },
+      },
+    });
+    const copy = p?.channelCopy;
+    if (!p || !copy || copy.missingSince) return [];
+    const app = faceValues(p);
+    const channel = faceValues(copy);
+    const drafts = faceSummary(fingerprintsOf(app), copy).draft.filter((f) => !args.fields || args.fields.includes(f));
+    let update: Prisma.PublicationUpdateInput = {};
+    for (const field of drafts) {
+      update = { ...update, ...writeFace(field, channel[field]) };
+      await tx.channelSyncChange.create({
+        data: { publicationId: args.publicationId, field, kind: 'DISCARDED', before: asJson(app[field]), after: asJson(channel[field]), userId: args.userId },
+      });
+    }
+    if (drafts.length > 0) await tx.publication.update({ where: { id: args.publicationId }, data: update });
+    return drafts;
+  });
 }

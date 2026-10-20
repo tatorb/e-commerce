@@ -1,7 +1,9 @@
 import { prisma } from '@/lib/db';
-import { faceSummary, fingerprintsOf, type FaceField } from '@/domain/channel-sync';
-import { parseNameValueList, type NameValue } from '@/domain/name-value';
+import { faceSummary, faceValues, fingerprintsOf, type FaceField } from '@/domain/channel-sync';
+import type { NameValue } from '@/domain/name-value';
 import { getChannelListings } from '@/channels/listings';
+import { getChannelPublisher } from '@/channels/publish';
+import type { PipelineRemoval, PipelineStatus, PipelineStep } from '@/generated/prisma/enums';
 
 // Lo que muestra la pantalla Sincronización: cómo va la lectura de cada
 // tienda, lo que hay que elegir y lo último que llegó del canal.
@@ -11,7 +13,6 @@ const RECENT_CHANGES = 40;
 
 export type ChoiceRow = {
   id: string;
-  productId: string;
   externalId: string | null;
   storeName: string;
   channelName: string;
@@ -48,7 +49,6 @@ export async function loadSyncOverview(accountId: string) {
       where: { product: { accountId }, channelCopy: { isNot: null } },
       select: {
         id: true,
-        productId: true,
         externalId: true,
         title: true,
         description: true,
@@ -73,15 +73,14 @@ export async function loadSyncOverview(accountId: string) {
   for (const p of publications) {
     const copy = p.channelCopy!;
     if (copy.missingSince) continue;
-    const app = { title: p.title, description: p.description, attributes: parseNameValueList(p.attributes) };
-    const channel = { title: copy.title, description: copy.description, attributes: parseNameValueList(copy.attributes) };
+    const app = faceValues(p);
+    const channel = faceValues(copy);
     const summary = faceSummary(fingerprintsOf(app), copy);
     if (summary.draft.length > 0) drafts++;
     if (summary.draft.length === 0 && summary.choose.length === 0) upToDate++;
     if (summary.choose.length === 0) continue;
     toChoose.push({
       id: p.id,
-      productId: p.productId,
       externalId: p.externalId,
       storeName: p.store.name,
       channelName: p.store.channel.name,
@@ -119,3 +118,60 @@ export async function loadSyncOverview(accountId: string) {
 }
 
 export type SyncOverview = Awaited<ReturnType<typeof loadSyncOverview>>;
+
+export type ToPushRow = {
+  id: string;
+  externalId: string | null;
+  title: string | null;
+  storeName: string;
+  channelName: string;
+  draft: FaceField[];
+  choose: FaceField[];
+  rejected: { field: FaceField; message: string }[];
+  // Por qué no se puede subir desde la app, si no se puede.
+  blocked: string | null;
+  pipeline: { pipelineStatus: PipelineStatus; pipelineStep: PipelineStep | null; pipelineRemoval: PipelineRemoval | null };
+};
+
+/** Las publicaciones con cambios de la app sin subir al canal, o con datos para elegir. */
+export async function listToPush(accountId: string): Promise<ToPushRow[]> {
+  const publications = await prisma.publication.findMany({
+    where: { product: { accountId }, channelCopy: { is: { missingSince: null } } },
+    select: {
+      id: true,
+      externalId: true,
+      title: true,
+      description: true,
+      attributes: true,
+      pipelineStatus: true,
+      pipelineStep: true,
+      pipelineRemoval: true,
+      store: { select: { name: true, channel: { select: { kind: true, name: true } }, connection: { select: { status: true } } } },
+      channelCopy: { select: { fingerprints: true, agreed: true, rejections: true } },
+    },
+    orderBy: { updatedAt: 'desc' },
+  });
+  const rows: ToPushRow[] = [];
+  for (const p of publications) {
+    const summary = faceSummary(fingerprintsOf(faceValues(p)), p.channelCopy);
+    if (summary.draft.length === 0 && summary.choose.length === 0) continue;
+    const channelName = p.store.channel.name;
+    rows.push({
+      id: p.id,
+      externalId: p.externalId,
+      title: p.title,
+      storeName: p.store.name,
+      channelName,
+      draft: summary.draft,
+      choose: summary.choose,
+      rejected: summary.rejected.map(({ field, message }) => ({ field, message })),
+      blocked: !getChannelPublisher(p.store.channel.kind)
+        ? `Todavía no se pueden subir cambios a ${channelName}.`
+        : p.store.connection?.status !== 'ACTIVE'
+          ? `La tienda no está conectada con ${channelName}.`
+          : null,
+      pipeline: { pipelineStatus: p.pipelineStatus, pipelineStep: p.pipelineStep, pipelineRemoval: p.pipelineRemoval },
+    });
+  }
+  return rows;
+}

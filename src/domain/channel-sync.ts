@@ -1,5 +1,5 @@
 import { cleanText } from './content';
-import type { NameValue } from './name-value';
+import { parseNameValueList, type NameValue } from './name-value';
 
 // Las caras de una publicación: lo que tiene la app y lo que está en el canal.
 // Para saber de qué lado cambió cada dato se guarda, además, la huella de lo
@@ -14,12 +14,26 @@ export const FACE_FIELD_LABEL: Record<FaceField, string> = {
   attributes: 'Datos de catálogo',
 };
 
+// Cómo se cuenta cada cambio en el historial.
+export const SYNC_CHANGE_LABEL = {
+  TAKEN: 'llegó del canal',
+  CHOSE_CHANNEL: 'se eligió lo del canal',
+  CHOSE_APP: 'se eligió lo de la app',
+  SENT: 'se subió al canal',
+  DISCARDED: 'se descartó el cambio de la app',
+} as const;
+
 export function isFaceField(value: string): value is FaceField {
   return (FACE_FIELDS as readonly string[]).includes(value);
 }
 
 export type FaceValues = { title: string | null; description: string | null; attributes: NameValue[] };
 export type Fingerprints = Partial<Record<FaceField, string>>;
+
+/** Los datos de una cara, de la publicación o de la copia del canal, como se guardan. */
+export function faceValues(p: { title: string | null; description: string | null; attributes: unknown }): FaceValues {
+  return { title: p.title, description: p.description, attributes: parseNameValueList(p.attributes) };
+}
 
 const oneSpace = (s: string) => s.replace(/\s+/g, ' ').trim();
 
@@ -126,18 +140,46 @@ export function planFaces(app: Record<FaceField, string>, channel: Record<FaceFi
   });
 }
 
-export type FaceSummary = { draft: FaceField[]; choose: FaceField[] };
+export type Rejection = { message: string; at: string; fingerprint: string };
+
+/** Lo que el canal no aceptó al subir, por dato. */
+export function parseRejections(raw: unknown): Partial<Record<FaceField, Rejection>> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out: Partial<Record<FaceField, Rejection>> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!isFaceField(key) || !value || typeof value !== 'object') continue;
+    const r = value as Record<string, unknown>;
+    if (typeof r.message === 'string' && typeof r.at === 'string' && typeof r.fingerprint === 'string') {
+      out[key] = { message: r.message, at: r.at, fingerprint: r.fingerprint };
+    }
+  }
+  return out;
+}
+
+export type FaceSummary = {
+  draft: FaceField[];
+  choose: FaceField[];
+  // Los del borrador que el canal no aceptó, mientras la app siga con el mismo valor.
+  rejected: { field: FaceField; message: string; at: string }[];
+};
 
 /** En qué está la publicación: los datos del borrador y los que hay que elegir. */
-export function faceSummary(app: Record<FaceField, string>, copy: { fingerprints: unknown; agreed: unknown } | null): FaceSummary {
-  const summary: FaceSummary = { draft: [], choose: [] };
+export function faceSummary(
+  app: Record<FaceField, string>,
+  copy: { fingerprints: unknown; agreed: unknown; rejections?: unknown } | null,
+): FaceSummary {
+  const summary: FaceSummary = { draft: [], choose: [], rejected: [] };
   if (!copy) return summary;
   const channel = parseFingerprints(copy.fingerprints);
   const agreed = parseFingerprints(copy.agreed);
+  const rejections = parseRejections(copy.rejections);
   for (const field of FACE_FIELDS) {
     const state = fieldState(app[field], channel[field] ?? EMPTY, agreed[field]);
-    if (state === 'draft') summary.draft.push(field);
-    else if (state === 'choose') summary.choose.push(field);
+    if (state === 'draft') {
+      summary.draft.push(field);
+      const r = rejections[field];
+      if (r && r.fingerprint === app[field]) summary.rejected.push({ field, message: r.message, at: r.at });
+    } else if (state === 'choose') summary.choose.push(field);
   }
   return summary;
 }

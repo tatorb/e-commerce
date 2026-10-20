@@ -101,7 +101,7 @@ export function ChoiceList({ accountSlug, rows }: { accountSlug: string; rows: C
                 onChange={(e) => toggle(row.id, e.target.checked)}
               />
               <div className="min-w-0 flex-1">
-                <Link href={`/a/${accountSlug}/productos/${row.productId}`} className="font-medium hover:underline">
+                <Link href={`/a/${accountSlug}/publicaciones/${row.id}`} className="font-medium hover:underline">
                   {titleOrUntitled(row.title)}
                 </Link>
                 <p className="text-xs text-muted-foreground">

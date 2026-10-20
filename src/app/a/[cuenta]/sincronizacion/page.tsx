@@ -5,7 +5,7 @@ import { SectionBody, SectionCard } from '@/components/ui/section-card';
 import { Badge } from '@/components/ui/badge';
 import { ChoiceList } from '@/components/sync/ChoiceList';
 import { SyncNowButton } from '@/components/sync/SyncNowButton';
-import { FACE_FIELD_LABEL, isFaceField } from '@/domain/channel-sync';
+import { FACE_FIELD_LABEL, isFaceField, SYNC_CHANGE_LABEL } from '@/domain/channel-sync';
 import { titleOrUntitled } from '@/domain/publication-title';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { formatDateTime, formatDuration, plural } from '@/lib/format';
@@ -22,8 +22,6 @@ export async function generateMetadata({ params }: { params: Promise<{ cuenta: s
 }
 
 type Run = SyncOverview['runs'][number];
-
-const CHANGE_LABEL = { TAKEN: 'Llegó del canal', CHOSE_CHANNEL: 'Se eligió lo del canal', CHOSE_APP: 'Se eligió lo de la app' } as const;
 
 function runErrors(run: Run): { at: string; message: string }[] {
   return Array.isArray(run.errors) ? (run.errors as { at: string; message: string }[]) : [];
@@ -163,7 +161,7 @@ export default async function SyncPage({ params }: { params: Promise<{ cuenta: s
                   <span className="font-medium">{titleOrUntitled(c.publication.title)}</span>
                   <span className="text-xs text-muted-foreground">{c.publication.externalId}</span>
                   <span className="basis-full text-muted-foreground sm:basis-auto sm:ml-auto">
-                    {isFaceField(c.field) ? FACE_FIELD_LABEL[c.field] : c.field}: {CHANGE_LABEL[c.kind].toLowerCase()}
+                    {isFaceField(c.field) ? FACE_FIELD_LABEL[c.field] : c.field}: {SYNC_CHANGE_LABEL[c.kind]}
                     {c.user ? `, ${c.user.name}` : ''}
                   </span>
                 </li>

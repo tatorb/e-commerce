@@ -175,7 +175,8 @@ describe.skipIf(!url)('la lectura automática en la base', () => {
 
   const state = async (id: string) => {
     const p = await db.publication.findUniqueOrThrow({ where: { id }, include: { channelCopy: true } });
-    return faceSummary(fingerprintsOf({ title: p.title, description: p.description, attributes: p.attributes as never }), p.channelCopy);
+    const { draft, choose } = faceSummary(fingerprintsOf({ title: p.title, description: p.description, attributes: p.attributes as never }), p.channelCopy);
+    return { draft, choose };
   };
 
   it('la primera vez: lo igual queda acordado, lo que falta se trae y lo distinto queda para elegir', async () => {

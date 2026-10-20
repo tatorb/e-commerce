@@ -1181,6 +1181,9 @@ model ChannelCopy {
   // app. Un dato sin huella acordada todavía no se sabe de qué lado está bien.
   fingerprints      Json          @default("{}")
   agreed            Json          @default("{}")
+  // Lo que el canal no aceptó al subir, por dato: { title: { message, at, fingerprint } }.
+  // Vale mientras la app tenga el mismo valor que se intentó subir.
+  rejections        Json          @default("{}")
   updatedAt         DateTime      @updatedAt
 
   @@map("channel_copies")
@@ -1236,9 +1239,14 @@ enum SyncChangeKind {
   // Era distinto en los dos lados y alguien eligió.
   CHOSE_CHANNEL
   CHOSE_APP
+  // Se subió al canal lo de la app.
+  SENT
+  // Se descartó el cambio de la app y volvió lo del canal.
+  DISCARDED
 }
 
-// Un dato que cambió en la app por la sincronización, o una elección.
+// Un dato que cambió por la sincronización: lo que llegó del canal, lo que se
+// eligió, lo que se subió o el borrador que se descartó.
 model ChannelSyncChange {
   id            Int            @id @default(autoincrement())
   syncId        String?

@@ -10,6 +10,8 @@ export class MercadoLibreRequestError extends ConnectError {
   constructor(
     message: string,
     readonly status: number,
+    // Lo que respondió Mercado Libre, para explicar por qué no aceptó un cambio.
+    readonly body: unknown = null,
   ) {
     super(message, status === 401, status === 429);
   }
@@ -56,6 +58,48 @@ export async function mlGet(path: string, accessToken: string): Promise<unknown>
       throw new MercadoLibreRequestError('Mercado Libre pidió esperar porque hubo demasiados pedidos. Probá de nuevo en unos minutos.', 429);
     }
     throw new MercadoLibreRequestError(`Mercado Libre respondió con un error (código ${res.status}).`, res.status);
+  }
+}
+
+/**
+ * PUT o POST con la llave y un cuerpo JSON. Reintenta igual que mlGet; si
+ * Mercado Libre no acepta el cambio, el error trae su respuesta.
+ */
+export async function mlSend(method: 'PUT' | 'POST', path: string, accessToken: string, body: unknown): Promise<unknown> {
+  for (let attempt = 0; ; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(`${apiUrl()}${path}`, {
+        method,
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(20_000),
+        cache: 'no-store',
+      });
+    } catch {
+      if (attempt + 1 < TRIES) {
+        await sleep(500 * 2 ** attempt);
+        continue;
+      }
+      throw new ConnectError('No se pudo conectar con Mercado Libre. Probá de nuevo.');
+    }
+    const text = await res.text();
+    let parsed: unknown = null;
+    try {
+      parsed = text ? JSON.parse(text) : null;
+    } catch {
+      parsed = text;
+    }
+    if (res.ok) return parsed;
+    if (RETRY_STATUS.has(res.status) && attempt + 1 < TRIES) {
+      await sleep(waitFor(res, attempt));
+      continue;
+    }
+    if (res.status === 401) throw new MercadoLibreRequestError('Mercado Libre no aceptó la llave: hay que volver a conectar.', 401, parsed);
+    if (res.status === 429) {
+      throw new MercadoLibreRequestError('Mercado Libre pidió esperar porque hubo demasiados pedidos. Probá de nuevo en unos minutos.', 429, parsed);
+    }
+    throw new MercadoLibreRequestError(`Mercado Libre respondió con un error (código ${res.status}).`, res.status, parsed);
   }
 }
 

@@ -54,6 +54,11 @@ function SyncBadges({ sync }: { sync: SyncState }) {
           Para elegir
         </Badge>
       ) : null}
+      {sync.rejected ? (
+        <Badge variant="destructive" title="El canal no aceptó un cambio que se subió: el motivo está en la publicación">
+          Rechazada
+        </Badge>
+      ) : null}
     </>
   );
 }
@@ -132,7 +137,6 @@ function rowHint(r: CatalogRow): string {
 export function CatalogTable({ accountSlug, rows }: { accountSlug: string; rows: CatalogRow[] }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const add = useAddToPipeline(() => setSelected(new Set()));
-  const base = `/a/${accountSlug}/productos`;
 
   // Solo cuentan las que se ven ahora: si un filtro esconde una elegida, no se agrega.
   const eligible = rows.filter(canEnter);
@@ -207,7 +211,7 @@ export function CatalogTable({ accountSlug, rows }: { accountSlug: string; rows:
               <div className="min-w-0 flex-1 space-y-1.5">
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex min-w-0 items-start gap-1.5">
-                    <Link href={`${base}/${p.productId}`} className="font-medium hover:underline min-w-0">
+                    <Link href={`/a/${accountSlug}/publicaciones/${p.id}`} className="font-medium hover:underline min-w-0">
                       {titleOrUntitled(p.title)}
                     </Link>
                     <span className="pt-1">
@@ -272,7 +276,7 @@ export function CatalogTable({ accountSlug, rows }: { accountSlug: string; rows:
                   </TableCell>
                   <TableCell className="max-w-[22rem]">
                     <div className="flex items-start gap-1.5">
-                      <Link href={`${base}/${p.productId}`} className="font-medium hover:underline line-clamp-2">
+                      <Link href={`/a/${accountSlug}/publicaciones/${p.id}`} className="font-medium hover:underline line-clamp-2">
                         {titleOrUntitled(p.title)}
                       </Link>
                       <span className="pt-1">

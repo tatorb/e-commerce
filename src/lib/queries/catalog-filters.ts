@@ -79,16 +79,18 @@ export const SYNC_OPTIONS = [
   { value: 'al-dia', label: 'Al día' },
   { value: 'borrador', label: 'Con borrador' },
   { value: 'elegir', label: 'Para elegir' },
+  { value: 'rechazada', label: 'Rechazada por el canal' },
   { value: 'sin-leer', label: 'Sin leer del canal' },
 ] as const;
 
-export type SyncState = { read: boolean; draft: boolean; choose: boolean };
+export type SyncState = { read: boolean; draft: boolean; choose: boolean; rejected: boolean };
 
 function syncOptions(s: SyncState): string[] {
   if (!s.read) return ['sin-leer'];
   const out: string[] = [];
   if (s.draft) out.push('borrador');
   if (s.choose) out.push('elegir');
+  if (s.rejected) out.push('rechazada');
   return out.length > 0 ? out : ['al-dia'];
 }
 

@@ -15,6 +15,8 @@ import { StepActions } from '@/components/pipeline/StepActions';
 import { PipelineHistory } from '@/components/pipeline/PipelineHistory';
 import { AddToPipelineButton } from '@/components/pipeline/AddToPipelineButton';
 import { PublicationCodeCard } from '@/components/pipeline/PublicationCodeCard';
+import { PendingChangesCard } from '@/components/publication/PendingChangesCard';
+import { loadPublicationFaces } from '@/lib/queries/publication-faces';
 import { channelInfo } from '@/channels';
 import { codeOrUnpublished } from '@/domain/channel-status';
 import { PIPELINE_REMOVAL_LABEL, PIPELINE_STEP_LABEL, PIPELINE_STEP_SLUG, stepFromSlug } from '@/domain/pipeline';
@@ -88,7 +90,7 @@ export default async function PipelineStepPage({
   const lock = pub.titleLock.locked ? titleLockText(pub.titleLock) : null;
   // Lo que usa el paso que se mira, pedido todo junto: con la base lejos, cada
   // consulta en fila suma una ida y vuelta.
-  const [ctx, info, images, channel] = await Promise.all([
+  const [ctx, info, images, channel, faces] = await Promise.all([
     // Información y Título usan la ficha, la competencia y lo leído del buscador.
     viewing === 'INFO' || viewing === 'TITLE' ? loadTitleContext(prisma, account.id, pub.id) : null,
     viewing === 'INFO'
@@ -102,12 +104,13 @@ export default async function PipelineStepPage({
           prisma.publication.count({ where: { productId: pub.productId } }),
         ])
       : null,
-    // Publicación carga el ID del canal, con el formato de cada canal.
+    // Publicación carga el ID del canal, con el formato de cada canal, y lo que falta subir.
     viewing === 'PUBLISH'
       ? prisma.publication
           .findUniqueOrThrow({ where: { id: pub.id }, select: { store: { select: { channel: true } } } })
           .then((p) => p.store.channel)
       : null,
+    viewing === 'PUBLISH' ? loadPublicationFaces(account.id, pub.id) : null,
   ]);
   const auto = ctx && viewing === 'TITLE' ? await autoAvailable(prisma, ctx.channel, ctx.storeId) : null;
 
@@ -250,13 +253,16 @@ export default async function PipelineStepPage({
             blobReady={isBlobConfigured()}
           />
         ) : channel && viewing === 'PUBLISH' ? (
-          <PublicationCodeCard
-            accountSlug={account.slug}
-            publicationId={pub.id}
-            channel={channelInfo(channel.kind, channel.name)}
-            externalId={pub.externalId}
-            url={pub.url}
-          />
+          <>
+            <PublicationCodeCard
+              accountSlug={account.slug}
+              publicationId={pub.id}
+              channel={channelInfo(channel.kind, channel.name)}
+              externalId={pub.externalId}
+              url={pub.url}
+            />
+            {faces ? <PendingChangesCard accountSlug={account.slug} faces={faces} /> : null}
+          </>
         ) : viewing ? (
           <Card>
             <CardContent className="space-y-4 p-6">

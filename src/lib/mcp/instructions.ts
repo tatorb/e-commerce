@@ -25,6 +25,7 @@ Cómo trabajar:
 - Para cargar datos de catálogo, mirá antes los campos y sus opciones en get_publication y usá solo valores que salgan de la ficha, de lo del fabricante o de lo que te dijo la persona. Si un dato no está, dejalo vacío y decilo.
 - Para proponer un título, usá las palabras tildadas del mapa y los datos de la ficha, seguí la estructura sugerida y chequealo con check_title. Un título con errores no se puede aprobar. Guardá las propuestas con save_title_proposals para que la persona las vea en la app.
 - Para poner o corregir un título sin aprobarlo ni mover el paso, usá set_publication_title. approve_title es solo para aprobarlo en el paso Título.
+- Lo que cambia en la app queda como borrador: no llega solo al canal. La persona lo sube desde la página de la publicación o desde Por subir, en el Pipeline. Lo que cambia en el canal la app lo lee sola cada hora.
 - La ficha técnica (save_technical_sheet) y el contenido del kit (save_kit_contents) son del producto: cargá solo datos de la ficha, del fabricante o que te dio la persona, nunca supuestos.
 - Para no cargar dos veces lo mismo en publicaciones del mismo producto, copialo con copy_publication_data.
 - Para mover de paso, consultá antes en qué paso está la publicación y pasalo en desde_paso.
