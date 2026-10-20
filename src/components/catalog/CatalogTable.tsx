@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { KanbanSquare, Lock, X } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -18,6 +19,7 @@ import { cn } from '@/lib/utils/cn';
 import { addToPipelineAction } from '@/app/a/[cuenta]/publicaciones/pipeline-actions';
 import { useAddToPipeline } from './useAddToPipeline';
 import { titleOrUntitled } from '@/domain/publication-title';
+import type { SyncState } from '@/lib/queries/catalog-filters';
 
 // La lista del Catálogo, con casillas para elegir publicaciones y agregarlas
 // al pipeline. Entran también las que todavía no están publicadas.
@@ -35,7 +37,26 @@ export type CatalogRow = PipelineState & {
   sales: number | null;
   titleLock: TitleLock;
   missing: string[];
+  sync: SyncState;
 };
+
+/** Si tiene cambios de la app sin subir, o datos distintos en los dos lados para elegir. */
+function SyncBadges({ sync }: { sync: SyncState }) {
+  return (
+    <>
+      {sync.draft ? (
+        <Badge variant="secondary" title="Tiene cambios de la app que todavía no están en el canal">
+          Borrador
+        </Badge>
+      ) : null}
+      {sync.choose ? (
+        <Badge variant="destructive" title="Un dato es distinto en la app y en el canal: hay que elegir en Sincronización">
+          Para elegir
+        </Badge>
+      ) : null}
+    </>
+  );
+}
 
 function MissingList({ missing }: { missing: string[] }) {
   if (missing.length === 0) return <span className="text-muted-foreground">—</span>;
@@ -199,6 +220,7 @@ export function CatalogTable({ accountSlug, rows }: { accountSlug: string; rows:
                 <div className="flex flex-wrap gap-1.5">
                   <PipelineCell accountSlug={accountSlug} row={p} />
                   <ChannelStatusBadge status={p.channelStatus} />
+                  <SyncBadges sync={p.sync} />
                 </div>
                 <div className="text-xs text-muted-foreground truncate">
                   {[codeOrUnpublished(p.externalId), p.skus.join(' / ')].filter(Boolean).join(' · ')}
@@ -263,7 +285,10 @@ export function CatalogTable({ accountSlug, rows }: { accountSlug: string; rows:
                     </div>
                   </TableCell>
                   <TableCell>
-                    <ChannelStatusBadge status={p.channelStatus} />
+                    <div className="flex flex-wrap gap-1">
+                      <ChannelStatusBadge status={p.channelStatus} />
+                      <SyncBadges sync={p.sync} />
+                    </div>
                   </TableCell>
                   <TableCell>
                     <PipelineCell accountSlug={accountSlug} row={p} />

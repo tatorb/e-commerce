@@ -19,6 +19,7 @@ export type PublicationSearch = {
   ventas?: string;
   bloqueado?: string;
   propuesta?: string;
+  sincro?: string;
   orden?: string;
 };
 
@@ -73,6 +74,24 @@ export const LOCK_OPTIONS = [
   { value: 'sin-dato', label: 'Sin dato' },
 ] as const;
 
+// Cómo está frente a lo que se leyó del canal.
+export const SYNC_OPTIONS = [
+  { value: 'al-dia', label: 'Al día' },
+  { value: 'borrador', label: 'Con borrador' },
+  { value: 'elegir', label: 'Para elegir' },
+  { value: 'sin-leer', label: 'Sin leer del canal' },
+] as const;
+
+export type SyncState = { read: boolean; draft: boolean; choose: boolean };
+
+function syncOptions(s: SyncState): string[] {
+  if (!s.read) return ['sin-leer'];
+  const out: string[] = [];
+  if (s.draft) out.push('borrador');
+  if (s.choose) out.push('elegir');
+  return out.length > 0 ? out : ['al-dia'];
+}
+
 // Atajos del recorrido de la propuesta completa con IA.
 export const PROPOSAL_SHORTCUTS = {
   revisar: { label: 'Propuestas para revisar', stages: ['PROPOSAL_GENERATED', 'IN_REVIEW'] as Stage[] },
@@ -100,6 +119,7 @@ export type CatalogFilters = {
   sales: string[];
   locked: string[];
   proposal: keyof typeof PROPOSAL_SHORTCUTS | '';
+  sync: string[];
   sort: string;
   q: string;
 };
@@ -123,6 +143,7 @@ export function parsePublicationSearch(search: PublicationSearch): CatalogFilter
     sales: list(search.ventas, SALES_OPTIONS.map((o) => o.value)),
     locked: list(search.bloqueado, LOCK_OPTIONS.map((o) => o.value)),
     proposal: search.propuesta && search.propuesta in PROPOSAL_SHORTCUTS ? (search.propuesta as 'revisar' | 'aplicar') : '',
+    sync: list(search.sincro, SYNC_OPTIONS.map((o) => o.value)),
     sort: SORTS.some((s) => s.value === search.orden) ? search.orden! : 'puntaje',
     q: search.q?.trim().toLowerCase() ?? '',
   };
@@ -139,6 +160,7 @@ export function isFiltered(f: CatalogFilters): boolean {
       f.sales.length ||
       f.locked.length ||
       f.proposal ||
+      f.sync.length ||
       f.q,
   );
 }
@@ -157,6 +179,7 @@ export type Filterable = {
   visits: number | null;
   sales: number | null;
   titleLock: TitleLock;
+  sync: SyncState;
 };
 
 function visitRange(visits: number | null): string {
@@ -173,7 +196,7 @@ function lockOption(lock: TitleLock): string {
 }
 
 export function filterPublications<T extends Filterable>(all: T[], f: CatalogFilters): T[] {
-  const { band, statuses, pipeline, families, kinds, visits, sales, locked, proposal, sort, q } = f;
+  const { band, statuses, pipeline, families, kinds, visits, sales, locked, proposal, sync, sort, q } = f;
   const proposalStages = proposal ? PROPOSAL_SHORTCUTS[proposal].stages : null;
   const familySet = new Set(families.map((x) => x.toLowerCase()));
   return all
@@ -186,6 +209,7 @@ export function filterPublications<T extends Filterable>(all: T[], f: CatalogFil
     .filter((p) => sales.length === 0 || sales.includes(salesOption(p.sales)))
     .filter((p) => locked.length === 0 || locked.includes(lockOption(p.titleLock)))
     .filter((p) => !proposalStages || proposalStages.includes(p.stage))
+    .filter((p) => sync.length === 0 || syncOptions(p.sync).some((o) => sync.includes(o)))
     .filter(
       (p) =>
         !q ||

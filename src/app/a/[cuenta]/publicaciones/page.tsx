@@ -23,6 +23,7 @@ import {
   BANDS,
   CHANNEL_STATUSES,
   LOCK_OPTIONS,
+  SYNC_OPTIONS,
   PROPOSAL_SHORTCUTS,
   SALES_OPTIONS,
   SORTS,
@@ -101,6 +102,7 @@ export default async function PublicationsPage({
     sales: p.sales,
     titleLock: p.titleLock,
     missing: p.missing.map((m) => m.name),
+    sync: p.sync,
   }));
   const ready = items.filter((p) => needsProposal(p.stage));
   const toReview = all.filter((p) => p.stage === 'PROPOSAL_GENERATED' || p.stage === 'IN_REVIEW').length;
@@ -223,6 +225,12 @@ export default async function PublicationsPage({
             paramKey="bloqueado"
             options={LOCK_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
             selected={filters.locked}
+          />
+          <UrlFilterDropdown
+            label="Sincronización"
+            paramKey="sincro"
+            options={SYNC_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+            selected={filters.sync}
           />
           <UrlFilterDropdown
             label="Estado"

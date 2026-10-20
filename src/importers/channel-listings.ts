@@ -2,6 +2,8 @@ import type { ChannelListing } from '@/channels/listings-types';
 import type { ChannelAdapter } from '@/channels/types';
 import type { ChannelStatus } from '@/generated/prisma/enums';
 import { CatalogError, cleanCatalogValue } from '@/domain/catalog-data';
+import type { NameValue } from '@/domain/name-value';
+import { parseSpecs } from './cells';
 import type { FieldKey } from './fields';
 import type { RowInput } from './mapping';
 import type { Cell } from './spreadsheet';
@@ -45,6 +47,11 @@ function attributeLines(listing: ChannelListing, adapter: ChannelAdapter): strin
 function productTypeOf(listing: ChannelListing, adapter: ChannelAdapter): string | null {
   const family = listing.categoryId ? (adapter.catalog?.familyForCategory(listing.categoryId, listing.title) ?? null) : null;
   return family ?? listing.categoryName;
+}
+
+/** Los datos de catálogo como los guarda la app, igual que al importarlos. */
+export function listingAttributes(listing: ChannelListing, adapter: ChannelAdapter): NameValue[] {
+  return parseSpecs(attributeLines(listing, adapter).join('\n')).items;
 }
 
 export function listingToRow(listing: ChannelListing, rowNumber: number, adapter: ChannelAdapter): RowInput {

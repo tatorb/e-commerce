@@ -39,6 +39,8 @@ export type ChannelListing = {
   attributes: { id: string; name: string; value: string }[];
   // Cuántos datos de la ficha del canal tiene cargados, contando marca y SKU.
   attributeCount: number;
+  // Cuándo cambió por última vez en el canal, si lo informa.
+  updatedAt: string | null;
 };
 
 export interface ChannelListings {
@@ -46,6 +48,15 @@ export interface ChannelListings {
   countByStatus(accessToken: string, userId: string): Promise<Record<ListingStatus, number>>;
   /** Los códigos de las publicaciones con esos estados. */
   listIds(accessToken: string, userId: string, statuses: ListingStatus[]): Promise<string[]>;
-  /** Hasta LISTINGS_BATCH publicaciones propias; las que no vinieron o son de otra cuenta, en missing. */
-  readListings(accessToken: string, userId: string, ids: string[]): Promise<{ listings: ChannelListing[]; missing: string[] }>;
+  /**
+   * Hasta LISTINGS_BATCH publicaciones propias; las que no vinieron o son de
+   * otra cuenta, en missing. Con description, la descripción se pide solo para
+   * las que dice que sí.
+   */
+  readListings(
+    accessToken: string,
+    userId: string,
+    ids: string[],
+    opts?: { description?: (listing: ChannelListing) => boolean },
+  ): Promise<{ listings: ChannelListing[]; missing: string[] }>;
 }

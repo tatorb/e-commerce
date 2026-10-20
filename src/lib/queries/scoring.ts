@@ -1,7 +1,9 @@
 import { prisma } from '@/lib/db';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
+import { faceSummary, fingerprintsOf } from '@/domain/channel-sync';
 import { LATEST_MEASUREMENTS, latestMetrics } from '@/domain/measurements';
+import { parseNameValueList } from '@/domain/name-value';
 import { resolveTitleLock } from '@/domain/title-lock';
 import { scorePublication, type RuleConfig, type ScoreResult } from '@/domain/standard';
 import { toScoreInput } from './score-input';
@@ -52,6 +54,7 @@ export async function listScoredPublications(
         updatedAt: true,
         store: { select: { name: true, channelId: true, channel: { select: { kind: true, name: true } } } },
         measurements: { orderBy: { takenAt: 'desc' }, take: LATEST_MEASUREMENTS, select: { takenAt: true, metrics: true } },
+        channelCopy: { select: { fingerprints: true, agreed: true, missingSince: true } },
         product: {
           select: {
             id: true,
@@ -75,6 +78,8 @@ export async function listScoredPublications(
     const result: ScoreResult = scorePublication(rules.get(p.store.channelId) ?? [], toScoreInput(p.product, p));
     const metrics = latestMetrics(p.measurements);
     const channel = getChannelAdapter(p.store.channel.kind, p.store.channel.name);
+    const copy = p.channelCopy && !p.channelCopy.missingSince ? p.channelCopy : null;
+    const faces = faceSummary(fingerprintsOf({ title: p.title, description: p.description, attributes: parseNameValueList(p.attributes) }), copy);
     return {
       id: p.id,
       title: p.title,
@@ -96,6 +101,8 @@ export async function listScoredPublications(
       sales: typeof metrics.sales_90d === 'number' ? metrics.sales_90d : null,
       score: result.score,
       missing: result.missing,
+      // Cómo está frente a lo que se leyó del canal.
+      sync: { read: copy !== null, draft: faces.draft.length > 0, choose: faces.choose.length > 0 },
     };
   });
 }

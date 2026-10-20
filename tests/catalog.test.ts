@@ -24,13 +24,14 @@ const base: Filterable & { id: string } = {
   visits: null,
   sales: null,
   titleLock: { locked: null, source: null },
+  sync: { read: true, draft: false, choose: false },
 };
 
 const items = [
   { ...base, id: 'a', title: 'Kit embrague', family: 'Kit de embrague', visits: 0, sales: 0, titleLock: { locked: false, source: 'data' as const } },
-  { ...base, id: 'b', title: 'Pistones', family: 'Subconjunto (pistones + aros)', visits: 30, sales: 2, titleLock: { locked: true, source: 'data' as const }, pipelineStatus: 'IN_PIPELINE' as const },
-  { ...base, id: 'c', title: 'Juntas', family: 'Juntas, varias', visits: 120, sales: null, stage: 'APPROVED' as const, kind: 'COMBO' as const },
-  { ...base, id: 'd', title: 'Sin datos' },
+  { ...base, id: 'b', title: 'Pistones', family: 'Subconjunto (pistones + aros)', visits: 30, sales: 2, titleLock: { locked: true, source: 'data' as const }, pipelineStatus: 'IN_PIPELINE' as const, sync: { read: true, draft: true, choose: true } },
+  { ...base, id: 'c', title: 'Juntas', family: 'Juntas, varias', visits: 120, sales: null, stage: 'APPROVED' as const, kind: 'COMBO' as const, sync: { read: true, draft: true, choose: false } },
+  { ...base, id: 'd', title: 'Sin datos', sync: { read: false, draft: false, choose: false } },
 ];
 
 const ids = (search: Parameters<typeof parsePublicationSearch>[0]) =>
@@ -73,6 +74,15 @@ describe('filtros del Catálogo', () => {
   it('el atajo de propuestas para aplicar', () => {
     expect(ids({ propuesta: 'aplicar' })).toEqual(['c']);
     expect(isFiltered(parsePublicationSearch({ propuesta: 'aplicar' }))).toBe(true);
+  });
+
+  it('por cómo está frente al canal', () => {
+    expect(ids({ sincro: 'al-dia' })).toEqual(['a']);
+    expect(ids({ sincro: 'borrador' }).sort()).toEqual(['b', 'c']);
+    expect(ids({ sincro: 'elegir' })).toEqual(['b']);
+    expect(ids({ sincro: 'sin-leer' })).toEqual(['d']);
+    expect(ids({ sincro: 'al-dia,sin-leer' }).sort()).toEqual(['a', 'd']);
+    expect(isFiltered(parsePublicationSearch({ sincro: 'elegir' }))).toBe(true);
   });
 
   it('ignora valores que no conoce, como la etapa vieja', () => {

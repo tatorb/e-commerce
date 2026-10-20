@@ -1,0 +1,45 @@
+# Cada hora le pide a la app que lea las publicaciones de las tiendas
+# conectadas (src/app/api/sincronizar/route.ts). Vercel ya la llama una vez
+# por día; esto la lleva a cada hora sin pagar un plan de Vercel.
+#
+# Necesita el secreto CRON_SECRET del repositorio, el mismo valor que la
+# variable CRON_SECRET de Vercel. Sin él, no hace nada. Si la app no está en
+# https://e-commerce.studiomrb.com, cargar la variable APP_URL.
+
+name: Leer los canales
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: leer-canales
+  cancel-in-progress: false
+
+jobs:
+  leer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Pedirle a la app que lea
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          APP_URL: ${{ vars.APP_URL }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "Falta el secreto CRON_SECRET: no se lee."
+            exit 0
+          fi
+          url="${APP_URL:-https://e-commerce.studiomrb.com}/api/sincronizar"
+          # Cada pedido lee lo que alcanza en 45 segundos. Si quedó algo, se vuelve a pedir.
+          for i in 1 2 3 4 5 6 7 8; do
+            res=$(curl -sS --fail-with-body --max-time 90 -H "Authorization: Bearer $CRON_SECRET" "$url")
+            echo "$res"
+            case "$res" in
+              *'"pending":true'*) sleep 5 ;;
+              *) exit 0 ;;
+            esac
+          done

@@ -29,6 +29,7 @@ const ITEM_FIELDS = [
   'variations',
   'seller_custom_field',
   'health',
+  'last_updated',
 ];
 
 // Los que van a la ficha y no a los datos de catálogo.
@@ -125,6 +126,7 @@ export function parseItem(item: Obj): ChannelListing {
     measures,
     attributes,
     attributeCount: attributes.length + [brand, partNumber, origin].filter(Boolean).length + (skuAttr ? 1 : 0),
+    updatedAt: str(item.last_updated),
   };
 }
 
@@ -261,7 +263,7 @@ export const mercadolibreListings: ChannelListings = {
     return out;
   },
 
-  async readListings(accessToken, userId, ids) {
+  async readListings(accessToken, userId, ids, opts) {
     const wanted = [...new Set(ids)].slice(0, BULK_MAX);
     // Solo las propias: las de otra cuenta quedan como no leídas.
     const own = (await readItems(accessToken, wanted, ITEM_FIELDS, { allAttributes: true })).filter(
@@ -272,6 +274,7 @@ export const mercadolibreListings: ChannelListings = {
     const tasks: (() => Promise<void>)[] = [];
     for (const l of listings) {
       l.visits90d = visits.get(l.externalId) ?? null;
+      if (opts?.description && !opts.description(l)) continue;
       const id = encodeURIComponent(l.externalId);
       tasks.push(async () => {
         const body = await optional(() => mlGet(`/items/${id}/description`, accessToken));

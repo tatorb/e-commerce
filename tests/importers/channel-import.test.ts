@@ -37,6 +37,7 @@ function listing(over: Partial<ChannelListing> = {}): ChannelListing {
       { id: 'ITEM_CONDITION', name: 'Condición del ítem', value: 'Nuevo; sin uso' },
     ],
     attributeCount: 6,
+    updatedAt: null,
     ...over,
   };
 }

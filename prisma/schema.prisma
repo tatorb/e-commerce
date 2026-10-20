@@ -53,6 +53,8 @@ model User {
   photoSettings    PhotoSettings[]
   photoEdits       PhotoEdit[]
   photoDecisions   PhotoStepRun[]
+  channelSyncs     ChannelSync[]
+  syncChoices      ChannelSyncChange[]
 
   @@map("users")
 }
@@ -173,6 +175,7 @@ model Store {
   connection       ChannelConnection?
   connectAttempts  ConnectAttempt[]
   probes           ChannelProbe[]
+  syncs            ChannelSync[]
 
   @@unique([accountId, channelId, name])
   @@map("stores")
@@ -372,6 +375,8 @@ model Publication {
   titleWork         TitleWork?
   titleApprovals    TitleApproval[]
   positions         SearchPosition[]
+  channelCopy       ChannelCopy?
+  syncChanges       ChannelSyncChange[]
 
   @@unique([storeId, externalId])
   @@index([pipelineStatus])
@@ -1144,4 +1149,111 @@ model PhotoStepRun {
   @@index([status, createdAt])
   @@index([editId, step])
   @@map("photo_step_runs")
+}
+
+// ───────────────────────────── Sincronización con el canal ─────────────────────────────
+
+// La cara de una publicación en el canal: lo último que se leyó de allá. Junto
+// con lo que tiene la app y lo último en que las dos coincidieron, dice de qué
+// lado cambió cada dato (src/domain/channel-sync.ts).
+model ChannelCopy {
+  publicationId     String        @id
+  publication       Publication   @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  readAt            DateTime
+  // Cuándo cambió por última vez en el canal, según el canal.
+  channelUpdatedAt  DateTime?
+  // La descripción se pide aparte: solo si la publicación cambió o pasó un día.
+  descriptionReadAt DateTime?
+  // Desde cuándo el canal no la devuelve: se borró o es de otra cuenta.
+  missingSince      DateTime?
+  title             String?
+  description       String?
+  // Los datos de catálogo como los guarda la app: lista de { name, value }.
+  attributes        Json          @default("[]")
+  price             Decimal?      @db.Decimal(14, 2)
+  status            ChannelStatus
+  url               String?
+  photos            Json          @default("[]")
+  hasVideo          Boolean       @default(false)
+  // Marca, número de pieza, origen y SKU, como los informa el canal.
+  details           Json          @default("{}")
+  // Huella de cada dato en el canal, y de lo último en que coincidieron con la
+  // app. Un dato sin huella acordada todavía no se sabe de qué lado está bien.
+  fingerprints      Json          @default("{}")
+  agreed            Json          @default("{}")
+  updatedAt         DateTime      @updatedAt
+
+  @@map("channel_copies")
+}
+
+enum SyncTrigger {
+  SCHEDULE
+  MANUAL
+}
+
+enum SyncStatus {
+  RUNNING
+  DONE
+  FAILED
+}
+
+// Una pasada de lectura de una tienda. Se hace por tandas, en uno o varios
+// pedidos: guarda hasta dónde llegó para seguir en el próximo.
+model ChannelSync {
+  id           String              @id @default(cuid())
+  storeId      String
+  store        Store               @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  trigger      SyncTrigger
+  userId       String?
+  user         User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
+  status       SyncStatus          @default(RUNNING)
+  startedAt    DateTime            @default(now())
+  finishedAt   DateTime?
+  // Mientras un pedido la está corriendo, nadie más la toma.
+  leaseUntil   DateTime?
+  // Los códigos de las publicaciones a leer y cuántos ya se leyeron.
+  ids          Json                @default("[]")
+  position     Int                 @default(0)
+  total        Int                 @default(0)
+  read         Int                 @default(0)
+  // Publicaciones con datos que llegaron del canal.
+  updated      Int                 @default(0)
+  // Publicaciones que el canal no devolvió.
+  missing      Int                 @default(0)
+  // Al terminar: cuántas quedan para elegir y cuántas hay en el canal que no están en la app.
+  toChoose     Int?
+  newInChannel Int?
+  errors       Json                @default("[]")
+  changes      ChannelSyncChange[]
+
+  @@index([storeId, startedAt])
+  @@map("channel_syncs")
+}
+
+enum SyncChangeKind {
+  // Cambió en el canal y la app no tenía un cambio propio: se tomó.
+  TAKEN
+  // Era distinto en los dos lados y alguien eligió.
+  CHOSE_CHANNEL
+  CHOSE_APP
+}
+
+// Un dato que cambió en la app por la sincronización, o una elección.
+model ChannelSyncChange {
+  id            Int            @id @default(autoincrement())
+  syncId        String?
+  sync          ChannelSync?   @relation(fields: [syncId], references: [id], onDelete: SetNull)
+  publicationId String
+  publication   Publication    @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  field         String
+  kind          SyncChangeKind
+  before        Json?
+  after         Json?
+  userId        String?
+  user          User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt     DateTime       @default(now())
+
+  @@index([publicationId, createdAt])
+  @@index([syncId])
+  @@map("channel_sync_changes")
 }
