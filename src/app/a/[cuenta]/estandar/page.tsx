@@ -1,4 +1,3 @@
-import { notFound } from 'next/navigation';
 import { prisma } from '@/lib/db';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
@@ -6,29 +5,30 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { RuleDialog } from '@/components/standard/RuleDialog';
 import { DeleteRuleButton, LoadSuggestedButton } from '@/components/standard/RuleActions';
 import { describeCheck, isCheckKey, readParams } from '@/domain/standard';
-import { getAccountBySlug } from '@/lib/queries/accounts';
+import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { cn } from '@/lib/utils/cn';
 
 export const dynamic = 'force-dynamic';
 
 export async function generateMetadata({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
-  const account = await getAccountBySlug(cuenta);
+  const account = await accountForTitle(cuenta);
   return { title: account ? `Estándar · ${account.name}` : 'Estándar' };
 }
 
 export default async function StandardPage({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
-  const account = await getAccountBySlug(cuenta);
-  if (!account) notFound();
+  const { account } = await requireAccount(cuenta);
 
   // Un estándar por cada canal en el que la cuenta tiene tiendas.
-  const stores = await prisma.store.findMany({ where: { accountId: account.id }, include: { channel: true } });
+  const [stores, rules] = await Promise.all([
+    prisma.store.findMany({ where: { accountId: account.id }, include: { channel: true } }),
+    prisma.standardRule.findMany({
+      where: { accountId: account.id },
+      orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+    }),
+  ]);
   const channels = [...new Map(stores.map((s) => [s.channel.id, s.channel])).values()];
-  const rules = await prisma.standardRule.findMany({
-    where: { accountId: account.id },
-    orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
-  });
 
   return (
     <>

@@ -84,16 +84,19 @@ export async function loadTitleContext(db: PrismaClient, accountId: string, publ
   const { _count, ...product } = pub.product;
   const channel = pub.store.channel;
   const adapter = getChannelAdapter(channel.kind, channel.name);
-  const { rules, custom } = await loadTitleRules(db, accountId, channel);
   const work = pub.titleWork;
   const seedsSaved = work?.seeds !== null && work?.seeds !== undefined;
   const seeds = seedsSaved ? parseStrings(work!.seeds) : buildSeeds(product);
 
-  // Lo leído para estas semillas, de cualquier publicación de la cuenta: lo más nuevo de cada cosa escrita.
-  const rows = await db.searchSuggestion.findMany({
-    where: { accountId, channelId: channel.id, seed: { in: seeds } },
-    orderBy: { capturedAt: 'desc' },
-  });
+  // Las reglas y lo leído para estas semillas, de cualquier publicación de la
+  // cuenta, se piden juntos. De lo leído vale lo más nuevo de cada cosa escrita.
+  const [{ rules, custom }, rows] = await Promise.all([
+    loadTitleRules(db, accountId, channel),
+    db.searchSuggestion.findMany({
+      where: { accountId, channelId: channel.id, seed: { in: seeds } },
+      orderBy: { capturedAt: 'desc' },
+    }),
+  ]);
   const captures: Capture[] = [];
   for (const r of rows) {
     if (captures.some((c) => c.query === r.query)) continue;

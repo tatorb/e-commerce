@@ -27,7 +27,7 @@ import { loadRulesByChannel, toScoreInput } from '@/lib/queries/scoring';
 import { channelInfo, getChannelAdapter } from '@/channels';
 import { parseNameValueList } from '@/domain/name-value';
 import { METRICS, METRIC_KEYS, formatMetric, latestMetrics, parseMetrics } from '@/domain/measurements';
-import { getAccountBySlug } from '@/lib/queries/accounts';
+import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { getProduct, listStores, type ProductDetail } from '@/lib/queries/products';
 import { formatDateTime, formatDuration } from '@/lib/format';
 import { PublicationProposal } from '@/components/proposals/PublicationProposal';
@@ -39,7 +39,7 @@ export const maxDuration = 300;
 
 export async function generateMetadata({ params }: { params: Promise<{ cuenta: string; id: string }> }) {
   const { cuenta, id } = await params;
-  const account = await getAccountBySlug(cuenta);
+  const account = await accountForTitle(cuenta);
   const product = account ? await getProduct(account.id, id) : null;
   return { title: product ? `${product.name} · ${account!.name}` : 'Producto' };
 }
@@ -83,8 +83,7 @@ function priceToInput(price: { toString(): string } | null): string {
 
 export default async function ProductPage({ params }: { params: Promise<{ cuenta: string; id: string }> }) {
   const { cuenta, id } = await params;
-  const account = await getAccountBySlug(cuenta);
-  if (!account) notFound();
+  const { account } = await requireAccount(cuenta);
   const [product, stores, rules, combo] = await Promise.all([
     getProduct(account.id, id),
     listStores(account.id),

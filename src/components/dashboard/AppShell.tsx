@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { MobileTopBar } from '@/components/dashboard/MobileTopBar';
 import { MainArea } from '@/components/dashboard/MainArea';
+import { NavigationProgress } from '@/components/dashboard/NavigationProgress';
 
 interface AppShellProps {
   sidebar: React.ReactNode;
@@ -15,6 +16,9 @@ interface AppShellProps {
 export function AppShell({ sidebar, homeHref, children }: AppShellProps) {
   return (
     <div className="h-[100dvh] md:h-screen flex flex-col md:flex-row bg-background overflow-hidden">
+      <React.Suspense fallback={null}>
+        <NavigationProgress />
+      </React.Suspense>
       <div className="hidden md:flex">{sidebar}</div>
       <div className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden">
         <MobileTopBar sidebar={sidebar} homeHref={homeHref} />

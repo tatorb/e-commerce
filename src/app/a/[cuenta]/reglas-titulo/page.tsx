@@ -1,11 +1,10 @@
-import { notFound } from 'next/navigation';
 import { prisma } from '@/lib/db';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { TitleRulesForm } from '@/components/settings/TitleRulesForm';
 import { getChannelAdapter } from '@/channels';
-import { getAccountBySlug } from '@/lib/queries/accounts';
+import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { loadTitleRules } from '@/lib/title-rules';
 import { formatDateTime } from '@/lib/format';
 
@@ -13,14 +12,13 @@ export const dynamic = 'force-dynamic';
 
 export async function generateMetadata({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
-  const account = await getAccountBySlug(cuenta);
+  const account = await accountForTitle(cuenta);
   return { title: account ? `Reglas de título · ${account.name}` : 'Reglas de título' };
 }
 
 export default async function TitleRulesPage({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
-  const account = await getAccountBySlug(cuenta);
-  if (!account) notFound();
+  const { account } = await requireAccount(cuenta);
 
   const stores = await prisma.store.findMany({ where: { accountId: account.id }, include: { channel: true } });
   const channels = [...new Map(stores.map((s) => [s.channel.id, s.channel])).values()];

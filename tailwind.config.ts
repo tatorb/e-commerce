@@ -69,10 +69,16 @@ const config: Config = {
           from: { height: 'var(--radix-accordion-content-height)' },
           to: { height: '0' },
         },
+        // La barra de carga de arriba: un tramo que cruza de izquierda a derecha.
+        'nav-progress': {
+          from: { transform: 'translateX(-100%)' },
+          to: { transform: 'translateX(250%)' },
+        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
         'accordion-up': 'accordion-up 0.2s ease-out',
+        'nav-progress': 'nav-progress 1.1s ease-in-out infinite',
       },
     },
   },

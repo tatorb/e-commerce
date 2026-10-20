@@ -11,21 +11,20 @@ import { ApplyGuideView } from '@/components/apply/ApplyGuideView';
 import { getChannelAdapter } from '@/channels';
 import { approvedAt, approvedFields, todayIn } from '@/domain/applications';
 import { loadContent } from '@/domain/content';
-import { getAccountBySlug } from '@/lib/queries/accounts';
+import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { formatDateTime } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
 export async function generateMetadata({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
-  const account = await getAccountBySlug(cuenta);
+  const account = await accountForTitle(cuenta);
   return { title: account ? `Aplicar · ${account.name}` : 'Aplicar' };
 }
 
 export default async function ApplyPage({ params }: { params: Promise<{ cuenta: string; id: string }> }) {
   const { cuenta, id } = await params;
-  const account = await getAccountBySlug(cuenta);
-  if (!account) notFound();
+  const { account } = await requireAccount(cuenta);
 
   const publication = await prisma.publication.findFirst({
     where: { id, product: { accountId: account.id } },

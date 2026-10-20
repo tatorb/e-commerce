@@ -20,7 +20,7 @@ import { codeOrUnpublished } from '@/domain/channel-status';
 import { PIPELINE_REMOVAL_LABEL, PIPELINE_STEP_LABEL, PIPELINE_STEP_SLUG, stepFromSlug } from '@/domain/pipeline';
 import { titleLockText } from '@/domain/title-lock';
 import type { PipelineStep } from '@/generated/prisma/enums';
-import { getAccountBySlug } from '@/lib/queries/accounts';
+import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { getPipelinePublication } from '@/lib/queries/pipeline';
 import { loadTitleContext } from '@/lib/queries/title-step';
 import { loadResearch } from '@/lib/queries/research';
@@ -43,7 +43,7 @@ export const maxDuration = 300;
 
 export async function generateMetadata({ params }: { params: Promise<{ cuenta: string; id: string }> }) {
   const { cuenta, id } = await params;
-  const account = await getAccountBySlug(cuenta);
+  const account = await accountForTitle(cuenta);
   const pub = account ? await getPipelinePublication(account.id, id) : null;
   return { title: pub ? `${pub.title} · Pipeline` : 'Pipeline' };
 }
@@ -69,8 +69,7 @@ export default async function PipelineStepPage({
 }) {
   const { cuenta, id } = await params;
   const { paso, foto, fotos } = await searchParams;
-  const account = await getAccountBySlug(cuenta);
-  if (!account) notFound();
+  const { account } = await requireAccount(cuenta);
   const pub = await getPipelinePublication(account.id, id);
   if (!pub) notFound();
 
@@ -85,14 +84,30 @@ export default async function PipelineStepPage({
   const viewHref = viewing ? `${pageHref}?paso=${PIPELINE_STEP_SLUG[viewing]}` : pageHref;
   const open = pub.movements.find((m) => m.exitedAt === null) ?? null;
   const lock = pub.titleLock.locked ? titleLockText(pub.titleLock) : null;
-  // Información y Título usan la ficha, la competencia y lo leído del buscador.
-  const ctx = viewing === 'INFO' || viewing === 'TITLE' ? await loadTitleContext(prisma, account.id, pub.id) : null;
-  // Publicación carga el ID del canal, con el formato de cada canal.
-  const channel =
+  // Lo que usa el paso que se mira, pedido todo junto: con la base lejos, cada
+  // consulta en fila suma una ida y vuelta.
+  const [ctx, info, images, channel] = await Promise.all([
+    // Información y Título usan la ficha, la competencia y lo leído del buscador.
+    viewing === 'INFO' || viewing === 'TITLE' ? loadTitleContext(prisma, account.id, pub.id) : null,
+    viewing === 'INFO'
+      ? Promise.all([loadResearch(prisma, pub.productId), loadCatalogData(prisma, pub.id), loadCombo(prisma, pub.productId)])
+      : null,
+    viewing === 'IMAGES'
+      ? Promise.all([
+          loadPhotoLine(prisma, pub.productId),
+          workerState(prisma),
+          countChannelPhotos(prisma, pub.productId),
+          prisma.publication.count({ where: { productId: pub.productId } }),
+        ])
+      : null,
+    // Publicación carga el ID del canal, con el formato de cada canal.
     viewing === 'PUBLISH'
-      ? (await prisma.publication.findUniqueOrThrow({ where: { id: pub.id }, select: { store: { select: { channel: true } } } })).store
-          .channel
-      : null;
+      ? prisma.publication
+          .findUniqueOrThrow({ where: { id: pub.id }, select: { store: { select: { channel: true } } } })
+          .then((p) => p.store.channel)
+      : null,
+  ]);
+  const auto = ctx && viewing === 'TITLE' ? await autoAvailable(prisma, ctx.channel, ctx.storeId) : null;
 
   return (
     <>
@@ -199,37 +214,37 @@ export default async function PipelineStepPage({
           </p>
         ) : null}
 
-        {ctx && viewing === 'INFO' ? (
+        {ctx && info && viewing === 'INFO' ? (
           <InfoStep
             accountSlug={account.slug}
             timeZone={account.timezone}
             ctx={ctx}
-            research={await loadResearch(prisma, ctx.publication.productId)}
-            catalog={await loadCatalogData(prisma, ctx.publication.id)}
-            combo={await loadCombo(prisma, ctx.publication.productId)}
+            research={info[0]}
+            catalog={info[1]}
+            combo={info[2]}
             blobReady={isBlobConfigured()}
           />
-        ) : ctx && viewing === 'TITLE' ? (
+        ) : ctx && auto && viewing === 'TITLE' ? (
           <TitleStep
             accountSlug={account.slug}
             timeZone={account.timezone}
             ctx={ctx}
-            auto={await autoAvailable(prisma, ctx.channel, ctx.storeId)}
+            auto={auto}
             aiDisabledReason={isAiConfigured() ? null : AI_NOT_CONFIGURED}
           />
-        ) : viewing === 'IMAGES' ? (
+        ) : images && viewing === 'IMAGES' ? (
           <ImagesStep
             accountSlug={account.slug}
             publicationId={pub.id}
             productId={pub.productId}
             pageHref={`${pageHref}?paso=${PIPELINE_STEP_SLUG.IMAGES}`}
             timeZone={account.timezone}
-            edits={await loadPhotoLine(prisma, pub.productId)}
+            edits={images[0]}
             openIds={openPhotoIds({ foto, fotos })}
-            worker={await workerState(prisma)}
-            channelPhotos={await countChannelPhotos(prisma, pub.productId)}
+            worker={images[1]}
+            channelPhotos={images[2]}
             channelName={pub.channelName}
-            sharedWith={await prisma.publication.count({ where: { productId: pub.productId } })}
+            sharedWith={images[3]}
             blobReady={isBlobConfigured()}
           />
         ) : channel && viewing === 'PUBLISH' ? (

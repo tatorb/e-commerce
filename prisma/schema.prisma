@@ -7,8 +7,12 @@
 // se muestran ahí, precio, ID externo).
 
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider        = "prisma-client"
+  output          = "../src/generated/prisma"
+  // Trae cada registro con sus relaciones en una sola consulta, en lugar de
+  // una por nivel: con la base lejos del servidor, cada consulta suma una ida
+  // y vuelta.
+  previewFeatures = ["relationJoins"]
 }
 
 datasource db {

@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
 import { Clock, Plus } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -18,7 +17,7 @@ import { PipelineBadge } from '@/components/stages/StageBadge';
 import { KindBadge } from '@/components/products/KindBadge';
 import { UrlFilterDropdown } from '@/components/filters/UrlFilterDropdown';
 import { KIND_OPTIONS, parseKinds } from '@/lib/queries/catalog-filters';
-import { getAccountBySlug } from '@/lib/queries/accounts';
+import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { listProducts, type ProductListItem } from '@/lib/queries/products';
 import { formatRelativeDate, plural } from '@/lib/format';
 
@@ -26,7 +25,7 @@ export const dynamic = 'force-dynamic';
 
 export async function generateMetadata({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
-  const account = await getAccountBySlug(cuenta);
+  const account = await accountForTitle(cuenta);
   return { title: account ? `Productos · ${account.name}` : 'Productos' };
 }
 
@@ -52,8 +51,7 @@ export default async function ProductsPage({
   searchParams: Promise<{ q?: string; tipo?: string }>;
 }) {
   const [{ cuenta }, { q, tipo }] = await Promise.all([params, searchParams]);
-  const account = await getAccountBySlug(cuenta);
-  if (!account) notFound();
+  const { account } = await requireAccount(cuenta);
 
   const kinds = parseKinds(tipo);
   const products = await listProducts(account.id, q, kinds);

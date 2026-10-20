@@ -1,4 +1,3 @@
-import { notFound } from 'next/navigation';
 import { CheckCircle2, XCircle } from 'lucide-react';
 import { prisma } from '@/lib/db';
 import { PageHeader } from '@/components/dashboard/PageHeader';
@@ -13,7 +12,7 @@ import { getChannelConnector } from '@/channels/connect';
 import { getChannelResearch } from '@/channels/research';
 import { isCryptoConfigured } from '@/lib/crypto';
 import { connectionSummary, noticesUri, redirectUri } from '@/lib/connections';
-import { getAccountBySlug } from '@/lib/queries/accounts';
+import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { formatDateTime } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
 
@@ -23,7 +22,7 @@ export const maxDuration = 60;
 
 export async function generateMetadata({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
-  const account = await getAccountBySlug(cuenta);
+  const account = await accountForTitle(cuenta);
   return { title: account ? `Conexión · ${account.name}` : 'Conexión' };
 }
 
@@ -62,8 +61,7 @@ export default async function ConnectionPage({
   searchParams: Promise<{ resultado?: string; detalle?: string }>;
 }) {
   const [{ cuenta }, { resultado, detalle }] = await Promise.all([params, searchParams]);
-  const account = await getAccountBySlug(cuenta);
-  if (!account) notFound();
+  const { account } = await requireAccount(cuenta);
 
   const stores = (
     await prisma.store.findMany({ where: { accountId: account.id }, include: { channel: true }, orderBy: { name: 'asc' } })

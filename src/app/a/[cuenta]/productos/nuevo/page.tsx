@@ -1,16 +1,14 @@
-import { notFound } from 'next/navigation';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Breadcrumb } from '@/components/navigation/Breadcrumb';
 import { EMPTY_PRODUCT, ProductForm } from '@/components/products/ProductForm';
-import { getAccountBySlug } from '@/lib/queries/accounts';
+import { requireAccount } from '@/lib/auth/account';
 
 export const metadata = { title: 'Nuevo producto' };
 
 export default async function NewProductPage({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
-  const account = await getAccountBySlug(cuenta);
-  if (!account) notFound();
+  const { account } = await requireAccount(cuenta);
   const base = `/a/${account.slug}/productos`;
 
   return (

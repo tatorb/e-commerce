@@ -1,4 +1,3 @@
-import { notFound } from 'next/navigation';
 import { prisma } from '@/lib/db';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
@@ -7,7 +6,7 @@ import { ImportWizard } from '@/components/import/ImportWizard';
 import { UndoImportButton } from '@/components/import/UndoImportButton';
 import { ImportStatusBadge } from '@/components/stages/StageBadge';
 import { getChannelListings } from '@/channels/listings';
-import { getAccountBySlug } from '@/lib/queries/accounts';
+import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { formatDateTime, plural } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
@@ -16,7 +15,7 @@ export const maxDuration = 60;
 
 export async function generateMetadata({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
-  const account = await getAccountBySlug(cuenta);
+  const account = await accountForTitle(cuenta);
   return { title: account ? `Importar · ${account.name}` : 'Importar' };
 }
 
@@ -33,8 +32,7 @@ function todayIn(timeZone: string): string {
 
 export default async function ImportPage({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
-  const account = await getAccountBySlug(cuenta);
-  if (!account) notFound();
+  const { account } = await requireAccount(cuenta);
 
   const [stores, mappings, runs] = await Promise.all([
     prisma.store.findMany({

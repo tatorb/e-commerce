@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
 import { ListChecks } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/dashboard/PageHeader';
@@ -8,7 +7,7 @@ import { NewPipelinePublicationDialog } from '@/components/pipeline/NewPipelineP
 import { PipelineBoard } from '@/components/pipeline/PipelineBoard';
 import { UrlFilterDropdown } from '@/components/filters/UrlFilterDropdown';
 import { KIND_OPTIONS, parseKinds } from '@/lib/queries/catalog-filters';
-import { getAccountBySlug } from '@/lib/queries/accounts';
+import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { listBoard } from '@/lib/queries/pipeline';
 import { listStores } from '@/lib/queries/products';
 import { plural } from '@/lib/format';
@@ -17,7 +16,7 @@ export const dynamic = 'force-dynamic';
 
 export async function generateMetadata({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
-  const account = await getAccountBySlug(cuenta);
+  const account = await accountForTitle(cuenta);
   return { title: account ? `Pipeline · ${account.name}` : 'Pipeline' };
 }
 
@@ -29,8 +28,7 @@ export default async function PipelinePage({
   searchParams: Promise<{ tipo?: string }>;
 }) {
   const [{ cuenta }, { tipo }] = await Promise.all([params, searchParams]);
-  const account = await getAccountBySlug(cuenta);
-  if (!account) notFound();
+  const { account } = await requireAccount(cuenta);
 
   const kinds = parseKinds(tipo);
   const [all, stores] = await Promise.all([listBoard(account.id), listStores(account.id)]);

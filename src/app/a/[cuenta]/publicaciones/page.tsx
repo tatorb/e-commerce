@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
 import { ClipboardCheck, Download, Send, SlidersHorizontal, X } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -19,7 +18,7 @@ import { PIPELINE_STATUSES, PIPELINE_STATUS_LABEL } from '@/domain/pipeline';
 import { channelInfo } from '@/channels';
 import { contentSheetInstructions } from '@/importers/content-sheet';
 import { prisma } from '@/lib/db';
-import { getAccountBySlug } from '@/lib/queries/accounts';
+import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import {
   BANDS,
   CHANNEL_STATUSES,
@@ -49,7 +48,7 @@ const BULK_LIMIT = 50;
 
 export async function generateMetadata({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
-  const account = await getAccountBySlug(cuenta);
+  const account = await accountForTitle(cuenta);
   return { title: account ? `Catálogo · ${account.name}` : 'Catálogo' };
 }
 
@@ -70,8 +69,7 @@ export default async function PublicationsPage({
   searchParams: Promise<PublicationSearch>;
 }) {
   const [{ cuenta }, search] = await Promise.all([params, searchParams]);
-  const account = await getAccountBySlug(cuenta);
-  if (!account) notFound();
+  const { account } = await requireAccount(cuenta);
 
   const filters = parsePublicationSearch(search);
   const { band, statuses, sort } = filters;

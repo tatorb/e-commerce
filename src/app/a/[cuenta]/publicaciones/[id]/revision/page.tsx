@@ -15,21 +15,20 @@ import { codeOrUnpublished } from '@/domain/channel-status';
 import { loadContent, sameValue, type ContentField, type ContentSnapshot } from '@/domain/content';
 import { parseNotes, parseProposalFields, parseReview } from '@/domain/proposals';
 import { initialReviewValue, type ReviewField } from '@/domain/review';
-import { getAccountBySlug } from '@/lib/queries/accounts';
+import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { formatDateTime } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
 export async function generateMetadata({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
-  const account = await getAccountBySlug(cuenta);
+  const account = await accountForTitle(cuenta);
   return { title: account ? `Revisión · ${account.name}` : 'Revisión' };
 }
 
 export default async function ReviewPage({ params }: { params: Promise<{ cuenta: string; id: string }> }) {
   const { cuenta, id } = await params;
-  const account = await getAccountBySlug(cuenta);
-  if (!account) notFound();
+  const { account } = await requireAccount(cuenta);
 
   const publication = await prisma.publication.findFirst({
     where: { id, product: { accountId: account.id } },
