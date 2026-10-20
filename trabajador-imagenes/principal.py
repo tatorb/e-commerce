@@ -119,7 +119,7 @@ def entregar(cliente: ClienteApp, resultado) -> None:
 
 
 def un_trabajo(cliente: ClienteApp, trabajo: Trabajo, pasos, inspector) -> None:
-    log.info(f"Foto {trabajo.foto}: paso {trabajo.indice + 1}, {trabajo.paso} (turno {trabajo.turno}).")
+    log.info(f"Foto {trabajo.foto}: paso {trabajo.indice + 1}, {trabajo.grupo}: {", ".join(trabajo.pasos)} (turno {trabajo.turno}).")
     with despierto(), latiendo(cliente, trabajo) as cancelado:
         try:
             hecho = procesar(trabajo, pasos, inspector, cliente, carpeta_de_datos() / "trabajo", cancelado)
@@ -130,7 +130,7 @@ def un_trabajo(cliente: ClienteApp, trabajo: Trabajo, pasos, inspector) -> None:
             entregar(cliente, Fallo(id=trabajo.id, turno=trabajo.turno, error=mensaje_simple(e)))
             return
     entregar(cliente, hecho)
-    costo = (hecho.uso_claude or {}).get("costo_usd")
+    costo = sum((p.uso_claude or {}).get("costo_usd", 0) for p in hecho.partes)
     log.info(f"Listo en {hecho.segundos} s" + (f", Claude US$ {costo:.3f}." if costo else "."))
 
 

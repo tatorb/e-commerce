@@ -1,5 +1,5 @@
 import type { PhotoRunStatus, PhotoSource } from '@/generated/prisma/enums';
-import type { StepParam, StepProposal } from '@/domain/photo-contract';
+import type { StepPart } from '@/domain/photo-contract';
 import type { PhotoProgress } from '@/domain/photo-steps';
 
 // Lo que necesita la pantalla de cada foto, ya armado en el servidor: solo datos.
@@ -8,13 +8,10 @@ export type RunView = {
   id: string;
   step: number;
   status: PhotoRunStatus;
-  proposal: StepProposal | null;
-  values: Record<string, number> | null;
-  requested: Record<string, number> | null;
-  params: StepParam[];
-  measures: Record<string, unknown> | null;
-  note: string | null;
-  notApplicable: string | null;
+  // Lo que pasó en cada ajuste del paso. Vacío mientras no se hizo.
+  parts: StepPart[];
+  // Si se rehízo con valores pedidos.
+  requested: boolean;
   // La foto que entró al paso y la que salió.
   beforeHref: string | null;
   afterHref: string | null;

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@/generated/prisma/client';
-import type { Transfer, UploadKind, WorkerDone } from '@/domain/photo-contract';
+import type { StepPart, Transfer, UploadKind, WorkerDone } from '@/domain/photo-contract';
 import { PHOTO_PROTOCOL } from '@/domain/photo-contract';
 import { DEFAULT_PHOTO_SETTINGS } from '@/domain/photo-settings';
 import {
@@ -76,22 +76,33 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
   const runsOf = (editId: string) => db.photoStepRun.findMany({ where: { editId }, orderBy: { createdAt: 'asc' } });
   const openRun = async (editId: string) => (await runsOf(editId)).find((r) => r.openFor !== null)!;
 
-  function done(job: { id: string; turno: number }, extra: Partial<WorkerDone> = {}): WorkerDone {
+  /** Lo que el trabajador devuelve de un ajuste: todos con un valor «giro» de -10 a 10. */
+  function part(paso: string, extra: Partial<StepPart> = {}): StepPart {
+    return {
+      paso,
+      aplicado: true,
+      no_aplica: null,
+      propuesta: { valores: { giro: 1.5 }, razon: `Propuesta para ${paso}.`, origen: 'claude' },
+      valores: { giro: 1.5 },
+      medidas: { medido: -1.4 },
+      parametros: [
+        { clave: 'giro', etiqueta: 'Giro', ayuda: 'Gira la foto.', minimo: -10, maximo: 10, defecto: 0, paso: 0.1, unidad: '°', tipo: 'numero' },
+      ],
+      nota: null,
+      uso_claude: { costo_usd: 0.01 },
+      segundos: 2,
+      ...extra,
+    };
+  }
+
+  function done(job: { id: string; turno: number; pasos?: string[] }, extra: Partial<WorkerDone> = {}): WorkerDone {
     return {
       protocolo: PHOTO_PROTOCOL,
       id: job.id,
       turno: job.turno,
       ok: true,
-      propuesta: { valores: { giro: 1.5 }, razon: 'Está torcida a la izquierda.', origen: 'claude' },
-      valores: { giro: 1.5 },
-      medidas: { torcida_grados: -1.4 },
-      parametros: [
-        { clave: 'giro', etiqueta: 'Giro', ayuda: 'Gira la foto.', minimo: -10, maximo: 10, defecto: 0, paso: 0.1, unidad: '°', tipo: 'numero' },
-      ],
-      nota: null,
-      no_aplica: null,
-      uso_claude: { costo_usd: 0.012 },
-      segundos: 3.2,
+      partes: (job.pasos ?? ['lente', 'perspectiva', 'blancos', 'luces', 'color']).map((p) => part(p)),
+      segundos: 10,
       archivos: ['vista'],
       original: null,
       ...extra,
@@ -196,11 +207,11 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     expect(run.error).toMatch(/3 veces/);
   });
 
-  it('el pedido lleva lo que hay que subir en cada paso, la receta y el contexto', async () => {
+  it('el pedido lleva los ajustes del paso, lo que hay que subir, la receta y el contexto', async () => {
     const w = await worker();
     const edit = await photo();
     const { job } = await work(w);
-    expect(job.paso).toBe('lente');
+    expect([job.grupo, job.indice, job.pasos]).toEqual(['corregir', 0, ['lente', 'perspectiva', 'blancos', 'luces', 'color']]);
     expect(job.producto).toBe('Pistón: Kit de pistones');
     expect(job.pedidos).toBeNull();
     expect(job.original).toEqual({
@@ -213,27 +224,18 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     expect(job.receta).toEqual([]);
 
     await approveStep(db, { runId: job.id, userId });
-    // Paso 2, perspectiva: la receta trae el lente aprobado.
+    // Paso 2: la receta trae lo que se aplicó en el paso 1.
     const second = await work(w);
-    expect(second.job.paso).toBe('perspectiva');
-    expect(Object.keys(second.job.subidas)).toEqual(['vista']);
+    expect([second.job.grupo, second.job.pasos]).toEqual(['terminar', ['fondo', 'recorte', 'exportar']]);
+    expect(Object.keys(second.job.subidas).sort()).toEqual(['jpg', 'mascara', 'png', 'vista']);
     expect(second.job.receta).toEqual([
-      { id: job.id, paso: 'lente', indice: 0, valores: { giro: 1.5 }, salteado: false, ajustes: DEFAULT_PHOTO_SETTINGS },
-    ]);
-    await skipStep(db, { runId: second.job.id, userId });
-    for (let i = 2; i < 5; i++) {
-      const { job: j } = await work(w);
-      await approveStep(db, { runId: j.id, userId });
-    }
-    const fondo = await work(w);
-    expect(fondo.job.paso).toBe('fondo');
-    expect(Object.keys(fondo.job.subidas).sort()).toEqual(['mascara', 'vista']);
-    expect(fondo.job.receta.map((r) => [r.paso, r.salteado])).toEqual([
-      ['lente', false],
-      ['perspectiva', true],
-      ['blancos', false],
-      ['luces', false],
-      ['color', false],
+      {
+        id: job.id,
+        grupo: 'corregir',
+        indice: 0,
+        partes: job.pasos.map((paso) => ({ paso, valores: { giro: 1.5 }, aplicado: true })),
+        ajustes: DEFAULT_PHOTO_SETTINGS,
+      },
     ]);
   });
 
@@ -243,16 +245,16 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
       Array.isArray(v)
         ? v.length ? [shape(v[0])] : []
         : v && typeof v === 'object'
-          ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, k === 'ajustes' || k === 'valores' || k === 'pedidos' || k === 'encabezados' ? 'objeto' : shape((v as Record<string, unknown>)[k])]))
+          ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, k === 'ajustes' || k === 'valores' || k === 'encabezados' ? 'objeto' : shape((v as Record<string, unknown>)[k])]))
           : typeof v;
     const example = JSON.parse(readFileSync(new URL('../trabajador-imagenes/contrato/trabajo.json', import.meta.url), 'utf8'));
     const w = await worker();
     await photo();
     const first = await work(w);
-    await skipStep(db, { runId: first.job.id, userId });
+    await approveStep(db, { runId: first.job.id, userId });
     const claimed = await claimNext(db, w);
     const job = await buildJob(db, claimed!.runId, deps);
-    const built = { ...job, pedidos: { giro: 1 }, subidas: { vista: job.subidas.vista } };
+    const built = { ...job, pedidos: { valores: {}, apagados: [] }, subidas: { vista: job.subidas.vista } };
     const expected = { ...example.trabajo, subidas: { vista: example.trabajo.subidas.vista } };
     expect(shape(built)).toEqual(shape(expected));
   });
@@ -265,8 +267,10 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     const run = await db.photoStepRun.findUniqueOrThrow({ where: { id: job.id } });
     expect(run.status).toBe('REVIEW');
     expect(run.openFor).toBe(edit.id);
-    expect(run.values).toEqual({ giro: 1.5 });
-    expect(run.proposal).toEqual({ valores: { giro: 1.5 }, razon: 'Está torcida a la izquierda.', origen: 'claude' });
+    expect((run.parts as StepPart[]).map((p) => p.paso)).toEqual(job.pasos);
+    expect((run.parts as StepPart[])[1].propuesta).toEqual({ valores: { giro: 1.5 }, razon: 'Propuesta para perspectiva.', origen: 'claude' });
+    // El costo de Claude es la suma de los ajustes.
+    expect(run.aiUsage).toEqual({ costo_usd: 0.05 });
     expect(run.previewUrl).toBe(`${BLOB}${outputPathname(productId, edit.id, job.id, 'vista')}`);
     expect(run.leaseUntil).toBeNull();
     const e = await db.photoEdit.findUniqueOrThrow({ where: { id: edit.id } });
@@ -289,17 +293,14 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     expect(await submitResult(db, w, done({ id: job.id, turno: 2 }), opts)).toEqual({ aceptado: true });
   });
 
-  it('un paso que no aplica se saltea solo y sigue el próximo', async () => {
+  it('un ajuste que no aplica queda anotado y el paso igual espera aprobación', async () => {
     const w = await worker();
     const edit = await photo();
-    const { job } = await work(w, { no_aplica: 'La foto no tiene datos de lente.', archivos: ['antes'], propuesta: null, valores: {} });
-    const runs = await runsOf(edit.id);
-    expect(runs.map((r) => [r.step, r.status])).toEqual([
-      [0, 'SKIPPED'],
-      [1, 'QUEUED'],
-    ]);
-    expect(runs[0].notApplicable).toBe('La foto no tiene datos de lente.');
-    expect(runs[0].id).toBe(job.id);
+    const lente = part('lente', { aplicado: false, no_aplica: 'La foto no tiene datos de lente.', propuesta: null, valores: {} });
+    const { job } = await work(w, { partes: [lente, ...['perspectiva', 'blancos', 'luces', 'color'].map((p) => part(p))] });
+    const run = await openRun(edit.id);
+    expect([run.id, run.status]).toEqual([job.id, 'REVIEW']);
+    expect((run.parts as StepPart[])[0]).toMatchObject({ paso: 'lente', aplicado: false, no_aplica: 'La foto no tiene datos de lente.' });
   });
 
   it('avisar que sigue vivo estira el turno; si se rehízo, le dice que ya no es suyo', async () => {
@@ -311,8 +312,8 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     const run = await db.photoStepRun.findUniqueOrThrow({ where: { id: claimed!.runId } });
     expect(await heartbeat(db, w, run.id, run.lease)).toBe(true);
     expect(await heartbeat(db, w, run.id, run.lease - 1)).toBe(false);
-    // Se rehace el lente mientras procesa la perspectiva.
-    await redoStep(db, { runId: job.id, userId, values: null });
+    // Se rehace la corrección mientras procesa el recorte.
+    await redoStep(db, { runId: job.id, userId, request: null });
     expect(await heartbeat(db, w, run.id, run.lease)).toBe(false);
     const runs = await runsOf(edit.id);
     expect(runs.map((r) => [r.step, r.status])).toEqual([
@@ -345,35 +346,50 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     expect([approved.status, approved.openFor, approved.decidedById]).toEqual(['APPROVED', null, userId]);
     // Aprobar dos veces no se puede.
     await expect(approveStep(db, { runId: job.id, userId })).rejects.toThrow(PhotoQueueError);
-    for (let i = 1; i < 8; i++) {
-      const { job: j } = await work(w);
-      await approveStep(db, { runId: j.id, userId });
-    }
+    const { job: last } = await work(w);
+    await approveStep(db, { runId: last.id, userId });
     const runs = await runsOf(edit.id);
     expect(runs.filter((r) => r.openFor !== null)).toEqual([]);
-    expect(runs.map((r) => r.step)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(runs.map((r) => r.step)).toEqual([0, 1]);
   });
 
-  it('rehacer con valores reemplaza ese paso y los siguientes, y conserva la explicación de Claude', async () => {
+  it('rehacer con valores y ajustes apagados reemplaza ese paso y los siguientes, y conserva lo que dijo Claude', async () => {
     const w = await worker();
     const edit = await photo();
     const { job } = await work(w);
-    await expect(redoStep(db, { runId: job.id, userId, values: { giro: 30 } })).rejects.toThrow('va de -10 a 10');
-    const redo = await redoStep(db, { runId: job.id, userId, values: { giro: -2, otro: 5 } });
-    expect(redo.requested).toEqual({ giro: -2 });
-    expect(redo.proposal).toEqual({ valores: { giro: 1.5 }, razon: 'Está torcida a la izquierda.', origen: 'claude' });
-    const claimed = await claimNext(db, w);
-    const again = await buildJob(db, claimed!.runId, deps);
-    expect(again.pedidos).toEqual({ giro: -2 });
-    // El trabajador no vuelve a preguntarle a Claude: la explicación anterior queda.
-    for (const kind of Object.keys(again.subidas) as UploadKind[]) uploaded.add(outputPathname(productId, edit.id, again.id, kind));
-    await submitResult(db, w, done(again, { propuesta: null, valores: { giro: -2 }, archivos: ['vista', 'antes'] }), {
-      verify,
-      pathnameFor: outputPathname,
+    const redo = (request: Parameters<typeof redoStep>[1]['request']) => redoStep(db, { runId: job.id, userId, request });
+    await expect(redo({ valores: { perspectiva: { giro: 30 } }, apagados: [] })).rejects.toThrow('va de -10 a 10');
+    const again = await redo({ valores: { perspectiva: { giro: -2, otro: 5 }, otro: { giro: 1 } }, apagados: ['luces', 'luces', 'fondo'] });
+    expect(again.requested).toMatchObject({ valores: { perspectiva: { giro: -2 } }, apagados: ['luces'] });
+    expect((again.requested as { propuestas: Record<string, unknown> }).propuestas.perspectiva).toEqual({
+      valores: { giro: 1.5 },
+      razon: 'Propuesta para perspectiva.',
+      origen: 'claude',
     });
-    const run = await db.photoStepRun.findUniqueOrThrow({ where: { id: again.id } });
-    expect(run.proposal).toEqual(redo.proposal);
-    expect(run.values).toEqual({ giro: -2 });
+    const claimed = await claimNext(db, w);
+    const next = await buildJob(db, claimed!.runId, deps);
+    expect(next.pedidos).toEqual({ valores: { perspectiva: { giro: -2 } }, apagados: ['luces'] });
+    // El trabajador no vuelve a preguntarle a Claude: la explicación anterior queda.
+    for (const kind of Object.keys(next.subidas) as UploadKind[]) uploaded.add(outputPathname(productId, edit.id, next.id, kind));
+    const partes = next.pasos.map((p) =>
+      p === 'luces' ? part(p, { aplicado: false, propuesta: null, valores: {} }) : part(p, p === 'perspectiva' ? { propuesta: null, valores: { giro: -2 } } : {}),
+    );
+    await submitResult(db, w, done(next, { partes, archivos: ['vista', 'antes'] }), { verify, pathnameFor: outputPathname });
+    const run = await db.photoStepRun.findUniqueOrThrow({ where: { id: next.id } });
+    const parts = run.parts as StepPart[];
+    expect(parts[1]).toMatchObject({ paso: 'perspectiva', valores: { giro: -2 }, propuesta: { razon: 'Propuesta para perspectiva.' } });
+    expect(parts[3]).toMatchObject({ paso: 'luces', aplicado: false });
+  });
+
+  it('exportar no se puede apagar', async () => {
+    const w = await worker();
+    await photo();
+    const { job } = await work(w);
+    await approveStep(db, { runId: job.id, userId });
+    const { job: last } = await work(w);
+    await expect(redoStep(db, { runId: last.id, userId, request: { valores: {}, apagados: ['exportar'] } })).rejects.toThrow(
+      'Exportar no se puede apagar',
+    );
   });
 
   it('si falla, vuelve a la cola; al tercer error queda fallido y se puede reintentar o saltear', async () => {

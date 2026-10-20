@@ -98,19 +98,30 @@ export async function skipPhotoStepAction(accountSlug: string, runId: string): P
   return guard(accountSlug, () => skipStep(prisma, { runId, userId: user.id }));
 }
 
-/** Rehace el paso con los valores de la pantalla, o sin valores para que Claude proponga de nuevo. */
+/**
+ * Rehace el paso con los valores de la pantalla y los ajustes apagados, o sin
+ * pedido para que Claude proponga de nuevo.
+ */
 export async function redoPhotoStepAction(
   accountSlug: string,
   runId: string,
-  values: Record<string, number> | null,
+  request: { valores: Record<string, Record<string, number>>; apagados: string[] } | null,
 ): Promise<Result> {
   const user = await requireUser();
   if (!(await runInAccount(accountSlug, runId))) return NOT_FOUND;
-  const clean = values
-    ? Object.fromEntries(Object.entries(values).map(([k, v]) => [String(k), Number(v)]))
+  const clean = request
+    ? {
+        valores: Object.fromEntries(
+          Object.entries(request.valores ?? {}).map(([paso, v]) => [
+            String(paso),
+            Object.fromEntries(Object.entries(v ?? {}).map(([k, n]) => [String(k), Number(n)])),
+          ]),
+        ),
+        apagados: Array.isArray(request.apagados) ? request.apagados.map(String) : [],
+      }
     : null;
   return guard(accountSlug, async () => {
-    await redoStep(prisma, { runId, userId: user.id, values: clean });
+    await redoStep(prisma, { runId, userId: user.id, request: clean });
     return 'En cola para rehacer.';
   });
 }

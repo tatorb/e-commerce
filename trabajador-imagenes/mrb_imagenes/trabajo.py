@@ -1,7 +1,9 @@
 """Hace un paso que pidió la app.
 
-Consigue la foto que entra al paso, la mide, le pide valores a Claude (o usa
-los que pidió la persona), aplica, sube las vistas y arma el resultado.
+Un paso tiene varios ajustes que se hacen de corrido. Consigue la foto que
+entra al paso y, ajuste por ajuste, la mide, le pide valores a Claude (o usa
+los que pidió la persona) y aplica. Al final sube las vistas y arma el
+resultado.
 
 Las fotos intermedias en tamaño completo quedan en la Mac, en una carpeta por
 foto: pesan mucho y subirlas en cada paso haría todo lento. Si esa carpeta se
@@ -28,6 +30,7 @@ from .app import (
     Hecho,
     OriginalPreparado,
     Parametro,
+    Parte,
     PropuestaParaApp,
     Trabajo,
 )
@@ -116,7 +119,7 @@ def foto_de_entrada(
     trabajo: Trabajo, pasos: list[Paso], carpeta: CarpetaDeFoto, cliente: ClienteApp, cancelado: Callable[[], bool]
 ) -> tuple[Foto, list[str]]:
     """La foto que entra al paso: la salida del último paso hecho, o el original. Si falta, se rearma con la receta."""
-    hechos = [r for r in trabajo.receta if not r.salteado]
+    hechos = trabajo.receta
     datos = json.loads(carpeta.datos.read_text()) if carpeta.datos.exists() else None
     # La salida más reciente que quedó en la Mac.
     desde = len(hechos)
@@ -129,18 +132,42 @@ def foto_de_entrada(
     else:
         foto, avisos = _foto_original(trabajo, carpeta, cliente)
         desde = 0
-    # Se rehacen los pasos que faltan, con los valores que se aprobaron.
+    # Se rehacen los pasos que faltan, con los ajustes y valores que se aprobaron.
+    por_clave = {p.clave: p for p in pasos}
     for r in hechos[desde:]:
-        if cancelado():
-            raise Cancelado()
-        paso = pasos[r.indice]
         ajustes = leer_ajustes(r.ajustes)
-        medicion = paso.medir(foto, ajustes)
-        valores, _ = paso.limitar(r.valores, ajustes)
-        resultado = paso.aplicar(foto, valores, ajustes, medicion)
-        guardar_intermedia(resultado.foto, carpeta.salida(r.id))
-        foto = _como_en_disco(resultado.foto)
+        for parte in r.partes:
+            if cancelado():
+                raise Cancelado()
+            if not parte.aplicado:
+                continue
+            paso = por_clave[parte.paso]
+            medicion = paso.medir(foto, ajustes)
+            valores, _ = paso.limitar(parte.valores, ajustes)
+            resultado = paso.aplicar(foto, valores, ajustes, medicion)
+            if not resultado.salteado:
+                foto = resultado.foto
+        guardar_intermedia(foto, carpeta.salida(r.id))
+        foto = _como_en_disco(foto)
     return foto, avisos
+
+
+def _parametros(paso: Paso, ajustes: dict) -> list[Parametro]:
+    """Los valores que se pueden editar en la pantalla, con el rango que dejan los topes."""
+    return [
+        Parametro(
+            clave=x.clave,
+            etiqueta=x.etiqueta,
+            ayuda=x.ayuda,
+            minimo=x.rango(ajustes)[0],
+            maximo=x.rango(ajustes)[1],
+            defecto=paso._ajustar_defecto(x, ajustes),
+            paso=x.paso,
+            unidad=x.unidad,
+            tipo=x.tipo,
+        )
+        for x in paso.parametros
+    ]
 
 
 def _vista_del_final(jpg: bytes, lado: int = 1600) -> bytes:
@@ -168,75 +195,90 @@ def procesar(
     cancelado: Callable[[], bool] = lambda: False,
 ) -> Hecho:
     inicio = time.monotonic()
-    paso = pasos[trabajo.indice] if 0 <= trabajo.indice < len(pasos) else None
-    if paso is None or paso.clave != trabajo.paso:
-        raise ValueError(f"La app pidió el paso «{trabajo.paso}», que este trabajador no conoce: hay que actualizarlo.")
+    por_clave = {p.clave: p for p in pasos}
+    for clave in trabajo.pasos:
+        if clave not in por_clave:
+            raise ValueError(f"La app pidió el ajuste «{clave}», que este trabajador no conoce: hay que actualizarlo.")
     carpeta = CarpetaDeFoto(raiz, trabajo.foto)
     carpeta.limpiar({r.id for r in trabajo.receta} | {trabajo.id})
-    foto, avisos = foto_de_entrada(trabajo, pasos, carpeta, cliente, cancelado)
-    if cancelado():
-        raise Cancelado()
+    entrada, avisos = foto_de_entrada(trabajo, pasos, carpeta, cliente, cancelado)
+    foto = entrada
 
     ajustes = leer_ajustes(trabajo.ajustes)
-    if trabajo.pedidos is not None:
-        # La persona pidió valores: se aplican sin volver a preguntarle a Claude.
-        medicion = paso.medir(foto, ajustes)
-        corrida = aplicar(paso, foto, ajustes, medicion, None, pedidos=trabajo.pedidos)
-    else:
-        medicion, propuesta = medir_y_proponer(paso, foto, ajustes, inspector, trabajo.producto)
-        corrida = aplicar(paso, foto, ajustes, medicion, propuesta)
+    pedidos = trabajo.pedidos
+    partes: list[Parte] = []
+    finales: dict[str, bytes] = {}
+    mascara = None
+    for clave in trabajo.pasos:
+        if cancelado():
+            raise Cancelado()
+        paso = por_clave[clave]
+        comienzo = time.monotonic()
+        parametros = _parametros(paso, ajustes)
+        if pedidos and clave in pedidos.apagados:
+            partes.append(
+                Parte(paso=clave, aplicado=False, no_aplica=None, propuesta=None, valores={}, medidas={}, parametros=parametros, nota=None, uso_claude=None, segundos=0)
+            )
+            continue
+        pedidos_del_ajuste = pedidos.valores.get(clave) if pedidos else None
+        if pedidos_del_ajuste is not None:
+            # La persona pidió valores: se aplican sin volver a preguntarle a Claude.
+            medicion = paso.medir(foto, ajustes)
+            corrida = aplicar(paso, foto, ajustes, medicion, None, pedidos=pedidos_del_ajuste)
+        else:
+            medicion, propuesta = medir_y_proponer(paso, foto, ajustes, inspector, trabajo.producto)
+            corrida = aplicar(paso, foto, ajustes, medicion, propuesta)
+        resultado = corrida.resultado
+        receta = corrida.receta()
+        p = corrida.propuesta
+        # Los avisos de la foto original van con el primer ajuste.
+        nota = " ".join(n for n in [*(avisos if not partes else []), receta["nota"] or ""] if n) or None
+        partes.append(
+            Parte(
+                paso=clave,
+                aplicado=not resultado.salteado,
+                no_aplica=medicion.no_aplica,
+                propuesta=None if p is None else PropuestaParaApp(valores=p.valores, razon=p.razon, origen=p.origen, aviso=p.aviso),
+                valores={k: float(v) for k, v in resultado.valores.items()},
+                medidas=a_json(receta["medidas"]),
+                parametros=parametros,
+                nota=nota,
+                uso_claude=None if p is None or not p.uso else a_json(p.uso),
+                segundos=round(time.monotonic() - comienzo, 1),
+            )
+        )
+        if not resultado.salteado:
+            foto = resultado.foto
+        if resultado.mascara is not None:
+            mascara = resultado.mascara
+        finales.update(resultado.archivos)
     if cancelado():
         raise Cancelado()
-    resultado = corrida.resultado
-    receta = corrida.receta()
-    if not resultado.salteado:
-        guardar_intermedia(resultado.foto, carpeta.salida(trabajo.id))
+    guardar_intermedia(foto, carpeta.salida(trabajo.id))
 
     archivos: dict[str, bytes] = {}
     if trabajo.indice == 0:
-        archivos["antes"] = vista_jpeg(foto)
-    if not resultado.salteado:
-        archivos["vista"] = _vista_del_final(resultado.archivos["final.jpg"]) if "final.jpg" in resultado.archivos else vista_jpeg(resultado.foto)
-        if resultado.mascara is not None:
-            archivos["mascara"] = _png_de_mascara(resultado.mascara)
-        if "final.png" in resultado.archivos:
-            archivos["png"] = resultado.archivos["final.png"]
-        if "final.jpg" in resultado.archivos:
-            archivos["jpg"] = resultado.archivos["final.jpg"]
+        archivos["antes"] = vista_jpeg(entrada)
+    archivos["vista"] = _vista_del_final(finales["final.jpg"]) if "final.jpg" in finales else vista_jpeg(foto)
+    if mascara is not None:
+        archivos["mascara"] = _png_de_mascara(mascara)
+    if "final.png" in finales:
+        archivos["png"] = finales["final.png"]
+    if "final.jpg" in finales:
+        archivos["jpg"] = finales["final.jpg"]
     for tipo, contenido in archivos.items():
         destino = trabajo.subidas.get(tipo)  # type: ignore[call-overload]
         if destino is None:
             raise ValueError(f"La app no dio permiso para subir «{tipo}».")
         cliente.subir(destino, contenido)
 
-    p = corrida.propuesta
-    nota = " ".join(n for n in [*avisos, receta["nota"] or ""] if n) or None
     return Hecho(
         id=trabajo.id,
         turno=trabajo.turno,
-        propuesta=None if p is None else PropuestaParaApp(valores=p.valores, razon=p.razon, origen=p.origen, aviso=p.aviso),
-        valores={k: float(v) for k, v in resultado.valores.items()},
-        medidas=a_json(receta["medidas"]),
-        parametros=[
-            Parametro(
-                clave=x.clave,
-                etiqueta=x.etiqueta,
-                ayuda=x.ayuda,
-                minimo=x.rango(ajustes)[0],
-                maximo=x.rango(ajustes)[1],
-                defecto=paso._ajustar_defecto(x, ajustes),
-                paso=x.paso,
-                unidad=x.unidad,
-                tipo=x.tipo,
-            )
-            for x in paso.parametros
-        ],
-        nota=nota,
-        no_aplica=medicion.no_aplica,
-        uso_claude=None if p is None or not p.uso else a_json(p.uso),
+        partes=partes,
         segundos=round(time.monotonic() - inicio, 1),
         archivos=list(archivos),  # type: ignore[arg-type]
-        original=OriginalPreparado(ancho=foto.ancho, alto=foto.alto, camara=a_json(foto.datos.get("camara")))
+        original=OriginalPreparado(ancho=entrada.ancho, alto=entrada.alto, camara=a_json(entrada.datos.get("camara")))
         if trabajo.indice == 0
         else None,
     )

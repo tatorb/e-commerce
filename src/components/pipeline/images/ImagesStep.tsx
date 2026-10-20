@@ -60,7 +60,7 @@ export function ImagesStep({
         title="Fotos"
         count={photos.length}
         description={withSharedNote(
-          'Cada foto pasa por 8 pasos de corrección y espera tu aprobación en cada uno. Solo se corrige la foto original: nada se genera ni se inventa, y el original no se toca.',
+          'Cada foto pasa por 2 pasos: corregir la foto, y recortar y exportar. La Mac hace los ajustes de cada paso de corrido y espera tu aprobación. Solo se corrige la foto original: nada se genera ni se inventa, y el original no se toca.',
           sharedWith,
         )}
       >

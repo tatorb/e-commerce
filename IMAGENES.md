@@ -1,16 +1,10 @@
 # Trabajador de imágenes
 
-El trabajador es el programa que corrige las fotos de producto. Corre en la Mac del estudio y pasa cada foto por 8 pasos:
-1. lente
-2. perspectiva
-3. balance de blancos
-4. luces y sombras
-5. color
-6. quitar fondo
-7. recorte
-8. exportar
+El trabajador es el programa que corrige las fotos de producto. Corre en la Mac del estudio y pasa cada foto por 2 pasos, cada uno con varios ajustes:
+1. **Corregir la foto:** lente, perspectiva, balance de blancos, luces y sombras, y color.
+2. **Recortar y exportar:** quitar fondo, recorte y exportar.
 
-En cada paso Claude mira la foto y propone los valores, y el programa los aplica.
+La Mac hace los ajustes de un paso de corrido y frena para que lo apruebes. En cada ajuste Claude mira la foto y propone los valores, y el programa los aplica.
 
 **Regla de oro:** solo se corrige la foto original. Nada se genera, rellena ni inventa, y el original nunca se toca.
 
@@ -71,14 +65,14 @@ El trabajador se conecta con la app y arranca solo cada vez que iniciás sesión
 2. Sumá fotos de dos formas:
    - **Arrastrá los originales**, tal como salen de la cámara. Pueden ser JPG, PNG, HEIC del iPhone o TIFF, de hasta 100 MB.
    - **Usar las fotos publicadas** baja las que ya están en Mercado Libre, en su tamaño más grande.
-3. Tocá una foto para ver su línea, con los 8 pasos arriba.
-4. En cada paso ves el antes y el después, lo que dijo Claude y los valores. Ahí:
+3. Tocá una foto para ver su línea, con los 2 pasos arriba.
+4. En cada paso ves el antes y el después, y abajo cada ajuste con lo que dijo Claude y sus valores. Ahí:
    - **Aprobar** pasa al paso siguiente, que arranca solo.
-   - **Rehacer con estos valores** vuelve a hacer el paso con los valores que cambiaste.
-   - **Saltar paso** deja la foto como estaba.
-5. En el último paso se bajan el **JPG con fondo** y el **PNG transparente**.
+   - **Rehacer con estos valores** vuelve a hacer el paso con los valores que cambiaste. Los ajustes que no tocaste quedan como estaban, sin volver a preguntarle a Claude.
+   - **Aplicar**, en cada ajuste, lo prende o lo apaga. Un ajuste apagado deja la foto como estaba en ese punto.
+5. En el paso 2 se bajan el **JPG con fondo** y el **PNG transparente**.
 
-Un paso ya aprobado también se puede rehacer: los que venían después se vuelven a hacer. Las fotos del iPhone saltean solas el paso del lente, porque el teléfono ya lo corrige.
+El paso 1 ya aprobado también se puede rehacer: el paso 2 se vuelve a hacer. Las fotos del iPhone saltean solas el ajuste del lente, porque el teléfono ya lo corrige.
 
 ## Prender, apagar y revisar
 
@@ -140,7 +134,7 @@ Todo va **en una sola línea**, y recién al final se aprieta Enter:
   - **"La llave del trabajador no vale":** creá una llave nueva en Equipo y cargala con `bash configurar.sh`.
   - **"Está desactualizado":** bajá el proyecto de nuevo y corré `bash instalar.sh`.
   - **"No se pudo conectar":** revisá la conexión a internet de la Mac.
-- **Un paso dice "falló":** la app muestra el motivo. Podés tocar **Reintentar** o **Saltar paso**.
+- **Un paso dice "falló":** la app muestra el motivo. Podés tocar **Reintentar**. Si falló el paso 1, también podés saltearlo y seguir con la foto como estaba.
 
 ## Para el equipo técnico
 
@@ -149,7 +143,8 @@ Todo va **en una sola línea**, y recién al final se aprieta Enter:
   - propone valores
   - aplica
 - **El inspector de Claude** está en `mrb_imagenes/inspector.py`.
-- **La conexión con la app** está en `mrb_imagenes/app.py`, y cada paso pedido se hace en `mrb_imagenes/trabajo.py`. El programa que corre siempre es `principal.py`.
+- **La conexión con la app** está en `mrb_imagenes/app.py`, y cada paso pedido se hace en `mrb_imagenes/trabajo.py`, ajuste por ajuste. El programa que corre siempre es `principal.py`.
+- **La prueba en la Terminal**, `probar.sh`, sigue mostrando los 8 ajustes uno por uno.
 - **Los mensajes con la app** tienen ejemplos en `contrato/`, que prueban los dos lados.
 - **El arranque automático** es un servicio de usuario de macOS, `com.studiomrb.imagenes`, que arma `prender.sh` en `~/Library/LaunchAgents/`.
 - **Dónde vive:** el entorno de Python, el modelo, la dirección de la app y las fotos de trabajo quedan fuera del proyecto, en `~/Library/Application Support/MRB Imagenes/`. Las fotos de trabajo se borran solas a los 7 días sin uso; si faltan, se rearman desde el original.

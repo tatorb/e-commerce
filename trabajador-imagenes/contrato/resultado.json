@@ -1,19 +1,54 @@
 {
-  "protocolo": 1,
-  "id": "corrida-fondo",
+  "protocolo": 2,
+  "id": "corrida-terminar",
   "turno": 2,
   "ok": true,
-  "propuesta": { "valores": { "detalle": 1, "refinar_bordes": 1, "motas": 0, "dureza": 20 }, "razon": "El recorte toma toda la pieza; dejo el seguro.", "origen": "claude", "aviso": null },
-  "valores": { "detalle": 1, "refinar_bordes": 1, "motas": 0, "dureza": 20 },
-  "medidas": { "piezas": 2, "motas_sacadas": 0, "cubre_pct": 31.5, "segunda_pasada_disponible": true, "modelo": "isnet-general-use" },
-  "parametros": [
-    { "clave": "detalle", "etiqueta": "Segunda pasada", "ayuda": "Vuelve a buscar el fondo solo en la zona del producto.", "minimo": 0, "maximo": 1, "defecto": 1, "paso": 1, "unidad": "", "tipo": "si_no" },
-    { "clave": "dureza", "etiqueta": "Dureza del borde", "ayuda": "0 deja el borde suave; más alto lo vuelve más nítido.", "minimo": 0, "maximo": 100, "defecto": 0, "paso": 1, "unidad": "", "tipo": "numero" }
+  "partes": [
+    {
+      "paso": "fondo",
+      "aplicado": true,
+      "no_aplica": null,
+      "propuesta": null,
+      "valores": { "detalle": 1, "refinar_bordes": 1, "rellenar_huecos": 0, "motas": 0, "dureza": 20 },
+      "medidas": { "piezas": 2, "motas_sacadas": 0, "cubre_pct": 31.5, "segunda_pasada_disponible": true, "modelo": "isnet-general-use" },
+      "parametros": [
+        { "clave": "detalle", "etiqueta": "Segunda pasada", "ayuda": "Vuelve a buscar el fondo solo en la zona del producto.", "minimo": 0, "maximo": 1, "defecto": 1, "paso": 1, "unidad": "", "tipo": "si_no" },
+        { "clave": "dureza", "etiqueta": "Dureza del borde", "ayuda": "0 deja el borde suave; más alto lo vuelve más nítido.", "minimo": 0, "maximo": 100, "defecto": 0, "paso": 1, "unidad": "", "tipo": "numero" }
+      ],
+      "nota": null,
+      "uso_claude": null,
+      "segundos": 21.4
+    },
+    {
+      "paso": "recorte",
+      "aplicado": true,
+      "no_aplica": null,
+      "propuesta": { "valores": { "margen": 8 }, "razon": "Pieza ancha: con 8 % queda pareja.", "origen": "claude", "aviso": null },
+      "valores": { "margen": 8 },
+      "medidas": { "lado_px": 2653, "lienzo_agregado": false },
+      "parametros": [
+        { "clave": "margen", "etiqueta": "Margen", "ayuda": "Espacio alrededor de la pieza, de cada lado.", "minimo": 2, "maximo": 25, "defecto": 8, "paso": 0.5, "unidad": " %", "tipo": "numero" }
+      ],
+      "nota": null,
+      "uso_claude": { "modelo": "claude-opus-5-5", "input_tokens": 2100, "output_tokens": 80, "costo_usd": 0.01 },
+      "segundos": 3.2
+    },
+    {
+      "paso": "exportar",
+      "aplicado": true,
+      "no_aplica": null,
+      "propuesta": { "valores": { "calidad": 95 }, "razon": "Se ve nítida y con el fondo limpio.", "origen": "claude", "aviso": null },
+      "valores": { "calidad": 95 },
+      "medidas": { "lado_px": [2653, 2653], "transparente": true, "fondo_jpg": "#FFFFFF" },
+      "parametros": [
+        { "clave": "calidad", "etiqueta": "Calidad del JPG", "ayuda": "Calidad de compresión del JPG final.", "minimo": 80, "maximo": 100, "defecto": 95, "paso": 1, "unidad": "", "tipo": "numero" }
+      ],
+      "nota": null,
+      "uso_claude": { "modelo": "claude-opus-5-5", "input_tokens": 2100, "output_tokens": 80, "costo_usd": 0.01 },
+      "segundos": 4.1
+    }
   ],
-  "nota": null,
-  "no_aplica": null,
-  "uso_claude": { "modelo": "claude-opus-5-5", "input_tokens": 2100, "output_tokens": 80, "costo_usd": 0.0100 },
-  "segundos": 21.4,
-  "archivos": ["vista", "mascara"],
+  "segundos": 29.8,
+  "archivos": ["vista", "mascara", "png", "jpg"],
   "original": null
 }

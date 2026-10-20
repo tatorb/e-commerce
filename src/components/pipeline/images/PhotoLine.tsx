@@ -7,8 +7,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { StatusText } from '@/components/pipeline/StatusText';
 import { useStepAction } from '@/components/pipeline/useStepAction';
-import { PHOTO_STEPS, RUN_STATUS_LABEL } from '@/domain/photo-steps';
-import type { StepParam } from '@/domain/photo-contract';
+import { PHOTO_ADJUSTMENT_LABEL, PHOTO_STEPS, RUN_STATUS_LABEL } from '@/domain/photo-steps';
+import type { StepParam, StepPart, StepRequest } from '@/domain/photo-contract';
 import { formatUsd } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
 import {
@@ -20,9 +20,9 @@ import {
 import { CompareView } from './CompareView';
 import type { PhotoView, RunView } from './types';
 
-// La línea de una foto: los 8 pasos arriba y, abajo, el paso elegido con su
-// antes y después, lo que dijo Claude y los valores, para aprobar, rehacer o
-// saltear.
+// La línea de una foto: los 2 pasos arriba y, abajo, el paso elegido con su
+// antes y después y cada uno de sus ajustes, con lo que dijo Claude, los
+// valores y si se aplica, para aprobar o rehacer.
 
 const ORIGIN_LABEL: Record<string, string> = {
   claude: 'Claude',
@@ -84,7 +84,7 @@ export function PhotoLine({ accountSlug, photo }: { accountSlug: string; photo: 
               >
                 <StepIcon run={r} />
                 <span>
-                  {i + 1}. {s.short}
+                  {i + 1}. {s.label}
                 </span>
               </button>
             </li>
@@ -97,27 +97,63 @@ export function PhotoLine({ accountSlug, photo }: { accountSlug: string; photo: 
   );
 }
 
-function RunPanel({ accountSlug, run, photo }: { accountSlug: string; run: RunView; photo: PhotoView }) {
-  const step = PHOTO_STEPS[run.step];
-  const { run: act, pending, status } = useStepAction();
-  const shown = run.values ?? run.requested ?? run.proposal?.valores ?? {};
-  const [values, setValues] = useState<Record<string, string>>(() =>
-    Object.fromEntries(run.params.map((p) => [p.clave, String(shown[p.clave] ?? p.defecto)])),
-  );
-  const edited = run.params.some((p) => Number(values[p.clave]) !== (shown[p.clave] ?? p.defecto));
-  const ready = run.status === 'REVIEW' || run.status === 'APPROVED' || run.status === 'SKIPPED';
+// Lo que se edita de cada ajuste: sus valores como texto y si se aplica.
+type Edits = Record<string, { values: Record<string, string>; on: boolean }>;
 
-  function numbers(): Record<string, number> | null {
+const shownValue = (part: StepPart, p: StepParam) => part.valores[p.clave] ?? p.defecto;
+
+function initialEdits(parts: StepPart[]): Edits {
+  return Object.fromEntries(
+    parts.map((part) => [
+      part.paso,
+      { values: Object.fromEntries(part.parametros.map((p) => [p.clave, String(shownValue(part, p))])), on: part.aplicado || part.no_aplica !== null },
+    ]),
+  );
+}
+
+/** Lo que se le pide al trabajador al rehacer. Null si algún valor no es un número. */
+function requestFrom(parts: StepPart[], edits: Edits): StepRequest | null {
+  const valores: StepRequest['valores'] = {};
+  const apagados: string[] = [];
+  for (const part of parts) {
+    if (part.no_aplica) continue;
+    if (!edits[part.paso].on) {
+      apagados.push(part.paso);
+      continue;
+    }
+    // Un ajuste que estaba apagado y se vuelve a prender lo propone Claude.
+    if (!part.aplicado) continue;
     const out: Record<string, number> = {};
-    for (const p of run.params) {
-      const n = Number(String(values[p.clave]).replace(',', '.'));
+    for (const p of part.parametros) {
+      const n = Number(String(edits[part.paso].values[p.clave]).replace(',', '.'));
       if (!Number.isFinite(n)) return null;
       out[p.clave] = n;
     }
-    return out;
+    valores[part.paso] = out;
   }
+  return { valores, apagados };
+}
 
+function RunPanel({ accountSlug, run, photo }: { accountSlug: string; run: RunView; photo: PhotoView }) {
+  const step = PHOTO_STEPS[run.step];
+  const { run: act, pending, status } = useStepAction();
+  const [edits, setEdits] = useState<Edits>(() => initialEdits(run.parts));
+  const edited = run.parts.some(
+    (part) =>
+      (part.no_aplica === null && edits[part.paso].on !== part.aplicado) ||
+      (part.aplicado && edits[part.paso].on && part.parametros.some((p) => Number(edits[part.paso].values[p.clave]) !== shownValue(part, p))),
+  );
+  const ready = run.status === 'REVIEW' || run.status === 'APPROVED' || run.status === 'SKIPPED';
   const working = run.status === 'QUEUED' || run.status === 'PROCESSING';
+
+  function redo() {
+    const request = requestFrom(run.parts, edits);
+    act(() =>
+      request
+        ? redoPhotoStepAction(accountSlug, run.id, request)
+        : Promise.resolve({ ok: false as const, error: 'Revisá los valores: tienen que ser números.' }),
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -131,6 +167,7 @@ function RunPanel({ accountSlug, run, photo }: { accountSlug: string; run: RunVi
           {run.costUsd ? ` · Claude ${formatUsd(run.costUsd)}` : ''}
         </span>
       </div>
+      <p className="text-xs text-muted-foreground">{step.parts.map((k) => PHOTO_ADJUSTMENT_LABEL[k]).join(', ')}.</p>
 
       {working ? (
         <div className="flex items-start gap-3 rounded-md border bg-muted/40 p-4 text-sm">
@@ -142,7 +179,7 @@ function RunPanel({ accountSlug, run, photo }: { accountSlug: string; run: RunVi
           <div className="space-y-1">
             <p>
               {run.status === 'PROCESSING'
-                ? 'El trabajador lo está procesando en la Mac. La pantalla se actualiza sola.'
+                ? 'El trabajador está haciendo los ajustes en la Mac. La pantalla se actualiza sola.'
                 : 'En cola: el trabajador lo toma en cuanto se desocupe. Si está apagado, lo toma cuando se prenda.'}
             </p>
             {run.requested ? <p className="text-muted-foreground">Con los valores que pediste.</p> : null}
@@ -166,37 +203,32 @@ function RunPanel({ accountSlug, run, photo }: { accountSlug: string; run: RunVi
               <RotateCcw className="h-4 w-4" />
               Reintentar
             </Button>
-            <Button size="sm" variant="outline" disabled={pending} onClick={() => act(() => skipPhotoStepAction(accountSlug, run.id))}>
-              <SkipForward className="h-4 w-4" />
-              Saltar paso
-            </Button>
+            {run.step < PHOTO_STEPS.length - 1 ? (
+              <Button size="sm" variant="outline" disabled={pending} onClick={() => act(() => skipPhotoStepAction(accountSlug, run.id))}>
+                <SkipForward className="h-4 w-4" />
+                Saltar paso
+              </Button>
+            ) : null}
           </div>
         </div>
       ) : null}
 
       {ready ? (
         <>
-          {run.notApplicable ? (
-            <p className="rounded-md border bg-muted/40 p-3 text-sm">Se salteó solo: {run.notApplicable}</p>
-          ) : (
-            <CompareView before={run.beforeHref} after={run.afterHref} canOverlay={!step.reframes} />
-          )}
-
-          {run.proposal ? (
-            <div className="flex items-start gap-2 text-sm">
-              <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-              <p>
-                <span className="font-medium">{ORIGIN_LABEL[run.proposal.origen] ?? run.proposal.origen}:</span> {run.proposal.razon}
-                {run.proposal.aviso ? <span className="block text-amber-700">{run.proposal.aviso}</span> : null}
-              </p>
-            </div>
-          ) : null}
+          <CompareView before={run.beforeHref} after={run.afterHref} canOverlay={!step.reframes} />
           {run.requested ? <p className="text-xs text-muted-foreground">Rehecho con los valores que pediste.</p> : null}
-          {run.note ? <p className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm">{run.note}</p> : null}
 
-          {run.params.length > 0 && !run.notApplicable ? (
-            <ValuesForm params={run.params} values={values} onChange={setValues} disabled={pending} />
-          ) : null}
+          <div className="space-y-3">
+            {run.parts.map((part) => (
+              <PartCard
+                key={part.paso}
+                part={part}
+                edit={edits[part.paso]}
+                onChange={(e) => setEdits({ ...edits, [part.paso]: e })}
+                disabled={pending}
+              />
+            ))}
+          </div>
 
           {run.pngHref || run.jpgHref || run.maskHref ? (
             <div className="flex flex-wrap gap-2">
@@ -234,52 +266,17 @@ function RunPanel({ accountSlug, run, photo }: { accountSlug: string; run: RunVi
                 Aprobar
               </Button>
             ) : null}
-            {run.params.length > 0 && !run.notApplicable ? (
-              <Button
-                size="sm"
-                variant={run.status === 'REVIEW' && !edited ? 'outline' : 'default'}
-                disabled={pending}
-                onClick={() => {
-                  const v = numbers();
-                  act(() => (v ? redoPhotoStepAction(accountSlug, run.id, v) : Promise.resolve({ ok: false as const, error: 'Revisá los valores: tienen que ser números.' })));
-                }}
-              >
-                <RotateCcw className="h-4 w-4" />
-                {run.status === 'REVIEW' ? 'Rehacer con estos valores' : 'Rehacer desde acá con estos valores'}
-              </Button>
-            ) : null}
-            {run.status === 'REVIEW' ? (
-              <Button size="sm" variant="ghost" disabled={pending} onClick={() => act(() => skipPhotoStepAction(accountSlug, run.id))}>
-                <SkipForward className="h-4 w-4" />
-                Saltar paso
-              </Button>
-            ) : null}
-            {run.status !== 'REVIEW' && (run.notApplicable || run.params.length === 0) ? (
-              <Button size="sm" variant="outline" disabled={pending} onClick={() => act(() => redoPhotoStepAction(accountSlug, run.id, null))}>
-                <RotateCcw className="h-4 w-4" />
-                Rehacer desde acá
-              </Button>
-            ) : null}
+            <Button size="sm" variant={run.status === 'REVIEW' && !edited ? 'outline' : 'default'} disabled={pending} onClick={redo}>
+              <RotateCcw className="h-4 w-4" />
+              {run.status === 'REVIEW' ? 'Rehacer con estos valores' : 'Rehacer desde acá con estos valores'}
+            </Button>
             <StatusText status={status} />
           </div>
           {edited && run.status === 'REVIEW' ? (
             <p className="text-xs text-muted-foreground">Cambiaste valores: rehacé el paso para ver cómo queda antes de aprobarlo.</p>
           ) : null}
-          {run.status !== 'REVIEW' ? (
-            <p className="text-xs text-muted-foreground">Rehacer este paso vuelve a hacer también los que vienen después.</p>
-          ) : null}
-
-          {run.measures && Object.keys(run.measures).length > 0 ? (
-            <details className="text-xs text-muted-foreground">
-              <summary className="cursor-pointer">Lo que midió el programa</summary>
-              <ul className="mt-1 space-y-0.5 pl-4">
-                {Object.entries(run.measures).map(([k, v]) => (
-                  <li key={k}>
-                    {k.replaceAll('_', ' ')}: {typeof v === 'object' ? JSON.stringify(v) : String(v)}
-                  </li>
-                ))}
-              </ul>
-            </details>
+          {run.status !== 'REVIEW' && run.step < PHOTO_STEPS.length - 1 ? (
+            <p className="text-xs text-muted-foreground">Rehacer este paso vuelve a hacer también el que viene después.</p>
           ) : null}
         </>
       ) : null}
@@ -291,12 +288,96 @@ function RunPanel({ accountSlug, run, photo }: { accountSlug: string; run: RunVi
   );
 }
 
+// Un ajuste del paso: si se aplicó, lo que dijo Claude, el aviso y sus valores.
+function PartCard({
+  part,
+  edit,
+  onChange,
+  disabled,
+}: {
+  part: StepPart;
+  edit: Edits[string];
+  onChange: (e: Edits[string]) => void;
+  disabled: boolean;
+}) {
+  const label = PHOTO_ADJUSTMENT_LABEL[part.paso] ?? part.paso;
+  const id = `ajuste-${part.paso}`;
+  // Sin Exportar no hay foto final; lo que no aplica no se puede prender.
+  const switchable = part.no_aplica === null && part.paso !== 'exportar';
+  return (
+    <section aria-labelledby={id} className="space-y-2 rounded-md border p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h4 id={id} className="text-sm font-semibold">
+          {label}
+        </h4>
+        {switchable ? (
+          <label className="flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              className="h-4 w-4"
+              checked={edit.on}
+              onChange={(e) => onChange({ ...edit, on: e.target.checked })}
+              disabled={disabled}
+            />
+            Aplicar
+          </label>
+        ) : null}
+      </div>
+      {part.no_aplica ? (
+        <p className="text-sm text-muted-foreground">Se salteó solo: {part.no_aplica}</p>
+      ) : !edit.on ? (
+        <p className="text-sm text-muted-foreground">
+          {part.aplicado ? 'Lo apagaste: al rehacer, la foto pasa sin este ajuste.' : 'Apagado: la foto pasa sin este ajuste.'}
+        </p>
+      ) : (
+        <>
+          {part.propuesta ? (
+            <div className="flex items-start gap-2 text-sm">
+              <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <p>
+                <span className="font-medium">{ORIGIN_LABEL[part.propuesta.origen] ?? part.propuesta.origen}:</span> {part.propuesta.razon}
+                {part.propuesta.aviso ? <span className="block text-amber-700">{part.propuesta.aviso}</span> : null}
+              </p>
+            </div>
+          ) : !part.aplicado ? (
+            <p className="text-sm text-muted-foreground">Al rehacer, Claude propone los valores.</p>
+          ) : null}
+          {part.nota ? <p className="rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-sm">{part.nota}</p> : null}
+          {part.parametros.length > 0 && part.aplicado ? (
+            <ValuesForm
+              idPrefix={part.paso}
+              params={part.parametros}
+              values={edit.values}
+              onChange={(values) => onChange({ ...edit, values })}
+              disabled={disabled}
+            />
+          ) : null}
+          {Object.keys(part.medidas).length > 0 ? (
+            <details className="text-xs text-muted-foreground">
+              <summary className="cursor-pointer">Lo que midió el programa</summary>
+              <ul className="mt-1 space-y-0.5 pl-4">
+                {Object.entries(part.medidas).map(([k, v]) => (
+                  <li key={k}>
+                    {k.replaceAll('_', ' ')}: {typeof v === 'object' ? JSON.stringify(v) : String(v)}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
+        </>
+      )}
+    </section>
+  );
+}
+
 function ValuesForm({
+  idPrefix,
   params,
   values,
   onChange,
   disabled,
 }: {
+  idPrefix: string;
   params: StepParam[];
   values: Record<string, string>;
   onChange: (v: Record<string, string>) => void;
@@ -304,10 +385,10 @@ function ValuesForm({
 }) {
   return (
     <fieldset className="space-y-2">
-      <legend className="text-sm font-medium">Valores</legend>
+      <legend className="sr-only">Valores</legend>
       <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
         {params.map((p) => {
-          const id = `valor-${p.clave}`;
+          const id = `valor-${idPrefix}-${p.clave}`;
           if (p.tipo === 'si_no') {
             return (
               <label key={p.clave} htmlFor={id} className="flex items-start gap-2 text-sm">

@@ -15,8 +15,9 @@ describe('lo que se dicen la app y el trabajador', () => {
     const done = resultSchema.parse(example('resultado.json'));
     expect(done.ok).toBe(true);
     if (done.ok) {
-      expect(done.archivos).toEqual(['vista', 'mascara']);
-      expect(done.parametros[0].tipo).toBe('si_no');
+      expect(done.archivos).toEqual(['vista', 'mascara', 'png', 'jpg']);
+      expect(done.partes.map((p) => p.paso)).toEqual(['fondo', 'recorte', 'exportar']);
+      expect(done.partes[0].parametros[0].tipo).toBe('si_no');
     }
     const failed = resultSchema.parse(example('fallo.json'));
     expect(failed).toMatchObject({ ok: false, error: 'La Mac se quedó sin memoria procesando la foto.' });
@@ -31,7 +32,9 @@ describe('lo que se dicen la app y el trabajador', () => {
   it('rechaza archivos desconocidos y valores que no son números', () => {
     const r = example('resultado.json');
     expect(resultSchema.safeParse({ ...r, archivos: ['otro'] }).success).toBe(false);
-    expect(resultSchema.safeParse({ ...r, valores: { giro: 'mucho' } }).success).toBe(false);
+    // Sin ningún ajuste no es un resultado.
+    expect(resultSchema.safeParse({ ...r, partes: [] }).success).toBe(false);
+    expect(resultSchema.safeParse({ ...r, partes: [{ ...r.partes[0], valores: { giro: 'mucho' } }] }).success).toBe(false);
   });
 });
 
@@ -43,11 +46,11 @@ describe('pasos de una foto', () => {
       { id: 'b', step: 1, status: 'REPLACED' as const, createdAt: at(2) },
       { id: 'c', step: 1, status: 'REVIEW' as const, createdAt: at(3) },
     ];
-    expect(currentRuns(runs).map((r) => r?.id ?? null)).toEqual(['a', 'c', null, null, null, null, null, null]);
+    expect(currentRuns(runs).map((r) => r?.id ?? null)).toEqual(['a', 'c']);
     const p = photoProgress(runs);
     expect(p).toEqual({ kind: 'open', step: 1, status: 'REVIEW' });
-    expect(photoProgressText(p)).toBe('Paso 2 de 8 · Perspectiva y enderezado · esperando tu aprobación');
-    expect(photoProgressText(photoProgress([{ step: 7, status: 'APPROVED' }]))).toBe('Lista');
+    expect(photoProgressText(p)).toBe('Paso 2 de 2 · Recortar y exportar · esperando tu aprobación');
+    expect(photoProgressText(photoProgress([{ step: 1, status: 'APPROVED' }]))).toBe('Lista');
   });
 });
 

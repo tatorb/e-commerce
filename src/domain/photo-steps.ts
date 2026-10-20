@@ -1,27 +1,36 @@
 import type { PhotoRunStatus } from '@/generated/prisma/enums';
 
-// Los 8 pasos de la línea de imágenes, en el orden del trabajador
-// (trabajador-imagenes/mrb_imagenes/pasos/). La app los muestra y guarda lo
-// que pasó en cada uno; cómo se corrige la foto es cosa del trabajador.
+// La línea de imágenes tiene 8 ajustes, en el orden del trabajador
+// (trabajador-imagenes/mrb_imagenes/pasos/), agrupados en 2 pasos: la Mac
+// hace los ajustes de un paso de corrido y frena para que una persona apruebe.
+// La app muestra y guarda lo que pasó; cómo se corrige la foto es cosa del
+// trabajador.
+
+export const PHOTO_ADJUSTMENT_LABEL: Record<string, string> = {
+  lente: 'Lente',
+  perspectiva: 'Perspectiva y enderezado',
+  blancos: 'Balance de blancos y tinte',
+  luces: 'Luces, sombras y claridad',
+  color: 'Color',
+  fondo: 'Quitar fondo',
+  recorte: 'Recorte',
+  exportar: 'Exportar',
+};
 
 export type PhotoStep = {
   key: string;
   label: string;
-  // Corto, para la línea de pasos.
-  short: string;
+  // Los ajustes del paso, en orden.
+  parts: string[];
   // Los que cambian el encuadre no se comparan superpuestos con el deslizador.
+  // Corregir endereza y recorta apenas: el deslizador igual sirve para ver
+  // colores y luz.
   reframes: boolean;
 };
 
 export const PHOTO_STEPS: readonly PhotoStep[] = [
-  { key: 'lente', label: 'Lente', short: 'Lente', reframes: true },
-  { key: 'perspectiva', label: 'Perspectiva y enderezado', short: 'Perspectiva', reframes: true },
-  { key: 'blancos', label: 'Balance de blancos y tinte', short: 'Blancos', reframes: false },
-  { key: 'luces', label: 'Luces, sombras y claridad', short: 'Luces', reframes: false },
-  { key: 'color', label: 'Color', short: 'Color', reframes: false },
-  { key: 'fondo', label: 'Quitar fondo', short: 'Fondo', reframes: false },
-  { key: 'recorte', label: 'Recorte', short: 'Recorte', reframes: true },
-  { key: 'exportar', label: 'Exportar', short: 'Exportar', reframes: false },
+  { key: 'corregir', label: 'Corregir la foto', parts: ['lente', 'perspectiva', 'blancos', 'luces', 'color'], reframes: false },
+  { key: 'terminar', label: 'Recortar y exportar', parts: ['fondo', 'recorte', 'exportar'], reframes: true },
 ];
 
 export const LAST_PHOTO_STEP = PHOTO_STEPS.length - 1;

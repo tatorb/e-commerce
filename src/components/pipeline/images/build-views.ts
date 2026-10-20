@@ -1,8 +1,8 @@
 import type { PhotoStepRun } from '@/generated/prisma/client';
-import type { StepParam, StepProposal } from '@/domain/photo-contract';
 import { currentRuns, photoProgress, photoProgressText } from '@/domain/photo-steps';
 import { formatDateTime } from '@/lib/format';
 import { photoFileHref } from '@/lib/photo-rules';
+import { partsOf } from '@/lib/photo-queue';
 import type { loadPhotoLine } from '@/lib/photos';
 import type { PhotoView, RunView } from './types';
 
@@ -11,10 +11,6 @@ import type { PhotoView, RunView } from './types';
 type Edit = Awaited<ReturnType<typeof loadPhotoLine>>[number];
 
 const obj = (v: unknown): Record<string, unknown> | null => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null);
-const nums = (v: unknown): Record<string, number> | null => {
-  const o = obj(v);
-  return o ? Object.fromEntries(Object.entries(o).filter((e): e is [string, number] => typeof e[1] === 'number')) : null;
-};
 
 function cameraText(camera: unknown): string | null {
   const c = obj(camera);
@@ -62,13 +58,8 @@ function runView(run: PhotoStepRun & { decidedBy: { name: string } | null }, bef
     id: run.id,
     step: run.step,
     status: run.status,
-    proposal: (obj(run.proposal) as StepProposal | null) ?? null,
-    values: nums(run.values),
-    requested: nums(run.requested),
-    params: Array.isArray(run.params) ? (run.params as StepParam[]) : [],
-    measures: obj(run.measures),
-    note: run.note,
-    notApplicable: run.notApplicable,
+    parts: partsOf(run.parts),
+    requested: run.requested !== null,
     beforeHref: before,
     afterHref: run.previewUrl ? photoFileHref('vista', { paso: run.id }) : null,
     maskHref: run.maskUrl ? photoFileHref('mascara', { paso: run.id }, true) : null,

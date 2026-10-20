@@ -22,7 +22,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 # Sube cuando cambia la forma de los mensajes, igual que PHOTO_PROTOCOL en la app.
-PROTOCOLO = 1
+PROTOCOLO = 2
 
 TipoSubida = Literal["antes", "vista", "mascara", "png", "jpg"]
 
@@ -39,24 +39,40 @@ class Original(BaseModel):
     bajar: Transferencia
 
 
-class PasoDeReceta(BaseModel):
-    id: str
+class AjusteDeReceta(BaseModel):
     paso: str
-    indice: int
     valores: dict[str, float]
-    salteado: bool
+    aplicado: bool
+
+
+class PasoDeReceta(BaseModel):
+    """Un paso ya aprobado: qué ajustes se aplicaron y con qué valores."""
+
+    id: str
+    grupo: str
+    indice: int
+    partes: list[AjusteDeReceta]
     ajustes: dict
+
+
+class Pedidos(BaseModel):
+    """Lo que pidió la persona al rehacer: valores por ajuste y los que apagó."""
+
+    valores: dict[str, dict[str, float]] = Field(default_factory=dict)
+    apagados: list[str] = Field(default_factory=list)
 
 
 class Trabajo(BaseModel):
     id: str
     turno: int
     foto: str
-    paso: str
+    # El paso y sus ajustes, que se hacen de corrido.
+    grupo: str
     indice: int
+    pasos: list[str]
     producto: str | None = None
     ajustes: dict
-    pedidos: dict[str, float] | None = None
+    pedidos: Pedidos | None = None
     original: Original
     receta: list[PasoDeReceta] = Field(default_factory=list)
     subidas: dict[TipoSubida, Transferencia] = Field(default_factory=dict)
@@ -92,18 +108,27 @@ class OriginalPreparado(BaseModel):
     camara: dict | None = None
 
 
-class Hecho(BaseModel):
-    protocolo: int = PROTOCOLO
-    id: str
-    turno: int
-    ok: Literal[True] = True
+class Parte(BaseModel):
+    """Lo que pasó en un ajuste del paso."""
+
+    paso: str
+    aplicado: bool
+    no_aplica: str | None
     propuesta: PropuestaParaApp | None
     valores: dict[str, float]
     medidas: dict
     parametros: list[Parametro]
     nota: str | None
-    no_aplica: str | None
     uso_claude: dict | None
+    segundos: float
+
+
+class Hecho(BaseModel):
+    protocolo: int = PROTOCOLO
+    id: str
+    turno: int
+    ok: Literal[True] = True
+    partes: list[Parte]
     segundos: float
     archivos: list[TipoSubida]
     original: OriginalPreparado | None = None

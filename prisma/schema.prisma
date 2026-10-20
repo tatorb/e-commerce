@@ -1095,51 +1095,47 @@ enum PhotoRunStatus {
   REPLACED // se rehízo este paso o uno anterior
 }
 
-// Cada intento de un paso de una foto: lo pedido, lo que propuso Claude, lo
-// que se usó y lo que midió el código. La cola de trabajo está en
+// Cada intento de un paso de una foto. Un paso tiene varios ajustes que la
+// Mac hace de corrido: lo pedido, lo que propuso Claude, lo que se usó y lo que
+// midió el código se guardan por ajuste. La cola de trabajo está en
 // src/lib/photo-queue.ts.
 model PhotoStepRun {
-  id            String         @id @default(cuid())
-  editId        String
-  edit          PhotoEdit      @relation(fields: [editId], references: [id], onDelete: Cascade)
-  // El paso, de 0 a 7 (src/domain/photo-steps.ts).
-  step          Int
-  status        PhotoRunStatus @default(QUEUED)
+  id          String         @id @default(cuid())
+  editId      String
+  edit        PhotoEdit      @relation(fields: [editId], references: [id], onDelete: Cascade)
+  // El paso: 0 Corregir la foto, 1 Recortar y exportar (src/domain/photo-steps.ts).
+  step        Int
+  status      PhotoRunStatus @default(QUEUED)
   // El id de la foto mientras el intento está abierto: en cola, en proceso,
   // esperando aprobación o fallido. Así hay uno solo abierto por foto.
-  openFor       String?        @unique
-  // Los valores que pidió la persona al rehacer. Sin pedido, propone Claude.
-  requested     Json?
+  openFor     String?        @unique
+  // Lo que pidió la persona al rehacer: { valores, apagados, propuestas }.
+  // Sin pedido, propone Claude.
+  requested   Json?
   // Copia de los ajustes de la cuenta con los que corre.
-  settings      Json
-  // Lo que devolvió el trabajador.
-  proposal      Json?
-  values        Json?
-  measures      Json?
-  // Los valores que se pueden editar en pantalla, con su rango.
-  params        Json?
-  note          String?
-  // Por qué el paso no se pudo aplicar, por ejemplo una foto sin datos de lente.
-  notApplicable String?
-  previewUrl    String?
-  maskUrl       String?
-  pngUrl        String?
-  jpgUrl        String?
-  aiUsage       Json?
-  seconds       Float?
+  settings    Json
+  // Lo que devolvió el trabajador en cada ajuste: lista de partes
+  // (src/domain/photo-contract.ts).
+  parts       Json?
+  previewUrl  String?
+  maskUrl     String?
+  pngUrl      String?
+  jpgUrl      String?
+  aiUsage     Json?
+  seconds     Float?
   // El turno: sube cada vez que el trabajador lo toma. Un resultado con otro
   // turno es de un intento viejo y no se acepta.
-  lease         Int            @default(0)
-  leaseUntil    DateTime?
-  workerId      String?
-  worker        ImageWorker?   @relation(fields: [workerId], references: [id], onDelete: SetNull)
-  attempts      Int            @default(0)
-  error         String?
-  decidedById   String?
-  decidedBy     User?          @relation(fields: [decidedById], references: [id], onDelete: SetNull)
-  decidedAt     DateTime?
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  lease       Int            @default(0)
+  leaseUntil  DateTime?
+  workerId    String?
+  worker      ImageWorker?   @relation(fields: [workerId], references: [id], onDelete: SetNull)
+  attempts    Int            @default(0)
+  error       String?
+  decidedById String?
+  decidedBy   User?          @relation(fields: [decidedById], references: [id], onDelete: SetNull)
+  decidedAt   DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
 
   @@index([status, createdAt])
   @@index([editId, step])
