@@ -13,10 +13,11 @@ import { readAllQuestions } from '@/lib/buyer-questions';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-// Lo que lee cada pedido, con margen para terminar antes del tope.
-const BUDGET_MS = 45_000;
+// Lo que lee cada pedido. Una tanda que empieza justo antes del final puede
+// tardar unos 20 segundos más: el margen es para que termine antes del tope de 60.
+const BUDGET_MS = 35_000;
 // Primero las preguntas, que esperan respuesta. La primera vez traen las anteriores por tandas.
-const QUESTIONS_BUDGET_MS = 15_000;
+const QUESTIONS_BUDGET_MS = 10_000;
 
 const digest = (s: string) => createHash('sha256').update(s).digest();
 

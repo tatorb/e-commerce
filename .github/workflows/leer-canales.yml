@@ -34,12 +34,29 @@ jobs:
             exit 0
           fi
           url="${APP_URL:-https://e-commerce.studiomrb.com}/api/sincronizar"
-          # Cada pedido lee lo que alcanza en 45 segundos. Si quedó algo, se vuelve a pedir.
+          # Cada pedido lee lo que alcanza en su tiempo. Si quedó algo, se vuelve a pedir.
+          # Si la app tardó de más o no respondió, se espera un poco y se pide otra vez:
+          # lo que no se leyó lo sigue el pedido siguiente o la próxima hora.
+          answered=0
           for i in 1 2 3 4 5 6 7 8; do
-            res=$(curl -sS --fail-with-body --max-time 90 -H "Authorization: Bearer $CRON_SECRET" "$url")
-            echo "$res"
-            case "$res" in
-              *'"pending":true'*) sleep 5 ;;
-              *) exit 0 ;;
+            out=$(curl -sS --max-time 90 -w '\n%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "$url" || echo 000)
+            code=$(printf '%s\n' "$out" | tail -n 1)
+            res=$(printf '%s\n' "$out" | sed '$d')
+            echo "$code $res"
+            case "$code" in
+              200)
+                answered=1
+                case "$res" in
+                  *'"pending":true'*) sleep 5 ;;
+                  *) exit 0 ;;
+                esac
+                ;;
+              401|403|404) echo "La app no aceptó el pedido: revisá CRON_SECRET en GitHub y en Vercel."; exit 1 ;;
+              *)
+                case "$res" in *CRON_SECRET*) echo "$res"; exit 1 ;; esac
+                sleep 20
+                ;;
             esac
           done
+          # Si nunca respondió bien, que se vea en rojo.
+          [ "$answered" = 1 ] || exit 1
