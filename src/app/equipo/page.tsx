@@ -24,21 +24,28 @@ import { CopyButton } from '@/components/apply/CopyButton';
 import { ImageWorkerCard } from '@/components/team/ImageWorkerCard';
 import { WorkerStatusLine } from '@/components/pipeline/images/WorkerStatusLine';
 import { workerState } from '@/lib/image-worker';
+import { DriveCard } from '@/components/team/DriveCard';
+import { driveRedirectUri, driveSummary } from '@/lib/drive';
+import { isCryptoConfigured, KEY_NOT_CONFIGURED } from '@/lib/crypto';
 
 export const metadata = { title: 'Equipo' };
 
 export const dynamic = 'force-dynamic';
 
-export default async function TeamPage() {
+export default async function TeamPage({ searchParams }: { searchParams: Promise<{ drive?: string; detalle?: string }> }) {
   const me = await requireUser();
-  const [users, connections, worker] = await Promise.all([
+  const back = await searchParams;
+  const [users, connections, worker, drive] = await Promise.all([
     prisma.user.findMany({
       orderBy: { createdAt: 'asc' },
       select: { id: true, name: true, email: true, createdAt: true },
     }),
     listConnections(prisma, me.id),
     workerState(prisma),
+    driveSummary(prisma),
   ]);
+  // Lo que dijo la vuelta de Google al conectar el Drive.
+  const driveBack = back.drive === 'ok' || back.drive === 'error' ? { ok: back.drive === 'ok', text: back.detalle ?? '' } : null;
   const now = new Date();
   const mcpUrl = `${baseUrlFromHeaders(await headers(), publicAppUrl())}/api/mcp`;
 
@@ -154,6 +161,40 @@ export default async function TeamPage() {
                 }))}
               />
             </div>
+          </CardContent>
+        </Card>
+
+        <Card id="drive">
+          <CardHeader>
+            <CardTitle>Google Drive del estudio</CardTitle>
+            <CardDescription>
+              Donde se guardan los videos de los productos, en una carpeta por cuenta y por producto. Se ven desde la Mac
+              con Google Drive y se pueden cambiar ahí. Es una sola conexión para todas las cuentas.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {driveBack ? (
+              <p role="status" className={driveBack.ok ? 'rounded-md border px-3 py-2 text-sm' : 'rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive'}>
+                {driveBack.ok ? `Listo: ${driveBack.text}` : driveBack.text}
+              </p>
+            ) : null}
+            <p className="text-sm">
+              {drive?.status === 'ACTIVE'
+                ? `Conectado con ${drive.email}${drive.connectedAt ? ` desde el ${formatDateTime(drive.connectedAt)}` : ''}${drive.connectedBy ? `, por ${drive.connectedBy.name}` : ''}.`
+                : drive?.status === 'NEEDS_REAUTH'
+                  ? `Hay que volver a conectarlo.${drive.lastError ? ` ${drive.lastError}` : ''}`
+                  : 'Sin conectar.'}
+            </p>
+            {isCryptoConfigured() ? (
+              <DriveCard
+                clientId={drive?.clientId ?? null}
+                secretHint={drive?.clientSecretHint ?? null}
+                connected={drive?.status === 'ACTIVE'}
+                redirectUri={driveRedirectUri()}
+              />
+            ) : (
+              <p className="text-sm text-muted-foreground">{KEY_NOT_CONFIGURED}</p>
+            )}
           </CardContent>
         </Card>
 

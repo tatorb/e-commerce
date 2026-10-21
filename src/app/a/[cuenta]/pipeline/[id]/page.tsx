@@ -21,7 +21,7 @@ import { loadMediaSources } from '@/lib/media';
 import { CreateInChannelCard } from '@/components/publication/CreateInChannelCard';
 import { createChecks } from '@/lib/channel-create';
 import { loadPublicationFaces } from '@/lib/queries/publication-faces';
-import { channelInfo } from '@/channels';
+import { channelInfo, getChannelAdapter } from '@/channels';
 import { codeOrUnpublished } from '@/domain/channel-status';
 import { PIPELINE_REMOVAL_LABEL, PIPELINE_STEP_LABEL, PIPELINE_STEP_SLUG, stepFromSlug } from '@/domain/pipeline';
 import { titleLockText } from '@/domain/title-lock';
@@ -44,6 +44,10 @@ import { workerState } from '@/lib/image-worker';
 import { formatDateTime, formatDuration, plural } from '@/lib/format';
 import { SectionBody, SectionCard } from '@/components/ui/section-card';
 import { titleOrUntitled } from '@/domain/publication-title';
+import { VideosStep } from '@/components/pipeline/videos/VideosStep';
+import { loadVideosStep } from '@/lib/videos';
+import { DescriptionStep } from '@/components/pipeline/description/DescriptionStep';
+import { loadDescriptionStep } from '@/lib/descriptions';
 
 export const dynamic = 'force-dynamic';
 // Leer el buscador letra por letra o pedir títulos a la IA puede tardar.
@@ -94,7 +98,7 @@ export default async function PipelineStepPage({
   const lock = pub.titleLock.locked ? titleLockText(pub.titleLock) : null;
   // Lo que usa el paso que se mira, pedido todo junto: con la base lejos, cada
   // consulta en fila suma una ida y vuelta.
-  const [ctx, info, images, channel, faces, media, create] = await Promise.all([
+  const [ctx, info, images, channel, faces, media, create, videos, description] = await Promise.all([
     // Información y Título usan la ficha, la competencia y lo leído del buscador.
     viewing === 'INFO' || viewing === 'TITLE' ? loadTitleContext(prisma, account.id, pub.id) : null,
     viewing === 'INFO'
@@ -118,6 +122,8 @@ export default async function PipelineStepPage({
     viewing === 'MEDIA' ? loadMediaSources(prisma, account.id, pub.id) : null,
     // Sin publicar: lo que hace falta para crearla en el canal.
     viewing === 'PUBLISH' && !pub.externalId ? createChecks(prisma, { accountId: account.id, publicationId: pub.id }) : null,
+    viewing === 'VIDEOS' ? loadVideosStep(prisma, { accountId: account.id, publicationId: pub.id }) : null,
+    viewing === 'DESCRIPTION' ? loadDescriptionStep(prisma, { accountId: account.id, publicationId: pub.id }) : null,
   ]);
   const auto = ctx && viewing === 'TITLE' ? await autoAvailable(prisma, ctx.channel, ctx.storeId) : null;
 
@@ -247,7 +253,7 @@ export default async function PipelineStepPage({
         ) : media && viewing === 'MEDIA' ? (
           <SectionCard
             title="Fotos de la publicación"
-            description={`Elegí qué fotos lleva esta publicación y en qué orden: la primera es la portada. Lo que guardes queda en el borrador hasta que lo subas a ${media.channelName}. Los videos todavía no se suben desde la app.`}
+            description={`Elegí qué fotos lleva esta publicación y en qué orden: la primera es la portada. Lo que guardes queda en el borrador hasta que lo subas a ${media.channelName}. El clip se elige en el paso Videos.`}
           >
             <SectionBody>
               <MediaOrganizer accountSlug={account.slug} publicationId={pub.id} sources={media} />
@@ -267,6 +273,23 @@ export default async function PipelineStepPage({
             channelName={pub.channelName}
             sharedWith={images[3]}
             blobReady={isBlobConfigured()}
+          />
+        ) : videos && viewing === 'VIDEOS' ? (
+          <VideosStep
+            accountSlug={account.slug}
+            publicationId={pub.id}
+            timeZone={account.timezone}
+            data={videos}
+            clipRules={getChannelAdapter(videos.channel.kind, videos.channel.name).clips}
+          />
+        ) : description && viewing === 'DESCRIPTION' ? (
+          <DescriptionStep
+            accountSlug={account.slug}
+            publicationId={pub.id}
+            timeZone={account.timezone}
+            data={description}
+            aiDisabledReason={isAiConfigured() ? null : AI_NOT_CONFIGURED}
+            publicationHref={`/a/${account.slug}/publicaciones/${pub.id}`}
           />
         ) : channel && viewing === 'PUBLISH' ? (
           <>

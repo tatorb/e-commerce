@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { cookies } from 'next/headers';
-import { History, Image as ImageIcon, KanbanSquare, MessageCircleQuestion, MessageSquareText, ListChecks, Package, PlugZap, RefreshCw, SlidersHorizontal, Type, Upload, Users } from 'lucide-react';
+import { AlignLeft, History, Image as ImageIcon, KanbanSquare, MessageCircleQuestion, MessageSquareText, ListChecks, Package, PlugZap, RefreshCw, SlidersHorizontal, Type, Upload, Users } from 'lucide-react';
 import { NavLink } from '@/components/dashboard/NavLink';
 import { SidebarShell } from '@/components/dashboard/SidebarShell';
 import { SidebarToggle } from '@/components/dashboard/SidebarToggle';
@@ -96,6 +96,9 @@ export async function Sidebar({
           </NavLink>
           <NavLink href={`${accountHome}/reglas-titulo`} label="Reglas de título">
             <Type className="h-4 w-4" />
+          </NavLink>
+          <NavLink href={`${accountHome}/descripciones`} label="Descripciones">
+            <AlignLeft className="h-4 w-4" />
           </NavLink>
           <NavLink href={`${accountHome}/respuestas`} label="Respuestas">
             <MessageSquareText className="h-4 w-4" />

@@ -4,6 +4,7 @@ import { mercadolibreCatalog } from './catalog';
 import { mercadolibreTitleLock } from './title-lock';
 import { MERCADOLIBRE_TITLE_RULES, mercadolibreSearchUrl } from './title-rules';
 import { mercadolibreFullSizePhoto } from './photos';
+import { MERCADOLIBRE_CLIPS } from './clips';
 
 // Mercado Libre Argentina. Los IDs de publicación tienen la forma MLA + números.
 // La gente suele pegar el link entero, que puede venir de dos maneras:
@@ -41,4 +42,5 @@ export const mercadolibre: ChannelAdapter = {
   searchUrl: mercadolibreSearchUrl,
   catalog: mercadolibreCatalog,
   fullSizePhotoUrl: mercadolibreFullSizePhoto,
+  clips: MERCADOLIBRE_CLIPS,
 };

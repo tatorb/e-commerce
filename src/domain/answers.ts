@@ -1,4 +1,5 @@
 import type { DraftOutcome } from '@/generated/prisma/enums';
+import { contactFound, contactList } from './contact';
 
 // Las respuestas a las preguntas de los compradores: qué se revisa antes de
 // mandar una y cómo se cuenta lo que se hizo con cada propuesta de Claude.
@@ -33,15 +34,6 @@ export function answerKindLabel(kind: string): string {
   return kind in ANSWER_KINDS ? ANSWER_KINDS[kind as AnswerKind] : ANSWER_KINDS.otro;
 }
 
-// Datos de contacto que los canales no aceptan. Los números largos solos no
-// cuentan: los códigos de los repuestos también los tienen.
-const CONTACT: [RegExp, string][] = [
-  [/\bhttps?:\/\/|\bwww\.|\b[\w-]+\.(com|net|org)(\.ar)?\b/i, 'links'],
-  [/[\w.+-]+@[\w-]+\.[\w.]+/, 'mails'],
-  [/\b(whats?app|wsp|wpp|tel[eé]fono|celular|instagram|facebook|telegram)|\bllam(anos|[aá] al)\b/i, 'datos de contacto'],
-  [/\+\s?54\b/, 'teléfonos'],
-];
-
 /** Lo que hay que corregir antes de mandar la respuesta. Vacía si está lista. */
 export function checkAnswer(text: string): string[] {
   const value = text.trim();
@@ -49,8 +41,8 @@ export function checkAnswer(text: string): string[] {
   const problems: string[] = [];
   if (FILL_IN.test(value)) problems.push('Completá lo que está marcado con [COMPLETAR].');
   if (value.length > ANSWER_MAX) problems.push(`La respuesta puede tener hasta ${ANSWER_MAX} caracteres; tiene ${value.length}.`);
-  const found = [...new Set(CONTACT.filter(([pattern]) => pattern.test(value)).map(([, what]) => what))];
-  if (found.length > 0) problems.push(`Sacá ${found.join(' y ')}: el canal no los acepta en las respuestas.`);
+  const found = contactFound(value);
+  if (found.length > 0) problems.push(`Sacá ${contactList(found)}: el canal no los acepta en las respuestas.`);
   return problems;
 }
 

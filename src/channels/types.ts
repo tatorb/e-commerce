@@ -3,6 +3,7 @@ import type { ChannelCatalog } from '@/domain/catalog-data';
 import type { ContentField, ContentSnapshot } from '@/domain/content';
 import type { Metrics } from '@/domain/measurements';
 import type { TitleRules } from '@/domain/title-rules';
+import type { ClipRules } from '@/domain/videos';
 
 /** Un dato para pasar al canal a mano. */
 export type ApplyItem = {
@@ -59,4 +60,6 @@ export interface ChannelAdapter {
   catalog: ChannelCatalog | null;
   /** El link de una foto publicada en su tamaño más grande, o null si la foto no es de este canal. */
   fullSizePhotoUrl(url: string): string | null;
+  /** Lo que pide el canal para un video corto vertical, y cómo se sube a mano. Null si el canal no tiene clips. */
+  clips: ClipRules | null;
 }

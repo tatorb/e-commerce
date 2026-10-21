@@ -58,6 +58,7 @@ function genericAdapter(kind: ChannelKind, name: string): ChannelAdapter {
     searchUrl: () => null,
     catalog: null,
     fullSizePhotoUrl: () => null,
+    clips: null,
   };
 }
 

@@ -23,40 +23,46 @@ datasource db {
 // Los usuarios son del equipo del estudio y ven todas las cuentas.
 
 model User {
-  id               String               @id
-  name             String
-  email            String               @unique
-  emailVerified    Boolean              @default(false)
-  image            String?
-  createdAt        DateTime             @default(now())
-  updatedAt        DateTime             @default(now()) @updatedAt
-  sessions         Session[]
-  authAccounts     AuthAccount[]
-  stageMovements   StageMovement[]
-  importRuns       ImportRun[]
-  importMappings   ImportMapping[]
-  proposals        Proposal[]           @relation("ProposalCreatedBy")
-  decidedProposals Proposal[]           @relation("ProposalDecidedBy")
-  applications     ChannelApplication[]
-  pipelineEntries  PipelineMovement[]   @relation("PipelineMovedIn")
-  pipelineExits    PipelineMovement[]   @relation("PipelineMovedOut")
-  titleLockChoices TitleWork[]
-  titleApprovals   TitleApproval[]
-  titleRuleSets    TitleRuleSet[]
-  connections      ChannelConnection[]
-  connectAttempts  ConnectAttempt[]
-  mcpCodes         McpAuthCode[]
-  mcpTokens        McpToken[]
-  researchEdits    ProductResearch[]
-  uploadedFiles    ProductFile[]
-  imageWorkers     ImageWorker[]
-  photoSettings    PhotoSettings[]
-  photoEdits       PhotoEdit[]
-  photoDecisions   PhotoStepRun[]
-  channelSyncs     ChannelSync[]
-  syncChoices      ChannelSyncChange[]
-  questionAnswers  BuyerQuestion[]
-  questionDrafts   QuestionDraft[]
+  id                String               @id
+  name              String
+  email             String               @unique
+  emailVerified     Boolean              @default(false)
+  image             String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @default(now()) @updatedAt
+  sessions          Session[]
+  authAccounts      AuthAccount[]
+  stageMovements    StageMovement[]
+  importRuns        ImportRun[]
+  importMappings    ImportMapping[]
+  proposals         Proposal[]           @relation("ProposalCreatedBy")
+  decidedProposals  Proposal[]           @relation("ProposalDecidedBy")
+  applications      ChannelApplication[]
+  pipelineEntries   PipelineMovement[]   @relation("PipelineMovedIn")
+  pipelineExits     PipelineMovement[]   @relation("PipelineMovedOut")
+  titleLockChoices  TitleWork[]
+  titleApprovals    TitleApproval[]
+  titleRuleSets     TitleRuleSet[]
+  connections       ChannelConnection[]
+  connectAttempts   ConnectAttempt[]
+  mcpCodes          McpAuthCode[]
+  mcpTokens         McpToken[]
+  researchEdits     ProductResearch[]
+  uploadedFiles     ProductFile[]
+  imageWorkers      ImageWorker[]
+  photoSettings     PhotoSettings[]
+  photoEdits        PhotoEdit[]
+  photoDecisions    PhotoStepRun[]
+  channelSyncs      ChannelSync[]
+  syncChoices       ChannelSyncChange[]
+  questionAnswers   BuyerQuestion[]
+  questionDrafts    QuestionDraft[]
+  driveConnections  DriveConnection[]    @relation("DriveConnectedBy")
+  driveAttempts     DriveConnection[]    @relation("DriveAttemptBy")
+  uploadedVideos    ProductVideo[]
+  clipChoices       PublicationClip[]    @relation("ClipChosenBy")
+  clipUploads       PublicationClip[]    @relation("ClipUploadedBy")
+  descriptionDrafts DescriptionDraft[]
 
   @@map("users")
 }
@@ -114,21 +120,22 @@ model Verification {
 
 // Cuenta: el cliente del estudio. Todo dato pertenece a una cuenta.
 model Account {
-  id               String             @id @default(cuid())
-  slug             String             @unique
-  name             String
-  timezone         String             @default("America/Argentina/Buenos_Aires")
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
-  stores           Store[]
-  products         Product[]
-  importMappings   ImportMapping[]
-  importRuns       ImportRun[]
-  standardRules    StandardRule[]
-  titleRuleSets    TitleRuleSet[]
-  suggestions      SearchSuggestion[]
-  photoSettings    PhotoSettings?
-  questionSettings QuestionSettings?
+  id                  String               @id @default(cuid())
+  slug                String               @unique
+  name                String
+  timezone            String               @default("America/Argentina/Buenos_Aires")
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  stores              Store[]
+  products            Product[]
+  importMappings      ImportMapping[]
+  importRuns          ImportRun[]
+  standardRules       StandardRule[]
+  titleRuleSets       TitleRuleSet[]
+  suggestions         SearchSuggestion[]
+  photoSettings       PhotoSettings?
+  questionSettings    QuestionSettings?
+  descriptionSettings DescriptionSettings?
 
   @@map("accounts")
 }
@@ -237,6 +244,7 @@ model Product {
   // Si es individual, los combos de los que forma parte.
   inCombos        ComboItem[]      @relation("ComboComponent")
   photoEdits      PhotoEdit[]
+  videos          ProductVideo[]
 
   @@index([accountId])
   @@index([importRunId])
@@ -386,6 +394,8 @@ model Publication {
   channelCopy       ChannelCopy?
   syncChanges       ChannelSyncChange[]
   buyerQuestions    BuyerQuestion[]
+  clip              PublicationClip?
+  descriptionDraft  DescriptionDraft?
 
   @@unique([storeId, externalId])
   @@index([pipelineStatus])
@@ -1426,4 +1436,147 @@ model QuestionSettings {
   updatedAt DateTime @updatedAt
 
   @@map("question_settings")
+}
+
+// ───────────────────────────── Google Drive y videos ─────────────────────────────
+
+// La conexión del estudio con su Google Drive, donde se guardan los videos.
+// Es una sola para todo el estudio. El cliente de Google lo crea el estudio
+// en su proyecto de Google Cloud; la clave secreta y las llaves se guardan
+// cifradas (src/lib/crypto.ts) y nunca se muestran.
+model DriveConnection {
+  id               String           @id @default("estudio")
+  clientId         String
+  clientSecret     String
+  // Los últimos 4 caracteres de la clave secreta, para reconocerla.
+  clientSecretHint String
+  status           ConnectionStatus @default(NOT_CONNECTED)
+  // La cuenta de Google que autorizó.
+  email            String?
+  accessToken      String?
+  refreshToken     String?
+  expiresAt        DateTime?
+  scope            String?
+  connectedAt      DateTime?
+  connectedById    String?
+  connectedBy      User?            @relation("DriveConnectedBy", fields: [connectedById], references: [id], onDelete: SetNull)
+  lastRefreshAt    DateTime?
+  lastError        String?
+  // El pedido de permiso en curso: el código de control va y vuelve de
+  // Google; el secreto de PKCE queda acá, cifrado. Se usa una sola vez.
+  pendingState     String?          @unique
+  pendingVerifier  String?
+  pendingUntil     DateTime?
+  pendingById      String?
+  pendingBy        User?            @relation("DriveAttemptBy", fields: [pendingById], references: [id], onDelete: SetNull)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@map("drive_connections")
+}
+
+// Las carpetas que armó la app en el Drive, por clave: "raiz", "cuenta:<id>",
+// "producto:<id>" y "videos:<id del producto>". Si alguien borra una, la app
+// la vuelve a crear.
+model DriveFolder {
+  key       String   @id
+  folderId  String
+  // La cuenta de Google donde está: si se conecta otra, no sirve.
+  email     String
+  createdAt DateTime @default(now())
+
+  @@map("drive_folders")
+}
+
+enum VideoOrigin {
+  APP // subido desde la app
+  DRIVE // agregado a la carpeta desde el Drive, por ejemplo desde la Mac
+}
+
+// Un video del producto, guardado en su carpeta del Drive. Es del producto:
+// lo ven todas sus publicaciones. La app guarda solo los datos; el archivo
+// está en el Drive.
+model ProductVideo {
+  id             String            @id @default(cuid())
+  productId      String
+  product        Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+  driveFileId    String            @unique
+  name           String
+  mimeType       String
+  size           BigInt?
+  // Ancho y alto como se ve, y duración. Los mide el navegador; mientras no
+  // los mida, valen los que informa Google cuando termina de procesarlo.
+  width          Int?
+  height         Int?
+  durationMs     Int?
+  measuredBy     String?
+  webViewLink    String?
+  origin         VideoOrigin
+  uploadedById   String?
+  uploadedBy     User?             @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  driveCreatedAt DateTime?
+  // Ya no está en la carpeta: se borró o se movió en el Drive.
+  goneAt         DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  clips          PublicationClip[]
+
+  @@index([productId])
+  @@map("product_videos")
+}
+
+// El clip elegido para una publicación, y la marca de que ya se subió a mano
+// al canal: Mercado Libre no deja subir clips por API.
+model PublicationClip {
+  publicationId String       @id
+  publication   Publication  @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  videoId       String
+  video         ProductVideo @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  chosenById    String?
+  chosenBy      User?        @relation("ClipChosenBy", fields: [chosenById], references: [id], onDelete: SetNull)
+  chosenAt      DateTime     @default(now())
+  uploadedAt    DateTime?
+  uploadedById  String?
+  uploadedBy    User?        @relation("ClipUploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([videoId])
+  @@map("publication_clips")
+}
+
+// ───────────────────────────── Descripciones ─────────────────────────────
+
+// La última propuesta de descripción de Claude para una publicación. Es solo
+// el cuerpo: el encabezado y el pie de la cuenta los agrega la app. Lo que se
+// usa va al borrador de la descripción de la publicación.
+model DescriptionDraft {
+  publicationId String      @id
+  publication   Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  text          String
+  // Lo que Claude marcó [A CONFIRMAR] y los datos que usó, en frases cortas.
+  toConfirm     Json        @default("[]")
+  usedData      Json        @default("[]")
+  model         String
+  usage         Json
+  // Lo que costaron todas las propuestas de esta publicación, en dólares.
+  costUsd       Float
+  attempts      Int         @default(1)
+  createdById   String?
+  createdBy     User?       @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@map("description_drafts")
+}
+
+// El encabezado y el pie fijos de las descripciones de una cuenta, y lo que
+// Claude tiene que saber para escribirlas.
+model DescriptionSettings {
+  accountId  String   @id
+  account    Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  header     String?
+  footer     String?
+  guidelines String?
+  updatedAt  DateTime @updatedAt
+
+  @@map("description_settings")
 }
