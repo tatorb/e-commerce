@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@/generated/prisma/client';
 import { Prisma } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
+import { ConnectError } from '@/channels/connect';
 import { getChannelPublisher, PublishError, type ChannelAttributeUpdate } from '@/channels/publish';
 import { normalizeText } from '@/domain/catalog-data';
 import { faceValues, fingerprint, fingerprintsOf } from '@/domain/channel-sync';
@@ -142,13 +143,30 @@ export async function createChecks(db: Db, args: { accountId: string; publicatio
 
 export type CreateInfo = Awaited<ReturnType<typeof createChecks>>;
 
-/** Crea la publicación en el canal. Devuelve su código y lo que quedó a medias. */
-export async function createInChannel(
-  db: Db,
-  args: { accountId: string; publicationId: string; price: number; quantity: number; listingType: string; userId: string | null; now?: Date },
-): Promise<{ externalId: string; url: string | null; warnings: string[]; confirmed: boolean }> {
-  const now = args.now ?? new Date();
+type CreateArgs = { accountId: string; publicationId: string; price: number; quantity: number; listingType: string; userId: string | null; now?: Date };
+type Created = { externalId: string; url: string | null; warnings: string[]; confirmed: boolean };
+
+/**
+ * Crea la publicación en el canal. Devuelve su código y lo que quedó a medias.
+ * Si no se pudo, el intento queda en el historial con el motivo.
+ */
+export async function createInChannel(db: Db, args: CreateArgs): Promise<Created> {
+  // Antes de anotar nada: que la publicación sea de la cuenta.
   const info = await createChecks(db, args);
+  try {
+    return await create(db, args, info);
+  } catch (e) {
+    if (e instanceof CreateError || e instanceof ConnectError) {
+      await db.channelSyncChange
+        .create({ data: { publicationId: args.publicationId, field: 'publication', kind: 'CREATE_FAILED', message: e.message, userId: args.userId } })
+        .catch((err) => console.error('No se pudo anotar el intento', err instanceof Error ? err.message : err));
+    }
+    throw e;
+  }
+}
+
+async function create(db: Db, args: CreateArgs, info: CreateInfo): Promise<Created> {
+  const now = args.now ?? new Date();
   if (info.blocked) throw new CreateError(info.blocked);
   const failing = info.checks.filter((c) => c.blocking && !c.ok);
   if (failing.length > 0) throw new CreateError(`Todavía no se puede crear: ${failing.map((c) => `${c.label}: ${c.detail}`).join(' ')}`);

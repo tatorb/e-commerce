@@ -225,6 +225,10 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     expect(result.sent).toEqual([]);
     expect(result.rejected).toEqual([{ field: 'title', message: 'Mercado Libre no deja cambiar el título de una publicación con ventas.' }]);
     expect((await state('MLA3')).rejected).toMatchObject([{ field: 'title', message: expect.stringContaining('con ventas') }]);
+    // El intento queda en el historial, con lo que había y lo que se quiso subir.
+    expect(await db.channelSyncChange.findMany({ where: { publicationId: p.id, kind: 'REJECTED' } })).toMatchObject([
+      { field: 'title', before: 'Pistones Tico', after: 'Pistones Daewoo Tico', message: expect.stringContaining('con ventas') },
+    ]);
     // Con otro valor en el borrador, el motivo ya no vale.
     await db.publication.update({ where: { id: p.id }, data: { title: 'Pistones Daewoo Tico 800' } });
     expect((await state('MLA3')).rejected).toEqual([]);
@@ -248,6 +252,10 @@ describe.skipIf(!url)('subir al canal en la base', () => {
       { field: 'title', message: 'Cambió también en Mercado Libre: primero elegí cuál queda.' },
     ]);
     expect(writes).toEqual([]);
+    expect((await db.channelSyncChange.findMany({ where: { kind: 'REJECTED' }, orderBy: { id: 'asc' } })).map((c) => c.message)).toEqual([
+      expect.stringContaining('bloqueado'),
+      'Cambió también en Mercado Libre: primero elegí cuál queda.',
+    ]);
   });
 
   it('descartar el borrador vuelve a lo que está en el canal', async () => {

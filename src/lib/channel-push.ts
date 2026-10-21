@@ -9,6 +9,7 @@ import {
   type ChannelPublisher,
   type PublishField,
 } from '@/channels/publish';
+import { ConnectError } from '@/channels/connect';
 import type { ChannelAdapter } from '@/channels/types';
 import { CatalogError, cleanCatalogValue, findField, normalizeText } from '@/domain/catalog-data';
 import {
@@ -46,6 +47,8 @@ type Db = PrismaClient;
 export class PushError extends Error {}
 
 const isPublishable = (f: FaceField): f is PublishField => (PUBLISH_FIELDS as string[]).includes(f);
+
+const asJson = (v: unknown) => (v === null || v === undefined ? Prisma.JsonNull : (v as Prisma.InputJsonValue));
 
 const LOCKED_TITLE =
   'El título está bloqueado porque la publicación tiene ventas: el canal no deja cambiarlo. Para probar uno nuevo, decidí en el paso Título si se prueba en una copia con cuotas.';
@@ -231,60 +234,86 @@ export async function pushDrafts(
     result.sent.push(field);
   };
 
-  for (const field of wanted) {
-    if (summary.choose.includes(field)) {
-      result.rejected.push({ field, message: `Cambió también en ${channelName}: primero elegí cuál queda.` });
-      continue;
-    }
-    if (!summary.draft.includes(field) || !isPublishable(field)) continue;
-    if (field === 'photos') {
-      await pushPhotos(db, { p, publisher, refs: app.photos ?? [], before: channel.photos ?? [], userId: args.userId, reject });
-      if (!result.rejected.some((r) => r.field === 'photos')) result.sent.push('photos');
-      continue;
-    }
-    let send: () => Promise<void>;
-    let value: string | NameValue[];
-    let problems: string[] = [];
-    if (field === 'attributes') {
-      const plan = planAttributes(app, channel, copy, adapter);
-      problems = plan.problems;
-      if (plan.updates.length === 0) {
-        await reject(field, problems.join(' ') || 'No hay datos de catálogo para subir.');
+  // Cada intento que no se subió queda en el historial, con el motivo.
+  const logRejected = async () => {
+    if (result.rejected.length === 0) return;
+    await db.channelSyncChange.createMany({
+      data: result.rejected.map((r) => ({
+        publicationId: p.id,
+        field: r.field,
+        kind: 'REJECTED' as const,
+        before: asJson(channel[r.field]),
+        after: asJson(app[r.field]),
+        message: r.message,
+        userId: args.userId,
+      })),
+    });
+  };
+
+  let current: FaceField | null = null;
+  try {
+    for (const field of wanted) {
+      current = field;
+      if (summary.choose.includes(field)) {
+        result.rejected.push({ field, message: `Cambió también en ${channelName}: primero elegí cuál queda.` });
         continue;
       }
-      value = mergeAttributes(channel.attributes, plan.sent);
-      send = () => withAccessToken(db, p.store.id, (token) => publisher.updateAttributes(token, p.externalId!, plan.updates));
-    } else {
-      if (field === 'title' && titleLocked(p)) {
-        result.rejected.push({ field, message: LOCKED_TITLE });
+      if (!summary.draft.includes(field) || !isPublishable(field)) continue;
+      if (field === 'photos') {
+        await pushPhotos(db, { p, publisher, refs: app.photos ?? [], before: channel.photos ?? [], userId: args.userId, reject });
+        if (!result.rejected.some((r) => r.field === 'photos')) result.sent.push('photos');
         continue;
       }
-      if (field === 'title') {
-        const { rules } = await loadTitleRules(db, args.accountId, p.store.channel);
-        const check = checkTitle(app.title ?? '', rules);
-        if (check.errors.length > 0) {
-          result.rejected.push({ field, message: check.errors.join(' ') });
+      let send: () => Promise<void>;
+      let value: string | NameValue[];
+      let problems: string[] = [];
+      if (field === 'attributes') {
+        const plan = planAttributes(app, channel, copy, adapter);
+        problems = plan.problems;
+        if (plan.updates.length === 0) {
+          await reject(field, problems.join(' ') || 'No hay datos de catálogo para subir.');
           continue;
         }
-      } else if (!app.description?.trim()) {
-        result.rejected.push({ field, message: 'La descripción está vacía: el canal no deja borrarla.' });
+        value = mergeAttributes(channel.attributes, plan.sent);
+        send = () => withAccessToken(db, p.store.id, (token) => publisher.updateAttributes(token, p.externalId!, plan.updates));
+      } else {
+        if (field === 'title' && titleLocked(p)) {
+          result.rejected.push({ field, message: LOCKED_TITLE });
+          continue;
+        }
+        if (field === 'title') {
+          const { rules } = await loadTitleRules(db, args.accountId, p.store.channel);
+          const check = checkTitle(app.title ?? '', rules);
+          if (check.errors.length > 0) {
+            result.rejected.push({ field, message: check.errors.join(' ') });
+            continue;
+          }
+        } else if (!app.description?.trim()) {
+          result.rejected.push({ field, message: 'La descripción está vacía: el canal no deja borrarla.' });
+          continue;
+        }
+        const text = (app[field] ?? '').trim();
+        value = text;
+        send = () => withAccessToken(db, p.store.id, (token) => publisher.update(token, p.externalId!, field, text));
+      }
+      try {
+        await send();
+      } catch (e) {
+        if (!(e instanceof PublishError)) throw e;
+        await reject(field, [e.message, ...problems].join(' '));
         continue;
       }
-      const text = (app[field] ?? '').trim();
-      value = text;
-      send = () => withAccessToken(db, p.store.id, (token) => publisher.update(token, p.externalId!, field, text));
+      await accept(field, value);
+      // Lo que quedó sin subir de los datos de catálogo, con su motivo.
+      if (problems.length > 0) await reject(field, problems.join(' '));
     }
-    try {
-      await send();
-    } catch (e) {
-      if (!(e instanceof PublishError)) throw e;
-      await reject(field, [e.message, ...problems].join(' '));
-      continue;
-    }
-    await accept(field, value);
-    // Lo que quedó sin subir de los datos de catálogo, con su motivo.
-    if (problems.length > 0) await reject(field, problems.join(' '));
+  } catch (e) {
+    // Si se cortó la conexión con el canal, lo que se estaba subiendo también queda anotado.
+    if (e instanceof ConnectError && current) result.rejected.push({ field: current, message: e.message });
+    await logRejected().catch((err) => console.error('No se pudo anotar el intento', err instanceof Error ? err.message : err));
+    throw e;
   }
+  await logRejected();
 
   if (result.sent.length > 0) {
     // Desde cuándo está en el canal: el punto de partida para medir el antes y el después.

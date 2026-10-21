@@ -5,7 +5,8 @@ import { SectionBody, SectionCard } from '@/components/ui/section-card';
 import { Badge } from '@/components/ui/badge';
 import { ChoiceList } from '@/components/sync/ChoiceList';
 import { SyncNowButton } from '@/components/sync/SyncNowButton';
-import { FACE_FIELD_LABEL, isFaceField, SYNC_CHANGE_LABEL } from '@/domain/channel-sync';
+import { SYNC_CHANGE_LABEL } from '@/domain/channel-sync';
+import { fieldLabel } from '@/domain/sync-log';
 import { titleOrUntitled } from '@/domain/publication-title';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { formatDateTime, formatDuration, plural } from '@/lib/format';
@@ -152,7 +153,15 @@ export default async function SyncPage({ params }: { params: Promise<{ cuenta: s
           )}
         </SectionCard>
 
-        <SectionCard title="Lo que cambió por la sincronización" description="Los datos que llegaron del canal y lo que se eligió, lo más nuevo primero.">
+        <SectionCard
+          title="Lo que cambió por la sincronización"
+          description="Los datos que llegaron del canal, lo que se subió y lo que se eligió, lo más nuevo primero."
+          action={
+            <Link href={`/a/${account.slug}/registro`} className="text-xs font-medium underline-offset-4 hover:underline">
+              Ver todo en el Registro
+            </Link>
+          }
+        >
           {overview.changes.length > 0 ? (
             <ul className="divide-y text-sm">
               {overview.changes.map((c) => (
@@ -161,7 +170,7 @@ export default async function SyncPage({ params }: { params: Promise<{ cuenta: s
                   <span className="font-medium">{titleOrUntitled(c.publication.title)}</span>
                   <span className="text-xs text-muted-foreground">{c.publication.externalId}</span>
                   <span className="basis-full text-muted-foreground sm:basis-auto sm:ml-auto">
-                    {isFaceField(c.field) ? FACE_FIELD_LABEL[c.field] : c.field}: {SYNC_CHANGE_LABEL[c.kind]}
+                    {fieldLabel(c.field)}: {SYNC_CHANGE_LABEL[c.kind]}
                     {c.user ? `, ${c.user.name}` : ''}
                   </span>
                 </li>

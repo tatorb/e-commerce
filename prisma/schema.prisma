@@ -1257,6 +1257,10 @@ enum SyncChangeKind {
   DISCARDED
   // Se creó la publicación en el canal desde la app.
   CREATED
+  // Se intentó subir y no se pudo: el motivo queda en message.
+  REJECTED
+  // Se intentó crear en el canal y no se pudo.
+  CREATE_FAILED
 }
 
 // Un dato que cambió por la sincronización: lo que llegó del canal, lo que se
@@ -1271,11 +1275,14 @@ model ChannelSyncChange {
   kind          SyncChangeKind
   before        Json?
   after         Json?
+  // Por qué no se pudo, en los intentos que fallaron.
+  message       String?
   userId        String?
   user          User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
   createdAt     DateTime       @default(now())
 
   @@index([publicationId, createdAt])
   @@index([syncId])
+  @@index([createdAt])
   @@map("channel_sync_changes")
 }

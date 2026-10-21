@@ -327,5 +327,10 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
       'El precio es muy bajo',
     );
     expect((await db.publication.findUniqueOrThrow({ where: { id: pub.id } })).externalId).toBeNull();
+    // Cada intento queda en el historial con el motivo.
+    expect(await db.channelSyncChange.findMany({ where: { publicationId: pub.id } })).toMatchObject([
+      { field: 'publication', kind: 'CREATE_FAILED', message: expect.stringContaining('El precio es muy bajo') },
+      { field: 'publication', kind: 'CREATE_FAILED', message: expect.stringContaining('El precio es muy bajo') },
+    ]);
   });
 });

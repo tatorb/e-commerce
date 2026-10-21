@@ -15,8 +15,9 @@ import { prisma } from '@/lib/db';
 import { loadMediaSources } from '@/lib/media';
 import { createChecks } from '@/lib/channel-create';
 import { CreateInChannelCard } from '@/components/publication/CreateInChannelCard';
-import { FACE_FIELDS, FACE_FIELD_LABEL, isFaceField, SYNC_CHANGE_LABEL, type FaceField, type FaceValues } from '@/domain/channel-sync';
+import { FACE_FIELDS, FACE_FIELD_LABEL, SYNC_CHANGE_LABEL, type FaceField, type FaceValues } from '@/domain/channel-sync';
 import { titleOrUntitled } from '@/domain/publication-title';
+import { fieldLabel } from '@/domain/sync-log';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { formatDateTime, plural } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
@@ -281,17 +282,28 @@ export default async function PublicationPage({
           </>
         )}
 
-        <SectionCard title="Historial con el canal" description="Lo que llegó del canal, lo que se subió y lo que se eligió, lo más nuevo primero.">
+        <SectionCard
+          title="Historial con el canal"
+          description="Lo que llegó del canal, lo que se subió y lo que se eligió, lo más nuevo primero."
+          action={
+            p.syncChanges.length > 0 ? (
+              <Link href={`/a/${account.slug}/registro?publicacion=${p.id}`} className="text-xs font-medium underline-offset-4 hover:underline">
+                Ver con el antes y el después
+              </Link>
+            ) : null
+          }
+        >
           {p.syncChanges.length > 0 ? (
             <ul className="divide-y text-sm">
               {p.syncChanges.map((c) => (
                 <li key={c.id} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 px-4 py-2.5">
                   <span className="tabular-nums text-xs text-muted-foreground">{formatDateTime(c.createdAt, tz)}</span>
-                  <span className="font-medium">{isFaceField(c.field) ? FACE_FIELD_LABEL[c.field] : c.field}</span>
+                  <span className="font-medium">{fieldLabel(c.field)}</span>
                   <span className="text-muted-foreground">
                     {SYNC_CHANGE_LABEL[c.kind]}
                     {c.user ? `, ${c.user.name}` : ''}
                   </span>
+                  {c.message ? <span className="basis-full text-xs text-muted-foreground">{c.message}</span> : null}
                 </li>
               ))}
             </ul>
