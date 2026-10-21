@@ -52,34 +52,63 @@ function parsePage(body: unknown, offset: number, limit: number): QuestionPage {
 const NO_PERMISSION =
   'Mercado Libre no deja leer las preguntas con esta conexión. Revisá que la aplicación tenga el permiso de comunicación con los compradores y volvé a conectar la tienda.';
 
-/** Sin permiso para las preguntas, lo dice en castellano. */
+/** Lo que dijo Mercado Libre, tal cual, para saber por qué no devolvió las preguntas. */
+function mlSays(body: unknown): string {
+  if (!isObj(body)) return '';
+  const said = [...new Set([str(body.message), str(body.error)].filter((s): s is string => s !== null))].join(' · ').slice(0, 300);
+  return said ? ` Mercado Libre dijo: «${said}».` : '';
+}
+
+/** Si Mercado Libre no devuelve las preguntas, lo dice en castellano y con lo que respondió. */
 async function get(path: string, accessToken: string): Promise<unknown> {
   try {
     return await mlGet(path, accessToken);
   } catch (e) {
-    if (e instanceof MercadoLibreRequestError && e.status === 403) throw new MercadoLibreRequestError(NO_PERMISSION, 403, e.body);
-    throw e;
+    if (!(e instanceof MercadoLibreRequestError) || [401, 404, 429].includes(e.status)) throw e;
+    console.error('Mercado Libre no devolvió las preguntas', path.split('?')[0], e.status, JSON.stringify(e.body)?.slice(0, 500));
+    const message = e.status === 403 ? NO_PERMISSION : `Mercado Libre no devolvió las preguntas (código ${e.status}).`;
+    throw new MercadoLibreRequestError(`${message}${mlSays(e.body)}`, e.status, e.body);
   }
 }
 
-async function page(path: string, accessToken: string, offset: number, limit: number): Promise<QuestionPage> {
-  try {
-    return parsePage(await get(`${path}&limit=${limit}&offset=${offset}`, accessToken), offset, limit);
-  } catch (e) {
-    // Más atrás de cierto punto Mercado Libre no pagina: ahí termina lo que se puede traer.
-    if (offset > 0 && e instanceof MercadoLibreRequestError && e.status === 400) return { questions: [], total: null, end: true, limited: true };
-    throw e;
+const isBadRequest = (e: unknown) => e instanceof MercadoLibreRequestError && e.status === 400;
+
+/**
+ * Una página de preguntas. Prueba las búsquedas en orden: si Mercado Libre no
+ * acepta una, sigue con la próxima. Más atrás de cierto punto no pagina: ahí
+ * termina lo que se puede traer.
+ */
+async function page(paths: string[], accessToken: string, offset: number, limit: number): Promise<QuestionPage> {
+  let first: unknown = null;
+  for (const path of paths) {
+    try {
+      return parsePage(await get(`${path}&limit=${limit}&offset=${offset}`, accessToken), offset, limit);
+    } catch (e) {
+      if (!isBadRequest(e)) throw e;
+      first ??= e;
+    }
   }
+  if (offset > 0) return { questions: [], total: null, end: true, limited: true };
+  throw first;
 }
 
 export const mercadolibreQuestions: ChannelQuestions = {
   listRecent(accessToken, userId, offset, limit) {
     const seller = encodeURIComponent(userId);
-    return page(`/questions/search?seller_id=${seller}&api_version=4&sort_fields=date_created&sort_types=DESC`, accessToken, offset, limit);
+    // Si no acepta la búsqueda por vendedor, las recibidas por la cuenta conectada.
+    return page(
+      [
+        `/questions/search?seller_id=${seller}&api_version=4&sort_fields=date_created&sort_types=DESC`,
+        '/my/received_questions/search?api_version=4&sort_fields=date_created&sort_types=DESC',
+      ],
+      accessToken,
+      offset,
+      limit,
+    );
   },
 
   async listUnanswered(accessToken, userId, offset, limit) {
-    const result = await page('/my/received_questions/search?status=UNANSWERED&api_version=4', accessToken, offset, limit);
+    const result = await page(['/my/received_questions/search?status=UNANSWERED&api_version=4'], accessToken, offset, limit);
     // Las de la cuenta conectada: la llave podría ser de otra.
     return { ...result, questions: result.questions.filter((q) => q.sellerId === null || q.sellerId === userId) };
   },

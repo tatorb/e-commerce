@@ -53,11 +53,13 @@ export async function mlGet(path: string, accessToken: string): Promise<unknown>
       await sleep(waitFor(res, attempt));
       continue;
     }
-    if (res.status === 401) throw new MercadoLibreRequestError('Mercado Libre no aceptó la llave: hay que volver a conectar.', 401);
+    // Lo que respondió, para explicar el error.
+    const body = await res.json().catch(() => null);
+    if (res.status === 401) throw new MercadoLibreRequestError('Mercado Libre no aceptó la llave: hay que volver a conectar.', 401, body);
     if (res.status === 429) {
-      throw new MercadoLibreRequestError('Mercado Libre pidió esperar porque hubo demasiados pedidos. Probá de nuevo en unos minutos.', 429);
+      throw new MercadoLibreRequestError('Mercado Libre pidió esperar porque hubo demasiados pedidos. Probá de nuevo en unos minutos.', 429, body);
     }
-    throw new MercadoLibreRequestError(`Mercado Libre respondió con un error (código ${res.status}).`, res.status);
+    throw new MercadoLibreRequestError(`Mercado Libre respondió con un error (código ${res.status}).`, res.status, body);
   }
 }
 

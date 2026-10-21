@@ -67,7 +67,7 @@ describe.skipIf(!url)('las preguntas en la base', () => {
   const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: url! }) });
   let server: http.Server;
   let questions: MlQuestion[] = [];
-  const sim = { forbidden: false, offsetLimit: Infinity, onSearch: () => {} };
+  const sim = { forbidden: false, sellerSearch: true, offsetLimit: Infinity, onSearch: () => {} };
   let storeId = '';
   let productId = '';
 
@@ -77,7 +77,7 @@ describe.skipIf(!url)('las preguntas en la base', () => {
       const u = new URL(req.url ?? '/', 'http://x');
       const json = (status: number, body: unknown) => res.writeHead(status, { 'Content-Type': 'application/json' }).end(JSON.stringify(body));
       if (req.headers.authorization !== 'Bearer llave') return json(401, {});
-      if (sim.forbidden) return json(403, { message: 'forbidden' });
+      if (sim.forbidden) return json(403, { message: 'The caller is not authorized', error: 'forbidden' });
       const limit = Number(u.searchParams.get('limit') ?? 50);
       const offset = Number(u.searchParams.get('offset') ?? 0);
       const pageOf = (list: MlQuestion[]) => {
@@ -85,12 +85,19 @@ describe.skipIf(!url)('las preguntas en la base', () => {
         return json(200, { total: list.length, limit, questions: list.slice(offset, offset + limit) });
       };
       if (u.pathname === '/questions/search') {
+        if (!sim.sellerSearch) return json(400, { message: 'invalid search', error: 'bad_request' });
         sim.onSearch();
         if (u.searchParams.get('seller_id') !== '7' || u.searchParams.get('api_version') !== '4') return json(400, {});
         return pageOf([...questions].sort((a, b) => b.date_created.localeCompare(a.date_created)));
       }
       if (u.pathname === '/my/received_questions/search') {
-        return pageOf(questions.filter((q) => q.status === 'UNANSWERED').sort((a, b) => a.date_created.localeCompare(b.date_created)));
+        const status = u.searchParams.get('status');
+        const desc = u.searchParams.get('sort_types') === 'DESC';
+        return pageOf(
+          questions
+            .filter((q) => !status || q.status === status)
+            .sort((a, b) => (desc ? b.date_created.localeCompare(a.date_created) : a.date_created.localeCompare(b.date_created))),
+        );
       }
       const one = u.pathname.match(/^\/questions\/(\d+)$/);
       if (one) {
@@ -113,7 +120,7 @@ describe.skipIf(!url)('las preguntas en la base', () => {
     await db.$executeRawUnsafe(
       'TRUNCATE buyer_questions, question_readers, channel_connections, publications, products, stores, channels, accounts, users CASCADE',
     );
-    Object.assign(sim, { forbidden: false, offsetLimit: Infinity, onSearch: () => {} });
+    Object.assign(sim, { forbidden: false, sellerSearch: true, offsetLimit: Infinity, onSearch: () => {} });
     // 120 preguntas en dos publicaciones de la app y una que no está.
     questions = Array.from({ length: 120 }, (_, i) => question(1000 + i, i % 3 === 0 ? 'MLA99' : i % 2 ? 'MLA1' : 'MLA2', 200 - i, i < 100 ? 'Respuesta.' : undefined));
     const channel = await db.channel.create({ data: { kind: 'MERCADOLIBRE', name: 'Mercado Libre' } });
@@ -214,6 +221,8 @@ describe.skipIf(!url)('las preguntas en la base', () => {
     const r = await read();
     expect(r.status).toBe('failed');
     expect(r.error).toContain('permiso de comunicación');
+    // Con lo que respondió Mercado Libre, para saber por qué.
+    expect(r.error).toContain('The caller is not authorized');
     expect((await db.questionReader.findUniqueOrThrow({ where: { storeId } })).lastError).toContain('permiso');
 
     sim.forbidden = false;
@@ -221,6 +230,12 @@ describe.skipIf(!url)('las preguntas en la base', () => {
     expect((await read()).status).toBe('done');
     expect(await db.questionReader.findUniqueOrThrow({ where: { storeId } })).toMatchObject({ historyOffset: null, historyLimited: true, lastError: null });
     expect(await db.buyerQuestion.count()).toBe(100);
+  });
+
+  it('si Mercado Libre no acepta la búsqueda por vendedor, usa las recibidas por la cuenta', async () => {
+    sim.sellerSearch = false;
+    expect(await read()).toMatchObject({ status: 'done', added: 120 });
+    expect(await db.buyerQuestion.count({ where: { status: 'UNANSWERED' } })).toBe(20);
   });
 
   it('si otra lectura está en curso, no lee', async () => {
