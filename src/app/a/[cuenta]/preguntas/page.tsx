@@ -1,15 +1,28 @@
 import Link from 'next/link';
-import { ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Settings2, X } from 'lucide-react';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { ReadQuestionsButton } from '@/components/questions/ReadQuestionsButton';
+import { AnswerBox, type DraftView } from '@/components/questions/AnswerBox';
+import { DraftMissing } from '@/components/questions/DraftMissing';
+import { isAiConfigured } from '@/ai/claude';
+import type { PracticeCounts } from '@/domain/answers';
 import { titleOrUntitled } from '@/domain/publication-title';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
-import { formatDateTime, formatDuration, plural } from '@/lib/format';
-import { loadQuestions, parseQuestionSearch, type QuestionList, type QuestionRow, type QuestionSearch } from '@/lib/queries/questions';
+import { formatDateTime, formatDuration, formatUsd, plural } from '@/lib/format';
+import {
+  loadAnswerSettings,
+  loadPractice,
+  loadQuestions,
+  parseQuestionSearch,
+  PRACTICE_DAYS,
+  type QuestionList,
+  type QuestionRow,
+  type QuestionSearch,
+} from '@/lib/queries/questions';
 import { cn } from '@/lib/utils/cn';
 
 export const dynamic = 'force-dynamic';
@@ -24,6 +37,49 @@ export async function generateMetadata({ params }: { params: Promise<{ cuenta: s
 
 // Desde cuántas horas sin respuesta se marca la espera.
 const LONG_WAIT_H = 12;
+// Las que Claude propone solo al abrir la pantalla: las de estos días.
+const AUTO_DRAFT_DAYS = 30;
+
+const OUTCOME_LABEL = {
+  SENT_AS_IS: 'se mandó tal cual',
+  SENT_EDITED: 'se corrigió antes de mandarla',
+  DISCARDED: 'se descartó',
+  ANSWERED_IN_CHANNEL: 'no se usó: respondieron en el canal',
+} as const;
+
+const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+
+function draftView(q: QuestionRow): DraftView | null {
+  if (!q.draft || q.draft.outcome) return null;
+  return {
+    text: q.draft.text,
+    kind: q.draft.kind,
+    usedData: strings(q.draft.usedData),
+    missing: strings(q.draft.missing),
+    needsPerson: q.draft.needsPerson,
+    reason: q.draft.reason,
+  };
+}
+
+function Practice({ p, channels }: { p: PracticeCounts; channels: string }) {
+  const parts = [
+    `${p.SENT_AS_IS} mandadas tal cual`,
+    `${p.SENT_EDITED} corregidas`,
+    `${p.DISCARDED} descartadas`,
+    `${p.ANSWERED_IN_CHANNEL} respondidas en ${channels} sin usarla`,
+    ...(p.PENDING > 0 ? [`${p.PENDING} esperando`] : []),
+  ];
+  return (
+    <Card className="space-y-1 p-4 text-sm">
+      <p className="font-medium">
+        Cómo le va a Claude en los últimos {PRACTICE_DAYS} días: {plural(p.total, 'propuesta', 'propuestas')}
+      </p>
+      <p className="text-muted-foreground">
+        {parts.join(' · ')}. Costaron {formatUsd(p.costUsd)}.
+      </p>
+    </Card>
+  );
+}
 
 function chipClass(active: boolean): string {
   return cn(
@@ -77,7 +133,22 @@ function StoreStatus({ store, accountSlug, timeZone }: { store: QuestionList['st
   );
 }
 
-function QuestionItem({ q, accountSlug, timeZone, now, showStore }: { q: QuestionRow; accountSlug: string; timeZone: string; now: Date; showStore: boolean }) {
+function QuestionItem({
+  q,
+  accountSlug,
+  timeZone,
+  now,
+  showStore,
+  canDraft,
+}: {
+  q: QuestionRow;
+  accountSlug: string;
+  timeZone: string;
+  now: Date;
+  showStore: boolean;
+  canDraft: boolean;
+}) {
+  const draft = draftView(q);
   const waitingH = (now.getTime() - q.askedAt.getTime()) / 3_600_000;
   return (
     <li className="space-y-2 px-4 py-3 text-sm">
@@ -104,11 +175,33 @@ function QuestionItem({ q, accountSlug, timeZone, now, showStore }: { q: Questio
       {q.answer ? (
         <div className="rounded-md bg-muted px-3 py-2">
           <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            Respondida en {q.store.channel.name}
+            {q.answeredFrom === 'APP' ? `Respondida desde la app${q.answeredBy ? ` por ${q.answeredBy.name}` : ''}` : `Respondida en ${q.store.channel.name}`}
             {q.answeredAt ? ` el ${formatDateTime(q.answeredAt, timeZone)}` : ''}
           </p>
           <p className="mt-0.5 whitespace-pre-line break-words">{q.answer}</p>
         </div>
+      ) : null}
+      {q.status === 'ANSWERED' && q.draft && q.draft.outcome !== 'SENT_AS_IS' ? (
+        <details className="text-xs">
+          <summary className="cursor-pointer text-muted-foreground">
+            Lo que había propuesto Claude{q.draft.outcome ? `: ${OUTCOME_LABEL[q.draft.outcome]}` : ''}
+          </summary>
+          <p className="mt-1 whitespace-pre-line break-words rounded-md border px-3 py-2 text-sm">{q.draft.text}</p>
+        </details>
+      ) : null}
+      {q.status === 'ANSWERED' && q.draft?.outcome === 'SENT_AS_IS' ? (
+        <p className="text-xs text-muted-foreground">Es la propuesta de Claude, mandada tal cual.</p>
+      ) : null}
+      {q.status === 'UNANSWERED' && q.text ? (
+        <AnswerBox
+          key={`${q.id}:${draft?.text ?? ''}:${q.draft?.outcome ?? ''}`}
+          accountSlug={accountSlug}
+          questionId={q.id}
+          channelName={q.store.channel.name}
+          draft={draft}
+          discarded={q.draft?.outcome === 'DISCARDED'}
+          canDraft={canDraft}
+        />
       ) : null}
     </li>
   );
@@ -119,8 +212,14 @@ export default async function QuestionsPage({ params, searchParams }: { params: 
   const { account } = await requireAccount(cuenta);
   const tz = account.timezone;
   const f = parseQuestionSearch(search);
-  const list = await loadQuestions(account.id, f);
+  const [list, practice, settings] = await Promise.all([loadQuestions(account.id, f), loadPractice(account.id), loadAnswerSettings(account.id)]);
   const now = new Date();
+  const aiReady = isAiConfigured();
+  // Las que Claude todavía no propuso: se proponen al abrir la pantalla.
+  const toDraft =
+    aiReady && settings?.autoDraft !== false && f.view === 'sin-responder'
+      ? list.questions.filter((q) => !q.draft && q.text && now.getTime() - q.askedAt.getTime() < AUTO_DRAFT_DAYS * 86_400_000).length
+      : 0;
   const channels = [...new Set(list.stores.map((s) => s.channelName))].join(' y ') || 'los canales';
 
   const kept = Object.entries(search).filter((e): e is [string, string] => typeof e[1] === 'string' && e[1] !== '');
@@ -143,7 +242,15 @@ export default async function QuestionsPage({ params, searchParams }: { params: 
               aparece acá.
             </p>
           </div>
-          {list.stores.some((s) => s.connected) ? <ReadQuestionsButton accountSlug={account.slug} /> : null}
+          <div className="flex flex-wrap items-start gap-2">
+            <Button size="sm" variant="ghost" asChild>
+              <Link href={`/a/${account.slug}/respuestas`}>
+                <Settings2 className="h-4 w-4" />
+                Cómo responde la tienda
+              </Link>
+            </Button>
+            {list.stores.some((s) => s.connected) ? <ReadQuestionsButton accountSlug={account.slug} /> : null}
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Link href={hrefWith({ vista: null, page: null })} className={chipClass(f.view === 'sin-responder')}>
@@ -180,6 +287,12 @@ export default async function QuestionsPage({ params, searchParams }: { params: 
             ))}
           </Card>
         )}
+
+        {practice.total > 0 ? <Practice p={practice} channels={channels} /> : null}
+        {!aiReady && f.view === 'sin-responder' ? (
+          <p className="text-sm text-muted-foreground">Claude no puede proponer respuestas: falta configurar su clave en Vercel. Igual podés responder a mano.</p>
+        ) : null}
+        {toDraft > 0 ? <DraftMissing accountSlug={account.slug} count={toDraft} /> : null}
 
         <Card>
           <form className="flex flex-wrap items-end gap-3 p-4" action="" method="get">
@@ -218,7 +331,7 @@ export default async function QuestionsPage({ params, searchParams }: { params: 
           ) : (
             <ul className="divide-y">
               {list.questions.map((q) => (
-                <QuestionItem key={q.id} q={q} accountSlug={account.slug} timeZone={tz} now={now} showStore={list.stores.length > 1} />
+                <QuestionItem key={q.id} q={q} accountSlug={account.slug} timeZone={tz} now={now} showStore={list.stores.length > 1} canDraft={aiReady} />
               ))}
             </ul>
           )}

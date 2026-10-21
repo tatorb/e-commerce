@@ -1,6 +1,7 @@
 import type { Prisma } from '@/generated/prisma/client';
 import { prisma } from '@/lib/db';
 import { getChannelQuestions } from '@/channels/questions';
+import { practiceCounts } from '@/domain/answers';
 
 // Lo que muestran la pantalla Preguntas, el menú y el aviso del Pipeline.
 
@@ -65,6 +66,11 @@ export async function loadQuestions(accountId: string, f: QuestionFilters) {
         answeredAt: true,
         listingId: true,
         buyerId: true,
+        answeredFrom: true,
+        answeredBy: { select: { name: true } },
+        draft: {
+          select: { text: true, kind: true, usedData: true, missing: true, needsPerson: true, reason: true, outcome: true, sentText: true, costUsd: true },
+        },
         publication: { select: { id: true, title: true, externalId: true } },
         store: { select: { name: true, channel: { select: { name: true } } } },
       },
@@ -96,3 +102,19 @@ export async function loadQuestions(accountId: string, f: QuestionFilters) {
 
 export type QuestionList = Awaited<ReturnType<typeof loadQuestions>>;
 export type QuestionRow = QuestionList['questions'][number];
+
+// Cuántos días mira la práctica.
+export const PRACTICE_DAYS = 30;
+
+/** Qué se hizo con las propuestas de Claude en los últimos días, y cuánto costaron. */
+export async function loadPractice(accountId: string, now = new Date()) {
+  const drafts = await prisma.questionDraft.findMany({
+    where: { question: { store: { accountId } }, createdAt: { gte: new Date(now.getTime() - PRACTICE_DAYS * 24 * 60 * 60 * 1000) } },
+    select: { outcome: true, costUsd: true },
+  });
+  return practiceCounts(drafts);
+}
+
+export async function loadAnswerSettings(accountId: string) {
+  return prisma.questionSettings.findUnique({ where: { accountId } });
+}

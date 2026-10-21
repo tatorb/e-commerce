@@ -41,7 +41,7 @@ describe('los filtros del Registro', () => {
     const reads = parseLogSearch({ tipo: 'lecturas' });
     expect(logKinds(reads)).toEqual([]);
     expect(logReads(reads)).toBe('all');
-    expect(logKinds(parseLogSearch({ tipo: 'fallidas,elecciones' }))).toEqual(['REJECTED', 'CREATE_FAILED', 'CHOSE_CHANNEL', 'CHOSE_APP']);
+    expect(logKinds(parseLogSearch({ tipo: 'fallidas,elecciones' }))).toEqual(['REJECTED', 'CREATE_FAILED', 'ANSWER_FAILED', 'CHOSE_CHANNEL', 'CHOSE_APP']);
     expect(logReads(parseLogSearch({ tipo: 'subidas' }))).toBe('none');
     // Las lecturas son de la tienda: al buscar una publicación no aparecen.
     expect(logReads(parseLogSearch({ q: 'kit' }))).toBe('none');

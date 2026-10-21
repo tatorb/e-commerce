@@ -8,10 +8,10 @@ import { mercadolibreConnector } from '@/channels/mercadolibre/oauth';
 const received = vi.hoisted(() => [] as { kind: string; body: unknown }[]);
 
 vi.mock('@/lib/db', () => ({ prisma: {} }));
-vi.mock('@/lib/buyer-questions', () => ({
-  receiveNotice: async (_db: unknown, kind: string, body: unknown) => {
+vi.mock('@/lib/answers', () => ({
+  handleNotice: async (_db: unknown, kind: string, body: unknown) => {
     received.push({ kind, body });
-    return 0;
+    return { saved: 0, drafted: 0 };
   },
 }));
 vi.mock('next/server', async (original) => ({

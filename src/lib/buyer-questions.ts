@@ -45,7 +45,7 @@ export async function saveQuestions(db: Db, storeId: string, questions: ChannelQ
     }),
     db.buyerQuestion.findMany({
       where: { storeId, externalId: { in: valid.map((q) => q.externalId) } },
-      select: { externalId: true, status: true, text: true, answer: true, publicationId: true },
+      select: { id: true, externalId: true, status: true, text: true, answer: true, publicationId: true, answeredFrom: true },
     }),
   ]);
   const publicationOf = new Map(publications.map((p) => [p.externalId, p.id]));
@@ -64,12 +64,16 @@ export async function saveQuestions(db: Db, storeId: string, questions: ChannelQ
       buyerId: q.buyerId,
       answer: q.answer?.text ?? null,
       answeredAt: toDate(q.answer?.answeredAt),
+      // Las que llegan respondidas se respondieron en el canal.
+      answeredFrom: q.answer ? ('CHANNEL' as const) : null,
       readAt: now,
     })),
     // Si el aviso y la lectura la traen a la vez, la segunda no la repite.
     skipDuplicates: true,
   });
 
+  // Las que se respondieron en el canal, fuera de la app.
+  const answeredInChannel: string[] = [];
   for (const q of valid) {
     const before = known.get(q.externalId);
     if (!before) continue;
@@ -80,16 +84,26 @@ export async function saveQuestions(db: Db, storeId: string, questions: ChannelQ
     const changed =
       before.status !== q.status || before.text !== text || before.answer !== answer || (publicationId !== undefined && before.publicationId !== publicationId);
     if (!changed) continue;
+    const inChannel = q.status === 'ANSWERED' && before.status !== 'ANSWERED' && !before.answeredFrom;
+    if (inChannel) answeredInChannel.push(before.id);
     await db.buyerQuestion.update({
       where: { storeId_externalId: { storeId, externalId: q.externalId } },
       data: {
         status: q.status,
         text,
         answer,
+        ...(inChannel ? { answeredFrom: 'CHANNEL' as const } : {}),
         ...(q.answer ? { answeredAt: toDate(q.answer.answeredAt) } : answer === null ? { answeredAt: null } : {}),
         ...(publicationId ? { publicationId } : {}),
         readAt: now,
       },
+    });
+  }
+  if (answeredInChannel.length > 0) {
+    // La propuesta de Claude que quedó sin usar: alguien respondió en el canal.
+    await db.questionDraft.updateMany({
+      where: { questionId: { in: answeredInChannel }, outcome: null },
+      data: { outcome: 'ANSWERED_IN_CHANNEL', decidedAt: now },
     });
   }
   return count;

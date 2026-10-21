@@ -1,5 +1,5 @@
-import { MercadoLibreRequestError, mlGet } from './http';
-import type { ChannelQuestion, ChannelQuestions, ChannelQuestionStatus, QuestionNotice, QuestionPage } from '../questions-types';
+import { MercadoLibreRequestError, mlGet, mlSend } from './http';
+import { AnswerError, type ChannelQuestion, type ChannelQuestions, type ChannelQuestionStatus, type QuestionNotice, type QuestionPage } from '../questions-types';
 
 // Las preguntas de los compradores en Mercado Libre, con la versión 4 de su
 // formato. Del comprador se guarda solo su código.
@@ -71,6 +71,19 @@ async function get(path: string, accessToken: string): Promise<unknown> {
   }
 }
 
+/** Por qué Mercado Libre no aceptó la respuesta, en castellano. */
+export function answerRejection(status: number, body: unknown): string {
+  if (status === 403) return 'La aplicación de Mercado Libre no tiene permiso para responder preguntas. Revisá el permiso de comunicación con los compradores y volvé a conectar la tienda.';
+  if (status === 404) return 'Mercado Libre ya no tiene esa pregunta: puede que la hayan borrado.';
+  const said = isObj(body) ? [str(body.message), str(body.error)].filter((s): s is string => s !== null).join(' ') : '';
+  if (/answered|already/i.test(said)) return 'La pregunta ya estaba respondida en Mercado Libre.';
+  if (/closed|inactive|paused/i.test(said)) return 'La publicación está pausada o finalizada: Mercado Libre no deja responder.';
+  if (/(link|url|mail|phone|contact|forbidden[_ ]words|moderat)/i.test(said)) {
+    return 'Mercado Libre no acepta links, mails, teléfonos ni datos de contacto en las respuestas.';
+  }
+  return said ? `Mercado Libre no aceptó la respuesta. Mercado Libre dijo: «${said.slice(0, 300)}».` : `Mercado Libre no aceptó la respuesta (código ${status}).`;
+}
+
 const isBadRequest = (e: unknown) => e instanceof MercadoLibreRequestError && e.status === 400;
 
 /**
@@ -120,6 +133,17 @@ export const mercadolibreQuestions: ChannelQuestions = {
     } catch (e) {
       if (e instanceof MercadoLibreRequestError && e.status === 404) return null;
       throw e;
+    }
+  },
+
+  async answer(accessToken, questionId, text) {
+    if (!/^\d{1,20}$/.test(questionId)) throw new AnswerError('La pregunta no tiene un código válido.');
+    try {
+      await mlSend('POST', '/answers', accessToken, { question_id: Number(questionId), text });
+    } catch (e) {
+      // Una llave vencida o "demasiados pedidos" siguen como error de conexión.
+      if (!(e instanceof MercadoLibreRequestError) || e.status === 401 || e.status === 429) throw e;
+      throw new AnswerError(answerRejection(e.status, e.body));
     }
   },
 

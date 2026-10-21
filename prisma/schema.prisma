@@ -55,6 +55,8 @@ model User {
   photoDecisions   PhotoStepRun[]
   channelSyncs     ChannelSync[]
   syncChoices      ChannelSyncChange[]
+  questionAnswers  BuyerQuestion[]
+  questionDrafts   QuestionDraft[]
 
   @@map("users")
 }
@@ -112,20 +114,21 @@ model Verification {
 
 // Cuenta: el cliente del estudio. Todo dato pertenece a una cuenta.
 model Account {
-  id             String             @id @default(cuid())
-  slug           String             @unique
-  name           String
-  timezone       String             @default("America/Argentina/Buenos_Aires")
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
-  stores         Store[]
-  products       Product[]
-  importMappings ImportMapping[]
-  importRuns     ImportRun[]
-  standardRules  StandardRule[]
-  titleRuleSets  TitleRuleSet[]
-  suggestions    SearchSuggestion[]
-  photoSettings  PhotoSettings?
+  id               String             @id @default(cuid())
+  slug             String             @unique
+  name             String
+  timezone         String             @default("America/Argentina/Buenos_Aires")
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  stores           Store[]
+  products         Product[]
+  importMappings   ImportMapping[]
+  importRuns       ImportRun[]
+  standardRules    StandardRule[]
+  titleRuleSets    TitleRuleSet[]
+  suggestions      SearchSuggestion[]
+  photoSettings    PhotoSettings?
+  questionSettings QuestionSettings?
 
   @@map("accounts")
 }
@@ -1264,6 +1267,10 @@ enum SyncChangeKind {
   REJECTED
   // Se intentó crear en el canal y no se pudo.
   CREATE_FAILED
+  // Se respondió desde la app la pregunta de un comprador.
+  ANSWERED
+  // Se intentó responder y no se pudo.
+  ANSWER_FAILED
 }
 
 // Un dato que cambió por la sincronización: lo que llegó del canal, lo que se
@@ -1320,6 +1327,11 @@ model BuyerQuestion {
   buyerId       String?
   answer        String?
   answeredAt    DateTime?
+  // Desde dónde se respondió, y quién si fue desde la app.
+  answeredFrom  AnswerSource?
+  answeredById  String?
+  answeredBy    User?          @relation(fields: [answeredById], references: [id], onDelete: SetNull)
+  draft         QuestionDraft?
   // La última vez que se leyó del canal.
   readAt        DateTime
   createdAt     DateTime       @default(now())
@@ -1351,4 +1363,67 @@ model QuestionReader {
   noticeAt       DateTime?
 
   @@map("question_readers")
+}
+
+enum AnswerSource {
+  // Se respondió en el canal, fuera de la app.
+  CHANNEL
+  APP
+}
+
+enum DraftOutcome {
+  SENT_AS_IS
+  SENT_EDITED
+  DISCARDED
+  // Alguien respondió en el canal, fuera de la app.
+  ANSWERED_IN_CHANNEL
+}
+
+// La respuesta que propuso Claude para una pregunta, y qué se hizo con ella:
+// así se mide cuánto se usa tal cual antes de pensar en responder solo.
+model QuestionDraft {
+  id          String        @id @default(cuid())
+  questionId  String        @unique
+  question    BuyerQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  text        String
+  // De qué trata la pregunta, por ejemplo compatibilidad o stock.
+  kind        String
+  // Los datos que usó y los que le faltaron, en frases cortas.
+  usedData    Json          @default("[]")
+  missing     Json          @default("[]")
+  // Depende de algo que la app no sabe: tiene que responder una persona.
+  needsPerson Boolean       @default(false)
+  reason      String?
+  model       String
+  usage       Json
+  // Lo que costaron todas las propuestas de esta pregunta, en dólares.
+  costUsd     Float
+  attempts    Int           @default(1)
+  outcome     DraftOutcome?
+  // Lo que se mandó al final, si se corrigió.
+  sentText    String?
+  decidedAt   DateTime?
+  decidedById String?
+  decidedBy   User?         @relation(fields: [decidedById], references: [id], onDelete: SetNull)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([outcome, createdAt])
+  @@map("question_drafts")
+}
+
+// Cómo responde cada cuenta: lo que Claude usa para proponer.
+model QuestionSettings {
+  accountId String   @id
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  greeting  String?
+  signature String?
+  tone      String?
+  // Lo que Claude tiene que saber de la tienda: envíos, facturas, cómo se leen las medidas.
+  notes     String?
+  // Proponer respuestas solas cuando llega una pregunta.
+  autoDraft Boolean  @default(true)
+  updatedAt DateTime @updatedAt
+
+  @@map("question_settings")
 }

@@ -23,7 +23,8 @@ export const LOG_TYPES = [
   { value: 'bajadas', label: 'Llegó del canal', kinds: ['TAKEN'] },
   { value: 'subidas', label: 'Se subió', kinds: ['SENT'] },
   { value: 'creadas', label: 'Se creó en el canal', kinds: ['CREATED'] },
-  { value: 'fallidas', label: 'No se pudo', kinds: ['REJECTED', 'CREATE_FAILED'] },
+  { value: 'respuestas', label: 'Respuestas a preguntas', kinds: ['ANSWERED'] },
+  { value: 'fallidas', label: 'No se pudo', kinds: ['REJECTED', 'CREATE_FAILED', 'ANSWER_FAILED'] },
   { value: 'elecciones', label: 'Se eligió', kinds: ['CHOSE_CHANNEL', 'CHOSE_APP'] },
   { value: 'descartes', label: 'Se descartó', kinds: ['DISCARDED'] },
   { value: 'lecturas', label: 'Lecturas del canal', kinds: [] },
@@ -133,7 +134,8 @@ export function dayRange(f: Pick<LogFilters, 'from' | 'to'>, timeZone: string): 
 // ───────────────────────────── Cómo se cuenta cada cosa ─────────────────────────────
 
 export function fieldLabel(field: string): string {
-  return isFaceField(field) ? FACE_FIELD_LABEL[field] : field === 'publication' ? 'Publicación' : field;
+  if (isFaceField(field)) return FACE_FIELD_LABEL[field];
+  return field === 'publication' ? 'Publicación' : field === 'question' ? 'Pregunta de un comprador' : field;
 }
 
 export function kindLabel(kind: SyncChangeKind): string {
@@ -141,7 +143,7 @@ export function kindLabel(kind: SyncChangeKind): string {
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
-export const FAILED_KINDS: readonly SyncChangeKind[] = ['REJECTED', 'CREATE_FAILED'];
+export const FAILED_KINDS: readonly SyncChangeKind[] = ['REJECTED', 'CREATE_FAILED', 'ANSWER_FAILED'];
 
 // Qué es el antes y qué el después en cada caso.
 export const SIDE_LABELS: Record<SyncChangeKind, [string, string]> = {
@@ -153,6 +155,8 @@ export const SIDE_LABELS: Record<SyncChangeKind, [string, string]> = {
   CREATED: ['', 'Código en el canal'],
   REJECTED: ['Estaba en el canal', 'Se quiso subir'],
   CREATE_FAILED: ['', ''],
+  ANSWERED: ['Pregunta', 'Respuesta'],
+  ANSWER_FAILED: ['Pregunta', 'Se quiso responder'],
 };
 
 function photoSummary(refs: PhotoRef[]): string {

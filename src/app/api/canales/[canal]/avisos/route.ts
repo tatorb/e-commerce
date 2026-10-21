@@ -1,17 +1,19 @@
 import { after, NextResponse } from 'next/server';
 import { getChannelConnector } from '@/channels/connect';
 import type { ChannelKind } from '@/generated/prisma/enums';
+import { isAiConfigured } from '@/ai/claude';
 import { prisma } from '@/lib/db';
-import { receiveNotice } from '@/lib/buyer-questions';
+import { handleNotice } from '@/lib/answers';
 
 // Avisos del canal. Mercado Libre pide esta dirección al crear la aplicación.
 // Hoy la app usa los de las preguntas de los compradores; los demás llegan y
 // no se guardan. Se confirma enseguida y se procesa después: si tarda, el
 // canal vuelve a mandar el aviso. Lo que trae el aviso no se registra ni se
-// cree: la pregunta se le pide al canal con la conexión de la tienda.
+// cree: la pregunta se le pide al canal con la conexión de la tienda. Si es
+// nueva, Claude propone la respuesta en ese momento.
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 // Un aviso es chico: lo que pase de esto no es un aviso.
 const MAX_CHARS = 16_000;
@@ -35,7 +37,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ can
   }
   after(async () => {
     try {
-      await receiveNotice(prisma, kind, body);
+      await handleNotice(prisma, kind, body, { aiReady: isAiConfigured() });
     } catch (e) {
       console.error('No se pudo procesar el aviso', e instanceof Error ? e.message : e);
     }

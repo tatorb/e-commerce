@@ -25,6 +25,9 @@ export type QuestionPage = {
   limited?: boolean;
 };
 
+/** El canal no aceptó la respuesta: el motivo, en castellano. */
+export class AnswerError extends Error {}
+
 /** Lo que trae un aviso del canal sobre una pregunta. */
 export type QuestionNotice = { userId: string; appId: string | null; questionId: string };
 
@@ -35,6 +38,8 @@ export interface ChannelQuestions {
   listUnanswered(accessToken: string, userId: string, offset: number, limit: number): Promise<QuestionPage>;
   /** Una pregunta, o null si el canal ya no la tiene. */
   readOne(accessToken: string, questionId: string): Promise<ChannelQuestion | null>;
+  /** Publica la respuesta. Si el canal no la acepta, AnswerError con el motivo. */
+  answer(accessToken: string, questionId: string, text: string): Promise<void>;
   /** El aviso que manda el canal, o null si no es de una pregunta. */
   parseNotice(body: unknown): QuestionNotice | null;
 }
