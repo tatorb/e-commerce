@@ -33,14 +33,16 @@ const LISTS: Record<Kind, { title: string; empty: string; placeholder: string }>
   },
 };
 
-// Dolores del comprador: las preguntas pegadas y las listas de dolores y
-// objeciones. Es del producto, salvo las preguntas de la publicación propia,
-// que son de cada publicación.
+// Dolores del comprador: las preguntas que llegaron del canal, las pegadas y
+// las listas de dolores y objeciones. Es del producto, salvo las preguntas de
+// la publicación propia, que son de cada publicación.
 export function BuyerPainsCard({
   accountSlug,
   publicationId,
   sharedWith,
   questions,
+  received = [],
+  channelName,
   pains,
   objections,
 }: {
@@ -48,6 +50,9 @@ export function BuyerPainsCard({
   publicationId: string;
   sharedWith: number;
   questions: { own: string; competitors: string };
+  // Las que llegaron solas del canal, lo más nuevo primero.
+  received?: { id: string; text: string; answer: string | null }[];
+  channelName: string;
   pains: EditableItem[];
   objections: EditableItem[];
 }) {
@@ -65,15 +70,28 @@ export function BuyerPainsCard({
       )}
     >
       <SectionBody>
+        {received.length > 0 ? (
+          <div className="overflow-hidden rounded-lg border">
+            <SubHeader title={`Recibidas en ${channelName}`} count={received.length} />
+            <ul className="max-h-72 divide-y overflow-y-auto text-sm">
+              {received.map((q) => (
+                <li key={q.id} className="space-y-0.5 px-3 py-2">
+                  <p className="whitespace-pre-line break-words">{q.text}</p>
+                  {q.answer ? <p className="whitespace-pre-line break-words text-muted-foreground">{q.answer}</p> : null}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
         <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
-            <Label htmlFor="q-own">Preguntas de esta publicación</Label>
+            <Label htmlFor="q-own">{received.length > 0 ? 'Otras preguntas de esta publicación' : 'Preguntas de esta publicación'}</Label>
             <Textarea
               id="q-own"
               rows={8}
               value={values.own}
               onChange={(e) => setValues((v) => ({ ...v, own: e.target.value }))}
-              placeholder="Pegá acá todas las preguntas, como vienen."
+              placeholder={`Pegá acá las preguntas que no llegaron solas de ${channelName}, como vienen.`}
             />
           </div>
           <div className="space-y-2">

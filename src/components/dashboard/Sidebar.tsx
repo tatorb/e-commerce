@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { cookies } from 'next/headers';
-import { History, Image as ImageIcon, KanbanSquare, ListChecks, Package, PlugZap, RefreshCw, SlidersHorizontal, Type, Upload, Users } from 'lucide-react';
+import { History, Image as ImageIcon, KanbanSquare, MessageCircleQuestion, ListChecks, Package, PlugZap, RefreshCw, SlidersHorizontal, Type, Upload, Users } from 'lucide-react';
 import { NavLink } from '@/components/dashboard/NavLink';
 import { SidebarShell } from '@/components/dashboard/SidebarShell';
 import { SidebarToggle } from '@/components/dashboard/SidebarToggle';
@@ -20,11 +20,14 @@ export async function Sidebar({
   user,
   account,
   accounts,
+  questions = 0,
   className,
 }: {
   user: CurrentUser;
   account: AccountOption;
   accounts: AccountOption[];
+  // Preguntas de los compradores sin responder.
+  questions?: number;
   className?: string;
 }) {
   const accountHome = `/a/${account.slug}`;
@@ -69,6 +72,9 @@ export async function Sidebar({
           </NavLink>
           <NavLink href={`${accountHome}/publicaciones`} label="Catálogo">
             <ListChecks className="h-4 w-4" />
+          </NavLink>
+          <NavLink href={`${accountHome}/preguntas`} label="Preguntas" badge={questions}>
+            <MessageCircleQuestion className="h-4 w-4" />
           </NavLink>
           <NavLink href={`${accountHome}/importar`} label="Importar">
             <Upload className="h-4 w-4" />

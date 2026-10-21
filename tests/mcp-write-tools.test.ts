@@ -310,7 +310,7 @@ describe.skipIf(!url)('herramientas de escritura', () => {
       updatedById: 'u1',
     });
     const mine = await call('get_publication', { publicacion: 'MLA1110001' });
-    expect(mine.data.investigacion.preguntas).toEqual({ propia: '¿Sirve para Gol 2012?', competencia: '¿Es original?' });
+    expect(mine.data.investigacion.preguntas).toEqual({ recibidas: [], propia: '¿Sirve para Gol 2012?', competencia: '¿Es original?' });
     expect(mine.data.ficha.publicaciones_que_la_comparten).toBe(2);
 
     // Lo ve también la otra publicación del mismo producto, sin la línea del

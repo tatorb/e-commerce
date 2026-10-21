@@ -36,7 +36,7 @@ import { loadCombo } from '@/lib/queries/combos';
 import { comboForAi, comboParts, PRODUCT_KIND_LABEL } from '@/domain/combos';
 import { loadCatalogData } from '@/lib/catalog-data';
 import { catalogForClaude } from './catalog';
-import { loadTitleContext } from '@/lib/queries/title-step';
+import { loadTitleContext, RECEIVED_QUESTIONS } from '@/lib/queries/title-step';
 import {
   McpToolError,
   accountArg,
@@ -306,7 +306,7 @@ const getPublication = defineTool({
   name: 'get_publication',
   title: 'Ver una publicación',
   description:
-    'Muestra todo de una publicación: la ficha del producto (la fuente de verdad), el título y la descripción actuales, los atributos del canal, los datos de catálogo del canal (cada campo del formulario de su categoría, con sus opciones y lo cargado), el puntaje y lo que le falta, la última medición, el estado e historial del pipeline, el candado del título, la competencia cargada y la investigación del producto: lo del fabricante, las aclaraciones para las imágenes, las preguntas de los compradores y sus dolores y objeciones. La ficha y la investigación son del producto y las comparten todas sus publicaciones; las preguntas de la publicación propia son solo de esta.',
+    'Muestra todo de una publicación: la ficha del producto (la fuente de verdad), el título y la descripción actuales, los atributos del canal, los datos de catálogo del canal (cada campo del formulario de su categoría, con sus opciones y lo cargado), el puntaje y lo que le falta, la última medición, el estado e historial del pipeline, el candado del título, la competencia cargada y la investigación del producto: lo del fabricante, las aclaraciones para las imágenes, las preguntas de los compradores (las que llegaron solas del canal, con su respuesta, y las pegadas) y sus dolores y objeciones. La ficha y la investigación son del producto y las comparten todas sus publicaciones; las preguntas de la publicación propia son solo de esta.',
   input: z.object({ cuenta: accountArg, publicacion: publicationArg }),
   readOnly: true,
   async run(ctx, args) {
@@ -320,6 +320,12 @@ const getPublication = defineTool({
           description: true,
           attributes: true,
           ownQuestions: true,
+          buyerQuestions: {
+            where: { status: { in: ['UNANSWERED', 'ANSWERED'] }, text: { not: '' } },
+            orderBy: { askedAt: 'desc' },
+            take: RECEIVED_QUESTIONS,
+            select: { text: true, answer: true, askedAt: true },
+          },
           measurements: { orderBy: { takenAt: 'desc' }, take: LATEST_MEASUREMENTS, select: { takenAt: true, metrics: true } },
           competitors: { orderBy: { position: 'asc' }, select: { title: true, url: true, soldQuantity: true } },
           product: {
@@ -451,7 +457,12 @@ const getPublication = defineTool({
           })),
         },
         aclaraciones_para_imagenes: richTextToMarkdown(r?.clarifications ?? null) || null,
-        preguntas: { propia: pub.ownQuestions, competencia: r?.competitorQuestions ?? null },
+        preguntas: {
+          // Las que llegaron solas del canal, con su respuesta si la tiene.
+          recibidas: pub.buyerQuestions.map((q) => ({ pregunta: q.text, respuesta: q.answer, fecha: q.askedAt.toISOString().slice(0, 10) })),
+          propia: pub.ownQuestions,
+          competencia: r?.competitorQuestions ?? null,
+        },
         dolores: research.pains.map((i) => i.text),
         objeciones: research.objections.map((i) => i.text),
       },

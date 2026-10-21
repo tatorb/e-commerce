@@ -176,6 +176,8 @@ model Store {
   connectAttempts  ConnectAttempt[]
   probes           ChannelProbe[]
   syncs            ChannelSync[]
+  buyerQuestions   BuyerQuestion[]
+  questionReader   QuestionReader?
 
   @@unique([accountId, channelId, name])
   @@map("stores")
@@ -380,6 +382,7 @@ model Publication {
   positions         SearchPosition[]
   channelCopy       ChannelCopy?
   syncChanges       ChannelSyncChange[]
+  buyerQuestions    BuyerQuestion[]
 
   @@unique([storeId, externalId])
   @@index([pipelineStatus])
@@ -1285,4 +1288,67 @@ model ChannelSyncChange {
   @@index([syncId])
   @@index([createdAt])
   @@map("channel_sync_changes")
+}
+
+// ───────────────────────────── Preguntas de los compradores ─────────────────────────────
+
+enum QuestionStatus {
+  UNANSWERED
+  ANSWERED
+  // Ya no se puede responder: la publicación se cerró.
+  CLOSED
+  // El canal la borró, la bloqueó o la está revisando.
+  REMOVED
+}
+
+// Una pregunta que hizo un comprador en el canal, con su respuesta si la
+// tiene. Llega con el aviso del canal o con la lectura de cada hora.
+model BuyerQuestion {
+  id            String         @id @default(cuid())
+  storeId       String
+  store         Store          @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  // El código de la pregunta en el canal.
+  externalId    String
+  // El código de la publicación en el canal. publicationId, si está en la app.
+  listingId     String
+  publicationId String?
+  publication   Publication?   @relation(fields: [publicationId], references: [id], onDelete: SetNull)
+  text          String
+  status        QuestionStatus
+  askedAt       DateTime
+  // Solo el código del comprador en el canal, para juntar sus preguntas.
+  buyerId       String?
+  answer        String?
+  answeredAt    DateTime?
+  // La última vez que se leyó del canal.
+  readAt        DateTime
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@unique([storeId, externalId])
+  @@index([storeId, status, askedAt])
+  @@index([publicationId, askedAt])
+  @@index([storeId, listingId])
+  @@map("buyer_questions")
+}
+
+// Cómo va la lectura de las preguntas de cada tienda.
+model QuestionReader {
+  storeId        String    @id
+  store          Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  // Mientras un pedido está leyendo, nadie más lee.
+  leaseUntil     DateTime?
+  // La pregunta más nueva que se leyó: las lecturas siguientes paran cerca de ahí.
+  newestAt       DateTime?
+  // Por dónde va la carga de las preguntas anteriores. Null cuando terminó.
+  historyOffset  Int?      @default(0)
+  historyTotal   Int?
+  // El canal no deja traer más atrás.
+  historyLimited Boolean   @default(false)
+  readAt         DateTime?
+  lastError      String?
+  // El último aviso del canal: muestra que la dirección de avisos está bien cargada.
+  noticeAt       DateTime?
+
+  @@map("question_readers")
 }

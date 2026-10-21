@@ -283,6 +283,38 @@ export default async function PublicationPage({
         )}
 
         <SectionCard
+          title="Preguntas de los compradores"
+          count={p._count.buyerQuestions}
+          description={`Las que llegaron de ${channelName}, lo más nuevo primero.`}
+          action={
+            p._count.buyerQuestions > 0 ? (
+              <Link href={`/a/${account.slug}/preguntas?publicacion=${p.id}`} className="text-xs font-medium underline-offset-4 hover:underline">
+                Ver todas
+              </Link>
+            ) : null
+          }
+        >
+          {p.buyerQuestions.length > 0 ? (
+            <ul className="divide-y text-sm">
+              {p.buyerQuestions.map((q) => (
+                <li key={q.id} className="space-y-1 px-4 py-2.5">
+                  <div className="flex flex-wrap items-baseline gap-x-2">
+                    <span className="tabular-nums text-xs text-muted-foreground">{formatDateTime(q.askedAt, tz)}</span>
+                    {q.status === 'UNANSWERED' ? <Badge variant="alert">Sin responder</Badge> : null}
+                  </div>
+                  <p className="whitespace-pre-line break-words font-medium">{q.text || 'El canal ocultó el texto de esta pregunta.'}</p>
+                  {q.answer ? <p className="whitespace-pre-line break-words text-muted-foreground">{q.answer}</p> : null}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <SectionBody>
+              <p className="text-sm text-muted-foreground">Todavía no llegó ninguna pregunta.</p>
+            </SectionBody>
+          )}
+        </SectionCard>
+
+        <SectionCard
           title="Historial con el canal"
           description="Lo que llegó del canal, lo que se subió y lo que se eligió, lo más nuevo primero."
           action={

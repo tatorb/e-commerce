@@ -21,6 +21,7 @@ import { resolveTitleLock } from '@/domain/title-lock';
 // borrador de la app, dato por dato, con lo que se puede hacer con cada uno.
 
 const HISTORY = 30;
+const QUESTIONS = 20;
 
 export async function loadPublicationFaces(accountId: string, publicationId: string) {
   const p = await prisma.publication.findFirst({
@@ -44,6 +45,13 @@ export async function loadPublicationFaces(accountId: string, publicationId: str
       measurements: { orderBy: { takenAt: 'desc' }, take: LATEST_MEASUREMENTS, select: { metrics: true } },
       channelCopy: true,
       syncChanges: { orderBy: { createdAt: 'desc' }, take: HISTORY, include: { user: { select: { name: true } } } },
+      buyerQuestions: {
+        where: { status: { in: ['UNANSWERED', 'ANSWERED'] } },
+        orderBy: { askedAt: 'desc' },
+        take: QUESTIONS,
+        select: { id: true, text: true, status: true, askedAt: true, answer: true, answeredAt: true },
+      },
+      _count: { select: { buyerQuestions: { where: { status: { in: ['UNANSWERED', 'ANSWERED'] } } } } },
     },
   });
   if (!p) return null;

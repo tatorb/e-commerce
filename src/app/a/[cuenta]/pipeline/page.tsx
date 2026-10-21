@@ -6,12 +6,14 @@ import { PageBody } from '@/components/dashboard/PageBody';
 import { NewPipelinePublicationDialog } from '@/components/pipeline/NewPipelinePublicationDialog';
 import { PipelineBoard } from '@/components/pipeline/PipelineBoard';
 import { ToPushList } from '@/components/sync/ToPushList';
+import { QuestionsNotice } from '@/components/questions/QuestionsNotice';
 import { UrlFilterDropdown } from '@/components/filters/UrlFilterDropdown';
 import { KIND_OPTIONS, parseKinds } from '@/lib/queries/catalog-filters';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { listBoard } from '@/lib/queries/pipeline';
 import { listStores } from '@/lib/queries/products';
 import { listToPush } from '@/lib/queries/sync';
+import { unansweredSummary } from '@/lib/queries/questions';
 import { plural } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
 
@@ -36,10 +38,11 @@ export default async function PipelinePage({
   const kinds = parseKinds(tipo);
   const toPushView = vista === 'por-subir';
   // Por subir mira todas las publicaciones de la cuenta: se carga solo en su pestaña.
-  const [all, stores, toPush] = await Promise.all([
+  const [all, stores, toPush, questions] = await Promise.all([
     toPushView ? Promise.resolve([]) : listBoard(account.id),
     listStores(account.id),
     toPushView ? listToPush(account.id) : Promise.resolve([]),
+    unansweredSummary(account.id),
   ]);
   const items = kinds.length > 0 ? all.filter((i) => kinds.includes(i.kind)) : all;
   const catalogHref = `/a/${account.slug}/publicaciones?pipeline=UNTOUCHED,DISCARDED`;
@@ -70,6 +73,7 @@ export default async function PipelinePage({
         </div>
       </PageHeader>
       <PageBody className="max-w-none">
+        <QuestionsNotice accountSlug={account.slug} count={questions.count} oldestAt={questions.oldestAt} />
         <div className="inline-flex w-full rounded-lg border bg-muted/50 p-1 sm:w-auto" role="tablist" aria-label="Vista del pipeline">
           {(
             [

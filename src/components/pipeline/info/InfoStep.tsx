@@ -106,6 +106,8 @@ export function InfoStep({
         publicationId={publicationId}
         sharedWith={ctx.sharedWith}
         questions={{ own: s(ctx.publication.ownQuestions), competitors: s(r?.competitorQuestions) }}
+        received={ctx.publication.receivedQuestions.map((q) => ({ id: q.id, text: q.text, answer: q.answer }))}
+        channelName={ctx.channel.name}
         pains={research.pains.map((i) => ({ id: i.id, text: i.text }))}
         objections={research.objections.map((i) => ({ id: i.id, text: i.text }))}
       />

@@ -35,6 +35,9 @@ export function flattenSuggestions(captures: Capture[], seeds: string[]): string
   return out;
 }
 
+// Las preguntas recibidas que se muestran en la Investigación.
+export const RECEIVED_QUESTIONS = 100;
+
 export async function loadTitleContext(db: PrismaClient, accountId: string, publicationId: string) {
   const pub = await db.publication.findFirst({
     where: { id: publicationId, product: { accountId } },
@@ -47,6 +50,13 @@ export async function loadTitleContext(db: PrismaClient, accountId: string, publ
       pipelineStep: true,
       titleLockedManual: true,
       ownQuestions: true,
+      // Las que llegaron del canal: se suman a las pegadas para los dolores y objeciones.
+      buyerQuestions: {
+        where: { status: { in: ['UNANSWERED', 'ANSWERED'] }, text: { not: '' } },
+        orderBy: { askedAt: 'desc' },
+        take: RECEIVED_QUESTIONS,
+        select: { id: true, text: true, answer: true, askedAt: true },
+      },
       store: { select: { id: true, channel: { select: { id: true, kind: true, name: true } } } },
       measurements: { orderBy: { takenAt: 'desc' }, take: LATEST_MEASUREMENTS, select: { metrics: true } },
       product: {
@@ -120,6 +130,7 @@ export async function loadTitleContext(db: PrismaClient, accountId: string, publ
       pipelineStatus: pub.pipelineStatus,
       pipelineStep: pub.pipelineStep,
       ownQuestions: pub.ownQuestions,
+      receivedQuestions: pub.buyerQuestions,
     },
     channel,
     storeId: pub.store.id,
