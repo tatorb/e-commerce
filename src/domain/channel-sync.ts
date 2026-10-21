@@ -183,3 +183,42 @@ export function faceSummary(
   }
   return summary;
 }
+
+// ───────────────────────────── Datos de catálogo ─────────────────────────────
+
+const attributeKey = (name: string) => oneSpace(name).toLowerCase();
+
+export type AttributeDiff = {
+  // Están en los dos lados con otro valor.
+  changed: { name: string; from: string; to: string }[];
+  // Están en la app y no en el canal.
+  added: NameValue[];
+  // Están en el canal y no en la app.
+  removed: NameValue[];
+};
+
+/** Qué datos de catálogo de la app son distintos de los del canal. */
+export function attributeDiff(app: NameValue[], channel: NameValue[]): AttributeDiff {
+  const theirs = new Map(channel.map((a) => [attributeKey(a.name), a]));
+  const ours = new Set(app.map((a) => attributeKey(a.name)));
+  const diff: AttributeDiff = { changed: [], added: [], removed: [] };
+  for (const a of app) {
+    if (!a.value.trim()) continue;
+    const other = theirs.get(attributeKey(a.name));
+    if (!other) diff.added.push(a);
+    else if (oneSpace(other.value) !== oneSpace(a.value)) diff.changed.push({ name: a.name, from: other.value, to: a.value });
+  }
+  for (const a of channel) if (!ours.has(attributeKey(a.name))) diff.removed.push(a);
+  return diff;
+}
+
+/** Los datos del canal con los que se subieron: reemplazan al de su mismo nombre o se suman al final. */
+export function mergeAttributes(channel: NameValue[], sent: NameValue[]): NameValue[] {
+  const out = channel.map((a) => ({ ...a }));
+  for (const s of sent) {
+    const at = out.findIndex((a) => attributeKey(a.name) === attributeKey(s.name));
+    if (at >= 0) out[at] = { name: s.name, value: s.value };
+    else out.push({ name: s.name, value: s.value });
+  }
+  return out;
+}

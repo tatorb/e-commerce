@@ -81,7 +81,7 @@ export function parseItem(item: Obj): ChannelListing {
     else if (id === PART_NUMBER) partNumber = value;
     else if (id === ORIGIN) origin = value;
     else if (id === SELLER_SKU) addSku(value);
-    else attributes.push({ id, name: str(a.name) ?? id, value });
+    else attributes.push({ id, name: str(a.name) ?? id, value, ...(str(a.value_name) ? {} : arr(a.values).length > 1 ? { multiple: true } : {}) });
   }
   addSku(str(item.seller_custom_field));
 

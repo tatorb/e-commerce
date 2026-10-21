@@ -18,7 +18,7 @@ import {
 import { parseMetrics, type Metrics } from '@/domain/measurements';
 import type { NameValue } from '@/domain/name-value';
 import { isUniqueViolation } from '@/domain/publications';
-import { listingAttributes } from '@/importers/channel-listings';
+import { listingAttributeIds, listingAttributes } from '@/importers/channel-listings';
 import { withAccessToken } from '@/lib/connections';
 
 // La lectura automática del canal: recorre las publicaciones de cada tienda
@@ -210,6 +210,8 @@ async function applyListing(
     photos: listing.photos,
     hasVideo: listing.hasVideo,
     details: { brand: listing.brand, partNumber: listing.partNumber, origin: listing.origin, skus: listing.skus, measures: listing.measures },
+    categoryId: listing.categoryId,
+    attributeIds: listingAttributeIds(listing, ctx.adapter),
     fingerprints: channelPrints,
     agreed,
   };

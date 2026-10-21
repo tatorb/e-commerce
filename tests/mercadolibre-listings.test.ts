@@ -80,7 +80,8 @@ describe('de Mercado Libre al formato neutro', () => {
     });
     expect(l.attributes).toEqual([
       { id: 'CLUTCH_TYPE', name: 'Tipo de embrague', value: 'Monodisco' },
-      { id: 'OEM', name: 'Código OEM', value: 'AB12, CD34' },
+      // Vino con varios valores: se suben como lista.
+      { id: 'OEM', name: 'Código OEM', value: 'AB12, CD34', multiple: true },
     ]);
   });
 

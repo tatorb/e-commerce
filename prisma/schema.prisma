@@ -1177,6 +1177,11 @@ model ChannelCopy {
   hasVideo          Boolean       @default(false)
   // Marca, número de pieza, origen y SKU, como los informa el canal.
   details           Json          @default("{}")
+  // La categoría en el canal, y el código de cada dato de catálogo por su
+  // nombre en la app: { "tipo de embrague": { id, multiple } }. Sirven para
+  // subir los datos de catálogo.
+  categoryId        String?
+  attributeIds      Json          @default("{}")
   // Huella de cada dato en el canal, y de lo último en que coincidieron con la
   // app. Un dato sin huella acordada todavía no se sabe de qué lado está bien.
   fingerprints      Json          @default("{}")

@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { SectionBody, SectionCard } from '@/components/ui/section-card';
 import { ChannelStatusBadge, PipelineBadge } from '@/components/stages/StageBadge';
 import { DraftBar, DraftField, FaceValue, ReadOneButton } from '@/components/publication/FaceControls';
+import { CatalogCard } from '@/components/pipeline/info/CatalogCard';
 import { FACE_FIELDS, FACE_FIELD_LABEL, isFaceField, SYNC_CHANGE_LABEL, type FaceField, type FaceValues } from '@/domain/channel-sync';
 import { titleOrUntitled } from '@/domain/publication-title';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
@@ -181,8 +182,8 @@ export default async function PublicationPage({
             {FACE_FIELDS.map((field) => {
               const state = states[field];
               const editable =
-                field === 'attributes'
-                  ? 'Los datos de catálogo se editan en el paso Información.'
+                field === 'attributes' && !data.catalog
+                  ? `${channelName} todavía no tiene datos de catálogo en la app.`
                   : field === 'title' && data.titleLock.locked && p.title?.trim()
                     ? 'El título está bloqueado porque la publicación tiene ventas: se decide en el paso Título.'
                     : (true as const);
@@ -193,6 +194,12 @@ export default async function PublicationPage({
                   action={state === 'same' && !copy ? null : <Badge variant={STATE[state].variant}>{STATE[state].label}</Badge>}
                 >
                   <SectionBody>
+                    {field === 'attributes' && data.categoryMismatch ? (
+                      <p className="text-sm text-muted-foreground">
+                        En la app la categoría es {data.categoryMismatch.app} y en {channelName} es {data.categoryMismatch.channel}. Los datos se
+                        suben a los campos de la categoría de {channelName}.
+                      </p>
+                    ) : null}
                     <DraftField
                       accountSlug={account.slug}
                       publicationId={p.id}
@@ -202,8 +209,14 @@ export default async function PublicationPage({
                       channelValue={channel ? asText(channel, field) : null}
                       channelName={channelName}
                       editable={editable}
-                      pushBlocked={data.pushBlocked ?? (data.publishable.includes(field) ? null : 'Los datos de catálogo todavía no se suben desde la app.')}
+                      pushBlocked={data.pushBlocked}
                       rejection={summary.rejected.find((r) => r.field === field)?.message ?? null}
+                      editor={
+                        field === 'attributes' && data.catalog ? (
+                          <CatalogCard accountSlug={account.slug} publicationId={p.id} data={data.catalog} bare />
+                        ) : undefined
+                      }
+                      diff={field === 'attributes' ? data.attributeDiff : null}
                     />
                   </SectionBody>
                 </SectionCard>

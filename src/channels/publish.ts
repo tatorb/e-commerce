@@ -5,7 +5,7 @@ import type { ChannelPublisher } from './publish-types';
 // A qué canales se pueden subir cambios con la cuenta conectada. Los tipos
 // están en publish-types.ts, así cada canal los usa sin depender de esta lista.
 
-export { PUBLISH_FIELDS, PublishError, type ChannelPublisher, type PublishField } from './publish-types';
+export { PUBLISH_FIELDS, PublishError, type ChannelAttributeUpdate, type ChannelPublisher, type PublishField } from './publish-types';
 
 const PUBLISHERS: Partial<Record<ChannelKind, ChannelPublisher>> = {
   MERCADOLIBRE: mercadolibrePublisher,

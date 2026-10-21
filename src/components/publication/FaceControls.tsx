@@ -1,12 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { Pencil, RefreshCw, Undo2, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { FACE_FIELD_LABEL, type FaceField } from '@/domain/channel-sync';
+import { FACE_FIELD_LABEL, type AttributeDiff, type FaceField } from '@/domain/channel-sync';
 import { cn } from '@/lib/utils/cn';
 import { discardDraftsAction, pushDraftsAction, readOneAction, saveDraftAction } from '@/app/a/[cuenta]/publicaciones/sync-actions';
 import { chooseFacesAction } from '@/app/a/[cuenta]/sincronizacion/actions';
@@ -35,10 +35,11 @@ function useBusy() {
 
 /** Cuenta lo que pasó al subir, en una línea. */
 export function pushMessage(r: PushResult, channelName: string): Message {
-  const sent = r.sent.map((f) => `${f === 'title' ? 'el' : 'la'} ${FACE_FIELD_LABEL[f].toLowerCase()}`);
+  const article: Record<FaceField, string> = { title: 'el', description: 'la', attributes: 'los' };
+  const sent = r.sent.map((f) => `${article[f]} ${FACE_FIELD_LABEL[f].toLowerCase()}`);
   const rejected = r.rejected.map((x) => `${FACE_FIELD_LABEL[x.field]}: ${x.message}`);
   if (sent.length === 0) return { kind: 'error', text: rejected.join(' ') || 'No había nada para subir.' };
-  const text = `Listo: ${sent.join(' y ')} ya ${sent.length > 1 ? 'están' : 'está'} en ${channelName}.${r.confirmed ? '' : ' No se pudo volver a leer para confirmar: se confirma en la próxima lectura.'}`;
+  const text = `Listo: ${sent.join(' y ')} ya ${sent.length > 1 || r.sent.includes('attributes') ? 'están' : 'está'} en ${channelName}.${r.confirmed ? '' : ' No se pudo volver a leer para confirmar: se confirma en la próxima lectura.'}`;
   return rejected.length > 0 ? { kind: 'error', text: `${text} ${rejected.join(' ')}` } : { kind: 'ok', text };
 }
 
@@ -142,6 +143,8 @@ export function DraftField({
   editable,
   pushBlocked,
   rejection,
+  editor,
+  diff,
 }: {
   accountSlug: string;
   publicationId: string;
@@ -155,12 +158,18 @@ export function DraftField({
   // Por qué no se puede subir, si no se puede.
   pushBlocked: string | null;
   rejection: string | null;
+  // Un formulario propio para editar, como el de los datos de catálogo.
+  editor?: ReactNode;
+  // En los datos de catálogo, qué cambia frente al canal.
+  diff?: AttributeDiff | null;
 }) {
   const { busy, message, run } = useBusy();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const multiline = field === 'description';
   const textField = field === 'title' || field === 'description';
+  const canEdit = editable === true && (textField || editor !== undefined);
+  const showDiff = diff && (state === 'draft' || state === 'choose') && diff.changed.length + diff.added.length + diff.removed.length > 0;
 
   async function save() {
     await run(
@@ -176,7 +185,14 @@ export function DraftField({
 
   return (
     <div className="space-y-3">
-      {editing ? (
+      {editing && editor ? (
+        <div className="space-y-3">
+          {editor}
+          <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
+            Cerrar
+          </Button>
+        </div>
+      ) : editing ? (
         <div className="space-y-2">
           {multiline ? (
             <Textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={10} aria-label={FACE_FIELD_LABEL[field]} />
@@ -205,7 +221,29 @@ export function DraftField({
         <FaceValue field={field} value={value} />
       )}
 
-      {state === 'choose' && channelValue !== null ? (
+      {showDiff ? (
+        <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Frente a {channelName}</p>
+          <ul className="mt-1 space-y-0.5">
+            {diff.changed.map((c) => (
+              <li key={`c-${c.name}`}>
+                <span className="text-muted-foreground">{c.name}:</span> {c.from} → <span className="font-medium">{c.to}</span>
+              </li>
+            ))}
+            {diff.added.map((a) => (
+              <li key={`a-${a.name}`}>
+                <span className="text-muted-foreground">{a.name}:</span> <span className="font-medium">{a.value}</span> <span className="text-muted-foreground">(nuevo)</span>
+              </li>
+            ))}
+            {diff.removed.map((a) => (
+              <li key={`r-${a.name}`} className="text-muted-foreground">
+                {a.name}: {a.value} (está en {channelName} y no en la app)
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {state === 'choose' && channelValue !== null && field !== 'attributes' ? (
         <div className="rounded-md border bg-muted/30 px-3 py-2">
           <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">En {channelName} ahora</p>
           <FaceValue field={field} value={channelValue} />
@@ -219,13 +257,13 @@ export function DraftField({
 
       {!editing ? (
         <div className="flex flex-wrap items-center gap-2">
-          {textField && editable === true ? (
+          {canEdit ? (
             <Button size="sm" variant="outline" onClick={() => setEditing(true)} disabled={busy !== null}>
               <Pencil />
               Editar
             </Button>
           ) : null}
-          {state === 'draft' && textField && !pushBlocked ? (
+          {state === 'draft' && !pushBlocked ? (
             <Button
               size="sm"
               disabled={busy !== null}
@@ -283,7 +321,7 @@ export function DraftField({
             </>
           ) : null}
           {typeof editable === 'string' ? <p className="text-xs text-muted-foreground">{editable}</p> : null}
-          {state === 'draft' && textField && pushBlocked ? <p className="text-xs text-muted-foreground">{pushBlocked}</p> : null}
+          {state === 'draft' && pushBlocked ? <p className="text-xs text-muted-foreground">{pushBlocked}</p> : null}
         </div>
       ) : null}
       <Note message={message} />

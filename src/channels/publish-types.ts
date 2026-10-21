@@ -3,13 +3,18 @@
 // nunca conoce el formato del canal. Solo corre en el servidor.
 
 /** Los datos que hoy se pueden subir. */
-export type PublishField = 'title' | 'description';
-export const PUBLISH_FIELDS: PublishField[] = ['title', 'description'];
+export type PublishField = 'title' | 'description' | 'attributes';
+export const PUBLISH_FIELDS: PublishField[] = ['title', 'description', 'attributes'];
+
+/** Un dato de catálogo para subir: el código del campo en el canal y su valor; con multiple, varios separados por coma. */
+export type ChannelAttributeUpdate = { id: string; value: string; multiple: boolean };
 
 /** El canal no aceptó el cambio. El mensaje explica por qué, en castellano. */
 export class PublishError extends Error {}
 
 export interface ChannelPublisher {
-  /** Cambia un dato de una publicación propia. Lanza PublishError si el canal no lo acepta. */
-  update(accessToken: string, externalId: string, field: PublishField, value: string): Promise<void>;
+  /** Cambia el título o la descripción de una publicación propia. Lanza PublishError si el canal no lo acepta. */
+  update(accessToken: string, externalId: string, field: 'title' | 'description', value: string): Promise<void>;
+  /** Cambia esos datos de catálogo; los demás quedan como están. Lanza PublishError si el canal no lo acepta. */
+  updateAttributes(accessToken: string, externalId: string, attributes: ChannelAttributeUpdate[]): Promise<void>;
 }

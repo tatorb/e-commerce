@@ -28,7 +28,8 @@ describe('por qué Mercado Libre no aceptó un cambio', () => {
 
 const url = process.env.TEST_DATABASE_URL;
 
-type Item = { title: string; description: string | null; sold: number; last_updated: string };
+type Attribute = { id: string; name: string; value_name: string | null; values?: { name: string }[] };
+type Item = { title: string; description: string | null; sold: number; last_updated: string; attributes?: Attribute[]; category_id?: string };
 
 describe.skipIf(!url)('subir al canal en la base', () => {
   const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: url! }) });
@@ -54,6 +55,19 @@ describe.skipIf(!url)('subir al canal en la base', () => {
       if (item && req.method === 'PUT') {
         const it = items[item[1]];
         if (!it) return json(404, {});
+        if (body.attributes) {
+          const bad = body.attributes.find((a: Attribute) => a.value_name === 'Usado');
+          if (bad) return json(400, { message: 'Validation error', cause: [{ code: 'item.attributes.invalid', message: 'Condición del ítem: el valor Usado no es válido' }] });
+          for (const a of body.attributes as Attribute[]) {
+            const list = (it.attributes ??= []);
+            const at = list.findIndex((x) => x.id === a.id);
+            const next = { id: a.id, name: at >= 0 ? list[at].name : a.id, value_name: a.value_name ?? null, ...(a.values ? { values: a.values } : {}) };
+            if (at >= 0) list[at] = next;
+            else list.push(next);
+          }
+          it.last_updated = new Date().toISOString();
+          return json(200, { id: item[1] });
+        }
         if (it.sold > 0) return json(400, { message: 'Validation error', cause: [{ code: 'item.title.not_modifiable', message: 'Not modifiable' }] });
         // A veces el canal guarda el título con algún cambio.
         it.title = String(body.title).replace('Sachs', 'SACHS');
@@ -82,10 +96,24 @@ describe.skipIf(!url)('subir al canal en la base', () => {
           wanted.map((id) => {
             const it = items[id];
             if (!it) return { code: 404, body: {} };
-            return { code: 200, body: { id, seller_id: 7, title: it.title, status: 'active', price: 100, sold_quantity: it.sold, last_updated: it.last_updated } };
+            return {
+              code: 200,
+              body: {
+                id,
+                seller_id: 7,
+                title: it.title,
+                status: 'active',
+                price: 100,
+                sold_quantity: it.sold,
+                last_updated: it.last_updated,
+                category_id: it.category_id ?? 'MLA999',
+                attributes: it.attributes ?? [],
+              },
+            };
           }),
         );
       }
+      if (u.pathname.startsWith('/categories/')) return json(200, { name: 'Otra categoría' });
       if (u.pathname === '/items/visits') return json(200, (u.searchParams.get('ids') ?? '').split(',').map((id) => ({ item_id: id, total_visits: 10 })));
       return json(404, {});
     });
@@ -106,7 +134,20 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     resetVisitsTogether();
     writes.length = 0;
     items = {
-      MLA1: { title: 'Kit Embrague Ford Ka', description: 'Kit completo.', sold: 0, last_updated: '2026-10-20T10:00:00.000Z' },
+      MLA1: {
+        title: 'Kit Embrague Ford Ka',
+        description: 'Kit completo.',
+        sold: 0,
+        last_updated: '2026-10-20T10:00:00.000Z',
+        category_id: 'MLA373460',
+        attributes: [
+          { id: 'BRAND', name: 'Marca', value_name: 'Sachs' },
+          { id: 'CLUTCH_TYPE', name: 'Tipo de embrague', value_name: 'Monodisco' },
+          { id: 'INCLUDES_DISC', name: 'Incluye disco', value_name: 'No' },
+          { id: 'ITEM_CONDITION', name: 'Condición del ítem', value_name: 'Nuevo' },
+          { id: 'COLOR', name: 'Color', value_name: 'Gris' },
+        ],
+      },
       MLA2: { title: 'Bomba de Agua Fiat', description: null, sold: 0, last_updated: '2026-10-20T10:00:00.000Z' },
       MLA3: { title: 'Pistones Tico', description: 'Juego de 3.', sold: 4, last_updated: '2026-10-20T10:00:00.000Z' },
     };
@@ -223,5 +264,94 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     const unpublished = await db.publication.create({ data: { productId, storeId, title: 'Sin publicar', channelStatus: 'UNPUBLISHED' } });
     await expect(pushDrafts(db, { accountId, publicationId: unpublished.id, userId: null })).rejects.toThrow(PushError);
     await expect(pushDrafts(db, { accountId: 'otra', publicationId: fresh.id, userId: null })).rejects.toThrow('no está en la cuenta');
+  });
+
+  it('sube los datos de catálogo que cambiaron o son nuevos, con el código de cada campo', async () => {
+    const p = await pub('MLA1');
+    // La primera lectura trajo los datos de catálogo a la app.
+    expect(p.attributes).toEqual([
+      { name: 'Tipo de embrague', value: 'Monodisco' },
+      { name: 'Incluye disco', value: 'No' },
+      { name: 'Condición del ítem', value: 'Nuevo' },
+      { name: 'Color', value: 'Gris' },
+    ]);
+    await db.publication.update({
+      where: { id: p.id },
+      data: {
+        attributes: [
+          { name: 'Tipo de embrague', value: 'Bidisco' },
+          { name: 'Incluye disco', value: 'Sí' },
+          { name: 'Condición del ítem', value: 'Nuevo' },
+          { name: 'Color', value: 'Gris' },
+          { name: 'Código OEM', value: 'AB12, CD34' },
+        ],
+      },
+    });
+    expect((await state('MLA1')).draft).toEqual(['attributes']);
+
+    const result = await pushDrafts(db, { accountId, publicationId: p.id, userId: null });
+    expect(result).toEqual({ sent: ['attributes'], rejected: [], confirmed: true });
+    expect(writes).toEqual([
+      {
+        method: 'PUT',
+        path: '/items/MLA1',
+        body: {
+          attributes: [
+            { id: 'CLUTCH_TYPE', value_name: 'Bidisco' },
+            { id: 'INCLUDES_DISC', value_name: 'Sí' },
+            { id: 'OEM', values: [{ name: 'AB12' }, { name: 'CD34' }] },
+          ],
+        },
+      },
+    ]);
+    expect(await state('MLA1')).toEqual({ draft: [], choose: [], rejected: [] });
+  });
+
+  it('los campos que el canal no conoce y los que se borraron en la app quedan con su motivo', async () => {
+    const p = await pub('MLA1');
+    await db.publication.update({
+      where: { id: p.id },
+      data: {
+        attributes: [
+          { name: 'Tipo de embrague', value: 'Bidisco' },
+          { name: 'Incluye disco', value: 'No' },
+          { name: 'Condición del ítem', value: 'Nuevo' },
+          { name: 'Largo del cable', value: '1 m' },
+        ],
+      },
+    });
+    const result = await pushDrafts(db, { accountId, publicationId: p.id, userId: null });
+    expect(result.sent).toEqual(['attributes']);
+    expect(result.rejected[0].message).toContain('«Largo del cable» no es un campo de la categoría en Mercado Libre.');
+    expect(result.rejected[0].message).toContain('«Color» está en Mercado Libre y no en la app');
+    expect(writes.map((w) => w.body)).toEqual([{ attributes: [{ id: 'CLUTCH_TYPE', value_name: 'Bidisco' }] }]);
+    // Lo que se subió ya está en los dos lados; lo demás sigue en el borrador, con su motivo.
+    const after = await state('MLA1');
+    expect(after.draft).toEqual(['attributes']);
+    expect(after.rejected[0].message).toContain('Largo del cable');
+    expect((await pub('MLA1')).channelCopy?.attributes).toContainEqual({ name: 'Tipo de embrague', value: 'Bidisco' });
+  });
+
+  it('un valor que la app sabe que no vale no se sube, y lo que el canal rechaza queda con su motivo', async () => {
+    const p = await pub('MLA1');
+    await db.publication.update({
+      where: { id: p.id },
+      data: {
+        attributes: [
+          { name: 'Tipo de embrague', value: 'Tridisco' },
+          { name: 'Incluye disco', value: 'No' },
+          { name: 'Condición del ítem', value: 'Usado' },
+          { name: 'Color', value: 'Gris' },
+        ],
+      },
+    });
+    const result = await pushDrafts(db, { accountId, publicationId: p.id, userId: null });
+    expect(result.sent).toEqual([]);
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0].message).toContain('Mercado Libre no aceptó un dato de catálogo: Condición del ítem: el valor Usado no es válido');
+    expect(result.rejected[0].message).toContain('«Tridisco» no es una opción');
+    // Tipo de embrague no se mandó: no es una de las opciones.
+    expect(writes.map((w) => w.body)).toEqual([{ attributes: [{ id: 'ITEM_CONDITION', value_name: 'Usado' }] }]);
+    expect((await state('MLA1')).rejected).toHaveLength(1);
   });
 });

@@ -35,8 +35,8 @@ export type ChannelListing = {
   skus: string[];
   // La medida de cada variante, cuando el canal las tiene.
   measures: { sku: string; measure: string }[];
-  // Los demás datos de la ficha del canal.
-  attributes: { id: string; name: string; value: string }[];
+  // Los demás datos de la ficha del canal. multiple: vino con varios valores.
+  attributes: { id: string; name: string; value: string; multiple?: boolean }[];
   // Cuántos datos de la ficha del canal tiene cargados, contando marca y SKU.
   attributeCount: number;
   // Cuándo cambió por última vez en el canal, si lo informa.

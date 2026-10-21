@@ -1,7 +1,9 @@
 import { prisma } from '@/lib/db';
 import { getChannelAdapter } from '@/channels';
 import { getChannelPublisher, PUBLISH_FIELDS } from '@/channels/publish';
+import { loadCatalogData } from '@/lib/catalog-data';
 import {
+  attributeDiff,
   FACE_FIELDS,
   faceSummary,
   faceValues,
@@ -58,6 +60,10 @@ export async function loadPublicationFaces(accountId: string, publicationId: str
   ) as Record<FaceField, FieldState | 'unread'>;
 
   const connected = p.store.connection?.status === 'ACTIVE';
+  // El formulario de datos de catálogo, para editarlos sin pasar por el pipeline.
+  const catalog = await loadCatalogData(prisma, p.id);
+  const channelCategoryId = copy?.categoryId ?? null;
+  const channelCategory = channelCategoryId ? (adapter.catalog?.category(channelCategoryId)?.name ?? channelCategoryId) : null;
   return {
     publication: p,
     channelName: adapter.name,
@@ -81,6 +87,14 @@ export async function loadPublicationFaces(accountId: string, publicationId: str
             ? `Primero hay que leerla de ${adapter.name}.`
             : null,
     publishable: PUBLISH_FIELDS as FaceField[],
+    catalog,
+    // Qué datos de catálogo cambian al subir.
+    attributeDiff: channel ? attributeDiff(app.attributes, channel.attributes) : null,
+    // Si la categoría de la app no es la del canal: los datos se suben a los campos de la del canal.
+    categoryMismatch:
+      catalog?.category && channelCategoryId && catalog.category.id !== channelCategoryId
+        ? { app: catalog.category.name, channel: channelCategory! }
+        : null,
   };
 }
 

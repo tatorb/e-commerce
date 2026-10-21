@@ -1,8 +1,22 @@
 import type { PrismaClient } from '@/generated/prisma/client';
 import { Prisma } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
-import { getChannelPublisher, PUBLISH_FIELDS, PublishError, type PublishField } from '@/channels/publish';
-import { faceSummary, faceValues, fingerprint, fingerprintsOf, parseFingerprints, parseRejections, type FaceField } from '@/domain/channel-sync';
+import { getChannelPublisher, PUBLISH_FIELDS, PublishError, type ChannelAttributeUpdate, type PublishField } from '@/channels/publish';
+import type { ChannelAdapter } from '@/channels/types';
+import { CatalogError, cleanCatalogValue, findField, normalizeText } from '@/domain/catalog-data';
+import {
+  attributeDiff,
+  faceSummary,
+  faceValues,
+  fingerprint,
+  fingerprintsOf,
+  mergeAttributes,
+  parseFingerprints,
+  parseRejections,
+  type FaceField,
+  type FaceValues,
+} from '@/domain/channel-sync';
+import type { NameValue } from '@/domain/name-value';
 import { writeContentField } from '@/domain/content';
 import { LATEST_MEASUREMENTS, latestMetrics } from '@/domain/measurements';
 import { resolveTitleLock } from '@/domain/title-lock';
@@ -40,7 +54,17 @@ async function loadForPush(db: Db, accountId: string, publicationId: string) {
       store: { select: { id: true, channel: { select: { id: true, kind: true, name: true } }, connection: { select: { status: true } } } },
       measurements: { orderBy: { takenAt: 'desc' }, take: LATEST_MEASUREMENTS, select: { metrics: true } },
       channelCopy: {
-        select: { title: true, description: true, attributes: true, fingerprints: true, agreed: true, rejections: true, missingSince: true },
+        select: {
+          title: true,
+          description: true,
+          attributes: true,
+          fingerprints: true,
+          agreed: true,
+          rejections: true,
+          missingSince: true,
+          categoryId: true,
+          attributeIds: true,
+        },
       },
     },
   });
@@ -53,6 +77,67 @@ type Loaded = Awaited<ReturnType<typeof loadForPush>>;
 function titleLocked(p: Loaded): boolean {
   const adapter = getChannelAdapter(p.store.channel.kind, p.store.channel.name);
   return resolveTitleLock(adapter.titleLock(latestMetrics(p.measurements)), p.titleLockedManual, Boolean(p.externalId)).locked === true;
+}
+
+const names = (list: string[]) => (list.length <= 1 ? list.join('') : `${list.slice(0, -1).join(', ')} y ${list[list.length - 1]}`);
+
+function parseAttributeIds(raw: unknown): Record<string, { id: string; multiple: boolean }> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out: Record<string, { id: string; multiple: boolean }> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const v = value as { id?: unknown; multiple?: unknown } | null;
+    if (v && typeof v.id === 'string') out[key] = { id: v.id, multiple: v.multiple === true };
+  }
+  return out;
+}
+
+/**
+ * Qué datos de catálogo se suben: los que cambiaron o son nuevos en la app,
+ * con el código de su campo en el canal. Sale de la categoría que tiene la
+ * publicación en el canal o, si la app no la conoce, de lo que se leyó. Lo que
+ * no se puede subir vuelve en problems, con el motivo.
+ */
+function planAttributes(
+  app: FaceValues,
+  channel: FaceValues,
+  copy: { categoryId: string | null; attributeIds: unknown },
+  adapter: ChannelAdapter,
+): { updates: ChannelAttributeUpdate[]; sent: NameValue[]; problems: string[] } {
+  const diff = attributeDiff(app.attributes, channel.attributes);
+  const category = copy.categoryId ? (adapter.catalog?.category(copy.categoryId) ?? null) : null;
+  const own = category?.fields.filter((f) => !f.fromProduct) ?? [];
+  const ids = parseAttributeIds(copy.attributeIds);
+  const plan = { updates: [] as ChannelAttributeUpdate[], sent: [] as NameValue[], problems: [] as string[] };
+  const unknown: string[] = [];
+  for (const a of [...diff.changed.map((c) => ({ name: c.name, value: c.to })), ...diff.added]) {
+    const field = findField(own, a.name);
+    if (field) {
+      try {
+        plan.updates.push({ id: field.id, value: cleanCatalogValue(field, a.value) ?? a.value, multiple: Boolean(field.multiple) });
+        plan.sent.push(a);
+      } catch (e) {
+        if (!(e instanceof CatalogError)) throw e;
+        plan.problems.push(e.message);
+      }
+      continue;
+    }
+    const known = ids[normalizeText(a.name)];
+    if (known) {
+      plan.updates.push({ id: known.id, value: a.value, multiple: known.multiple });
+      plan.sent.push(a);
+    } else if (category?.fields.some((f) => f.fromProduct && normalizeText(f.label) === normalizeText(a.name))) {
+      plan.problems.push(`${a.name} sale de la ficha del producto: no se sube desde los datos de catálogo.`);
+    } else unknown.push(a.name);
+  }
+  if (unknown.length > 0) {
+    plan.problems.push(`${names(unknown.map((n) => `«${n}»`))} no ${unknown.length > 1 ? 'son campos' : 'es un campo'} de la categoría en ${adapter.name}.`);
+  }
+  if (diff.removed.length > 0) {
+    plan.problems.push(
+      `${names(diff.removed.map((a) => `«${a.name}»`))} ${diff.removed.length > 1 ? 'están' : 'está'} en ${adapter.name} y no en la app: para borrarlo hay que hacerlo allá.`,
+    );
+  }
+  return plan;
 }
 
 export type PushResult = {
@@ -83,45 +168,25 @@ export async function pushDrafts(
   if (copy.missingSince) throw new PushError(`${channelName} no la devuelve: puede estar borrada o ser de otra cuenta.`);
 
   const app = faceValues(p);
+  const channel = faceValues(copy);
   const appPrints = fingerprintsOf(app);
   const summary = faceSummary(appPrints, copy);
+  const adapter = getChannelAdapter(p.store.channel.kind, p.store.channel.name);
   const wanted = args.fields ?? [...summary.draft, ...summary.choose];
   const result: PushResult = { sent: [], rejected: [], confirmed: false };
-  const toSend: PublishField[] = [];
-  for (const field of wanted) {
-    if (summary.choose.includes(field)) {
-      result.rejected.push({ field, message: `Cambió también en ${channelName}: primero elegí cuál queda.` });
-    } else if (!summary.draft.includes(field)) {
-      continue;
-    } else if (!isPublishable(field)) {
-      result.rejected.push({ field, message: 'Los datos de catálogo todavía no se suben desde la app.' });
-    } else if (field === 'title' && titleLocked(p)) {
-      result.rejected.push({ field, message: LOCKED_TITLE });
-    } else if (field === 'title') {
-      const { rules } = await loadTitleRules(db, args.accountId, p.store.channel);
-      const check = checkTitle(app.title ?? '', rules);
-      if (check.errors.length > 0) result.rejected.push({ field, message: check.errors.join(' ') });
-      else toSend.push(field);
-    } else if (!app.description?.trim()) {
-      result.rejected.push({ field, message: 'La descripción está vacía: el canal no deja borrarla.' });
-    } else toSend.push(field);
-  }
 
-  for (const field of toSend) {
-    const value = (app[field] ?? '').trim();
-    try {
-      await withAccessToken(db, p.store.id, (token) => publisher.update(token, p.externalId!, field, value));
-    } catch (e) {
-      if (!(e instanceof PublishError)) throw e;
-      result.rejected.push({ field, message: e.message });
-      const rejections = parseRejections(copy.rejections);
-      rejections[field] = { message: e.message, at: now.toISOString(), fingerprint: appPrints[field] };
-      await db.channelCopy.update({ where: { publicationId: p.id }, data: { rejections } });
-      copy.rejections = rejections;
-      continue;
-    }
-    // Ya está en el canal: la cara del canal y lo acordado pasan a ser lo que se subió.
-    // Si el canal lo guardó un poco distinto, la lectura de confirmación lo trae.
+  // Anota lo que no se subió y por qué, mientras la app tenga ese mismo valor.
+  const reject = async (field: FaceField, message: string) => {
+    result.rejected.push({ field, message });
+    const rejections = parseRejections(copy.rejections);
+    rejections[field] = { message, at: now.toISOString(), fingerprint: appPrints[field] };
+    await db.channelCopy.update({ where: { publicationId: p.id }, data: { rejections } });
+    copy.rejections = rejections;
+  };
+
+  // Ya está en el canal: la cara del canal y lo acordado pasan a ser lo que se subió.
+  // Si el canal lo guardó un poco distinto, la lectura de confirmación lo trae.
+  const accept = async (field: FaceField, value: string | NameValue[]) => {
     const print = fingerprint(field, value);
     await db.$transaction(async (tx) => {
       const current = await tx.channelCopy.findUniqueOrThrow({ where: { publicationId: p.id }, select: { fingerprints: true, agreed: true, rejections: true } });
@@ -141,13 +206,65 @@ export async function pushDrafts(
           publicationId: p.id,
           field,
           kind: 'SENT',
-          before: (copy[field] ?? Prisma.JsonNull) as Prisma.InputJsonValue,
-          after: value,
+          before: (channel[field] ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+          after: value as Prisma.InputJsonValue,
           userId: args.userId,
         },
       });
     });
+    copy.rejections = parseRejections(copy.rejections);
+    delete (copy.rejections as Record<string, unknown>)[field];
     result.sent.push(field);
+  };
+
+  for (const field of wanted) {
+    if (summary.choose.includes(field)) {
+      result.rejected.push({ field, message: `Cambió también en ${channelName}: primero elegí cuál queda.` });
+      continue;
+    }
+    if (!summary.draft.includes(field) || !isPublishable(field)) continue;
+    let send: () => Promise<void>;
+    let value: string | NameValue[];
+    let problems: string[] = [];
+    if (field === 'attributes') {
+      const plan = planAttributes(app, channel, copy, adapter);
+      problems = plan.problems;
+      if (plan.updates.length === 0) {
+        await reject(field, problems.join(' ') || 'No hay datos de catálogo para subir.');
+        continue;
+      }
+      value = mergeAttributes(channel.attributes, plan.sent);
+      send = () => withAccessToken(db, p.store.id, (token) => publisher.updateAttributes(token, p.externalId!, plan.updates));
+    } else {
+      if (field === 'title' && titleLocked(p)) {
+        result.rejected.push({ field, message: LOCKED_TITLE });
+        continue;
+      }
+      if (field === 'title') {
+        const { rules } = await loadTitleRules(db, args.accountId, p.store.channel);
+        const check = checkTitle(app.title ?? '', rules);
+        if (check.errors.length > 0) {
+          result.rejected.push({ field, message: check.errors.join(' ') });
+          continue;
+        }
+      } else if (!app.description?.trim()) {
+        result.rejected.push({ field, message: 'La descripción está vacía: el canal no deja borrarla.' });
+        continue;
+      }
+      const text = (app[field] ?? '').trim();
+      value = text;
+      send = () => withAccessToken(db, p.store.id, (token) => publisher.update(token, p.externalId!, field, text));
+    }
+    try {
+      await send();
+    } catch (e) {
+      if (!(e instanceof PublishError)) throw e;
+      await reject(field, [e.message, ...problems].join(' '));
+      continue;
+    }
+    await accept(field, value);
+    // Lo que quedó sin subir de los datos de catálogo, con su motivo.
+    if (problems.length > 0) await reject(field, problems.join(' '));
   }
 
   if (result.sent.length > 0) {
@@ -173,7 +290,7 @@ export class DraftError extends Error {}
  */
 export async function saveDraft(
   db: Db,
-  args: { accountId: string; publicationId: string; field: PublishField; value: string },
+  args: { accountId: string; publicationId: string; field: 'title' | 'description'; value: string },
 ): Promise<{ warnings: string[] }> {
   const p = await loadForPush(db, args.accountId, args.publicationId);
   const value = args.field === 'title' ? args.value.replace(/\s+/g, ' ').trim() : args.value.replace(/\r\n?/g, '\n').trim();

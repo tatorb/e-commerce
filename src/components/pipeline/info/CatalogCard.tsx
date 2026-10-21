@@ -50,10 +50,13 @@ export function CatalogCard({
   accountSlug,
   publicationId,
   data,
+  bare = false,
 }: {
   accountSlug: string;
   publicationId: string;
   data: CatalogData;
+  // Sin la tarjeta alrededor, para usarlo dentro de otra.
+  bare?: boolean;
 }) {
   const action = useStepAction();
   const [dirty, setDirty] = useState(false);
@@ -69,85 +72,89 @@ export function CatalogCard({
     .filter((c) => c.id !== familyCategory?.id)
     .sort((a, b) => a.name.localeCompare(b.name, 'es'));
 
+  const body = (
+    <SectionBody className={bare ? 'px-0 py-0' : undefined}>
+      <div className="space-y-2">
+        <Label htmlFor="catalog-category">Categoría</Label>
+        <select
+          id="catalog-category"
+          className={cn(SELECT_CLASS, 'md:max-w-md')}
+          value={data.source === 'manual' && category ? category.id : ''}
+          disabled={action.pending}
+          onChange={(e) => changeCategory(e.target.value)}
+        >
+          {familyCategory ? (
+            <option value="">{familyCategory.name}, por la familia</option>
+          ) : (
+            <option value="" disabled>
+              Elegí una categoría
+            </option>
+          )}
+          {others.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+        <p className="text-xs text-muted-foreground">
+          {data.source === 'family'
+            ? `Sale de la familia «${family}».`
+            : data.source === 'manual'
+              ? familyCategory
+                ? `Elegida a mano. A la familia «${family}» le toca ${familyCategory.name}.`
+                : 'Elegida a mano.'
+              : family
+                ? `La familia «${family}» no tiene una categoría asignada: elegila acá.`
+                : 'El producto no tiene familia en la ficha: elegí la categoría acá.'}
+        </p>
+      </div>
+
+      {category ? (
+        <>
+          {data.fromProduct.length > 0 ? (
+            <div className="rounded-md border bg-muted/30 px-3 py-2.5">
+              <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-3">
+                {data.fromProduct.map(({ field, value }) => (
+                  <div key={field.id} className="min-w-0">
+                    <dt className="text-xs text-muted-foreground">{field.label}</dt>
+                    <dd className={cn('truncate text-sm', !value && 'text-muted-foreground')}>{value ?? 'Falta en la ficha'}</dd>
+                  </div>
+                ))}
+              </dl>
+              <p className="mt-2 text-xs text-muted-foreground">Salen de la ficha: se cambian en los datos del producto.</p>
+            </div>
+          ) : null}
+
+          <CatalogFields
+            // Se vuelve a armar al cambiar la categoría o al guardar, con los valores limpios.
+            key={`${category.id}:${JSON.stringify(data.values)}`}
+            fields={data.fields}
+            saved={data.values}
+            pending={action.pending}
+            onDirty={(d) => {
+              setDirty(d);
+              if (d) action.clear();
+            }}
+            onSave={(values) =>
+              action.run(
+                () => saveCatalogAction(accountSlug, publicationId, category.id, values),
+                () => setDirty(false),
+              )
+            }
+          />
+          <StatusText status={action.status} className="block" />
+        </>
+      ) : null}
+    </SectionBody>
+  );
+  if (bare) return body;
   return (
     <SectionCard
       title={`Datos de catálogo en ${data.channelName}`}
       count={filled}
       description={`Los campos del formulario de ${data.channelName} para la categoría, con las mismas opciones. Marca, número de pieza y origen salen de la ficha.`}
     >
-      <SectionBody>
-        <div className="space-y-2">
-          <Label htmlFor="catalog-category">Categoría</Label>
-          <select
-            id="catalog-category"
-            className={cn(SELECT_CLASS, 'md:max-w-md')}
-            value={data.source === 'manual' && category ? category.id : ''}
-            disabled={action.pending}
-            onChange={(e) => changeCategory(e.target.value)}
-          >
-            {familyCategory ? (
-              <option value="">{familyCategory.name}, por la familia</option>
-            ) : (
-              <option value="" disabled>
-                Elegí una categoría
-              </option>
-            )}
-            {others.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-          <p className="text-xs text-muted-foreground">
-            {data.source === 'family'
-              ? `Sale de la familia «${family}».`
-              : data.source === 'manual'
-                ? familyCategory
-                  ? `Elegida a mano. A la familia «${family}» le toca ${familyCategory.name}.`
-                  : 'Elegida a mano.'
-                : family
-                  ? `La familia «${family}» no tiene una categoría asignada: elegila acá.`
-                  : 'El producto no tiene familia en la ficha: elegí la categoría acá.'}
-          </p>
-        </div>
-
-        {category ? (
-          <>
-            {data.fromProduct.length > 0 ? (
-              <div className="rounded-md border bg-muted/30 px-3 py-2.5">
-                <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-3">
-                  {data.fromProduct.map(({ field, value }) => (
-                    <div key={field.id} className="min-w-0">
-                      <dt className="text-xs text-muted-foreground">{field.label}</dt>
-                      <dd className={cn('truncate text-sm', !value && 'text-muted-foreground')}>{value ?? 'Falta en la ficha'}</dd>
-                    </div>
-                  ))}
-                </dl>
-                <p className="mt-2 text-xs text-muted-foreground">Salen de la ficha: se cambian arriba, en Datos del producto.</p>
-              </div>
-            ) : null}
-
-            <CatalogFields
-              // Se vuelve a armar al cambiar la categoría o al guardar, con los valores limpios.
-              key={`${category.id}:${JSON.stringify(data.values)}`}
-              fields={data.fields}
-              saved={data.values}
-              pending={action.pending}
-              onDirty={(d) => {
-                setDirty(d);
-                if (d) action.clear();
-              }}
-              onSave={(values) =>
-                action.run(
-                  () => saveCatalogAction(accountSlug, publicationId, category.id, values),
-                  () => setDirty(false),
-                )
-              }
-            />
-            <StatusText status={action.status} className="block" />
-          </>
-        ) : null}
-      </SectionBody>
+      {body}
     </SectionCard>
   );
 }
