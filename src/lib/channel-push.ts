@@ -1,11 +1,19 @@
 import type { PrismaClient } from '@/generated/prisma/client';
 import { Prisma } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
-import { getChannelPublisher, PUBLISH_FIELDS, PublishError, type ChannelAttributeUpdate, type PublishField } from '@/channels/publish';
+import {
+  getChannelPublisher,
+  PUBLISH_FIELDS,
+  PublishError,
+  type ChannelAttributeUpdate,
+  type ChannelPublisher,
+  type PublishField,
+} from '@/channels/publish';
 import type { ChannelAdapter } from '@/channels/types';
 import { CatalogError, cleanCatalogValue, findField, normalizeText } from '@/domain/catalog-data';
 import {
   attributeDiff,
+  channelFaceValues,
   faceSummary,
   faceValues,
   fingerprint,
@@ -16,12 +24,14 @@ import {
   type FaceField,
   type FaceValues,
 } from '@/domain/channel-sync';
+import { channelPhotos, type PhotoRef } from '@/domain/media';
 import type { NameValue } from '@/domain/name-value';
 import { writeContentField } from '@/domain/content';
 import { LATEST_MEASUREMENTS, latestMetrics } from '@/domain/measurements';
 import { resolveTitleLock } from '@/domain/title-lock';
 import { checkTitle } from '@/domain/titles';
 import { readOne } from '@/lib/channel-sync';
+import { photoOriginsOf, picturesFor } from '@/lib/media';
 import { withAccessToken } from '@/lib/connections';
 import { loadTitleRules } from '@/lib/title-rules';
 
@@ -50,6 +60,7 @@ async function loadForPush(db: Db, accountId: string, publicationId: string) {
       title: true,
       description: true,
       attributes: true,
+      media: true,
       titleLockedManual: true,
       store: { select: { id: true, channel: { select: { id: true, kind: true, name: true } }, connection: { select: { status: true } } } },
       measurements: { orderBy: { takenAt: 'desc' }, take: LATEST_MEASUREMENTS, select: { metrics: true } },
@@ -64,6 +75,9 @@ async function loadForPush(db: Db, accountId: string, publicationId: string) {
           missingSince: true,
           categoryId: true,
           attributeIds: true,
+          photos: true,
+          photoIds: true,
+          photoOrigins: true,
         },
       },
     },
@@ -168,7 +182,7 @@ export async function pushDrafts(
   if (copy.missingSince) throw new PushError(`${channelName} no la devuelve: puede estar borrada o ser de otra cuenta.`);
 
   const app = faceValues(p);
-  const channel = faceValues(copy);
+  const channel = channelFaceValues(copy);
   const appPrints = fingerprintsOf(app);
   const summary = faceSummary(appPrints, copy);
   const adapter = getChannelAdapter(p.store.channel.kind, p.store.channel.name);
@@ -223,6 +237,11 @@ export async function pushDrafts(
       continue;
     }
     if (!summary.draft.includes(field) || !isPublishable(field)) continue;
+    if (field === 'photos') {
+      await pushPhotos(db, { p, publisher, refs: app.photos ?? [], before: channel.photos ?? [], userId: args.userId, reject });
+      if (!result.rejected.some((r) => r.field === 'photos')) result.sent.push('photos');
+      continue;
+    }
     let send: () => Promise<void>;
     let value: string | NameValue[];
     let problems: string[] = [];
@@ -279,6 +298,69 @@ export async function pushDrafts(
     }
   }
   return result;
+}
+
+/**
+ * Sube las fotos elegidas, en orden. Si sale bien, la publicación vuelve a
+ * seguir a las fotos del canal, que ya son esas, y queda anotado de qué foto
+ * corregida salió cada una.
+ */
+async function pushPhotos(
+  db: Db,
+  args: {
+    p: Loaded;
+    publisher: ChannelPublisher;
+    refs: PhotoRef[];
+    before: PhotoRef[];
+    userId: string | null;
+    reject: (field: FaceField, message: string) => Promise<void>;
+  },
+): Promise<void> {
+  const { p, refs } = args;
+  const { pictures, origins, problems } = await picturesFor(db, p.productId, refs);
+  if (problems.length > 0 || pictures.length === 0) return args.reject('photos', problems.join(' ') || 'Elegí al menos una foto.');
+  let ids: string[] | null;
+  try {
+    ids = await withAccessToken(db, p.store.id, (token) => args.publisher.updatePictures(token, p.externalId!, pictures));
+  } catch (e) {
+    if (!(e instanceof PublishError)) throw e;
+    return args.reject('photos', e.message);
+  }
+  const known = new Map(args.before.map((r) => [r.kind === 'channel' ? r.id : '', r.kind === 'channel' ? r.url : '']));
+  await db.$transaction(async (tx) => {
+    const current = await tx.channelCopy.findUniqueOrThrow({
+      where: { publicationId: p.id },
+      select: { fingerprints: true, agreed: true, rejections: true, photoOrigins: true },
+    });
+    const rejections = parseRejections(current.rejections);
+    delete rejections.photos;
+    const data: Prisma.ChannelCopyUpdateInput = { rejections };
+    // Con los códigos que devolvió el canal, la cara del canal ya tiene las fotos nuevas.
+    if (ids && ids.length === pictures.length) {
+      const urls = pictures.map((pic, i) => (pic.kind === 'link' ? pic.url : (known.get(ids![i]) ?? '')));
+      const print = fingerprint('photos', channelPhotos(urls, ids));
+      const added = Object.fromEntries(ids.flatMap((id, i) => (origins[i] ? [[id, origins[i]]] : [])));
+      Object.assign(data, {
+        photos: urls,
+        photoIds: ids,
+        fingerprints: { ...parseFingerprints(current.fingerprints), photos: print },
+        agreed: { ...parseFingerprints(current.agreed), photos: print },
+        photoOrigins: { ...photoOriginsOf(current.photoOrigins), ...added },
+      });
+    }
+    await tx.channelCopy.update({ where: { publicationId: p.id }, data });
+    await tx.publication.update({ where: { id: p.id }, data: { media: Prisma.DbNull } });
+    await tx.channelSyncChange.create({
+      data: {
+        publicationId: p.id,
+        field: 'photos',
+        kind: 'SENT',
+        before: args.before as Prisma.InputJsonValue,
+        after: refs as Prisma.InputJsonValue,
+        userId: args.userId,
+      },
+    });
+  });
 }
 
 export class DraftError extends Error {}

@@ -359,6 +359,9 @@ model Publication {
   // La categoría del canal, cuando se elige a mano. Sin elegir, sale de la
   // familia del producto (src/channels/<canal>/).
   channelCategory   String?
+  // Las fotos de la publicación, en orden (src/domain/media.ts). Sin elegir,
+  // son las que tiene en el canal.
+  media             Json?
   source            RecordSource         @default(MANUAL)
   // Importación que la creó, para poder deshacerla.
   importRunId       String?
@@ -1174,6 +1177,10 @@ model ChannelCopy {
   status            ChannelStatus
   url               String?
   photos            Json          @default("[]")
+  // El código de cada foto en el canal, en el mismo orden, y de qué foto
+  // corregida salió cada una que subió la app: { "<código>": "<id de la foto>" }.
+  photoIds          Json          @default("[]")
+  photoOrigins      Json          @default("{}")
   hasVideo          Boolean       @default(false)
   // Marca, número de pieza, origen y SKU, como los informa el canal.
   details           Json          @default("{}")
@@ -1248,6 +1255,8 @@ enum SyncChangeKind {
   SENT
   // Se descartó el cambio de la app y volvió lo del canal.
   DISCARDED
+  // Se creó la publicación en el canal desde la app.
+  CREATED
 }
 
 // Un dato que cambió por la sincronización: lo que llegó del canal, lo que se

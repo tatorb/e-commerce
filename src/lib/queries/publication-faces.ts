@@ -4,6 +4,7 @@ import { getChannelPublisher, PUBLISH_FIELDS } from '@/channels/publish';
 import { loadCatalogData } from '@/lib/catalog-data';
 import {
   attributeDiff,
+  channelFaceValues,
   FACE_FIELDS,
   faceSummary,
   faceValues,
@@ -29,6 +30,7 @@ export async function loadPublicationFaces(accountId: string, publicationId: str
       title: true,
       description: true,
       attributes: true,
+      media: true,
       externalId: true,
       url: true,
       price: true,
@@ -50,7 +52,7 @@ export async function loadPublicationFaces(accountId: string, publicationId: str
   const metrics = latestMetrics(p.measurements);
   const copy = p.channelCopy && !p.channelCopy.missingSince ? p.channelCopy : null;
   const app = faceValues(p);
-  const channel = copy ? faceValues(copy) : null;
+  const channel = copy ? channelFaceValues(copy) : null;
   const appPrints = fingerprintsOf(app);
   const summary = faceSummary(appPrints, copy);
   const channelPrints = parseFingerprints(copy?.fingerprints);
@@ -63,7 +65,10 @@ export async function loadPublicationFaces(accountId: string, publicationId: str
   // El formulario de datos de catálogo, para editarlos sin pasar por el pipeline.
   const catalog = await loadCatalogData(prisma, p.id);
   const channelCategoryId = copy?.categoryId ?? null;
-  const channelCategory = channelCategoryId ? (adapter.catalog?.category(channelCategoryId)?.name ?? channelCategoryId) : null;
+  const details = (copy?.details ?? {}) as { categoryName?: unknown };
+  const channelCategory = channelCategoryId
+    ? (adapter.catalog?.category(channelCategoryId)?.name ?? (typeof details.categoryName === 'string' ? details.categoryName : channelCategoryId))
+    : null;
   return {
     publication: p,
     channelName: adapter.name,

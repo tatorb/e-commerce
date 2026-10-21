@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/db';
-import { faceSummary, faceValues, fingerprintsOf, type FaceField } from '@/domain/channel-sync';
+import { channelFaceValues, faceSummary, faceValues, fingerprintsOf, type FaceField, type FaceValues } from '@/domain/channel-sync';
 import type { NameValue } from '@/domain/name-value';
 import { getChannelListings } from '@/channels/listings';
 import { getChannelPublisher } from '@/channels/publish';
@@ -21,7 +21,11 @@ export type ChoiceRow = {
   fields: { field: FaceField; app: string; channel: string }[];
 };
 
-function preview(field: FaceField, value: string | null | NameValue[], other: string | null | NameValue[]): string {
+function preview(field: FaceField, value: FaceValues[FaceField], other: FaceValues[FaceField]): string {
+  if (field === 'photos') {
+    const n = (value as FaceValues['photos'])?.length ?? 0;
+    return n === 1 ? '1 foto' : `${n} fotos`;
+  }
   if (field !== 'attributes') return ((value as string | null) ?? '').trim();
   // De los datos de catálogo, solo los que no coinciden.
   const theirs = new Map((other as NameValue[]).map((a) => [a.name.trim().toLowerCase(), a.value.trim()]));
@@ -53,9 +57,12 @@ export async function loadSyncOverview(accountId: string) {
         title: true,
         description: true,
         attributes: true,
+        media: true,
         pipelineStatus: true,
         store: { select: { name: true, channel: { select: { name: true } } } },
-        channelCopy: { select: { title: true, description: true, attributes: true, fingerprints: true, agreed: true, missingSince: true } },
+        channelCopy: {
+          select: { title: true, description: true, attributes: true, photos: true, photoIds: true, fingerprints: true, agreed: true, missingSince: true },
+        },
       },
       orderBy: { externalId: 'asc' },
     }),
@@ -74,7 +81,7 @@ export async function loadSyncOverview(accountId: string) {
     const copy = p.channelCopy!;
     if (copy.missingSince) continue;
     const app = faceValues(p);
-    const channel = faceValues(copy);
+    const channel = channelFaceValues(copy);
     const summary = faceSummary(fingerprintsOf(app), copy);
     if (summary.draft.length > 0) drafts++;
     if (summary.draft.length === 0 && summary.choose.length === 0) upToDate++;
@@ -143,6 +150,7 @@ export async function listToPush(accountId: string): Promise<ToPushRow[]> {
       title: true,
       description: true,
       attributes: true,
+      media: true,
       pipelineStatus: true,
       pipelineStep: true,
       pipelineRemoval: true,

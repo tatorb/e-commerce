@@ -1,5 +1,5 @@
 import { MercadoLibreRequestError, mlSend } from './http';
-import { PublishError, type ChannelAttributeUpdate, type ChannelPublisher } from '../publish-types';
+import { PublishError, type ChannelAttributeUpdate, type ChannelPicture, type ChannelPublisher } from '../publish-types';
 
 // Subir a Mercado Libre el título y la descripción de una publicación propia.
 // Si Mercado Libre no acepta el cambio, se explica por qué en castellano.
@@ -40,13 +40,40 @@ function translated(e: unknown): unknown {
   return e instanceof MercadoLibreRequestError && e.status !== 401 && e.status !== 429 ? new PublishError(rejectionMessage(e.status, e.body)) : e;
 }
 
-async function send(method: 'PUT' | 'POST', path: string, token: string, body: unknown) {
+async function send(method: 'PUT' | 'POST', path: string, token: string, body: unknown): Promise<unknown> {
   try {
-    await mlSend(method, path, token, body);
+    return await mlSend(method, path, token, body);
   } catch (e) {
     throw translated(e);
   }
 }
+
+/** Las fotos como las pide Mercado Libre: los archivos se suben antes y quedan por su código. */
+async function picturesBody(token: string, pictures: ChannelPicture[]): Promise<({ id: string } | { source: string })[]> {
+  const out: ({ id: string } | { source: string })[] = [];
+  for (const p of pictures) {
+    if (p.kind === 'existing') out.push({ id: p.id });
+    else if (p.kind === 'link') out.push({ source: p.url });
+    else {
+      const form = new FormData();
+      form.append('file', new Blob([p.data as BlobPart], { type: p.type }), p.name);
+      const body = await send('POST', '/pictures/items/upload', token, form);
+      const id = isObj(body) && typeof body.id === 'string' ? body.id : null;
+      if (!id) throw new PublishError('Mercado Libre no devolvió el código de una foto subida.');
+      out.push({ id });
+    }
+  }
+  return out;
+}
+
+/** El código de cada foto, en orden, de lo que respondió Mercado Libre. */
+function pictureIdsOf(body: unknown): string[] | null {
+  if (!isObj(body) || !Array.isArray(body.pictures)) return null;
+  const ids = body.pictures.map((p) => (isObj(p) && typeof p.id === 'string' ? p.id : null));
+  return ids.every((id): id is string => id !== null) ? ids : null;
+}
+
+const LISTING_TYPE_ID: Record<string, string> = { clasica: 'gold_special', premium: 'gold_pro' };
 
 /** Un dato de catálogo como lo pide Mercado Libre: un valor por nombre, o la lista si acepta varios. */
 function attributeBody(a: ChannelAttributeUpdate) {
@@ -59,6 +86,54 @@ function attributeBody(a: ChannelAttributeUpdate) {
 }
 
 export const mercadolibrePublisher: ChannelPublisher = {
+  listingTypes: [
+    { value: 'clasica', label: 'Clásica' },
+    { value: 'premium', label: 'Premium, con cuotas sin interés' },
+  ],
+
+  async create(accessToken, l) {
+    const pictures = await picturesBody(accessToken, l.pictures);
+    const attributes = [...l.attributes.map(attributeBody), ...(l.sku ? [{ id: 'SELLER_SKU', value_name: l.sku }] : [])];
+    const created = await send('POST', '/items', accessToken, {
+      title: l.title,
+      category_id: l.categoryId,
+      price: l.price,
+      currency_id: l.currency,
+      available_quantity: l.quantity,
+      buying_mode: 'buy_it_now',
+      listing_type_id: LISTING_TYPE_ID[l.listingType] ?? 'gold_special',
+      condition: 'new',
+      pictures,
+      attributes,
+      ...(l.warranty
+        ? { sale_terms: [{ id: 'WARRANTY_TYPE', value_name: 'Garantía del vendedor' }, { id: 'WARRANTY_TIME', value_name: l.warranty }] }
+        : {}),
+    });
+    const id = isObj(created) && typeof created.id === 'string' ? created.id : null;
+    if (!id) throw new PublishError('Mercado Libre no devolvió el código de la publicación nueva.');
+    const warnings: string[] = [];
+    if (l.description) {
+      try {
+        await send('POST', `/items/${encodeURIComponent(id)}/description`, accessToken, { plain_text: l.description });
+      } catch (e) {
+        if (!(e instanceof PublishError)) throw e;
+        warnings.push(`La publicación se creó, pero la descripción no: ${e.message} Queda en el borrador para subirla.`);
+      }
+    }
+    return {
+      externalId: id,
+      url: isObj(created) && typeof created.permalink === 'string' ? created.permalink : null,
+      pictureIds: pictureIdsOf(created),
+      warnings,
+    };
+  },
+
+  async updatePictures(accessToken, externalId, pictures) {
+    const body = await picturesBody(accessToken, pictures);
+    const res = await send('PUT', `/items/${encodeURIComponent(externalId)}`, accessToken, { pictures: body });
+    return pictureIdsOf(res) ?? (body.every((p) => 'id' in p) ? body.map((p) => (p as { id: string }).id) : null);
+  },
+
   async updateAttributes(accessToken, externalId, attributes) {
     // Mercado Libre cambia los que llegan y deja los demás como están.
     await send('PUT', `/items/${encodeURIComponent(externalId)}`, accessToken, { attributes: attributes.map(attributeBody) });
@@ -66,13 +141,16 @@ export const mercadolibrePublisher: ChannelPublisher = {
 
   async update(accessToken, externalId, field, value) {
     const id = encodeURIComponent(externalId);
-    if (field === 'title') return send('PUT', `/items/${id}`, accessToken, { title: value });
+    if (field === 'title') {
+      await send('PUT', `/items/${id}`, accessToken, { title: value });
+      return;
+    }
     // La descripción: se reemplaza; si la publicación no tenía, se crea.
     try {
       await mlSend('PUT', `/items/${id}/description?api_version=2`, accessToken, { plain_text: value });
     } catch (e) {
-      if (e instanceof MercadoLibreRequestError && e.status === 404) return send('POST', `/items/${id}/description`, accessToken, { plain_text: value });
-      throw translated(e);
+      if (!(e instanceof MercadoLibreRequestError) || e.status !== 404) throw translated(e);
+      await send('POST', `/items/${id}/description`, accessToken, { plain_text: value });
     }
   },
 };

@@ -42,6 +42,7 @@ export async function listScoredPublications(
         title: true,
         description: true,
         attributes: true,
+        media: true,
         externalId: true,
         url: true,
         channelStatus: true,

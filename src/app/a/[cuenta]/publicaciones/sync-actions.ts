@@ -9,6 +9,9 @@ import { ConnectError } from '@/channels/connect';
 import { FACE_FIELDS } from '@/domain/channel-sync';
 import { DraftError, pushDrafts, PushError, saveDraft, type PushResult } from '@/lib/channel-push';
 import { discardDrafts, readOne, SyncError } from '@/lib/channel-sync';
+import { photoRefSchema } from '@/domain/media';
+import { MediaError, saveMedia } from '@/lib/media';
+import { CreateError, createInChannel } from '@/lib/channel-create';
 
 // Lo que se hace desde la página de una publicación y desde Por subir: cambiar
 // el borrador, subirlo al canal, descartarlo y volver a leer del canal.
@@ -93,6 +96,54 @@ export async function readOneAction(accountSlug: string, publicationId: string):
     refresh(accountSlug, id.data);
     return { ok: true, found: taken !== null };
   } catch (e) {
+    return failure(e);
+  }
+}
+
+/** Guarda las fotos elegidas, en orden. Null vuelve a usar las del canal. */
+export async function saveMediaAction(accountSlug: string, publicationId: string, refs: unknown): Promise<Result> {
+  await requireUser();
+  const account = await getAccountBySlug(accountSlug);
+  if (!account) return { ok: false, error: 'La cuenta no existe.' };
+  const parsed = z.object({ id: idSchema, refs: z.array(photoRefSchema).max(50).nullable() }).safeParse({ id: publicationId, refs });
+  if (!parsed.success) return { ok: false, error: 'Las fotos que llegaron no tienen la forma esperada.' };
+  try {
+    await saveMedia(prisma, { accountId: account.id, publicationId: parsed.data.id, refs: parsed.data.refs });
+  } catch (e) {
+    if (e instanceof MediaError) return { ok: false, error: e.message };
+    throw e;
+  }
+  refresh(accountSlug, parsed.data.id);
+  revalidatePath(`/a/${accountSlug}/pipeline/${parsed.data.id}`);
+  return { ok: true };
+}
+
+const createSchema = z.object({
+  price: z.coerce.number().positive('Cargá el precio.').max(1_000_000_000),
+  quantity: z.coerce.number().int('La cantidad tiene que ser un número entero.').min(1, 'La cantidad tiene que ser 1 o más.').max(100_000),
+  listingType: z.string().min(1).max(40),
+});
+
+/** Crea la publicación en el canal, con el precio, la cantidad y el tipo que se eligieron. */
+export async function createInChannelAction(
+  accountSlug: string,
+  publicationId: string,
+  input: z.input<typeof createSchema>,
+): Promise<Result<{ externalId: string; warnings: string[] }>> {
+  const user = await requireUser();
+  const account = await getAccountBySlug(accountSlug);
+  if (!account) return { ok: false, error: 'La cuenta no existe.' };
+  const id = idSchema.safeParse(publicationId);
+  const parsed = createSchema.safeParse(input);
+  if (!id.success) return { ok: false, error: 'La publicación no existe.' };
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Revisá los datos.' };
+  try {
+    const created = await createInChannel(prisma, { accountId: account.id, publicationId: id.data, ...parsed.data, userId: user.id });
+    refresh(accountSlug, id.data);
+    revalidatePath(`/a/${accountSlug}/pipeline/${id.data}`);
+    return { ok: true, externalId: created.externalId, warnings: created.warnings };
+  } catch (e) {
+    if (e instanceof CreateError) return { ok: false, error: e.message };
     return failure(e);
   }
 }

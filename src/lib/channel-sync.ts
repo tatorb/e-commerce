@@ -6,6 +6,7 @@ import { getChannelListings, LISTINGS_BATCH, type ChannelListing } from '@/chann
 import type { ChannelAdapter } from '@/channels/types';
 import {
   FACE_FIELDS,
+  channelFaceValues,
   faceSummary,
   faceValues,
   fingerprintsOf,
@@ -15,6 +16,7 @@ import {
   type FaceValues,
   type Fingerprints,
 } from '@/domain/channel-sync';
+import { channelPhotos } from '@/domain/media';
 import { parseMetrics, type Metrics } from '@/domain/measurements';
 import type { NameValue } from '@/domain/name-value';
 import { isUniqueViolation } from '@/domain/publications';
@@ -122,6 +124,8 @@ function needsDescription(copy: CopyRow | null | undefined, listing: ChannelList
 }
 
 function writeFace(field: FaceField, value: FaceValues[FaceField]): Prisma.PublicationUpdateInput {
+  // Las fotos que se toman del canal: la publicación vuelve a seguir a las del canal.
+  if (field === 'photos') return { media: Prisma.DbNull };
   if (field === 'attributes') return { attributes: value as NameValue[] };
   return { [field]: (value as string | null) ?? null };
 }
@@ -153,6 +157,7 @@ async function applyListing(
       title: true,
       description: true,
       attributes: true,
+      media: true,
       channelCopy: { select: { description: true, descriptionReadAt: true, agreed: true } },
     },
   });
@@ -161,6 +166,7 @@ async function applyListing(
     title: listing.title,
     description: descriptionRead ? listing.description : (p.channelCopy?.description ?? null),
     attributes: listingAttributes(listing, ctx.adapter),
+    photos: channelPhotos(listing.photos, listing.photoIds),
   };
   const channelPrints = fingerprintsOf(channel);
   const plans = planFaces(fingerprintsOf(app), channelPrints, parseFingerprints(p.channelCopy?.agreed));
@@ -208,8 +214,16 @@ async function applyListing(
     status: listing.status,
     url: listing.url,
     photos: listing.photos,
+    photoIds: listing.photoIds ?? [],
     hasVideo: listing.hasVideo,
-    details: { brand: listing.brand, partNumber: listing.partNumber, origin: listing.origin, skus: listing.skus, measures: listing.measures },
+    details: {
+      brand: listing.brand,
+      partNumber: listing.partNumber,
+      origin: listing.origin,
+      skus: listing.skus,
+      measures: listing.measures,
+      categoryName: listing.categoryName,
+    },
     categoryId: listing.categoryId,
     attributeIds: listingAttributeIds(listing, ctx.adapter),
     fingerprints: channelPrints,
@@ -361,7 +375,7 @@ export async function runSyncStep(
 async function countToChoose(db: Db, storeId: string): Promise<number> {
   const publications = await db.publication.findMany({
     where: { storeId, channelCopy: { isNot: null } },
-    select: { title: true, description: true, attributes: true, channelCopy: { select: { fingerprints: true, agreed: true, missingSince: true } } },
+    select: { title: true, description: true, attributes: true, media: true, channelCopy: { select: { fingerprints: true, agreed: true, missingSince: true } } },
   });
   return publications.filter((p) => !p.channelCopy?.missingSince && faceSummary(fingerprintsOf(faceValues(p)), p.channelCopy).choose.length > 0)
     .length;
@@ -456,13 +470,16 @@ export async function chooseFaces(
           title: true,
           description: true,
           attributes: true,
-          channelCopy: { select: { title: true, description: true, attributes: true, fingerprints: true, agreed: true, missingSince: true } },
+          media: true,
+          channelCopy: {
+            select: { title: true, description: true, attributes: true, photos: true, photoIds: true, fingerprints: true, agreed: true, missingSince: true },
+          },
         },
       });
       const copy = p?.channelCopy;
       if (!p || !copy || copy.missingSince) return 0;
       const app = faceValues(p);
-      const channel = faceValues(copy);
+      const channel = channelFaceValues(copy);
       const prints = parseFingerprints(copy.fingerprints);
       const agreed = parseFingerprints(copy.agreed);
       const pending = faceSummary(fingerprintsOf(app), copy).choose.filter((f) => fields.includes(f));
@@ -506,13 +523,16 @@ export async function discardDrafts(
         title: true,
         description: true,
         attributes: true,
-        channelCopy: { select: { title: true, description: true, attributes: true, fingerprints: true, agreed: true, missingSince: true } },
+        media: true,
+        channelCopy: {
+          select: { title: true, description: true, attributes: true, photos: true, photoIds: true, fingerprints: true, agreed: true, missingSince: true },
+        },
       },
     });
     const copy = p?.channelCopy;
     if (!p || !copy || copy.missingSince) return [];
     const app = faceValues(p);
-    const channel = faceValues(copy);
+    const channel = channelFaceValues(copy);
     const drafts = faceSummary(fingerprintsOf(app), copy).draft.filter((f) => !args.fields || args.fields.includes(f));
     let update: Prisma.PublicationUpdateInput = {};
     for (const field of drafts) {

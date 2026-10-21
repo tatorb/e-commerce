@@ -16,6 +16,10 @@ import { PipelineHistory } from '@/components/pipeline/PipelineHistory';
 import { AddToPipelineButton } from '@/components/pipeline/AddToPipelineButton';
 import { PublicationCodeCard } from '@/components/pipeline/PublicationCodeCard';
 import { PendingChangesCard } from '@/components/publication/PendingChangesCard';
+import { MediaOrganizer } from '@/components/publication/MediaOrganizer';
+import { loadMediaSources } from '@/lib/media';
+import { CreateInChannelCard } from '@/components/publication/CreateInChannelCard';
+import { createChecks } from '@/lib/channel-create';
 import { loadPublicationFaces } from '@/lib/queries/publication-faces';
 import { channelInfo } from '@/channels';
 import { codeOrUnpublished } from '@/domain/channel-status';
@@ -38,7 +42,7 @@ import { openPhotoIds } from '@/components/pipeline/images/open-photos';
 import { countChannelPhotos, loadPhotoLine } from '@/lib/photos';
 import { workerState } from '@/lib/image-worker';
 import { formatDateTime, formatDuration, plural } from '@/lib/format';
-import { SectionCard } from '@/components/ui/section-card';
+import { SectionBody, SectionCard } from '@/components/ui/section-card';
 import { titleOrUntitled } from '@/domain/publication-title';
 
 export const dynamic = 'force-dynamic';
@@ -90,7 +94,7 @@ export default async function PipelineStepPage({
   const lock = pub.titleLock.locked ? titleLockText(pub.titleLock) : null;
   // Lo que usa el paso que se mira, pedido todo junto: con la base lejos, cada
   // consulta en fila suma una ida y vuelta.
-  const [ctx, info, images, channel, faces] = await Promise.all([
+  const [ctx, info, images, channel, faces, media, create] = await Promise.all([
     // Información y Título usan la ficha, la competencia y lo leído del buscador.
     viewing === 'INFO' || viewing === 'TITLE' ? loadTitleContext(prisma, account.id, pub.id) : null,
     viewing === 'INFO'
@@ -111,6 +115,9 @@ export default async function PipelineStepPage({
           .then((p) => p.store.channel)
       : null,
     viewing === 'PUBLISH' ? loadPublicationFaces(account.id, pub.id) : null,
+    viewing === 'MEDIA' ? loadMediaSources(prisma, account.id, pub.id) : null,
+    // Sin publicar: lo que hace falta para crearla en el canal.
+    viewing === 'PUBLISH' && !pub.externalId ? createChecks(prisma, { accountId: account.id, publicationId: pub.id }) : null,
   ]);
   const auto = ctx && viewing === 'TITLE' ? await autoAvailable(prisma, ctx.channel, ctx.storeId) : null;
 
@@ -237,6 +244,15 @@ export default async function PipelineStepPage({
             auto={auto}
             aiDisabledReason={isAiConfigured() ? null : AI_NOT_CONFIGURED}
           />
+        ) : media && viewing === 'MEDIA' ? (
+          <SectionCard
+            title="Fotos de la publicación"
+            description={`Elegí qué fotos lleva esta publicación y en qué orden: la primera es la portada. Lo que guardes queda en el borrador hasta que lo subas a ${media.channelName}. Los videos todavía no se suben desde la app.`}
+          >
+            <SectionBody>
+              <MediaOrganizer accountSlug={account.slug} publicationId={pub.id} sources={media} />
+            </SectionBody>
+          </SectionCard>
         ) : images && viewing === 'IMAGES' ? (
           <ImagesStep
             accountSlug={account.slug}
@@ -254,6 +270,7 @@ export default async function PipelineStepPage({
           />
         ) : channel && viewing === 'PUBLISH' ? (
           <>
+            {create ? <CreateInChannelCard accountSlug={account.slug} publicationId={pub.id} info={create} /> : null}
             <PublicationCodeCard
               accountSlug={account.slug}
               publicationId={pub.id}

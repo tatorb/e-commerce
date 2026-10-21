@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@/generated/prisma/client';
-import { faceSummary, fieldState, fingerprint, fingerprintsOf, planFaces } from '@/domain/channel-sync';
+import { faceSummary, faceValues, fieldState, fingerprint, fingerprintsOf, planFaces } from '@/domain/channel-sync';
 import { chooseFaces, runSyncStep, startSync, syncAllStores } from '@/lib/channel-sync';
 import { encrypt } from '@/lib/crypto';
 import { resetVisitsTogether } from '@/channels/mercadolibre/listings';
@@ -44,14 +44,16 @@ describe('de qué lado cambió cada dato', () => {
   });
 
   it('el plan toma lo del canal, guarda el borrador y no toca lo que hay que elegir', () => {
-    const plans = planFaces({ title: 'a', description: 'x', attributes: 'm' }, { title: 'b', description: 'y', attributes: 'n' }, {
-      title: 'a',
-      description: 'y',
-    });
+    const plans = planFaces(
+      { title: 'a', description: 'x', attributes: 'm', photos: 'f' },
+      { title: 'b', description: 'y', attributes: 'n', photos: 'f' },
+      { title: 'a', description: 'y' },
+    );
     expect(plans).toEqual([
       { field: 'title', state: 'incoming', take: true, agreed: 'b' },
       { field: 'description', state: 'draft', take: false, agreed: 'y' },
       { field: 'attributes', state: 'choose', take: false, agreed: undefined },
+      { field: 'photos', state: 'same', take: false, agreed: 'f' },
     ]);
   });
 });
@@ -175,7 +177,7 @@ describe.skipIf(!url)('la lectura automática en la base', () => {
 
   const state = async (id: string) => {
     const p = await db.publication.findUniqueOrThrow({ where: { id }, include: { channelCopy: true } });
-    const { draft, choose } = faceSummary(fingerprintsOf({ title: p.title, description: p.description, attributes: p.attributes as never }), p.channelCopy);
+    const { draft, choose } = faceSummary(fingerprintsOf(faceValues(p)), p.channelCopy);
     return { draft, choose };
   };
 

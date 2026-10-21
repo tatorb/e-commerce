@@ -1,0 +1,100 @@
+'use client';
+
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { Check, Upload, X } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { SectionBody, SectionCard } from '@/components/ui/section-card';
+import type { CreateInfo } from '@/lib/channel-create';
+import { cn } from '@/lib/utils/cn';
+import { createInChannelAction } from '@/app/a/[cuenta]/publicaciones/sync-actions';
+
+const SELECT_CLASS =
+  'flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50';
+
+// Crear en el canal una publicación que todavía no está publicada: qué está
+// listo, qué falta, y lo que pide el canal al crearla (precio, cantidad y tipo).
+export function CreateInChannelCard({ accountSlug, publicationId, info }: { accountSlug: string; publicationId: string; info: CreateInfo }) {
+  const router = useRouter();
+  const [price, setPrice] = useState(info.price !== null ? String(info.price) : '');
+  const [quantity, setQuantity] = useState('1');
+  const [listingType, setListingType] = useState(info.listingTypes[0]?.value ?? '');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+  const { channelName } = info;
+
+  async function create() {
+    if (!window.confirm(`¿Crear la publicación en ${channelName}? Queda publicada y a la venta.`)) return;
+    setBusy(true);
+    setMessage(null);
+    const r = await createInChannelAction(accountSlug, publicationId, { price: price.replace(',', '.'), quantity, listingType }).catch(() => null);
+    setBusy(false);
+    if (!r) return setMessage({ kind: 'error', text: 'Se cortó la conexión con la app. Antes de probar de nuevo, fijate en el canal si se creó.' });
+    if (!r.ok) return setMessage({ kind: 'error', text: r.error });
+    setMessage({ kind: 'ok', text: `Listo: se creó en ${channelName} con el código ${r.externalId}.${r.warnings.length > 0 ? ` ${r.warnings.join(' ')}` : ''}` });
+    router.refresh();
+  }
+
+  return (
+    <SectionCard
+      title={`Crear en ${channelName}`}
+      description={`Todavía no está publicada. La app la crea en ${channelName} con su título, descripción, categoría, datos de catálogo y fotos. El precio y la cantidad se cargan acá; después se manejan en ${channelName}.`}
+    >
+      <SectionBody className="space-y-4">
+        {info.blocked ? <p className="text-sm text-muted-foreground">{info.blocked}</p> : null}
+        <ul className="space-y-1.5 text-sm">
+          {info.checks.map((c) => (
+            <li key={c.label} className="flex items-start gap-2">
+              {c.ok ? (
+                <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-label="Listo" />
+              ) : (
+                <X className={cn('mt-0.5 h-4 w-4 shrink-0', c.blocking ? 'text-destructive' : 'text-muted-foreground')} aria-label="Falta" />
+              )}
+              <span>
+                <span className="font-medium">{c.label}:</span> <span className={cn(!c.ok && c.blocking && 'text-destructive')}>{c.detail}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+
+        {!info.blocked ? (
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="create-price">Precio</Label>
+              <Input id="create-price" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="Por ejemplo 45000" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="create-quantity">Cantidad disponible</Label>
+              <Input id="create-quantity" inputMode="numeric" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="create-type">Tipo de publicación</Label>
+              <select id="create-type" className={SELECT_CLASS} value={listingType} onChange={(e) => setListingType(e.target.value)}>
+                {info.listingTypes.map((t) => (
+                  <option key={t.value} value={t.value}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        ) : null}
+
+        {!info.blocked ? (
+          <Button onClick={create} disabled={!info.ready || busy || !price.trim()} pending={busy}>
+            <Upload />
+            Crear en {channelName}
+          </Button>
+        ) : null}
+        {!info.ready && !info.blocked ? <p className="text-xs text-muted-foreground">Completá lo que falta para poder crearla.</p> : null}
+        {message ? (
+          <p className={cn('text-sm', message.kind === 'error' ? 'text-destructive' : 'text-foreground')} role="status">
+            {message.text}
+          </p>
+        ) : null}
+      </SectionBody>
+    </SectionCard>
+  );
+}

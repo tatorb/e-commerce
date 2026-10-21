@@ -24,6 +24,8 @@ export type ChannelListing = {
   sold: number | null;
   visits90d: number | null;
   photos: string[];
+  // El código de cada foto en el canal, en el mismo orden, si lo informa.
+  photoIds?: string[];
   hasVideo: boolean;
   // Calidad según el canal, de 0 a 100.
   quality: number | null;

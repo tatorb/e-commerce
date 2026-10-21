@@ -35,11 +35,11 @@ function useBusy() {
 
 /** Cuenta lo que pasó al subir, en una línea. */
 export function pushMessage(r: PushResult, channelName: string): Message {
-  const article: Record<FaceField, string> = { title: 'el', description: 'la', attributes: 'los' };
+  const article: Record<FaceField, string> = { title: 'el', description: 'la', attributes: 'los', photos: 'las' };
   const sent = r.sent.map((f) => `${article[f]} ${FACE_FIELD_LABEL[f].toLowerCase()}`);
   const rejected = r.rejected.map((x) => `${FACE_FIELD_LABEL[x.field]}: ${x.message}`);
   if (sent.length === 0) return { kind: 'error', text: rejected.join(' ') || 'No había nada para subir.' };
-  const text = `Listo: ${sent.join(' y ')} ya ${sent.length > 1 || r.sent.includes('attributes') ? 'están' : 'está'} en ${channelName}.${r.confirmed ? '' : ' No se pudo volver a leer para confirmar: se confirma en la próxima lectura.'}`;
+  const text = `Listo: ${sent.join(' y ')} ya ${sent.length > 1 || r.sent.includes('attributes') || r.sent.includes('photos') ? 'están' : 'está'} en ${channelName}.${r.confirmed ? '' : ' No se pudo volver a leer para confirmar: se confirma en la próxima lectura.'}`;
   return rejected.length > 0 ? { kind: 'error', text: `${text} ${rejected.join(' ')}` } : { kind: 'ok', text };
 }
 
@@ -145,6 +145,8 @@ export function DraftField({
   rejection,
   editor,
   diff,
+  display,
+  channelDisplay,
 }: {
   accountSlug: string;
   publicationId: string;
@@ -162,6 +164,9 @@ export function DraftField({
   editor?: ReactNode;
   // En los datos de catálogo, qué cambia frente al canal.
   diff?: AttributeDiff | null;
+  // Cómo se ve el dato, si no es texto, como las fotos; y cómo está en el canal.
+  display?: ReactNode;
+  channelDisplay?: ReactNode;
 }) {
   const { busy, message, run } = useBusy();
   const [editing, setEditing] = useState(false);
@@ -218,7 +223,7 @@ export function DraftField({
           </div>
         </div>
       ) : (
-        <FaceValue field={field} value={value} />
+        (display ?? <FaceValue field={field} value={value} />)
       )}
 
       {showDiff ? (
@@ -244,9 +249,9 @@ export function DraftField({
         </div>
       ) : null}
       {state === 'choose' && channelValue !== null && field !== 'attributes' ? (
-        <div className="rounded-md border bg-muted/30 px-3 py-2">
+        <div className="space-y-1 rounded-md border bg-muted/30 px-3 py-2">
           <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">En {channelName} ahora</p>
-          <FaceValue field={field} value={channelValue} />
+          {channelDisplay ?? <FaceValue field={field} value={channelValue} />}
         </div>
       ) : null}
       {rejection ? (

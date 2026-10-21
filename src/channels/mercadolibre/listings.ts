@@ -99,9 +99,10 @@ export function parseItem(item: Obj): ChannelListing {
     if (sku && measure) measures.push({ sku, measure });
   }
 
-  const photos = arr(item.pictures)
-    .map((p) => (isObj(p) ? (str(p.secure_url) ?? str(p.url)) : null))
-    .filter((p): p is string => p !== null);
+  const pictures = arr(item.pictures)
+    .map((p) => (isObj(p) ? { id: str(p.id) ?? '', url: str(p.secure_url) ?? str(p.url) } : null))
+    .filter((p): p is { id: string; url: string } => p !== null && p.url !== null);
+  const photos = pictures.map((p) => p.url);
   const health = num(item.health);
   const skuAttr = arr(item.attributes).some((a) => isObj(a) && a.id === SELLER_SKU && attributeValue(a));
 
@@ -115,6 +116,7 @@ export function parseItem(item: Obj): ChannelListing {
     sold: num(item.sold_quantity),
     visits90d: null,
     photos,
+    photoIds: pictures.map((p) => p.id),
     hasVideo: str(item.video_id) !== null,
     quality: health === null ? null : Math.round(Math.min(Math.max(health, 0), 1) * 100),
     categoryId: str(item.category_id),

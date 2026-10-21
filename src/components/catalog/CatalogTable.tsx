@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { KanbanSquare, Lock, X } from 'lucide-react';
+import { KanbanSquare, Lock, Upload, X } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -17,6 +18,7 @@ import { KindBadge } from '@/components/products/KindBadge';
 import { plural } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
 import { addToPipelineAction } from '@/app/a/[cuenta]/publicaciones/pipeline-actions';
+import { pushDraftsAction } from '@/app/a/[cuenta]/publicaciones/sync-actions';
 import { useAddToPipeline } from './useAddToPipeline';
 import { titleOrUntitled } from '@/domain/publication-title';
 import type { SyncState } from '@/lib/queries/catalog-filters';
@@ -130,18 +132,57 @@ function PipelineCell({ accountSlug, row }: { accountSlug: string; row: CatalogR
 }
 
 function rowHint(r: CatalogRow): string {
-  if (r.pipelineStatus === 'IN_PIPELINE') return 'Ya está en el pipeline.';
   return `Elegir ${titleOrUntitled(r.title)}`;
+}
+
+// Las que tienen cambios de la app para subir al canal.
+const canPush = (r: CatalogRow) => r.sync.draft && Boolean(r.externalId);
+
+type PushOutcome = { title: string; kind: 'ok' | 'error'; text: string };
+
+/** Sube los cambios de varias publicaciones, de a una, contando el avance. */
+function useBulkPush(accountSlug: string, onDone: () => void) {
+  const router = useRouter();
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [outcomes, setOutcomes] = useState<PushOutcome[]>([]);
+  async function run(rows: CatalogRow[]) {
+    setOutcomes([]);
+    setProgress({ done: 0, total: rows.length });
+    const out: PushOutcome[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      const title = titleOrUntitled(rows[i].title);
+      const r = await pushDraftsAction(accountSlug, rows[i].id).catch(() => null);
+      out.push(
+        !r
+          ? { title, kind: 'error', text: 'Se cortó la conexión con la app.' }
+          : !r.ok
+            ? { title, kind: 'error', text: r.error }
+            : r.rejected.length > 0
+              ? { title, kind: 'error', text: r.rejected.map((x) => x.message).join(' ') }
+              : { title, kind: 'ok', text: 'Subida.' },
+      );
+      setProgress({ done: i + 1, total: rows.length });
+    }
+    setOutcomes(out);
+    setProgress(null);
+    onDone();
+    router.refresh();
+  }
+  return { run, progress, outcomes, clear: () => setOutcomes([]) };
 }
 
 export function CatalogTable({ accountSlug, rows }: { accountSlug: string; rows: CatalogRow[] }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const add = useAddToPipeline(() => setSelected(new Set()));
+  const push = useBulkPush(accountSlug, () => setSelected(new Set()));
 
-  // Solo cuentan las que se ven ahora: si un filtro esconde una elegida, no se agrega.
-  const eligible = rows.filter(canEnter);
+  // Solo cuentan las que se ven ahora: si un filtro esconde una elegida, no se toca.
+  const eligible = rows;
   const chosen = eligible.filter((r) => selected.has(r.id));
   const allChosen = eligible.length > 0 && chosen.length === eligible.length;
+  const toPipeline = chosen.filter(canEnter);
+  const toPush = chosen.filter(canPush);
+  const busy = add.pending || push.progress !== null;
 
   function toggle(id: string, on: boolean) {
     setSelected((prev) => {
@@ -151,36 +192,73 @@ export function CatalogTable({ accountSlug, rows }: { accountSlug: string; rows:
       return next;
     });
     add.clearMessage();
+    push.clear();
   }
 
   function toggleAll(on: boolean) {
     setSelected(on ? new Set(eligible.map((r) => r.id)) : new Set());
     add.clearMessage();
+    push.clear();
   }
 
-  const submit = () => add.run(() => addToPipelineAction(accountSlug, chosen.map((r) => r.id)));
+  const submit = () => add.run(() => addToPipelineAction(accountSlug, toPipeline.map((r) => r.id)));
+  const pushed = push.outcomes.filter((o) => o.kind === 'ok').length;
+  const failed = push.outcomes.filter((o) => o.kind === 'error');
 
   return (
     <>
-      {chosen.length > 0 || add.message ? (
+      {chosen.length > 0 || add.message || push.progress || push.outcomes.length > 0 ? (
         <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
           {chosen.length > 0 ? (
             <>
               <span className="font-medium">{plural(chosen.length, 'elegida', 'elegidas')}</span>
-              <Button pending={add.pending} size="sm" onClick={submit} disabled={add.pending}>
+              <Button pending={add.pending} size="sm" onClick={submit} disabled={busy || toPipeline.length === 0}>
                 <KanbanSquare className="h-4 w-4" />
-                {add.pending ? 'Agregando…' : 'Agregar al pipeline'}
+                {add.pending ? 'Agregando…' : `Agregar al pipeline${toPipeline.length !== chosen.length ? ` (${toPipeline.length})` : ''}`}
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => toggleAll(false)} disabled={add.pending}>
+              <Button
+                size="sm"
+                variant="outline"
+                pending={push.progress !== null}
+                onClick={() => push.run(toPush)}
+                disabled={busy || toPush.length === 0}
+                title={toPush.length === 0 ? 'Ninguna de las elegidas tiene cambios para subir.' : undefined}
+              >
+                <Upload className="h-4 w-4" />
+                Subir los cambios{toPush.length > 0 ? ` (${toPush.length})` : ''}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => toggleAll(false)} disabled={busy}>
                 <X className="h-4 w-4" />
                 Quitar selección
               </Button>
             </>
           ) : null}
+          {push.progress ? (
+            <span className="tabular-nums text-muted-foreground" aria-live="polite">
+              Subiendo {push.progress.done} de {push.progress.total}
+            </span>
+          ) : null}
           {add.message ? (
             <p className={cn('basis-full', add.message.kind === 'error' ? 'text-destructive' : 'text-foreground')} role="status">
               {add.message.text}
             </p>
+          ) : null}
+          {push.outcomes.length > 0 ? (
+            <div className="basis-full space-y-1" role="status">
+              <p>
+                {pushed > 0 ? `Listo: se subieron los cambios de ${plural(pushed, 'publicación', 'publicaciones')}.` : 'No se subió nada.'}
+                {failed.length > 0 ? ` ${plural(failed.length, 'quedó', 'quedaron')} con algo sin subir:` : ''}
+              </p>
+              {failed.length > 0 ? (
+                <ul className="list-disc space-y-0.5 pl-5 text-destructive">
+                  {failed.slice(0, 10).map((o, i) => (
+                    <li key={i}>
+                      <span className="font-medium">{o.title}:</span> {o.text}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
           ) : null}
         </div>
       ) : null}
@@ -202,8 +280,8 @@ export function CatalogTable({ accountSlug, rows }: { accountSlug: string; rows:
             <div key={p.id} className="flex gap-3 px-3 py-3">
               <div className="pt-0.5">
                 <Checkbox
-                  checked={selected.has(p.id) && canEnter(p)}
-                  disabled={!canEnter(p)}
+                  checked={selected.has(p.id)}
+                  disabled={busy}
                   onChange={(on) => toggle(p.id, on)}
                   label={rowHint(p)}
                 />
@@ -262,11 +340,11 @@ export function CatalogTable({ accountSlug, rows }: { accountSlug: string; rows:
             </TableHeader>
             <TableBody>
               {rows.map((p) => (
-                <TableRow key={p.id} data-state={selected.has(p.id) && canEnter(p) ? 'selected' : undefined}>
+                <TableRow key={p.id} data-state={selected.has(p.id) ? 'selected' : undefined}>
                   <TableCell>
                     <Checkbox
-                      checked={selected.has(p.id) && canEnter(p)}
-                      disabled={!canEnter(p)}
+                      checked={selected.has(p.id)}
+                      disabled={busy}
                       onChange={(on) => toggle(p.id, on)}
                       label={rowHint(p)}
                     />

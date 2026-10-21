@@ -10,6 +10,11 @@ import { SectionBody, SectionCard } from '@/components/ui/section-card';
 import { ChannelStatusBadge, PipelineBadge } from '@/components/stages/StageBadge';
 import { DraftBar, DraftField, FaceValue, ReadOneButton } from '@/components/publication/FaceControls';
 import { CatalogCard } from '@/components/pipeline/info/CatalogCard';
+import { MediaOrganizer, PhotoStrip } from '@/components/publication/MediaOrganizer';
+import { prisma } from '@/lib/db';
+import { loadMediaSources } from '@/lib/media';
+import { createChecks } from '@/lib/channel-create';
+import { CreateInChannelCard } from '@/components/publication/CreateInChannelCard';
 import { FACE_FIELDS, FACE_FIELD_LABEL, isFaceField, SYNC_CHANGE_LABEL, type FaceField, type FaceValues } from '@/domain/channel-sync';
 import { titleOrUntitled } from '@/domain/publication-title';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
@@ -40,6 +45,7 @@ const STATE: Record<State, { label: string; variant: 'secondary' | 'destructive'
 /** Un dato como texto: los datos de catálogo, uno por línea. */
 function asText(values: FaceValues, field: FaceField): string {
   if (field === 'attributes') return values.attributes.map((a) => `${a.name}: ${a.value}`).join('\n');
+  if (field === 'photos') return '';
   return values[field] ?? '';
 }
 
@@ -55,17 +61,18 @@ export default async function PublicationPage({
 }) {
   const [{ cuenta, id }, { cara }] = await Promise.all([params, searchParams]);
   const { account } = await requireAccount(cuenta);
-  const data = await loadPublicationFaces(account.id, id);
+  const [data, media] = await Promise.all([loadPublicationFaces(account.id, id), loadMediaSources(prisma, account.id, id).catch(() => null)]);
+  // Sin publicar: lo que hace falta para crearla en el canal.
+  const create = data && !data.publication.externalId ? await createChecks(prisma, { accountId: account.id, publicationId: id }) : null;
   if (!data) notFound();
 
   const { publication: p, channelName, app, channel, states, summary, copy } = data;
   const tz = account.timezone;
   const base = `/a/${account.slug}/publicaciones/${p.id}`;
   const pending = summary.draft.length + summary.choose.length;
-  const face = cara === 'canal' || cara === 'borrador' ? cara : pending > 0 ? 'borrador' : 'canal';
+  const face = cara === 'canal' || cara === 'borrador' ? cara : pending > 0 || !p.externalId ? 'borrador' : 'canal';
   const title = titleOrUntitled(p.title);
   const pushable = summary.draft.filter((f) => data.publishable.includes(f));
-  const photos = Array.isArray(copy?.photos) ? (copy.photos as string[]) : [];
 
   return (
     <>
@@ -149,35 +156,38 @@ export default async function PublicationPage({
 
         {face === 'borrador' ? (
           <>
-            <div className="rounded-lg border bg-card px-4 py-3 text-sm">
-              {data.missing ? (
-                <p>
-                  {channelName} no la devuelve: puede estar borrada o ser de otra cuenta. Los cambios quedan en la app.
-                </p>
-              ) : !copy ? (
-                <p>
-                  Todavía no se leyó de {channelName}, así que no se sabe qué cambió. {p.externalId ? 'Leela para comparar.' : 'Se compara cuando esté publicada.'}
-                </p>
-              ) : pending === 0 ? (
-                <p>No hay cambios sin subir: lo que ves es lo mismo que está en {channelName}. Si cambiás algo acá, queda en el borrador hasta que lo subas.</p>
-              ) : (
-                <div className="space-y-3">
+            {create ? <CreateInChannelCard accountSlug={account.slug} publicationId={p.id} info={create} /> : null}
+            {p.externalId ? (
+              <div className="rounded-lg border bg-card px-4 py-3 text-sm">
+                {data.missing ? (
                   <p>
-                    {summary.draft.length > 0 ? `${plural(summary.draft.length, 'dato cambió', 'datos cambiaron')} en la app y todavía no está en ${channelName}. ` : ''}
-                    {summary.choose.length > 0 ? `${plural(summary.choose.length, 'dato cambió', 'datos cambiaron')} en los dos lados: elegí cuál queda.` : ''}
+                    {channelName} no la devuelve: puede estar borrada o ser de otra cuenta. Los cambios quedan en la app.
                   </p>
-                  {summary.draft.length > 0 ? (
-                    <DraftBar
-                      accountSlug={account.slug}
-                      publicationId={p.id}
-                      channelName={channelName}
-                      canPush={!data.pushBlocked && pushable.length > 0}
-                      canDiscard
-                    />
-                  ) : null}
-                </div>
-              )}
-            </div>
+                ) : !copy ? (
+                  <p>
+                    Todavía no se leyó de {channelName}, así que no se sabe qué cambió. Leela para comparar.
+                  </p>
+                ) : pending === 0 ? (
+                  <p>No hay cambios sin subir: lo que ves es lo mismo que está en {channelName}. Si cambiás algo acá, queda en el borrador hasta que lo subas.</p>
+                ) : (
+                  <div className="space-y-3">
+                    <p>
+                      {summary.draft.length > 0 ? `${plural(summary.draft.length, 'dato cambió', 'datos cambiaron')} en la app y todavía no está en ${channelName}. ` : ''}
+                      {summary.choose.length > 0 ? `${plural(summary.choose.length, 'dato cambió', 'datos cambiaron')} en los dos lados: elegí cuál queda.` : ''}
+                    </p>
+                    {summary.draft.length > 0 ? (
+                      <DraftBar
+                        accountSlug={account.slug}
+                        publicationId={p.id}
+                        channelName={channelName}
+                        canPush={!data.pushBlocked && pushable.length > 0}
+                        canDiscard
+                      />
+                    ) : null}
+                  </div>
+                )}
+              </div>
+            ) : null}
 
             {FACE_FIELDS.map((field) => {
               const state = states[field];
@@ -191,7 +201,7 @@ export default async function PublicationPage({
                 <SectionCard
                   key={field}
                   title={FACE_FIELD_LABEL[field]}
-                  action={state === 'same' && !copy ? null : <Badge variant={STATE[state].variant}>{STATE[state].label}</Badge>}
+                  action={state === 'unread' && !p.externalId ? null : <Badge variant={STATE[state].variant}>{STATE[state].label}</Badge>}
                 >
                   <SectionBody>
                     {field === 'attributes' && data.categoryMismatch ? (
@@ -214,9 +224,13 @@ export default async function PublicationPage({
                       editor={
                         field === 'attributes' && data.catalog ? (
                           <CatalogCard accountSlug={account.slug} publicationId={p.id} data={data.catalog} bare />
+                        ) : field === 'photos' && media ? (
+                          <MediaOrganizer accountSlug={account.slug} publicationId={p.id} sources={media} />
                         ) : undefined
                       }
                       diff={field === 'attributes' ? data.attributeDiff : null}
+                      display={field === 'photos' && media ? <PhotoStrip items={media.current} /> : undefined}
+                      channelDisplay={field === 'photos' && media ? <PhotoStrip items={media.available.channel} /> : undefined}
                     />
                   </SectionBody>
                 </SectionCard>
@@ -242,7 +256,11 @@ export default async function PublicationPage({
             {FACE_FIELDS.map((field) => (
               <SectionCard key={field} title={FACE_FIELD_LABEL[field]}>
                 <SectionBody>
-                  <FaceValue field={field} value={channel ? asText(channel, field) : ''} />
+                  {field === 'photos' ? (
+                    <PhotoStrip items={media?.available.channel ?? []} />
+                  ) : (
+                    <FaceValue field={field} value={channel ? asText(channel, field) : ''} />
+                  )}
                 </SectionBody>
               </SectionCard>
             ))}
@@ -257,17 +275,7 @@ export default async function PublicationPage({
                   </dd>
                   <dt className="text-muted-foreground">Video</dt>
                   <dd>{copy.hasVideo ? 'Sí' : 'No'}</dd>
-                  <dt className="text-muted-foreground">Fotos</dt>
-                  <dd>{photos.length}</dd>
                 </dl>
-                {photos.length > 0 ? (
-                  <div className="flex flex-wrap gap-2">
-                    {photos.slice(0, 12).map((src) => (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img key={src} src={src} alt="" loading="lazy" className="h-20 w-20 rounded-md border bg-white object-contain" />
-                    ))}
-                  </div>
-                ) : null}
               </SectionBody>
             </SectionCard>
           </>

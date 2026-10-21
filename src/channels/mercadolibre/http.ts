@@ -66,13 +66,19 @@ export async function mlGet(path: string, accessToken: string): Promise<unknown>
  * Mercado Libre no acepta el cambio, el error trae su respuesta.
  */
 export async function mlSend(method: 'PUT' | 'POST', path: string, accessToken: string, body: unknown): Promise<unknown> {
+  // Un formulario (para subir un archivo) va tal cual; lo demás, como JSON.
+  const form = body instanceof FormData;
   for (let attempt = 0; ; attempt++) {
     let res: Response;
     try {
       res = await fetch(`${apiUrl()}${path}`, {
         method,
-        headers: { Accept: 'application/json', 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify(body),
+        headers: {
+          Accept: 'application/json',
+          ...(form ? {} : { 'Content-Type': 'application/json' }),
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: form ? body : JSON.stringify(body),
         signal: AbortSignal.timeout(20_000),
         cache: 'no-store',
       });

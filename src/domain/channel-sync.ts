@@ -1,17 +1,19 @@
 import { cleanText } from './content';
+import { channelPhotos, parseMedia, photoKey, type PhotoRef } from './media';
 import { parseNameValueList, type NameValue } from './name-value';
 
 // Las caras de una publicación: lo que tiene la app y lo que está en el canal.
 // Para saber de qué lado cambió cada dato se guarda, además, la huella de lo
 // último en que las dos coincidieron. Este módulo no sabe nada de canales.
 
-export const FACE_FIELDS = ['title', 'description', 'attributes'] as const;
+export const FACE_FIELDS = ['title', 'description', 'attributes', 'photos'] as const;
 export type FaceField = (typeof FACE_FIELDS)[number];
 
 export const FACE_FIELD_LABEL: Record<FaceField, string> = {
   title: 'Título',
   description: 'Descripción',
   attributes: 'Datos de catálogo',
+  photos: 'Fotos',
 };
 
 // Cómo se cuenta cada cambio en el historial.
@@ -21,24 +23,32 @@ export const SYNC_CHANGE_LABEL = {
   CHOSE_APP: 'se eligió lo de la app',
   SENT: 'se subió al canal',
   DISCARDED: 'se descartó el cambio de la app',
+  CREATED: 'se creó en el canal',
 } as const;
 
 export function isFaceField(value: string): value is FaceField {
   return (FACE_FIELDS as readonly string[]).includes(value);
 }
 
-export type FaceValues = { title: string | null; description: string | null; attributes: NameValue[] };
+// photos null: la app no eligió fotos, sigue a las del canal.
+export type FaceValues = { title: string | null; description: string | null; attributes: NameValue[]; photos: PhotoRef[] | null };
 export type Fingerprints = Partial<Record<FaceField, string>>;
 
-/** Los datos de una cara, de la publicación o de la copia del canal, como se guardan. */
-export function faceValues(p: { title: string | null; description: string | null; attributes: unknown }): FaceValues {
-  return { title: p.title, description: p.description, attributes: parseNameValueList(p.attributes) };
+/** Los datos de la cara de la app, como los guarda la publicación. */
+export function faceValues(p: { title: string | null; description: string | null; attributes: unknown; media?: unknown }): FaceValues {
+  return { title: p.title, description: p.description, attributes: parseNameValueList(p.attributes), photos: parseMedia(p.media) };
+}
+
+/** Los datos de la cara del canal, como los guarda la copia de lo que se leyó. */
+export function channelFaceValues(c: { title: string | null; description: string | null; attributes: unknown; photos: unknown; photoIds: unknown }): FaceValues {
+  return { title: c.title, description: c.description, attributes: parseNameValueList(c.attributes), photos: channelPhotos(c.photos, c.photoIds) };
 }
 
 const oneSpace = (s: string) => s.replace(/\s+/g, ' ').trim();
 
 /** El dato como se compara: sin diferencias de espacios, saltos de línea ni orden de los datos de catálogo. */
 function normalized(field: FaceField, value: FaceValues[FaceField]): string {
+  if (field === 'photos') return ((value as PhotoRef[] | null) ?? []).map(photoKey).join('\n');
   if (field === 'attributes') {
     return (value as NameValue[])
       .map((a) => `${oneSpace(a.name).toLowerCase()}=${oneSpace(a.value)}`)
@@ -58,6 +68,8 @@ function normalized(field: FaceField, value: FaceValues[FaceField]): string {
 
 // Un dato vacío tiene huella vacía.
 const EMPTY = '';
+// Las fotos que la app no eligió: siguen a las del canal, así que siempre son iguales.
+const FOLLOW = 'sigue-al-canal';
 
 /** Huella corta del texto, para comparar sin guardar dos veces lo mismo. */
 function hash(text: string): string {
@@ -74,6 +86,7 @@ function hash(text: string): string {
 }
 
 export function fingerprint(field: FaceField, value: FaceValues[FaceField]): string {
+  if (field === 'photos' && value === null) return FOLLOW;
   const text = normalized(field, value);
   return text === '' ? EMPTY : hash(text);
 }
@@ -83,6 +96,7 @@ export function fingerprintsOf(values: FaceValues): Record<FaceField, string> {
     title: fingerprint('title', values.title),
     description: fingerprint('description', values.description),
     attributes: fingerprint('attributes', values.attributes),
+    photos: fingerprint('photos', values.photos),
   };
 }
 
@@ -105,7 +119,7 @@ export function parseFingerprints(raw: unknown): Fingerprints {
 export type FieldState = 'same' | 'draft' | 'incoming' | 'choose';
 
 export function fieldState(app: string, channel: string, agreed: string | undefined): FieldState {
-  if (app === channel) return 'same';
+  if (app === channel || app === FOLLOW) return 'same';
   if (agreed === undefined) {
     // La primera vez: si a un lado le falta, el otro lo trae.
     if (app === EMPTY) return 'incoming';
