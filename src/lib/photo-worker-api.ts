@@ -3,10 +3,11 @@ import type { z } from 'zod';
 import type { Prisma } from '@/generated/prisma/client';
 import { PHOTO_PROTOCOL, type Transfer } from '@/domain/photo-contract';
 import { prisma } from './db';
-import { BLOB_NOT_CONFIGURED, isBlobConfigured } from './files';
+import { driveEmail, NOT_CONNECTED } from './drive';
+import { signedDownloadUrl } from './files';
 import { verifyWorkerRequest } from './image-worker';
-import { signedDownloadUrl } from './photo-files';
 import { LEASE_MS } from './photo-queue';
+import { inVercel } from './stored-files';
 
 // Lo común a los pedidos del trabajador de imágenes: la llave, la forma del
 // mensaje y las respuestas de error, siempre con un texto para mostrar en la Mac.
@@ -38,19 +39,22 @@ export async function workerRequest<S extends z.ZodType>(
       res: fail(401, 'La llave del trabajador no vale. Creá una nueva en Equipo y cargala en la Mac con bash configurar.sh.'),
     };
   }
-  if (!isBlobConfigured()) return { ok: false, res: fail(503, BLOB_NOT_CONFIGURED) };
+  // Las fotos se guardan en el Drive del estudio.
+  if (!(await driveEmail(prisma))) return { ok: false, res: fail(503, NOT_CONNECTED) };
   return { ok: true, body: parsed.data, workerId: auth.workerId };
 }
 
 /**
- * Cómo baja el trabajador el original: un link firmado del depósito. Si el
- * depósito no da links firmados, lo baja a través de la app.
+ * Cómo baja el trabajador el original: a través de la app, que lo lee del
+ * Drive. Si todavía está en el depósito de Vercel, con un link firmado.
  */
 export async function originalTransfer(base: string, edit: { id: string; originalUrl: string }): Promise<Transfer> {
+  const throughApp: Transfer = { url: `${base}/api/imagenes/trabajador/original?foto=${encodeURIComponent(edit.id)}`, metodo: 'GET', encabezados: {} };
+  if (!inVercel(edit.originalUrl)) return throughApp;
   try {
     return { url: await signedDownloadUrl(edit.originalUrl, LEASE_MS * 2), metodo: 'GET', encabezados: {} };
   } catch (e) {
     console.error('No se pudo firmar el link del original; se baja a través de la app.', e);
-    return { url: `${base}/api/imagenes/trabajador/original?foto=${encodeURIComponent(edit.id)}`, metodo: 'GET', encabezados: {} };
+    return throughApp;
   }
 }

@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import { SectionCard } from '@/components/ui/section-card';
 import { withSharedNote } from '@/components/pipeline/info/SharedNote';
 import { checkClip, type ClipRules } from '@/domain/videos';
@@ -6,7 +5,8 @@ import { formatDateTime, formatRelativeDate } from '@/lib/format';
 import type { VideosStepData } from '@/lib/videos';
 import { AutoMeasure } from './AutoMeasure';
 import { ClipCard } from './ClipCard';
-import { DriveSync } from './DriveSync';
+import { DriveSync } from '@/components/drive/DriveSync';
+import { DriveMissing } from '@/components/drive/DriveMissing';
 import { VideoCard } from './VideoCard';
 import { VideoUploader } from './VideoUploader';
 
@@ -40,16 +40,9 @@ export function VideosStep({
 
   if (!data.driveEmail) {
     return (
-      <SectionCard title="Videos" description="Los videos de cada producto se guardan en el Google Drive del estudio.">
-        <div className="space-y-2 p-4 text-sm">
-          <p>Todavía no está conectado el Drive del estudio.</p>
-          <p className="text-muted-foreground">
-            Se conecta una sola vez, en{' '}
-            <Link href="/equipo#drive" className="text-primary underline-offset-4 hover:underline">
-              Equipo
-            </Link>
-            , con la cuenta martin@studiomrb.com.
-          </p>
+      <SectionCard title="Videos">
+        <div className="p-4">
+          <DriveMissing what="Los videos de cada producto" />
         </div>
       </SectionCard>
     );
@@ -106,7 +99,12 @@ export function VideosStep({
         )}
       >
         <div className="space-y-4 p-4">
-          <DriveSync accountSlug={accountSlug} productId={data.productId} folderUrl={data.folderUrl} />
+          <DriveSync
+            accountSlug={accountSlug}
+            target={{ kind: 'videos', productId: data.productId }}
+            folderUrl={data.folderUrl}
+            label="Abrir la carpeta en el Drive"
+          />
           <VideoUploader accountSlug={accountSlug} productId={data.productId} />
           {toMeasure.length > 0 ? <AutoMeasure accountSlug={accountSlug} videoIds={toMeasure} /> : null}
           {data.videos.length > 0 ? (

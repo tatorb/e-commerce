@@ -68,8 +68,9 @@ El trabajador se conecta con la app y arranca solo cada vez que iniciás sesión
 ## Usarlo desde la app
 
 1. Abrí una publicación en el paso **Imágenes** del pipeline.
-2. Sumá fotos de dos formas:
+2. Sumá fotos de tres formas:
    - **Arrastrá los originales**, tal como salen de la cámara. Pueden ser JPG, PNG, HEIC del iPhone o TIFF, de hasta 100 MB.
+   - **Copialas desde la Mac** a la carpeta Fotos / Originales del producto en el Drive. Al abrir el paso, o con **Revisar la carpeta**, entran a la línea.
    - **Usar las fotos publicadas** baja las que ya están en Mercado Libre, en su tamaño más grande.
 3. Tocá las fotos que quieras revisar. Cada una que tocás se abre abajo, una debajo de otra, y se marca con un tilde en la lista. Tocala de nuevo para cerrarla.
    - **Abrir las que esperan tu aprobación** abre de una todas las que la Mac ya terminó.
@@ -81,7 +82,9 @@ El trabajador se conecta con la app y arranca solo cada vez que iniciás sesión
    - los que no tocaste quedan como estaban, sin volver a preguntarle a Claude
    - **Aplicar**, en cada ajuste, lo prende o lo apaga. Un ajuste apagado deja la foto como estaba en ese punto. Exportar no se apaga, porque es el que arma la foto final.
 5. Cuando te guste, tocá **Aprobar**. La foto queda **Lista**.
-6. Se bajan el **JPG con fondo** y el **PNG transparente**.
+6. El **JPG con fondo** y el **PNG transparente** quedan en la carpeta Fotos / Corregidas del producto en el Drive, con el nombre del original. También se bajan desde la app.
+
+Todo se guarda en el Google Drive del estudio, en la carpeta de cada producto. Si retocás a mano una foto en Corregidas, a Mercado Libre se sube tu versión. La carpeta Trabajo de la app no hace falta tocarla.
 
 Una foto ya aprobada también se puede rehacer. Las fotos del iPhone saltean solas el ajuste del lente, porque el teléfono ya lo corrige.
 
@@ -146,6 +149,7 @@ Todo va **en una sola línea**, y recién al final se aprieta Enter:
   - **"La llave del trabajador no vale":** creá una llave nueva en Equipo y cargala con `bash configurar.sh`.
   - **"Está desactualizado":** bajá el proyecto de nuevo y corré `bash instalar.sh`.
   - **"No se pudo conectar":** revisá la conexión a internet de la Mac.
+  - **"El Drive del estudio no está conectado":** conectalo en Equipo, en la tarjeta Google Drive del estudio.
 - **Una foto dice "falló":** la app muestra el motivo. Podés tocar **Reintentar**.
 
 ## Para el equipo técnico
@@ -155,6 +159,7 @@ Todo va **en una sola línea**, y recién al final se aprieta Enter:
   - propone valores
   - aplica
 - **El inspector de Claude** está en `mrb_imagenes/inspector.py`.
+- **Los archivos:** el trabajador baja el original a través de la app y sube lo que hace directo al Drive del estudio, con una subida que sirve para un solo archivo. No tiene la llave del Drive.
 - **La conexión con la app** está en `mrb_imagenes/app.py`, y lo que pide la app se hace en `mrb_imagenes/trabajo.py`, ajuste por ajuste. La app hoy pide los 8 en un solo paso, pero el trabajador también sabe hacerlos repartidos en varios pasos. El programa que corre siempre es `principal.py`.
 - **La prueba en la Terminal**, `probar.sh`, sigue mostrando los 8 ajustes uno por uno.
 - **Los mensajes con la app** tienen ejemplos en `contrato/`, que prueban los dos lados.

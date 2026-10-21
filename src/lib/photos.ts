@@ -1,13 +1,17 @@
 import type { PrismaClient } from '@/generated/prisma/client';
 import { Prisma } from '@/generated/prisma/client';
 import { channelPhotoUrl } from '@/channels';
-import { extensionOf } from './file-rules';
-import { isOwnBlobUrl } from './files';
-import { CHANNEL_PHOTO_MAX_BYTES, ORIGINAL_MAX_BYTES, ORIGINAL_TYPES, originalPathname, photoPrefix } from './photo-files';
+import { isUniqueViolation } from '@/domain/publications';
+import { folderUrl, getFile, knownFolderId, listFiles, withDriveToken, type DriveFile } from './drive';
+import { CHANNEL_PHOTO_MAX_BYTES, ORIGINAL_MAX_BYTES, originalTypeFor, photoFolderId, photoOwner } from './photo-files';
 import { startPhoto } from './photo-queue';
+import { driveRef } from './stored-files';
 
-// Las fotos de un producto en la línea de imágenes. Recibe la base por
-// parámetro para poder probarlo con una base de prueba y un depósito simulado.
+// Las fotos de un producto en la línea de imágenes. Los originales se guardan
+// en la carpeta Fotos / Originales del producto en el Drive: los que se suben
+// desde la app, los que se bajan del canal y los que se copian a la carpeta
+// desde la Mac. Recibe la base por parámetro para poder probarlo con una base
+// de prueba y un Google simulado.
 
 export class PhotoError extends Error {}
 
@@ -25,34 +29,107 @@ async function createEdit(
   });
 }
 
-export type BlobHead = (url: string) => Promise<{ url: string; pathname: string; size: number; contentType: string }>;
+/** Si el archivo sirve como original. Null si sirve, o el motivo. */
+export function originalProblem(file: { name: string; size?: string | number | null }): string | null {
+  if (!originalTypeFor(file.name)) return `${file.name}: solo fotos JPG, PNG, HEIC o TIFF.`;
+  if (Number(file.size ?? 0) > ORIGINAL_MAX_BYTES) return `${file.name}: pesa más de 100 MB.`;
+  return null;
+}
+
+/** Anota un original que ya está en el Drive y arranca su línea. Si ya estaba anotado, no lo repite. */
+export async function addDriveOriginal(
+  db: PrismaClient,
+  args: { productId: string; file: { id: string; name: string; size?: string | number | null }; userId: string | null },
+) {
+  const problem = originalProblem(args.file);
+  if (problem) throw new PhotoError(problem);
+  const originalUrl = driveRef(args.file.id);
+  const existing = await db.photoEdit.findUnique({ where: { originalUrl } });
+  if (existing) return existing;
+  try {
+    return await createEdit(db, {
+      productId: args.productId,
+      source: 'UPLOAD',
+      originalUrl,
+      originalName: args.file.name.trim().slice(0, 200) || 'foto',
+      originalType: originalTypeFor(args.file.name)!,
+      originalSize: Number(args.file.size ?? 0),
+      createdById: args.userId,
+    });
+  } catch (e) {
+    // La anotó otro pedido a la vez, por ejemplo al leer la carpeta.
+    if (!isUniqueViolation(e)) throw e;
+    return db.photoEdit.findUniqueOrThrow({ where: { originalUrl } });
+  }
+}
+
+async function productInAccount(db: PrismaClient, accountId: string, productId: string) {
+  const p = await db.product.findFirst({ where: { id: productId, accountId }, select: { id: true } });
+  if (!p) throw new PhotoError('El producto no es de esta cuenta.');
+}
 
 /**
- * Anota un original que el navegador ya subió al depósito y arranca su línea.
- * Pregunta al depósito su tipo y su peso reales, y que esté en la carpeta del
- * producto.
+ * Anota los originales que el navegador terminó de subir al Drive. Confirma
+ * con Google que estén en la carpeta Originales del producto.
  */
-export async function addUploadedOriginal(
+export async function addUploadedOriginals(
   db: PrismaClient,
-  args: { productId: string; url: string; name: string; userId: string | null },
-  deps: { head: BlobHead },
-) {
-  if (!isOwnBlobUrl(args.url)) throw new PhotoError('La foto no está en el depósito de la app.');
-  const info = await deps.head(args.url);
-  if (!info.pathname.startsWith(`${photoPrefix(args.productId)}originales/`)) throw new PhotoError('La foto es de otro producto.');
-  const type = ORIGINAL_TYPES[extensionOf(info.pathname)];
-  if (!type || type !== info.contentType) throw new PhotoError('Solo se aceptan fotos JPG, PNG, HEIC o TIFF.');
-  if (info.size > ORIGINAL_MAX_BYTES) throw new PhotoError('La foto pesa más de 100 MB.');
-  const existing = await db.photoEdit.findUnique({ where: { originalUrl: info.url } });
-  if (existing) return existing;
-  return createEdit(db, {
-    productId: args.productId,
-    source: 'UPLOAD',
-    originalUrl: info.url,
-    originalName: args.name.trim().slice(0, 200) || info.pathname.split('/').pop()!,
-    originalType: info.contentType,
-    originalSize: info.size,
-    createdById: args.userId,
+  args: { accountId: string; productId: string; fileIds: string[]; userId: string | null },
+): Promise<{ added: number; problems: string[] }> {
+  await productInAccount(db, args.accountId, args.productId);
+  const owner = await photoOwner(db, args.productId);
+  return withDriveToken(db, async (token, email) => {
+    const folderId = await photoFolderId(db, token, email, owner, 'originales');
+    let added = 0;
+    const problems: string[] = [];
+    for (const id of args.fileIds.slice(0, 50)) {
+      const file = await getFile(token, id, 'id,name,size,parents,trashed');
+      if (!file || file.trashed || !file.parents?.includes(folderId)) {
+        problems.push('Una foto no quedó en la carpeta del producto. Probá de nuevo.');
+        continue;
+      }
+      try {
+        await addDriveOriginal(db, { productId: args.productId, file, userId: args.userId });
+        added++;
+      } catch (e) {
+        if (!(e instanceof PhotoError)) throw e;
+        problems.push(e.message);
+      }
+    }
+    return { added, problems };
+  });
+}
+
+/**
+ * Lee la carpeta Originales del producto: las fotos que se copiaron desde la
+ * Mac entran a la línea. Las que se sacaron de la lista no vuelven a entrar.
+ */
+export async function syncOriginals(
+  db: PrismaClient,
+  args: { accountId: string; productId: string },
+): Promise<{ added: number; skipped: string[]; folderUrl: string | null }> {
+  await productInAccount(db, args.accountId, args.productId);
+  const owner = await photoOwner(db, args.productId);
+  return withDriveToken(db, async (token, email) => {
+    const folderId = await photoFolderId(db, token, email, owner, 'originales');
+    const photos = await knownFolderId(db, `fotos:${args.productId}`, email);
+    const files: DriveFile[] = await listFiles(token, `'${folderId}' in parents and trashed=false and mimeType != 'application/vnd.google-apps.folder'`, 'id,name,size,createdTime');
+    const known = new Set(
+      (await db.photoEdit.findMany({ where: { originalUrl: { in: files.map((f) => driveRef(f.id)) } }, select: { originalUrl: true } })).map((e) => e.originalUrl),
+    );
+    let added = 0;
+    const skipped: string[] = [];
+    for (const f of files) {
+      if (known.has(driveRef(f.id))) continue;
+      const problem = originalProblem(f);
+      if (problem) {
+        skipped.push(problem);
+        continue;
+      }
+      await addDriveOriginal(db, { productId: args.productId, file: f, userId: null });
+      added++;
+    }
+    return { added, skipped, folderUrl: photos ? folderUrl(photos) : null };
   });
 }
 
@@ -60,7 +137,8 @@ const CHANNEL_TYPES: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png'
 
 export type ChannelPhotoDeps = {
   fetch: typeof fetch;
-  put: (pathname: string, body: ArrayBuffer, contentType: string) => Promise<{ url: string }>;
+  // Guarda la foto en la carpeta Originales y devuelve dónde quedó.
+  put: (name: string, body: ArrayBuffer, contentType: string) => Promise<{ url: string }>;
 };
 
 async function downloadPhoto(f: typeof fetch, url: string): Promise<{ body: ArrayBuffer; type: string } | null> {
@@ -75,7 +153,7 @@ async function downloadPhoto(f: typeof fetch, url: string): Promise<{ body: Arra
 
 /**
  * Suma a la línea las fotos que el producto tiene publicadas, en su tamaño
- * más grande. Las baja del canal y las guarda en el depósito como original.
+ * más grande. Las baja del canal y las guarda como original.
  * Las que ya están en la línea no se repiten.
  */
 export async function addChannelPhotos(
@@ -106,7 +184,7 @@ export async function addChannelPhotos(
       const photo = (await downloadPhoto(deps.fetch, full)) ?? (full !== asset.url ? await downloadPhoto(deps.fetch, asset.url) : null);
       if (!photo) throw new PhotoError('El canal no la entregó.');
       const name = `publicada-${i + 1}.${CHANNEL_TYPES[photo.type]}`;
-      const stored = await deps.put(originalPathname(args.productId, name), photo.body, photo.type);
+      const stored = await deps.put(name, photo.body, photo.type);
       await createEdit(db, {
         productId: args.productId,
         source: 'CHANNEL',

@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { saveVideoMeasureAction } from '@/app/a/[cuenta]/pipeline/video-actions';
-import { measureVideo } from './upload';
+import { measureVideo } from '@/components/drive/upload';
 
 // Mide en el navegador los videos que todavía no midió, de a uno: lee solo el
 // principio del archivo. Así se sabe si los que se agregaron desde la Mac

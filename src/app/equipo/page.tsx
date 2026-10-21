@@ -27,15 +27,20 @@ import { workerState } from '@/lib/image-worker';
 import { DriveCard } from '@/components/team/DriveCard';
 import { driveRedirectUri, driveSummary } from '@/lib/drive';
 import { isCryptoConfigured, KEY_NOT_CONFIGURED } from '@/lib/crypto';
+import { VercelFilesCard } from '@/components/team/VercelFilesCard';
+import { vercelLeft } from '@/lib/move-to-drive';
+import { isBlobConfigured } from '@/lib/files';
 
 export const metadata = { title: 'Equipo' };
 
 export const dynamic = 'force-dynamic';
+// Pasar al Drive lo guardado en Vercel va de a tandas largas.
+export const maxDuration = 120;
 
 export default async function TeamPage({ searchParams }: { searchParams: Promise<{ drive?: string; detalle?: string }> }) {
   const me = await requireUser();
   const back = await searchParams;
-  const [users, connections, worker, drive] = await Promise.all([
+  const [users, connections, worker, drive, left] = await Promise.all([
     prisma.user.findMany({
       orderBy: { createdAt: 'asc' },
       select: { id: true, name: true, email: true, createdAt: true },
@@ -43,7 +48,9 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
     listConnections(prisma, me.id),
     workerState(prisma),
     driveSummary(prisma),
+    vercelLeft(prisma),
   ]);
+  const storeConnected = isBlobConfigured();
   // Lo que dijo la vuelta de Google al conectar el Drive.
   const driveBack = back.drive === 'ok' || back.drive === 'error' ? { ok: back.drive === 'ok', text: back.detalle ?? '' } : null;
   const now = new Date();
@@ -197,6 +204,21 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
             )}
           </CardContent>
         </Card>
+
+        {left > 0 || storeConnected ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Archivos guardados en Vercel</CardTitle>
+              <CardDescription>
+                Antes de pasar al Drive, las fotos y los archivos del fabricante se guardaban en el depósito de Vercel. Se pasan al Drive una
+                sola vez y después se borran de Vercel, para dejar de pagarlo.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <VercelFilesCard left={left} driveReady={drive?.status === 'ACTIVE'} storeConnected={storeConnected} />
+            </CardContent>
+          </Card>
+        ) : null}
 
         <Card>
           <CardHeader>

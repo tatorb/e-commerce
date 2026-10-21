@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { headers } from 'next/headers';
 import { prisma } from '@/lib/db';
 import { requireUser } from '@/lib/auth/session';
 import {
@@ -16,7 +17,10 @@ import {
   updateResearch,
 } from '@/domain/research';
 import type { InsightKind } from '@/generated/prisma/enums';
-import { BLOB_NOT_CONFIGURED, deleteProductFile, FileError, isBlobConfigured, registerProductFile } from '@/lib/files';
+import { addUploadedProductFile, deleteProductFile, FILE_TYPES, extensionOf, FileError, manufacturerFolderId, productFileProblem } from '@/lib/files';
+import { startResumableUpload, withDriveToken } from '@/lib/drive';
+import { publicAppUrl } from '@/lib/public-url';
+import { removeStored, storageError } from '@/lib/stored-files';
 
 // Lo que se guarda desde las tarjetas nuevas del paso Información: fabricante,
 // aclaraciones, preguntas, dolores y objeciones. Todo es del producto, salvo
@@ -41,6 +45,8 @@ async function guard(accountSlug: string, run: () => Promise<string | void>): Pr
     return { ok: true, message: message ?? undefined };
   } catch (e) {
     if (e instanceof ResearchError || e instanceof FileError) return { ok: false, error: e.message };
+    const storage = storageError(e);
+    if (storage) return { ok: false, error: storage };
     throw e;
   }
 }
@@ -140,24 +146,57 @@ export async function moveInsightAction(
   });
 }
 
-/** Anota un archivo que el navegador ya subió al depósito. */
-export async function registerFileAction(accountSlug: string, publicationId: string, url: string, name: string): Promise<Result> {
+/** Abre la subida de un archivo a la carpeta Fabricante del producto: el navegador lo sube directo al Drive. */
+export async function startFileUploadAction(
+  accountSlug: string,
+  publicationId: string,
+  file: { name: string; size: number },
+): Promise<{ ok: true; uploadUrl: string } | { ok: false; error: string }> {
+  await requireUser();
+  const productId = await productOf(accountSlug, publicationId);
+  if (!productId) return NOT_FOUND as { ok: false; error: string };
+  const name = String(file?.name ?? '').trim().slice(0, 200);
+  const size = Number(file?.size);
+  const problem = productFileProblem({ name, size });
+  if (problem) return { ok: false, error: problem };
+  // La subida se abre con el origen de la página, así el navegador puede usarla.
+  const origin = (await headers()).get('origin') ?? publicAppUrl();
+  try {
+    const uploadUrl = await withDriveToken(prisma, async (token, email) =>
+      startResumableUpload(token, {
+        folderId: await manufacturerFolderId(prisma, token, email, productId),
+        name,
+        type: FILE_TYPES[extensionOf(name)].contentType,
+        size,
+        origin,
+        properties: { mrbProducto: productId },
+      }),
+    );
+    return { ok: true, uploadUrl };
+  } catch (e) {
+    const message = storageError(e);
+    if (message) return { ok: false, error: message };
+    throw e;
+  }
+}
+
+/** Anota un archivo que el navegador ya subió al Drive. */
+export async function registerFileAction(accountSlug: string, publicationId: string, fileId: string): Promise<Result> {
   const user = await requireUser();
   const productId = await productOf(accountSlug, publicationId);
   if (!productId) return NOT_FOUND;
-  if (!isBlobConfigured()) return { ok: false, error: BLOB_NOT_CONFIGURED };
   return guard(accountSlug, async () => {
-    await registerProductFile(prisma, { productId, url: String(url), name: String(name ?? ''), userId: user.id });
+    await addUploadedProductFile(prisma, { productId, fileId: String(fileId), userId: user.id });
   });
 }
 
+/** Saca el archivo de la ficha y lo manda a la papelera del Drive. */
 export async function deleteFileAction(accountSlug: string, publicationId: string, fileId: string): Promise<Result> {
   await requireUser();
   const productId = await productOf(accountSlug, publicationId);
   if (!productId) return NOT_FOUND;
-  if (!isBlobConfigured()) return { ok: false, error: BLOB_NOT_CONFIGURED };
   return guard(accountSlug, async () => {
-    await deleteProductFile(prisma, { productId, fileId: String(fileId) });
+    await deleteProductFile(prisma, { productId, fileId: String(fileId) }, (url) => removeStored(prisma, url));
     return 'Archivo borrado.';
   });
 }

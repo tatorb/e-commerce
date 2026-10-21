@@ -79,10 +79,12 @@ export async function startPhoto(tx: Tx, editId: string) {
 
 // ───────────────────────────── El trabajador ─────────────────────────────
 
+// De qué intento, de qué foto y de qué producto son los archivos.
+export type RunFiles = { productId: string; editId: string; runId: string; originalName: string };
+
 export type JobDeps = {
   download: (edit: { id: string; originalUrl: string }) => Promise<Transfer>;
-  upload: (kind: UploadKind, pathname: string) => Promise<Transfer>;
-  pathnameFor: (productId: string, editId: string, runId: string, kind: UploadKind) => string;
+  uploads: (run: RunFiles, kinds: UploadKind[]) => Promise<Partial<Record<UploadKind, Transfer>>>;
 };
 
 /**
@@ -171,10 +173,7 @@ export async function buildJob(db: PrismaClient, runId: string, deps: JobDeps): 
   if (run.step === 0) kinds.push('antes');
   if (step.parts.includes('fondo')) kinds.push('mascara');
   if (step.parts.includes('exportar')) kinds.push('png', 'jpg');
-  const subidas: Partial<Record<UploadKind, Transfer>> = {};
-  for (const kind of kinds) {
-    subidas[kind] = await deps.upload(kind, deps.pathnameFor(edit.productId, edit.id, run.id, kind));
-  }
+  const subidas = await deps.uploads({ productId: edit.productId, editId: edit.id, runId: run.id, originalName: edit.originalName }, kinds);
   const product = [edit.product.productType, edit.product.name].filter(Boolean).join(': ') || null;
   const request = requestOf(run.requested);
 
@@ -194,6 +193,14 @@ export async function buildJob(db: PrismaClient, runId: string, deps: JobDeps): 
   };
 }
 
+/** No se pudo armar el trabajo, por ejemplo porque el Drive no respondió: vuelve a la cola sin contar el intento. */
+export async function releaseClaim(db: PrismaClient, runId: string, workerId: string): Promise<void> {
+  await db.photoStepRun.updateMany({
+    where: { id: runId, status: 'PROCESSING', workerId },
+    data: { status: 'QUEUED', workerId: null, leaseUntil: null, attempts: { decrement: 1 } },
+  });
+}
+
 /** El trabajador avisa que sigue con este paso. Si ya no es suyo, se lo dice. */
 export async function heartbeat(db: PrismaClient, workerId: string, runId: string, lease: number, now = new Date()): Promise<boolean> {
   const r = await db.photoStepRun.updateMany({
@@ -203,7 +210,8 @@ export async function heartbeat(db: PrismaClient, workerId: string, runId: strin
   return r.count > 0;
 }
 
-export type Verify = (pathname: string) => Promise<{ url: string; size: number; contentType: string } | null>;
+// Los archivos que subió el trabajador para un intento, por tipo.
+export type Collect = (run: RunFiles) => Promise<Partial<Record<UploadKind, string>>>;
 
 export type SubmitOutcome = { aceptado: true } | { aceptado: false; motivo: string };
 
@@ -214,9 +222,9 @@ export async function submitResult(
   db: PrismaClient,
   workerId: string,
   done: WorkerDone,
-  deps: { verify: Verify; pathnameFor: JobDeps['pathnameFor'] },
+  deps: { collect: Collect },
 ): Promise<SubmitOutcome> {
-  const run = await db.photoStepRun.findUnique({ where: { id: done.id }, include: { edit: { select: { productId: true } } } });
+  const run = await db.photoStepRun.findUnique({ where: { id: done.id }, include: { edit: { select: { productId: true, originalName: true } } } });
   if (!run || run.status !== 'PROCESSING' || run.lease !== done.turno || run.workerId !== workerId) {
     return { aceptado: false, motivo: STALE };
   }
@@ -227,11 +235,12 @@ export async function submitResult(
     needed.add('png');
     needed.add('jpg');
   }
+  const found = await deps.collect({ productId: run.edit.productId, editId: run.editId, runId: run.id, originalName: run.edit.originalName });
   const urls: Partial<Record<UploadKind, string>> = {};
   for (const kind of new Set([...needed, ...done.archivos])) {
-    const file = await deps.verify(deps.pathnameFor(run.edit.productId, run.editId, run.id, kind));
-    if (!file) return { aceptado: false, motivo: `Falta subir el archivo «${kind}».` };
-    urls[kind] = file.url;
+    const ref = found[kind];
+    if (!ref) return { aceptado: false, motivo: `Falta subir el archivo «${kind}».` };
+    urls[kind] = ref;
   }
 
   return db.$transaction(async (tx) => {
@@ -383,7 +392,7 @@ export async function retryStep(db: PrismaClient, args: { runId: string; userId:
   });
 }
 
-/** Saca la foto de la lista. El original queda en el depósito. */
+/** Saca la foto de la lista. El original queda guardado. */
 export async function archivePhoto(db: PrismaClient, editId: string) {
   return db.$transaction(async (tx) => {
     await lockEdit(tx, editId);

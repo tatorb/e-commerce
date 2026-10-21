@@ -40,6 +40,15 @@ export function driveRedirectUri(): string {
   return `${publicAppUrl()}${DRIVE_CALLBACK_PATH}`;
 }
 
+// Cómo guarda la app un archivo del Drive en la base: "drive:<id del archivo>".
+const REF = 'drive:';
+export const driveRef = (fileId: string) => `${REF}${fileId}`;
+
+/** El id del archivo en el Drive, o null si está guardado en otro lado. */
+export function driveIdOf(ref: string | null | undefined): string | null {
+  return ref?.startsWith(REF) ? ref.slice(REF.length) || null : null;
+}
+
 export function folderUrl(folderId: string): string {
   return `https://drive.google.com/drive/folders/${folderId}`;
 }
@@ -165,6 +174,7 @@ export type DriveFile = {
   trashed?: boolean;
   parents?: string[];
   thumbnailLink?: string;
+  appProperties?: Record<string, string>;
   videoMediaMetadata?: { width?: number; height?: number; durationMillis?: string };
 };
 
@@ -205,21 +215,22 @@ export async function trashFile(token: string, fileId: string): Promise<void> {
 }
 
 /**
- * Abre una subida por partes y devuelve su dirección. El navegador sube las
- * partes directo a Google: la dirección sirve solo para este archivo y la
- * subida se abre con el origen de la app, así el navegador la puede usar.
+ * Abre una subida por partes y devuelve su dirección. La dirección sirve solo
+ * para este archivo: con ella suben el navegador o el trabajador de la Mac,
+ * sin la llave del Drive. Si sube el navegador, la subida se abre con el
+ * origen de la app, así el navegador la puede usar.
  */
 export async function startResumableUpload(
   token: string,
-  args: { folderId: string; name: string; type: string; size: number; origin: string; properties: Record<string, string> },
+  args: { folderId: string; name: string; type: string; size?: number; origin?: string; properties: Record<string, string> },
 ): Promise<string> {
   const res = await driveFetch(token, `/upload/drive/v3/files?uploadType=resumable&fields=${encodeURIComponent(VIDEO_FIELDS)}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json; charset=UTF-8',
       'X-Upload-Content-Type': args.type,
-      'X-Upload-Content-Length': String(args.size),
-      Origin: args.origin,
+      ...(args.size !== undefined ? { 'X-Upload-Content-Length': String(args.size) } : {}),
+      ...(args.origin ? { Origin: args.origin } : {}),
     },
     body: JSON.stringify({ name: args.name, parents: [args.folderId], mimeType: args.type, appProperties: args.properties }),
   });
@@ -242,6 +253,52 @@ export function isUploadSessionUrl(raw: string): boolean {
     url.searchParams.get('uploadType') === 'resumable' &&
     Boolean(url.searchParams.get('upload_id'))
   );
+}
+
+/** Sube un archivo desde la app, de una sola vez. */
+export async function uploadContent(
+  token: string,
+  args: { folderId: string; name: string; type: string; data: Uint8Array | ArrayBuffer; properties: Record<string, string> },
+): Promise<DriveFile> {
+  const size = args.data.byteLength;
+  const session = await startResumableUpload(token, { ...args, size });
+  let res: Response;
+  try {
+    res = await fetch(session, {
+      method: 'PUT',
+      headers: { 'Content-Type': args.type },
+      body: args.data as BodyInit,
+      signal: AbortSignal.timeout(240_000),
+      cache: 'no-store',
+    });
+  } catch {
+    throw new DriveError('Se cortó la subida al Drive. Probá de nuevo.');
+  }
+  if (!res.ok) throw driveFailure(res.status, (await res.json().catch(() => null)) as GoogleErrorBody | null);
+  const file = (await res.json()) as DriveFile;
+  if (!file.id) throw new DriveError('Google no confirmó el archivo subido.');
+  return file;
+}
+
+/** Mueve un archivo a otra carpeta, y si se pide le cambia el nombre. */
+export async function moveFile(token: string, fileId: string, args: { to: string; from: string[]; name?: string }): Promise<void> {
+  const params = new URLSearchParams({ addParents: args.to, fields: 'id' });
+  if (args.from.length > 0) params.set('removeParents', args.from.join(','));
+  await driveJson(token, `/drive/v3/files/${encodeURIComponent(fileId)}?${params}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args.name ? { name: args.name } : {}),
+  });
+}
+
+/** El archivo entero, para leerlo desde la app. Null si ya no está. */
+export async function fileContent(token: string, fileId: string): Promise<Response | null> {
+  try {
+    return await driveFetch(token, `/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`, { timeoutMs: 120_000 });
+  } catch (e) {
+    if (e instanceof DriveError && e.status === 404) return null;
+    throw e;
+  }
 }
 
 /** Un pedazo del archivo, para verlo en la app. */
@@ -270,11 +327,42 @@ export type FolderSpec = { key: string; name: string; parent: FolderSpec | null 
 
 const ROOT: FolderSpec = { key: 'raiz', name: ROOT_FOLDER_NAME, parent: null };
 
-/** E-commerce Studio MRB / cuenta / producto / Videos. */
-export function videosFolder(account: { id: string; name: string }, product: { id: string; name: string }): FolderSpec {
+type Named = { id: string; name: string };
+export type FolderOwner = { account: Named; product: Named };
+
+/** La cuenta y el producto, para armar sus carpetas. */
+export async function folderOwner(db: PrismaClient, productId: string): Promise<FolderOwner> {
+  const p = await db.product.findUniqueOrThrow({ where: { id: productId }, select: { id: true, name: true, account: { select: { id: true, name: true } } } });
+  return { account: p.account, product: { id: p.id, name: p.name } };
+}
+
+/** E-commerce Studio MRB / cuenta / producto. */
+function productFolder(account: Named, product: Named): FolderSpec {
   const accountFolder: FolderSpec = { key: `cuenta:${account.id}`, name: account.name.trim() || 'Cuenta', parent: ROOT };
-  const productFolder: FolderSpec = { key: `producto:${product.id}`, name: product.name.trim() || 'Producto', parent: accountFolder };
-  return { key: `videos:${product.id}`, name: 'Videos', parent: productFolder };
+  return { key: `producto:${product.id}`, name: product.name.trim() || 'Producto', parent: accountFolder };
+}
+
+/** E-commerce Studio MRB / cuenta / producto / Videos. */
+export function videosFolder(account: Named, product: Named): FolderSpec {
+  return { key: `videos:${product.id}`, name: 'Videos', parent: productFolder(account, product) };
+}
+
+export type PhotoFolder = 'originales' | 'corregidas' | 'trabajo';
+const PHOTO_FOLDER_NAME: Record<PhotoFolder, string> = { originales: 'Originales', corregidas: 'Corregidas', trabajo: 'Trabajo de la app' };
+
+/**
+ * Las carpetas de las fotos del producto: los originales, las corregidas
+ * aprobadas, y lo que usa la app para mostrarlas (vistas livianas, siluetas y
+ * las corregidas que todavía no se aprobaron).
+ */
+export function photoFolder(account: Named, product: Named, which: PhotoFolder): FolderSpec {
+  const photos: FolderSpec = { key: `fotos:${product.id}`, name: 'Fotos', parent: productFolder(account, product) };
+  return { key: `${which}:${product.id}`, name: PHOTO_FOLDER_NAME[which], parent: photos };
+}
+
+/** Las imágenes y los PDF del fabricante. */
+export function manufacturerFolder(account: Named, product: Named): FolderSpec {
+  return { key: `fabricante:${product.id}`, name: 'Fabricante', parent: productFolder(account, product) };
 }
 
 /** El id de una carpeta que la app ya armó en esta cuenta de Google, sin preguntarle al Drive. */

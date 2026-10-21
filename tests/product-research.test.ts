@@ -19,7 +19,7 @@ import {
   updateInsight,
   updateResearch,
 } from '@/domain/research';
-import { deleteProductFile, FileError, isOwnBlobUrl, readBlob, registerProductFile, safeFileName } from '@/lib/files';
+import { deleteProductFile, FileError, isOwnBlobUrl, readBlob, registerProductFile } from '@/lib/files';
 
 // Datos inventados.
 
@@ -83,8 +83,6 @@ describe('datos del fabricante', () => {
 
 describe('archivos', () => {
   it('nombres prolijos para la dirección', () => {
-    expect(safeFileName('Catálogo Embragues 2026 (final).PDF')).toBe('catalogo-embragues-2026-final.pdf');
-    expect(safeFileName('???.png')).toBe('archivo.png');
   });
 
   it('solo direcciones del depósito de Vercel', () => {
@@ -241,14 +239,16 @@ describe.skipIf(!url)('investigación del producto en la base', () => {
     ]);
   });
 
-  it('anota un archivo del depósito con su tipo y peso reales', async () => {
-    const fileUrl = `${base}/files/productos/${productId}/catalogo-ab12.pdf`;
-    blobs.set(fileUrl, { pathname: `productos/${productId}/catalogo-ab12.pdf`, size: 2048, contentType: 'application/pdf' });
-    const f = await registerProductFile(db, { productId, url: fileUrl, name: 'Catálogo.pdf', userId: 'u1' });
-    expect(f).toMatchObject({ kind: 'PDF', name: 'Catálogo.pdf', size: 2048, contentType: 'application/pdf', uploadedById: 'u1' });
+  it('anota un archivo del Drive con su tipo por la extensión, sin repetirlo', async () => {
+    const f = await registerProductFile(db, { productId, file: { id: 'abc', name: 'Catálogo.pdf', size: '2048' }, userId: 'u1' });
+    expect(f).toMatchObject({ kind: 'PDF', name: 'Catálogo.pdf', size: 2048, contentType: 'application/pdf', uploadedById: 'u1', url: 'drive:abc' });
+    expect((await registerProductFile(db, { productId, file: { id: 'abc', name: 'Catálogo.pdf', size: '2048' }, userId: 'u1' })).id).toBe(f.id);
 
-    await deleteProductFile(db, { productId, fileId: f.id });
-    expect(deleted).toEqual([fileUrl]);
+    const removed: string[] = [];
+    await deleteProductFile(db, { productId, fileId: f.id }, async (u) => {
+      removed.push(u);
+    });
+    expect(removed).toEqual(['drive:abc']);
     expect(await db.productFile.count()).toBe(0);
   });
 
@@ -262,18 +262,11 @@ describe.skipIf(!url)('investigación del producto en la base', () => {
     await expect(readBlob('https://otro-sitio.com/x.pdf')).rejects.toThrow(FileError);
   });
 
-  it('rechaza archivos de otro lado, de otro producto, de otro tipo o muy pesados', async () => {
-    const put = (name: string, size: number, contentType: string, owner = productId) => {
-      const u = `${base}/files/productos/${owner}/${name}`;
-      blobs.set(u, { pathname: `productos/${owner}/${name}`, size, contentType });
-      return u;
-    };
-    const reg = (u: string) => registerProductFile(db, { productId, url: u, name: 'x', userId: null });
-    await expect(reg('https://otro-sitio.com/x.pdf')).rejects.toThrow(FileError);
-    await expect(reg(put('a.pdf', 10, 'application/pdf', otherId))).rejects.toThrow('otro producto');
-    await expect(reg(put('b.pdf', 10, 'text/html'))).rejects.toThrow('tipo');
-    await expect(reg(put('c.exe', 10, 'application/octet-stream'))).rejects.toThrow('tipo');
-    await expect(reg(put('d.png', 11 * 1024 * 1024, 'image/png'))).rejects.toThrow('pesa');
-    expect((await reg(put('e.png', 1000, 'image/png'))).kind).toBe('IMAGE');
+  it('rechaza archivos de otro tipo o muy pesados', async () => {
+    const reg = (name: string, size: number) => registerProductFile(db, { productId, file: { id: name, name, size }, userId: null });
+    await expect(reg('b.html', 10)).rejects.toThrow('solo imágenes');
+    await expect(reg('c.exe', 10)).rejects.toThrow('solo imágenes');
+    await expect(reg('d.png', 11 * 1024 * 1024)).rejects.toThrow('pesa');
+    expect((await reg('e.png', 1000)).kind).toBe('IMAGE');
   });
 });

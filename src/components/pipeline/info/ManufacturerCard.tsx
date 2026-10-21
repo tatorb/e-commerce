@@ -2,7 +2,6 @@
 
 import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { uploadPresigned } from '@vercel/blob/client';
 import { FileText, Upload, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,10 +11,11 @@ import { Textarea } from '@/components/ui/textarea';
 import { IconButton, SectionBody, SectionCard } from '@/components/ui/section-card';
 import { StatusText } from '@/components/pipeline/StatusText';
 import { useStepAction } from '@/components/pipeline/useStepAction';
-import { deleteFileAction, registerFileAction, saveManufacturerAction } from '@/app/a/[cuenta]/pipeline/research-actions';
-import { BLOB_ACCESS, extensionOf, FILE_TYPES, fileHref, filesPrefix, MAX_FILES, safeFileName } from '@/lib/file-rules';
+import { deleteFileAction, registerFileAction, saveManufacturerAction, startFileUploadAction } from '@/app/a/[cuenta]/pipeline/research-actions';
+import { extensionOf, FILE_TYPES, fileHref, MAX_FILES } from '@/lib/file-rules';
 import { cn } from '@/lib/utils/cn';
-import { BlobSetup } from './BlobSetup';
+import { DriveMissing } from '@/components/drive/DriveMissing';
+import { uploadToDrive } from '@/components/drive/upload';
 import { withSharedNote } from './SharedNote';
 
 export type ManufacturerFile = { id: string; kind: 'IMAGE' | 'PDF'; name: string; size: number };
@@ -33,19 +33,18 @@ function formatSize(bytes: number): string {
 export function ManufacturerCard({
   accountSlug,
   publicationId,
-  productId,
   sharedWith,
   initial,
   files,
-  blobReady,
+  driveReady,
 }: {
   accountSlug: string;
   publicationId: string;
-  productId: string;
   sharedWith: number;
   initial: { site: string; productUrl: string; text: string };
   files: ManufacturerFile[];
-  blobReady: boolean;
+  // Si el Drive del estudio está conectado: los archivos se guardan ahí.
+  driveReady: boolean;
 }) {
   const [values, setValues] = useState(initial);
   const { run, pending, status } = useStepAction();
@@ -70,12 +69,12 @@ export function ManufacturerCard({
 
         <div className="space-y-2">
           <p className="text-sm font-medium">Archivos</p>
-          {blobReady ? (
-            <Uploader accountSlug={accountSlug} publicationId={publicationId} productId={productId} count={files.length} />
+          {driveReady ? (
+            <Uploader accountSlug={accountSlug} publicationId={publicationId} count={files.length} />
           ) : (
-            <BlobSetup />
+            <DriveMissing what="Los archivos del fabricante" />
           )}
-          <FileList accountSlug={accountSlug} publicationId={publicationId} files={files} canDelete={blobReady} />
+          <FileList accountSlug={accountSlug} publicationId={publicationId} files={files} canDelete={driveReady} />
         </div>
 
         <div className="space-y-2">
@@ -127,17 +126,7 @@ function LinkField({
 }
 
 // Sube directo al depósito de Vercel y después la app anota cada archivo.
-function Uploader({
-  accountSlug,
-  publicationId,
-  productId,
-  count,
-}: {
-  accountSlug: string;
-  publicationId: string;
-  productId: string;
-  count: number;
-}) {
+function Uploader({ accountSlug, publicationId, count }: { accountSlug: string; publicationId: string; count: number }) {
   const router = useRouter();
   const input = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -161,15 +150,16 @@ function Uploader({
       if (ok.length > room) problems.push(`Hasta ${MAX_FILES} archivos por producto: se suben los primeros ${room}.`);
       const queue = ok.slice(0, room);
       for (const [i, file] of queue.entries()) {
-        setProgress(queue.length === 1 ? `Subiendo ${file.name}…` : `Subiendo ${i + 1} de ${queue.length}…`);
+        const label = queue.length === 1 ? file.name : `${i + 1} de ${queue.length}`;
+        setProgress(`Subiendo ${label}…`);
         try {
-          const blob = await uploadPresigned(`${filesPrefix(productId)}${safeFileName(file.name)}`, file, {
-            access: BLOB_ACCESS,
-            handleUploadUrl: '/api/archivos',
-            contentType: FILE_TYPES[extensionOf(file.name)].contentType,
-            multipart: file.size > 8 * 1024 * 1024,
-          });
-          const r = await registerFileAction(accountSlug, publicationId, blob.url, file.name);
+          const start = await startFileUploadAction(accountSlug, publicationId, { name: file.name, size: file.size });
+          if (!start.ok) {
+            problems.push(`${file.name}: ${start.error}`);
+            continue;
+          }
+          const fileId = await uploadToDrive(file, start.uploadUrl, (sent) => setProgress(`Subiendo ${label}, ${Math.floor((sent / file.size) * 100)} %`));
+          const r = await registerFileAction(accountSlug, publicationId, fileId);
           if (!r.ok) problems.push(`${file.name}: ${r.error}`);
         } catch (e) {
           problems.push(`${file.name}: ${e instanceof Error ? e.message : 'no se pudo subir.'}`);
@@ -204,7 +194,7 @@ function Uploader({
       >
         <Upload className="h-8 w-8 text-muted-foreground" aria-hidden />
         <span className="text-sm">{progress ?? 'Arrastrá imágenes o PDF, o tocá para elegirlos'}</span>
-        <span className="text-xs text-muted-foreground">Imágenes de hasta 10 MB y PDF de hasta 50 MB.</span>
+        <span className="text-xs text-muted-foreground">Imágenes de hasta 10 MB y PDF de hasta 50 MB. Van a la carpeta Fabricante del producto en el Drive.</span>
       </button>
       <input
         ref={input}

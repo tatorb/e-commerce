@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth/session';
-import { FileError, readBlob } from '@/lib/files';
+import { readStored, storageError } from '@/lib/stored-files';
 
-// Muestra un archivo del fabricante. El depósito es privado: solo se ve a
-// través de la app y con sesión iniciada.
+// Muestra un archivo del fabricante, del Drive del estudio, solo con sesión
+// iniciada.
 
 export const dynamic = 'force-dynamic';
 
@@ -14,8 +14,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const file = await prisma.productFile.findUnique({ where: { id } });
   if (!file) return new NextResponse('El archivo no existe.', { status: 404 });
   try {
-    const res = await readBlob(file.url);
-    if (!res) return new NextResponse('El archivo ya no está en el depósito.', { status: 404 });
+    const res = await readStored(prisma, file.url);
+    if (!res) return new NextResponse('El archivo ya no está guardado: se borró del Drive.', { status: 404 });
     const download = new URL(req.url).searchParams.has('descargar');
     return new NextResponse(res.body, {
       headers: {
@@ -26,7 +26,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       },
     });
   } catch (e) {
-    if (e instanceof FileError) return new NextResponse(e.message, { status: 502 });
+    const message = storageError(e);
+    if (message) return new NextResponse(message, { status: 502 });
     throw e;
   }
 }

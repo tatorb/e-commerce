@@ -1,13 +1,15 @@
-import { del, head, issueSignedToken, presignUrl } from '@vercel/blob';
+import { del, issueSignedToken, presignUrl } from '@vercel/blob';
 import type { PrismaClient } from '@/generated/prisma/client';
-import { extensionOf, FILE_TYPES, filesPrefix, MAX_FILES } from './file-rules';
+import { driveRef, ensureFolder, folderOwner, getFile, manufacturerFolder, withDriveToken } from './drive';
+import { extensionOf, FILE_TYPES, MAX_FILES } from './file-rules';
 
-export { extensionOf, FILE_TYPES, fileHref, filesPrefix, MAX_FILES, safeFileName } from './file-rules';
+export { extensionOf, FILE_TYPES, fileHref, MAX_FILES } from './file-rules';
 
-// Los archivos del fabricante: van directo del navegador al depósito de
-// Vercel (Vercel Blob) y la app anota cada uno en la ficha. Recibe la base
-// por parámetro para poder probarlo con una base de prueba y un depósito
-// simulado.
+// Los archivos del fabricante: van directo del navegador a la carpeta
+// Fabricante del producto en el Drive, y la app anota cada uno en la ficha.
+// También lo que queda del depósito de Vercel (Vercel Blob), donde se
+// guardaba todo antes de pasar al Drive: leerlo, firmar links y borrarlo.
+// Recibe la base por parámetro para poder probarlo con una base de prueba.
 
 export const BLOB_NOT_CONFIGURED = 'Falta conectar el depósito de archivos de Vercel.';
 
@@ -32,36 +34,56 @@ export function isOwnBlobUrl(raw: string): boolean {
 
 export class FileError extends Error {}
 
-/**
- * Anota en la ficha un archivo ya subido. Pregunta al depósito su tipo y su
- * peso reales, y que esté en la carpeta del producto.
- */
+/** Si el archivo del fabricante se acepta: el tipo por la extensión y el peso. */
+export function productFileProblem(file: { name: string; size?: string | number | null }): string | null {
+  const type = FILE_TYPES[extensionOf(file.name)];
+  if (!type) return `${file.name}: solo imágenes JPG, PNG, WEBP o GIF, y PDF.`;
+  if (Number(file.size ?? 0) > type.maxBytes) return `${file.name}: pesa demasiado.`;
+  return null;
+}
+
+/** Anota en la ficha un archivo del fabricante que ya está en el Drive. Si ya estaba anotado, no lo repite. */
 export async function registerProductFile(
   db: PrismaClient,
-  args: { productId: string; url: string; name: string; userId: string | null },
+  args: { productId: string; file: { id: string; name: string; size?: string | number | null }; userId: string | null },
 ) {
-  if (!isOwnBlobUrl(args.url)) throw new FileError('El archivo no está en el depósito de la app.');
-  const info = await head(args.url);
-  if (!info.pathname.startsWith(filesPrefix(args.productId))) throw new FileError('El archivo es de otro producto.');
-  const type = FILE_TYPES[extensionOf(info.pathname)];
-  if (!type || type.contentType !== info.contentType) throw new FileError('Ese tipo de archivo no se acepta.');
-  if (info.size > type.maxBytes) throw new FileError('El archivo pesa demasiado.');
+  const problem = productFileProblem(args.file);
+  if (problem) throw new FileError(problem);
+  const type = FILE_TYPES[extensionOf(args.file.name)];
+  const url = driveRef(args.file.id);
+  const existing = await db.productFile.findUnique({ where: { url } });
+  if (existing) return existing;
   if ((await db.productFile.count({ where: { productId: args.productId } })) >= MAX_FILES) {
     throw new FileError(`Hasta ${MAX_FILES} archivos por producto.`);
   }
-  const name = args.name.trim().slice(0, 200) || info.pathname.split('/').pop()!;
   return db.productFile.upsert({
-    where: { url: info.url },
+    where: { url },
     update: {},
     create: {
       productId: args.productId,
       kind: type.kind,
-      name,
-      contentType: info.contentType,
-      size: info.size,
-      url: info.url,
+      name: args.file.name.trim().slice(0, 200) || 'archivo',
+      contentType: type.contentType,
+      size: Number(args.file.size ?? 0),
+      url,
       uploadedById: args.userId,
     },
+  });
+}
+
+/** La carpeta Fabricante del producto, creada si hace falta. */
+export async function manufacturerFolderId(db: PrismaClient, token: string, email: string, productId: string): Promise<string> {
+  const owner = await folderOwner(db, productId);
+  return ensureFolder(db, token, email, manufacturerFolder(owner.account, owner.product));
+}
+
+/** Anota el archivo que el navegador terminó de subir. Confirma con Google que esté en la carpeta Fabricante del producto. */
+export async function addUploadedProductFile(db: PrismaClient, args: { productId: string; fileId: string; userId: string | null }) {
+  return withDriveToken(db, async (token, email) => {
+    const folderId = await manufacturerFolderId(db, token, email, args.productId);
+    const file = await getFile(token, args.fileId, 'id,name,size,parents,trashed');
+    if (!file || file.trashed || !file.parents?.includes(folderId)) throw new FileError('El archivo no quedó en la carpeta del producto. Probá de nuevo.');
+    return registerProductFile(db, { productId: args.productId, file, userId: args.userId });
   });
 }
 
@@ -96,10 +118,20 @@ export async function readBlob(url: string): Promise<Response | null> {
   return res;
 }
 
-/** Borra el archivo del depósito y de la ficha. */
-export async function deleteProductFile(db: PrismaClient, args: { productId: string; fileId: string }) {
+/** Borra un archivo del depósito. */
+export async function deleteBlob(url: string): Promise<void> {
+  if (!isOwnBlobUrl(url)) throw new FileError('El archivo no está en el depósito de la app.');
+  await del(url);
+}
+
+/** Saca el archivo de la ficha. El archivo va a la papelera del Drive, o se borra del depósito si estaba ahí. */
+export async function deleteProductFile(
+  db: PrismaClient,
+  args: { productId: string; fileId: string },
+  remove: (url: string) => Promise<void>,
+) {
   const file = await db.productFile.findFirst({ where: { id: args.fileId, productId: args.productId } });
   if (!file) return;
-  await del(file.url);
+  await remove(file.url);
   await db.productFile.delete({ where: { id: file.id } });
 }

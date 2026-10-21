@@ -31,7 +31,6 @@ import { getPipelinePublication } from '@/lib/queries/pipeline';
 import { loadTitleContext } from '@/lib/queries/title-step';
 import { loadResearch } from '@/lib/queries/research';
 import { loadCatalogData } from '@/lib/catalog-data';
-import { isBlobConfigured } from '@/lib/files';
 import { autoAvailable } from '@/lib/research';
 import { prisma } from '@/lib/db';
 import { AI_NOT_CONFIGURED, isAiConfigured } from '@/ai/claude';
@@ -46,6 +45,7 @@ import { SectionBody, SectionCard } from '@/components/ui/section-card';
 import { titleOrUntitled } from '@/domain/publication-title';
 import { VideosStep } from '@/components/pipeline/videos/VideosStep';
 import { loadVideosStep } from '@/lib/videos';
+import { driveEmail, folderUrl, knownFolderId } from '@/lib/drive';
 import { DescriptionStep } from '@/components/pipeline/description/DescriptionStep';
 import { loadDescriptionStep } from '@/lib/descriptions';
 
@@ -102,7 +102,7 @@ export default async function PipelineStepPage({
     // Información y Título usan la ficha, la competencia y lo leído del buscador.
     viewing === 'INFO' || viewing === 'TITLE' ? loadTitleContext(prisma, account.id, pub.id) : null,
     viewing === 'INFO'
-      ? Promise.all([loadResearch(prisma, pub.productId), loadCatalogData(prisma, pub.id), loadCombo(prisma, pub.productId)])
+      ? Promise.all([loadResearch(prisma, pub.productId), loadCatalogData(prisma, pub.id), loadCombo(prisma, pub.productId), driveEmail(prisma)])
       : null,
     viewing === 'IMAGES'
       ? Promise.all([
@@ -110,6 +110,10 @@ export default async function PipelineStepPage({
           workerState(prisma),
           countChannelPhotos(prisma, pub.productId),
           prisma.publication.count({ where: { productId: pub.productId } }),
+          driveEmail(prisma).then(async (email) => ({
+            ready: email !== null,
+            folderUrl: email ? await knownFolderId(prisma, `fotos:${pub.productId}`, email).then((id) => (id ? folderUrl(id) : null)) : null,
+          })),
         ])
       : null,
     // Publicación carga el ID del canal, con el formato de cada canal, y lo que falta subir.
@@ -240,7 +244,7 @@ export default async function PipelineStepPage({
             research={info[0]}
             catalog={info[1]}
             combo={info[2]}
-            blobReady={isBlobConfigured()}
+            driveReady={info[3] !== null}
           />
         ) : ctx && auto && viewing === 'TITLE' ? (
           <TitleStep
@@ -263,7 +267,6 @@ export default async function PipelineStepPage({
           <ImagesStep
             accountSlug={account.slug}
             publicationId={pub.id}
-            productId={pub.productId}
             pageHref={`${pageHref}?paso=${PIPELINE_STEP_SLUG.IMAGES}`}
             timeZone={account.timezone}
             edits={images[0]}
@@ -272,7 +275,7 @@ export default async function PipelineStepPage({
             channelPhotos={images[2]}
             channelName={pub.channelName}
             sharedWith={images[3]}
-            blobReady={isBlobConfigured()}
+            drive={images[4]}
           />
         ) : videos && viewing === 'VIDEOS' ? (
           <VideosStep

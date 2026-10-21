@@ -4,7 +4,7 @@ import { getChannelAdapter } from '@/channels';
 import type { ChannelPicture } from '@/channels/publish';
 import { channelPhotos, cleanMedia, MAX_PHOTOS, parseMedia, photoKey, type PhotoRef } from '@/domain/media';
 import { LAST_PHOTO_STEP } from '@/domain/photo-steps';
-import { readBlob } from '@/lib/files';
+import { readStored } from '@/lib/stored-files';
 
 // Las fotos de una publicación: de dónde se pueden tomar (las que ya están en
 // el canal, las corregidas en el paso Imágenes y las del producto) y cuáles
@@ -142,16 +142,17 @@ export async function saveMedia(db: Db, args: { accountId: string; publicationId
 }
 
 /** El JPG final de una foto corregida, para subirlo al canal. Null si ya no está. */
-export async function correctedPhotoFile(db: Db, productId: string, editId: string): Promise<{ data: Uint8Array; type: string; name: string } | null> {
+export async function correctedPhotoFile(db: PrismaClient, productId: string, editId: string): Promise<{ data: Uint8Array; type: string; name: string } | null> {
   const edit = (await finishedEdits(db, productId)).find((e) => e.id === editId);
   if (!edit?.run.jpgUrl) return null;
-  const res = await readBlob(edit.run.jpgUrl);
+  // Del Drive: si se retocó a mano desde la Mac, va la versión retocada.
+  const res = await readStored(db, edit.run.jpgUrl);
   if (!res) return null;
   return { data: new Uint8Array(await res.arrayBuffer()), type: 'image/jpeg', name: `${edit.name.replace(/\.[^.]+$/, '')}.jpg` };
 }
 
 /** Las fotos, como las pide el canal: las corregidas se suben como archivo. */
-export async function picturesFor(db: Db, productId: string, refs: PhotoRef[]) {
+export async function picturesFor(db: PrismaClient, productId: string, refs: PhotoRef[]) {
   const pictures: ChannelPicture[] = [];
   const origins: (string | null)[] = [];
   const problems: string[] = [];

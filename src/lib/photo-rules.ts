@@ -1,7 +1,7 @@
-import { extensionOf, safeFileName } from './file-rules';
+import { extensionOf } from './file-rules';
 
-// Qué fotos se aceptan en la línea de imágenes y dónde van en el depósito.
-// Sin nada del servidor, para usarlo también en el navegador.
+// Qué fotos se aceptan en la línea de imágenes. Sin nada del servidor, para
+// usarlo también en el navegador.
 
 const MB = 1024 * 1024;
 
@@ -19,11 +19,6 @@ export const ORIGINAL_TYPES: Record<string, string> = {
 export const ORIGINAL_MAX_BYTES = 100 * MB;
 // Una foto publicada en el canal: chica, alcanza con menos.
 export const CHANNEL_PHOTO_MAX_BYTES = 20 * MB;
-
-/** Dónde van los archivos de una foto. */
-export const photoPrefix = (productId: string) => `imagenes/${productId}/`;
-export const originalPathname = (productId: string, name: string) =>
-  `${photoPrefix(productId)}originales/${safeFileName(name)}`;
 
 export function originalTypeFor(name: string): string | null {
   return ORIGINAL_TYPES[extensionOf(name)] ?? null;

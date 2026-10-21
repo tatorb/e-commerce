@@ -84,6 +84,8 @@ function matches(file: FakeFile, q: string, all: Map<string, FakeFile>): boolean
       if (!file.mimeType.includes(m[1])) return false;
     } else if ((m = p.match(/^mimeType='([^']+)'$/))) {
       if (file.mimeType !== m[1]) return false;
+    } else if ((m = p.match(/^mimeType != '([^']+)'$/))) {
+      if (file.mimeType === m[1]) return false;
     } else if ((m = p.match(/^appProperties has \{ key='([^']+)' and value='((?:[^'\\]|\\.)*)' \}$/))) {
       if (file.appProperties[m[1]] !== m[2].replace(/\\(.)/g, '$1')) return false;
     } else {
@@ -147,6 +149,9 @@ export async function startFakeGoogle(port = 0): Promise<FakeGoogle> {
     if (url.pathname === '/__agregar' && req.method === 'POST') {
       const file = addFile({ name: url.searchParams.get('name') ?? 'video.mp4', parents: [url.searchParams.get('parent') ?? 'root'], mimeType: url.searchParams.get('mime') ?? 'video/mp4', data: raw });
       return json(res, 200, { id: file.id });
+    }
+    if (url.pathname === '/__archivos' && req.method === 'GET') {
+      return json(res, 200, [...files.values()].map((f) => ({ id: f.id, name: f.name, mimeType: f.mimeType, parents: f.parents, trashed: f.trashed, size: f.data.length })));
     }
     if (url.pathname === '/__cors' && req.method === 'POST') {
       state.cors = url.searchParams.get('on') !== '0';
@@ -213,7 +218,12 @@ export async function startFakeGoogle(port = 0): Promise<FakeGoogle> {
       // Como Google: preguntar por una subida terminada devuelve el archivo.
       if (up.done) return json(res, 200, pick(up.done, base, files), cors);
       const m = range.match(/^bytes (\d+)-(\d+)\/(\d+)$/);
-      if (m) {
+      if (!range) {
+        // Todo el archivo de una vez, como sube el trabajador de la Mac.
+        up.received = [raw];
+        up.got = raw.length;
+        up.size = raw.length;
+      } else if (m) {
         const start = Number(m[1]);
         if (start !== up.got) return fail(res, 400, 'badRange', cors);
         up.received.push(raw);
@@ -267,7 +277,10 @@ export async function startFakeGoogle(port = 0): Promise<FakeGoogle> {
       const file = files.get(decodeURIComponent(fm[1]));
       if (!file) return fail(res, 404, 'notFound');
       if (req.method === 'PATCH') {
-        Object.assign(file, JSON.parse(raw.toString()));
+        Object.assign(file, JSON.parse(raw.toString() || '{}'));
+        const add = url.searchParams.get('addParents');
+        const remove = (url.searchParams.get('removeParents') ?? '').split(',').filter(Boolean);
+        if (add || remove.length > 0) file.parents = [...file.parents.filter((p) => !remove.includes(p)), ...(add ? [add] : [])];
         return json(res, 200, { id: file.id });
       }
       if (url.searchParams.get('alt') === 'media') {

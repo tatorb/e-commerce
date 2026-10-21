@@ -7,9 +7,12 @@ import { revokeAllConnections, revokeConnection } from '@/lib/mcp/oauth';
 import { createWorkerKey, revokeWorkerKey } from '@/lib/image-worker';
 import { CryptoError } from '@/lib/crypto';
 import { DriveError, disconnectDrive, saveDriveCredentials, startDriveAuthorization } from '@/lib/drive';
+import { deleteVercelBatch, moveBatch, type MoveResult } from '@/lib/move-to-drive';
+import { storageError } from '@/lib/stored-files';
 
 // Cortar las conexiones de Claude, cada persona solo las suyas, la llave del
-// trabajador de imágenes y la conexión con el Drive, que son del estudio.
+// trabajador de imágenes y la conexión con el Drive, que son del estudio, y
+// pasar al Drive lo que quedó guardado en Vercel.
 
 type Result = { ok: true } | { ok: false; error: string };
 
@@ -82,4 +85,37 @@ export async function disconnectDriveAction(): Promise<Result> {
   }
   revalidatePath('/equipo');
   return { ok: true };
+}
+
+// ───────────────────────────── Lo guardado en Vercel ─────────────────────────────
+
+// Cada tanda trabaja hasta este tiempo; la pantalla pide la siguiente.
+const BATCH_MS = 45_000;
+
+/** Pasa al Drive una tanda de lo que quedó en Vercel. */
+export async function moveToDriveAction(): Promise<({ ok: true } & MoveResult) | { ok: false; error: string }> {
+  await requireUser();
+  try {
+    const r = await moveBatch(prisma, { budgetMs: BATCH_MS });
+    revalidatePath('/equipo');
+    return { ok: true, ...r };
+  } catch (e) {
+    const message = storageError(e);
+    if (message) return { ok: false, error: message };
+    throw e;
+  }
+}
+
+/** Borra de Vercel una tanda de archivos. Solo cuando ya pasó todo al Drive. */
+export async function deleteVercelFilesAction(): Promise<{ ok: true; deleted: number; more: boolean } | { ok: false; error: string }> {
+  await requireUser();
+  try {
+    const r = await deleteVercelBatch(prisma, { budgetMs: BATCH_MS });
+    revalidatePath('/equipo');
+    return { ok: true, ...r };
+  } catch (e) {
+    const message = storageError(e) ?? (e instanceof Error && /blob/i.test(e.message) ? 'Vercel no dejó borrar los archivos. Probá de nuevo en un rato.' : null);
+    if (message) return { ok: false, error: message };
+    throw e;
+  }
 }

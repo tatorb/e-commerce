@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils/cn';
 import { videoUploadType } from '@/domain/videos';
 import { finishVideoUploadAction, startVideoUploadAction } from '@/app/a/[cuenta]/pipeline/video-actions';
 import { BrandMark } from '@/components/ui/brand-loader';
-import { measureVideo, uploadToDrive } from './upload';
+import { measureVideo, uploadToDrive } from '@/components/drive/upload';
 
 // Sube los videos directo a la carpeta del producto en el Drive. Antes de
 // subirlo, el navegador lo mide para saber si sirve como clip.

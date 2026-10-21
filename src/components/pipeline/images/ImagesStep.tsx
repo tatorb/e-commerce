@@ -2,7 +2,8 @@ import Link from 'next/link';
 import { Check, Download } from 'lucide-react';
 import { SectionCard } from '@/components/ui/section-card';
 import { Button } from '@/components/ui/button';
-import { BlobSetup } from '@/components/pipeline/info/BlobSetup';
+import { DriveMissing } from '@/components/drive/DriveMissing';
+import { DriveSync } from '@/components/drive/DriveSync';
 import { withSharedNote } from '@/components/pipeline/info/SharedNote';
 import { cn } from '@/lib/utils/cn';
 import type { WorkerState } from '@/lib/image-worker';
@@ -24,7 +25,6 @@ import { BrandMark } from '@/components/ui/brand-loader';
 export function ImagesStep({
   accountSlug,
   publicationId,
-  productId,
   pageHref,
   timeZone,
   edits,
@@ -33,11 +33,10 @@ export function ImagesStep({
   channelPhotos,
   channelName,
   sharedWith,
-  blobReady,
+  drive,
 }: {
   accountSlug: string;
   publicationId: string;
-  productId: string;
   // La dirección del paso, sin las fotos abiertas.
   pageHref: string;
   timeZone: string;
@@ -48,7 +47,8 @@ export function ImagesStep({
   channelPhotos: number;
   channelName: string;
   sharedWith: number;
-  blobReady: boolean;
+  // Si el Drive del estudio está conectado, y la carpeta Fotos del producto si ya se armó.
+  drive: { ready: boolean; folderUrl: string | null };
 }) {
   const now = new Date();
   const photos = edits.map((e) => buildPhotoView(e, timeZone));
@@ -68,16 +68,22 @@ export function ImagesStep({
         title="Fotos"
         count={photos.length}
         description={withSharedNote(
-          'La Mac le hace a cada foto los 8 ajustes de corrido, de la lente a la exportación, y espera tu aprobación. Si querés cambiar algo, cambiás los valores que quieras y se rehace todo junto. Solo se corrige la foto original: nada se genera ni se inventa, y el original no se toca.',
+          'La Mac le hace a cada foto los 8 ajustes de corrido, de la lente a la exportación, y espera tu aprobación. Si querés cambiar algo, cambiás los valores que quieras y se rehace todo junto. Solo se corrige la foto original: nada se genera ni se inventa, y el original no se toca. Todo se guarda en la carpeta Fotos del producto en el Drive: lo que copies a Originales desde la Mac entra a la línea, y las aprobadas quedan en Corregidas.',
           sharedWith,
         )}
       >
         <div className="space-y-4 p-4">
-          {!blobReady ? (
-            <BlobSetup />
+          {!drive.ready ? (
+            <DriveMissing what="Las fotos de cada producto" />
           ) : (
             <div className="space-y-3">
-              <PhotoUploader accountSlug={accountSlug} publicationId={publicationId} productId={productId} />
+              <DriveSync
+                accountSlug={accountSlug}
+                target={{ kind: 'fotos', publicationId }}
+                folderUrl={drive.folderUrl}
+                label="Abrir la carpeta Fotos en el Drive"
+              />
+              <PhotoUploader accountSlug={accountSlug} publicationId={publicationId} />
               <ChannelPhotosButton accountSlug={accountSlug} publicationId={publicationId} count={channelPhotos} channelName={channelName} />
             </div>
           )}

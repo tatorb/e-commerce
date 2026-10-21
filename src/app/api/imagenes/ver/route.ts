@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth/session';
-import { FileError, readBlob } from '@/lib/files';
-import { signedDownloadUrl } from '@/lib/photo-files';
+import { signedDownloadUrl } from '@/lib/files';
+import { inVercel, readStored, storageError } from '@/lib/stored-files';
 
-// Muestra o baja un archivo de la línea de imágenes. El depósito es privado:
-// solo se ve con sesión. Las vistas livianas pasan por la app; las fotos
-// grandes se bajan directo del depósito con un link que vence en minutos.
+// Muestra o baja un archivo de la línea de imágenes, solo con sesión. Lo que
+// está en el Drive pasa por la app. Lo que todavía está en el depósito de
+// Vercel: las vistas livianas pasan por la app y las fotos grandes se bajan
+// directo con un link que vence en minutos.
 
 export const dynamic = 'force-dynamic';
 
@@ -38,7 +39,7 @@ export async function GET(req: Request) {
   }
   if (!url) return new NextResponse('El archivo no existe.', { status: 404 });
 
-  if (!LIGHT.includes(kind)) {
+  if (inVercel(url) && !LIGHT.includes(kind)) {
     try {
       return NextResponse.redirect(await signedDownloadUrl(url, 10 * 60 * 1000, download), 302);
     } catch (e) {
@@ -46,19 +47,21 @@ export async function GET(req: Request) {
     }
   }
   try {
-    const res = await readBlob(url);
-    if (!res) return new NextResponse('El archivo ya no está en el depósito.', { status: 404 });
+    const res = await readStored(prisma, url);
+    if (!res) return new NextResponse('El archivo ya no está guardado: se borró del Drive.', { status: 404 });
     return new NextResponse(res.body, {
       headers: {
         'Content-Type': contentType,
         'Content-Disposition': `${download ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(name)}`,
-        // Cada archivo tiene su propia dirección y no cambia: se puede guardar.
-        'Cache-Control': 'private, max-age=86400, immutable',
+        // Las vistas no cambian: se pueden guardar. Las finales se pueden
+        // retocar desde la Mac, así que se piden de nuevo cada tanto.
+        'Cache-Control': kind === 'jpg' || kind === 'png' ? 'private, max-age=300' : 'private, max-age=86400, immutable',
         'X-Content-Type-Options': 'nosniff',
       },
     });
   } catch (e) {
-    if (e instanceof FileError) return new NextResponse(e.message, { status: 502 });
+    const message = storageError(e);
+    if (message) return new NextResponse(message, { status: 502 });
     throw e;
   }
 }

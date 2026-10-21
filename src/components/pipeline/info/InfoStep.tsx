@@ -27,7 +27,7 @@ export function InfoStep({
   research,
   catalog,
   combo,
-  blobReady,
+  driveReady,
 }: {
   accountSlug: string;
   timeZone: string;
@@ -35,7 +35,7 @@ export function InfoStep({
   research: ResearchData;
   catalog: CatalogData | null;
   combo: ComboData | null;
-  blobReady: boolean;
+  driveReady: boolean;
 }) {
   const s = (v: string | null | undefined) => v ?? '';
   const p = ctx.product;
@@ -83,11 +83,10 @@ export function InfoStep({
       <ManufacturerCard
         accountSlug={accountSlug}
         publicationId={publicationId}
-        productId={ctx.publication.productId}
         sharedWith={ctx.sharedWith}
         initial={{ site: s(r?.manufacturerSite), productUrl: s(r?.manufacturerProductUrl), text: s(r?.manufacturerText) }}
         files={research.files.map((f) => ({ id: f.id, kind: f.kind, name: f.name, size: f.size }))}
-        blobReady={blobReady}
+        driveReady={driveReady}
       />
       {catalog ? (
         <CatalogCard

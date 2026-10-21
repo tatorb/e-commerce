@@ -19,35 +19,31 @@ import {
   submitFailure,
   submitResult,
 } from '@/lib/photo-queue';
-import { addChannelPhotos, addUploadedOriginal, PhotoError } from '@/lib/photos';
+import { addChannelPhotos, addDriveOriginal } from '@/lib/photos';
 import { loadPhotoSettings, PhotoSettingsError, savePhotoSettings } from '@/lib/photo-settings';
 import { createWorkerKey, revokeWorkerKey, verifyWorkerRequest, workerState } from '@/lib/image-worker';
-import { outputPathname } from '@/lib/photo-files';
 
 // Datos inventados.
 
 const url = process.env.TEST_DATABASE_URL;
-const BLOB = 'https://abc123.private.blob.vercel-storage.com/';
 
 describe.skipIf(!url)('línea de imágenes en la base', () => {
   const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: url! }) });
   const userId = 'u1';
   let accountId = '';
   let productId = '';
-  // El depósito simulado: lo que el trabajador "subió".
+  // El Drive simulado: lo que el trabajador "subió", como "<intento>:<tipo>".
   let uploaded: Set<string>;
 
   const deps = {
-    download: async (e: { originalUrl: string }): Promise<Transfer> => ({ url: `${e.originalUrl}?firmado=1`, metodo: 'GET', encabezados: {} }),
-    upload: async (kind: UploadKind, pathname: string): Promise<Transfer> => ({
-      url: `https://subir.example/?pathname=${pathname}`,
-      metodo: 'PUT',
-      encabezados: { 'x-tipo': kind },
-    }),
-    pathnameFor: outputPathname,
+    download: async (e: { originalUrl: string }): Promise<Transfer> => ({ url: `https://app.example/original?${e.originalUrl}`, metodo: 'GET', encabezados: {} }),
+    uploads: async (run: { runId: string }, kinds: UploadKind[]) =>
+      Object.fromEntries(
+        kinds.map((kind): [UploadKind, Transfer] => [kind, { url: `https://subir.example/?corrida=${run.runId}&tipo=${kind}`, metodo: 'PUT', encabezados: { 'x-tipo': kind } }]),
+      ),
   };
-  const verify = async (pathname: string) =>
-    uploaded.has(pathname) ? { url: `${BLOB}${pathname}`, size: 10, contentType: 'image/jpeg' } : null;
+  const collect = async (run: { runId: string }) =>
+    Object.fromEntries([...uploaded].filter((k) => k.startsWith(`${run.runId}:`)).map((k) => [k.split(':')[1], `drive:${k}`]));
 
   beforeEach(async () => {
     await db.$executeRawUnsafe(
@@ -64,12 +60,7 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
   });
 
   async function photo(name = 'IMG_1.HEIC') {
-    const pathname = `imagenes/${productId}/originales/${name.toLowerCase()}`;
-    return addUploadedOriginal(
-      db,
-      { productId, url: `${BLOB}${pathname}`, name, userId },
-      { head: async (u) => ({ url: u, pathname, size: 3_000_000, contentType: 'image/heic' }) },
-    );
+    return addDriveOriginal(db, { productId, file: { id: name.toLowerCase(), name, size: '3000000' }, userId });
   }
 
   const runsOf = (editId: string) => db.photoStepRun.findMany({ where: { editId }, orderBy: { createdAt: 'asc' } });
@@ -113,13 +104,8 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     const claimed = await claimNext(db, workerId);
     if (!claimed) throw new Error('No había trabajo.');
     const job = await buildJob(db, claimed.runId, deps);
-    for (const kind of Object.keys(job.subidas) as UploadKind[]) {
-      uploaded.add(outputPathname(productId, job.foto, job.id, kind));
-    }
-    const r = await submitResult(db, workerId, done(job, { archivos: Object.keys(job.subidas) as UploadKind[], ...extra }), {
-      verify,
-      pathnameFor: outputPathname,
-    });
+    for (const kind of Object.keys(job.subidas) as UploadKind[]) uploaded.add(`${job.id}:${kind}`);
+    const r = await submitResult(db, workerId, done(job, { archivos: Object.keys(job.subidas) as UploadKind[], ...extra }), { collect });
     return { job, r };
   }
 
@@ -142,16 +128,11 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     expect((await photo()).id).toBe(edit.id);
   });
 
-  it('no acepta originales de otro producto, de otro tipo o fuera del depósito', async () => {
-    const head = (pathname: string, contentType = 'image/jpeg', size = 1000) => ({
-      head: async (u: string) => ({ url: u, pathname, size, contentType }),
-    });
-    const add = (u: string, h: ReturnType<typeof head>) => addUploadedOriginal(db, { productId, url: u, name: 'x.jpg', userId }, h);
-    await expect(add('https://otro-sitio.com/x.jpg', head('x'))).rejects.toThrow(PhotoError);
-    await expect(add(`${BLOB}imagenes/otro/originales/x.jpg`, head('imagenes/otro/originales/x.jpg'))).rejects.toThrow('otro producto');
-    const mine = `imagenes/${productId}/originales/x.jpg`;
-    await expect(add(`${BLOB}${mine}`, head(mine, 'image/png'))).rejects.toThrow('JPG, PNG, HEIC o TIFF');
-    await expect(add(`${BLOB}${mine}`, head(mine, 'image/jpeg', 200 * 1024 * 1024))).rejects.toThrow('100 MB');
+  it('no acepta originales de otro tipo o muy pesados', async () => {
+    const add = (name: string, size: number) => addDriveOriginal(db, { productId, file: { id: name, name, size }, userId });
+    await expect(add('x.gif', 1000)).rejects.toThrow('JPG, PNG, HEIC o TIFF');
+    await expect(add('x.jpg', 200 * 1024 * 1024)).rejects.toThrow('100 MB');
+    expect((await add('x.tif', 1000)).originalType).toBe('image/tiff');
   });
 
   it('el trabajador toma el paso, con su turno, y nadie más lo toma', async () => {
@@ -216,10 +197,10 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     expect(job.original).toEqual({
       nombre: 'IMG_1.HEIC',
       tipo: 'image/heic',
-      bajar: { url: `${edit.originalUrl}?firmado=1`, metodo: 'GET', encabezados: {} },
+      bajar: { url: `https://app.example/original?${edit.originalUrl}`, metodo: 'GET', encabezados: {} },
     });
     expect(Object.keys(job.subidas).sort()).toEqual(['antes', 'jpg', 'mascara', 'png', 'vista']);
-    expect(job.subidas.vista!.url).toContain(`imagenes/${productId}/${edit.id}/${job.id}/vista.jpg`);
+    expect(job.subidas.vista!.url).toBe(`https://subir.example/?corrida=${job.id}&tipo=vista`);
     expect(job.receta).toEqual([]);
   });
 
@@ -253,11 +234,11 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     expect((run.parts as StepPart[])[1].propuesta).toEqual({ valores: { giro: 1.5 }, razon: 'Propuesta para perspectiva.', origen: 'claude' });
     // El costo de Claude es la suma de los ajustes.
     expect(run.aiUsage).toEqual({ costo_usd: 0.08 });
-    expect(run.previewUrl).toBe(`${BLOB}${outputPathname(productId, edit.id, job.id, 'vista')}`);
+    expect(run.previewUrl).toBe(`drive:${job.id}:vista`);
     expect(run.leaseUntil).toBeNull();
     const e = await db.photoEdit.findUniqueOrThrow({ where: { id: edit.id } });
     expect([e.width, e.height, e.camera]).toEqual([4032, 3024, { marca: 'Apple' }]);
-    expect(e.previewUrl).toBe(`${BLOB}${outputPathname(productId, edit.id, job.id, 'antes')}`);
+    expect(e.previewUrl).toBe(`drive:${job.id}:antes`);
   });
 
   it('un resultado con turno viejo o sin archivos no se acepta', async () => {
@@ -265,10 +246,10 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     await photo();
     const claimed = await claimNext(db, w);
     const job = await buildJob(db, claimed!.runId, deps);
-    const opts = { verify, pathnameFor: outputPathname };
+    const opts = { collect };
     // Faltan los archivos.
     expect(await submitResult(db, w, done(job), opts)).toEqual({ aceptado: false, motivo: 'Falta subir el archivo «vista».' });
-    for (const kind of ['vista', 'antes', 'png', 'jpg'] as const) uploaded.add(outputPathname(productId, job.foto, job.id, kind));
+    for (const kind of ['vista', 'antes', 'png', 'jpg'] as const) uploaded.add(`${job.id}:${kind}`);
     // La Mac se reinició y lo volvió a tomar: el turno 1 ya no vale.
     await claimNext(db, w);
     expect((await submitResult(db, w, done(job), opts)).aceptado).toBe(false);
@@ -335,7 +316,7 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
 
   it('rehacer con valores de varios ajustes y ajustes apagados conserva lo que dijo Claude', async () => {
     const w = await worker();
-    const edit = await photo();
+    await photo();
     const { job } = await work(w);
     const redo = (request: Parameters<typeof redoStep>[1]['request']) => redoStep(db, { runId: job.id, userId, request });
     await expect(redo({ valores: { perspectiva: { giro: 30 } }, apagados: [] })).rejects.toThrow('va de -10 a 10');
@@ -353,11 +334,11 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     const next = await buildJob(db, claimed!.runId, deps);
     expect(next.pedidos).toEqual({ valores: { perspectiva: { giro: -2 }, fondo: { giro: 3 } }, apagados: ['luces'] });
     // El trabajador no vuelve a preguntarle a Claude: la explicación anterior queda.
-    for (const kind of Object.keys(next.subidas) as UploadKind[]) uploaded.add(outputPathname(productId, edit.id, next.id, kind));
+    for (const kind of Object.keys(next.subidas) as UploadKind[]) uploaded.add(`${next.id}:${kind}`);
     const partes = next.pasos.map((p) =>
       p === 'luces' ? part(p, { aplicado: false, propuesta: null, valores: {} }) : part(p, p === 'perspectiva' ? { propuesta: null, valores: { giro: -2 } } : {}),
     );
-    await submitResult(db, w, done(next, { partes, archivos: ['vista', 'antes', 'png', 'jpg'] }), { verify, pathnameFor: outputPathname });
+    await submitResult(db, w, done(next, { partes, archivos: ['vista', 'antes', 'png', 'jpg'] }), { collect });
     const run = await db.photoStepRun.findUniqueOrThrow({ where: { id: next.id } });
     const parts = run.parts as StepPart[];
     expect(parts[1]).toMatchObject({ paso: 'perspectiva', valores: { giro: -2 }, propuesta: { razon: 'Propuesta para perspectiva.' } });
@@ -463,9 +444,9 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
         if (u.includes('222') && u.endsWith('-F.jpg')) return new Response('no', { status: 404 });
         return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': u.endsWith('.webp') ? 'image/webp' : 'image/jpeg' } });
       }) as typeof fetch,
-      put: async (pathname: string) => {
-        stored.push(pathname);
-        return { url: `${BLOB}${pathname.replace('.', `-${stored.length}.`)}` };
+      put: async (name: string) => {
+        stored.push(name);
+        return { url: `drive:${stored.length}-${name}` };
       },
     };
     const r = await addChannelPhotos(db, { productId, userId }, channelDeps);
@@ -475,7 +456,7 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
       'https://http2.mlstatic.com/D_222-MLA2_012024-F.jpg',
       'https://http2.mlstatic.com/D_NQ_NP_222-MLA2_012024-O.webp',
     ]);
-    expect(stored).toEqual([`imagenes/${productId}/originales/publicada-1.jpg`, `imagenes/${productId}/originales/publicada-2.webp`]);
+    expect(stored).toEqual(['publicada-1.jpg', 'publicada-2.webp']);
     const edits = await db.photoEdit.findMany({ orderBy: { position: 'asc' } });
     expect(edits.map((e) => [e.source, e.originalType, e.position])).toEqual([
       ['CHANNEL', 'image/jpeg', 0],

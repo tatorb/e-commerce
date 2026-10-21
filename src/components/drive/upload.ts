@@ -1,4 +1,4 @@
-// Subida de un video al Drive desde el navegador, de a partes. Primero prueba
+// Subida de un archivo al Drive desde el navegador, de a partes. Primero prueba
 // hablar directo con Google; si el navegador no puede, manda las partes por la
 // app (/api/drive/subida), más chicas. Si se corta, le pregunta a Google hasta
 // dónde llegó y sigue desde ahí.

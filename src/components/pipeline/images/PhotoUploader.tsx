@@ -2,20 +2,20 @@
 
 import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { uploadPresigned } from '@vercel/blob/client';
 import { ImagePlus } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
-import { BLOB_ACCESS } from '@/lib/file-rules';
-import { ORIGINAL_MAX_BYTES, originalPathname, originalTypeFor } from '@/lib/photo-rules';
-import { addUploadedPhotosAction } from '@/app/a/[cuenta]/pipeline/image-actions';
+import { ORIGINAL_MAX_BYTES, originalTypeFor } from '@/lib/photo-rules';
+import { addUploadedPhotosAction, startPhotoUploadAction } from '@/app/a/[cuenta]/pipeline/image-actions';
 import { BrandMark } from '@/components/ui/brand-loader';
+import { uploadToDrive } from '@/components/drive/upload';
 
-// Sube los originales directo al depósito de Vercel y después la app los
-// suma a la línea. Acepta las HEIC del iPhone, que el navegador no muestra.
+// Sube los originales directo a la carpeta Originales del producto en el
+// Drive y después la app los suma a la línea. Acepta las HEIC del iPhone, que
+// el navegador no muestra.
 
 const ACCEPT = '.jpg,.jpeg,.png,.heic,.heif,.tif,.tiff,image/jpeg,image/png,image/heic,image/heif,image/tiff';
 
-export function PhotoUploader({ accountSlug, publicationId, productId }: { accountSlug: string; publicationId: string; productId: string }) {
+export function PhotoUploader({ accountSlug, publicationId }: { accountSlug: string; publicationId: string }) {
   const router = useRouter();
   const input = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -29,7 +29,7 @@ export function PhotoUploader({ accountSlug, publicationId, productId }: { accou
     setErrors([]);
     startTransition(async () => {
       const problems: string[] = [];
-      const done: { url: string; name: string }[] = [];
+      const done: string[] = [];
       const ok = all.filter((f) => {
         const type = originalTypeFor(f.name);
         if (!type) problems.push(`${f.name}: solo fotos JPG, PNG, HEIC o TIFF.`);
@@ -37,15 +37,15 @@ export function PhotoUploader({ accountSlug, publicationId, productId }: { accou
         return Boolean(type) && f.size <= ORIGINAL_MAX_BYTES;
       });
       for (const [i, file] of ok.entries()) {
-        setProgress(ok.length === 1 ? `Subiendo ${file.name}…` : `Subiendo ${i + 1} de ${ok.length}…`);
+        const label = ok.length === 1 ? file.name : `${i + 1} de ${ok.length}`;
+        setProgress(`Subiendo ${label}…`);
         try {
-          const blob = await uploadPresigned(originalPathname(productId, file.name), file, {
-            access: BLOB_ACCESS,
-            handleUploadUrl: '/api/imagenes/originales',
-            contentType: originalTypeFor(file.name)!,
-            multipart: file.size > 8 * 1024 * 1024,
-          });
-          done.push({ url: blob.url, name: file.name });
+          const start = await startPhotoUploadAction(accountSlug, publicationId, { name: file.name, size: file.size });
+          if (!start.ok) {
+            problems.push(`${file.name}: ${start.error}`);
+            continue;
+          }
+          done.push(await uploadToDrive(file, start.uploadUrl, (sent) => setProgress(`Subiendo ${label}, ${Math.floor((sent / file.size) * 100)} %`)));
         } catch (e) {
           problems.push(`${file.name}: ${e instanceof Error ? e.message : 'no se pudo subir.'}`);
         }
@@ -85,7 +85,7 @@ export function PhotoUploader({ accountSlug, publicationId, productId }: { accou
         {progress ? <BrandMark className="h-7 w-7 rounded" /> : <ImagePlus className="h-7 w-7 text-muted-foreground" aria-hidden />}
         <span className="text-sm">{progress ?? 'Arrastrá los originales o tocá para elegirlos'}</span>
         <span className="text-xs text-muted-foreground">
-          Tal como salen de la cámara, sin editar. JPG, PNG, HEIC o TIFF, hasta 100 MB cada una.
+          Tal como salen de la cámara, sin editar. JPG, PNG, HEIC o TIFF, hasta 100 MB cada una. Van a la carpeta Originales del producto en el Drive.
         </span>
       </button>
       <input
