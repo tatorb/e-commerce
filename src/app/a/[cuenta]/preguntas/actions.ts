@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { prisma } from '@/lib/db';
 import { requireUser } from '@/lib/auth/session';
 import { getAccountBySlug } from '@/lib/queries/accounts';
-import { questionStores, readQuestions } from '@/lib/buyer-questions';
+import { errorDetail, questionStores, readQuestions } from '@/lib/buyer-questions';
 
 export type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string };
 
@@ -31,7 +31,7 @@ export async function readQuestionsAction(accountSlug: string): Promise<Result<{
       if (r.error) errors.push(stores.length > 1 ? `${store.name}: ${r.error}` : r.error);
     } catch (e) {
       console.error('No se pudieron leer las preguntas', e instanceof Error ? e.message : e);
-      errors.push('No se pudieron leer las preguntas. Probá de nuevo.');
+      errors.push(`No se pudieron leer las preguntas. Detalle: ${errorDetail(e)}`);
     }
   }
   revalidatePath(`/a/${accountSlug}`, 'layout');

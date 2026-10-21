@@ -2,7 +2,6 @@ import type { PrismaClient } from '@/generated/prisma/client';
 import type { ChannelKind } from '@/generated/prisma/enums';
 import { ConnectError } from '@/channels/connect';
 import { getChannelQuestions, type ChannelQuestion } from '@/channels/questions';
-import { isUniqueViolation } from '@/domain/publications';
 import { withAccessToken } from '@/lib/connections';
 
 // Las preguntas de los compradores: se leen del canal y se guardan sin
@@ -29,55 +28,77 @@ const toDate = (s: string | null | undefined): Date | null => {
   return Number.isNaN(d.getTime()) ? null : d;
 };
 
-/** Guarda las preguntas sin repetir y las une con su publicación. Devuelve cuántas eran nuevas. */
+/**
+ * Guarda las preguntas sin repetir y las une con su publicación. Devuelve
+ * cuántas eran nuevas. Las nuevas entran de una sola vez; de las que ya
+ * estaban, se cambian solo las que cambiaron. Sin una transacción larga, así
+ * una tanda grande no se pasa del tiempo que da la base.
+ */
 export async function saveQuestions(db: Db, storeId: string, questions: ChannelQuestion[], now: Date): Promise<number> {
-  try {
-    return await upsertQuestions(db, storeId, questions, now);
-  } catch (e) {
-    // El aviso y la lectura de cada hora trajeron la misma pregunta a la vez: la segunda vez ya está.
-    if (!isUniqueViolation(e)) throw e;
-    return upsertQuestions(db, storeId, questions, now);
-  }
-}
-
-async function upsertQuestions(db: Db, storeId: string, questions: ChannelQuestion[], now: Date): Promise<number> {
-  const valid = questions.filter((q) => toDate(q.askedAt) !== null);
+  const byId = new Map(questions.filter((q) => toDate(q.askedAt) !== null).map((q) => [q.externalId, q]));
+  const valid = [...byId.values()];
   if (valid.length === 0) return 0;
   const [publications, existing] = await Promise.all([
     db.publication.findMany({
       where: { storeId, externalId: { in: [...new Set(valid.map((q) => q.listingId))] } },
       select: { id: true, externalId: true },
     }),
-    db.buyerQuestion.findMany({ where: { storeId, externalId: { in: valid.map((q) => q.externalId) } }, select: { externalId: true } }),
+    db.buyerQuestion.findMany({
+      where: { storeId, externalId: { in: valid.map((q) => q.externalId) } },
+      select: { externalId: true, status: true, text: true, answer: true, publicationId: true },
+    }),
   ]);
   const publicationOf = new Map(publications.map((p) => [p.externalId, p.id]));
-  const known = new Set(existing.map((e) => e.externalId));
-  await db.$transaction(
-    valid.map((q) => {
-      const publicationId = publicationOf.get(q.listingId);
-      const common = { listingId: q.listingId, status: q.status, askedAt: toDate(q.askedAt)!, buyerId: q.buyerId, readAt: now };
-      return db.buyerQuestion.upsert({
-        where: { storeId_externalId: { storeId, externalId: q.externalId } },
-        create: {
-          storeId,
-          externalId: q.externalId,
-          ...common,
-          publicationId: publicationId ?? null,
-          text: q.text,
-          answer: q.answer?.text ?? null,
-          answeredAt: toDate(q.answer?.answeredAt),
-        },
-        update: {
-          ...common,
-          ...(publicationId ? { publicationId } : {}),
-          // Las que el canal bloquea vienen sin texto: queda el que ya se tenía.
-          ...(q.text ? { text: q.text } : {}),
-          ...(q.answer ? { answer: q.answer.text, answeredAt: toDate(q.answer.answeredAt) } : q.status === 'UNANSWERED' ? { answer: null, answeredAt: null } : {}),
-        },
-      });
-    }),
-  );
-  return valid.filter((q) => !known.has(q.externalId)).length;
+  const known = new Map(existing.map((e) => [e.externalId, e]));
+
+  const fresh = valid.filter((q) => !known.has(q.externalId));
+  const { count } = await db.buyerQuestion.createMany({
+    data: fresh.map((q) => ({
+      storeId,
+      externalId: q.externalId,
+      listingId: q.listingId,
+      publicationId: publicationOf.get(q.listingId) ?? null,
+      text: q.text,
+      status: q.status,
+      askedAt: toDate(q.askedAt)!,
+      buyerId: q.buyerId,
+      answer: q.answer?.text ?? null,
+      answeredAt: toDate(q.answer?.answeredAt),
+      readAt: now,
+    })),
+    // Si el aviso y la lectura la traen a la vez, la segunda no la repite.
+    skipDuplicates: true,
+  });
+
+  for (const q of valid) {
+    const before = known.get(q.externalId);
+    if (!before) continue;
+    const publicationId = publicationOf.get(q.listingId);
+    // Las que el canal bloquea vienen sin texto: queda el que ya se tenía.
+    const text = q.text || before.text;
+    const answer = q.answer ? q.answer.text : q.status === 'UNANSWERED' ? null : before.answer;
+    const changed =
+      before.status !== q.status || before.text !== text || before.answer !== answer || (publicationId !== undefined && before.publicationId !== publicationId);
+    if (!changed) continue;
+    await db.buyerQuestion.update({
+      where: { storeId_externalId: { storeId, externalId: q.externalId } },
+      data: {
+        status: q.status,
+        text,
+        answer,
+        ...(q.answer ? { answeredAt: toDate(q.answer.answeredAt) } : answer === null ? { answeredAt: null } : {}),
+        ...(publicationId ? { publicationId } : {}),
+        readAt: now,
+      },
+    });
+  }
+  return count;
+}
+
+/** Lo técnico de un error inesperado, corto: la última línea suele decir el motivo. */
+export function errorDetail(e: unknown): string {
+  const lines = (e instanceof Error ? e.message : String(e)).split('\n').map((l) => l.trim()).filter(Boolean);
+  return (lines.at(-1) ?? 'sin detalle').slice(0, 240);
 }
 
 export type QuestionReadResult = {
@@ -203,7 +224,7 @@ export async function readQuestions(db: Db, storeId: string, opts: { budgetMs: n
     });
   } catch (e) {
     if (!(e instanceof ConnectError)) {
-      lastError = 'No se pudieron leer las preguntas. Se vuelve a probar en la próxima lectura.';
+      lastError = `No se pudieron leer las preguntas. Se vuelve a probar en la próxima lectura. Detalle: ${errorDetail(e)}`;
       throw e;
     }
     lastError = e.message;

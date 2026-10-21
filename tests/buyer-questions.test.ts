@@ -4,7 +4,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@/generated/prisma/client';
 import { mercadolibreQuestions, parseQuestion } from '@/channels/mercadolibre/questions';
-import { readQuestions, receiveNotice } from '@/lib/buyer-questions';
+import { errorDetail, readQuestions, receiveNotice } from '@/lib/buyer-questions';
 import { encrypt } from '@/lib/crypto';
 
 // Las preguntas de los compradores, contra un Mercado Libre simulado. Los
@@ -50,6 +50,11 @@ describe('las preguntas de Mercado Libre', () => {
     expect(parseQuestion({ ...question(2, 'MLA1', 1), status: 'CLOSED_UNANSWERED' })?.status).toBe('CLOSED');
     expect(parseQuestion({ ...question(3, 'MLA1', 1), status: 'BANNED', text: '' })).toMatchObject({ status: 'REMOVED', text: '' });
     expect(parseQuestion({ id: 4 })).toBeNull();
+  });
+
+  it('de un error inesperado muestra la última línea, corta', () => {
+    expect(errorDetail(new Error('Invalid `prisma.buyerQuestion.createMany()` invocation:\n\n\nTransaction already closed'))).toBe('Transaction already closed');
+    expect(errorDetail('x'.repeat(500))).toHaveLength(240);
   });
 
   it('del aviso toma solo el número de la pregunta y de quién es', () => {
