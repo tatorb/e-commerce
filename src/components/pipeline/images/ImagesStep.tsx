@@ -15,8 +15,16 @@ import { PhotoLine } from './PhotoLine';
 import { PhotoUploader } from './PhotoUploader';
 import { ArchivePhotoButton, AsIsButton, ChannelPhotosButton } from './PhotoListActions';
 import { asIsProblem, type ChannelPhotoRules } from '@/domain/media';
+import { photoTone, type PhotoTone } from '@/domain/photo-steps';
 import { WorkerStatusLine } from './WorkerStatusLine';
 import { BrandMark } from '@/components/ui/brand-loader';
+
+// Cada foto de la lista lleva el color de su estado.
+const TONE: Record<PhotoTone, { label: string; dot: string; pill: string; card: string }> = {
+  approved: { label: 'Aprobadas', dot: 'bg-emerald-500', pill: 'bg-emerald-100 text-emerald-800', card: 'border-emerald-200' },
+  review: { label: 'Falta verificar', dot: 'bg-amber-400', pill: 'bg-amber-100 text-amber-900', card: 'border-amber-300' },
+  pending: { label: 'Sin procesar', dot: 'bg-red-500', pill: 'bg-red-100 text-red-800', card: 'border-red-200' },
+};
 
 // El paso Imágenes: las fotos del producto, cada una con su línea de
 // corrección. El trabajador de la Mac procesa cada paso; acá se aprueba. Una
@@ -63,6 +71,8 @@ export function ImagesStep({
   const inReview = photos.filter((p) => p.progress.kind === 'open' && p.progress.status === 'REVIEW').map((p) => p.id);
   const working = edits.some((e) => e.runs.some((r) => r.status === 'QUEUED' || r.status === 'PROCESSING'));
   const pending = photos.filter((p) => p.progress.kind !== 'done').length;
+  const tones = photos.map((p) => photoTone(p.progress));
+  const counts = (Object.keys(TONE) as PhotoTone[]).map((t) => ({ tone: t, n: tones.filter((x) => x === t).length })).filter((c) => c.n > 0);
 
   return (
     <div className="space-y-6">
@@ -121,9 +131,21 @@ export function ImagesStep({
           ) : null}
 
           {photos.length > 0 ? (
+            <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm" aria-label="Cuántas fotos hay en cada estado">
+              {counts.map((c) => (
+                <span key={c.tone} className="inline-flex items-center gap-1.5">
+                  <span aria-hidden className={cn('h-2.5 w-2.5 rounded-full', TONE[c.tone].dot)} />
+                  {TONE[c.tone].label} <span className="tabular-nums text-muted-foreground">{c.n}</span>
+                </span>
+              ))}
+            </p>
+          ) : null}
+
+          {photos.length > 0 ? (
             <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {photos.map((p) => {
+              {photos.map((p, i) => {
                 const isOpen = openNow.includes(p.id);
+                const tone = TONE[tones[i]];
                 return (
                   <li key={p.id}>
                     <Link
@@ -131,10 +153,13 @@ export function ImagesStep({
                       scroll={false}
                       aria-current={isOpen ? 'true' : undefined}
                       className={cn(
-                        'relative flex gap-3 rounded-lg border p-2 transition-colors hover:bg-muted/50',
+                        'relative flex gap-3 overflow-hidden rounded-lg border py-2 pl-4 pr-2 transition-colors hover:bg-muted/50',
+                        tone.card,
                         isOpen && 'border-foreground bg-muted/50',
                       )}
                     >
+                      {/* El color de la izquierda dice en qué está: aprobada, falta verificar o sin procesar. */}
+                      <span aria-hidden className={cn('absolute inset-y-0 left-0 w-1.5', tone.dot)} />
                       {/* Tocar la foto la abre o la cierra: la marca muestra cuáles están abiertas. */}
                       <span
                         aria-hidden
@@ -156,7 +181,8 @@ export function ImagesStep({
                       )}
                       <div className="min-w-0 space-y-0.5 pr-7">
                         <p className="truncate text-sm font-medium">{p.name}</p>
-                        <p className={cn('text-xs', p.progress.kind === 'done' ? 'text-emerald-700' : 'text-muted-foreground')}>
+                        <p className={cn('inline-flex rounded px-1.5 py-0.5 text-xs font-medium', tone.pill)}>
+                          <span className="sr-only">{tone.label}: </span>
                           {p.progressText}
                         </p>
                         <p className="text-xs text-muted-foreground">{p.source === 'CHANNEL' ? `Publicada en ${channelName}` : 'Original subido'}</p>

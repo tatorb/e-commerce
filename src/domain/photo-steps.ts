@@ -86,6 +86,18 @@ export function photoProgress(runs: RunLike[]): PhotoProgress {
   return last ? { kind: 'done' } : { kind: 'empty' };
 }
 
+/**
+ * El color de la foto en la lista: aprobada (o lista para usar tal cual), falta
+ * verificar lo que hizo la Mac, o todavía sin procesar, incluida la que falló.
+ */
+export type PhotoTone = 'approved' | 'review' | 'pending';
+
+export function photoTone(p: PhotoProgress): PhotoTone {
+  if (p.kind === 'done') return 'approved';
+  if (p.kind === 'open' && p.status === 'REVIEW') return 'review';
+  return 'pending';
+}
+
 /** "Esperando tu aprobación", o con varios pasos "Paso 1 de 2 · Corrección de la foto · esperando tu aprobación". */
 export function photoProgressText(p: PhotoProgress): string {
   if (p.kind === 'done') return 'Lista';

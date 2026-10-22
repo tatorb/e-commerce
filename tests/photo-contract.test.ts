@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { heartbeatSchema, nextRequestSchema, PHOTO_PROTOCOL, resultSchema } from '@/domain/photo-contract';
-import { currentRuns, PHOTO_STEPS, photoProgress, photoProgressText } from '@/domain/photo-steps';
+import { currentRuns, PHOTO_STEPS, photoProgress, photoProgressText, photoTone } from '@/domain/photo-steps';
 import { DEFAULT_PHOTO_SETTINGS, parsePhotoSettings, photoSettingsSchema } from '@/domain/photo-settings';
 import { mercadolibreFullSizePhoto } from '@/channels/mercadolibre/photos';
 import { channelPhotoUrl } from '@/channels';
@@ -55,6 +55,15 @@ describe('pasos de una foto', () => {
     expect(photoProgressText(photoProgress([{ step: 0, status: 'QUEUED' }]))).toBe('En cola');
     expect(photoProgressText(photoProgress([{ step: 0, status: 'APPROVED' }]))).toBe('Lista');
     expect(photoProgressText(photoProgress([{ step: 0, status: 'REPLACED' }]))).toBe('Sin empezar');
+  });
+
+  it('el color de cada foto: aprobada, falta verificar o sin procesar', () => {
+    const tone = (status: 'QUEUED' | 'PROCESSING' | 'REVIEW' | 'APPROVED' | 'FAILED' | 'REPLACED') => photoTone(photoProgress([{ step: 0, status }]));
+    expect(tone('APPROVED')).toBe('approved');
+    expect(tone('REVIEW')).toBe('review');
+    expect(['QUEUED', 'PROCESSING', 'FAILED', 'REPLACED'].map((s) => tone(s as 'QUEUED'))).toEqual(['pending', 'pending', 'pending', 'pending']);
+    // La que se usa tal cual cuenta como lista.
+    expect(photoTone({ kind: 'done' })).toBe('approved');
   });
 });
 
