@@ -1,16 +1,17 @@
 'use client';
 
-import { CheckCircle2, Upload, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, CheckCircle2, Upload, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { IconButton } from '@/components/ui/section-card';
 import { StatusText } from '@/components/pipeline/StatusText';
 import { useStepAction } from '@/components/pipeline/useStepAction';
 import type { ClipCheck, ClipRules } from '@/domain/videos';
 import type { VideoRow } from '@/lib/videos';
-import { clearClipAction, markClipUploadedAction } from '@/app/a/[cuenta]/pipeline/video-actions';
+import { markClipUploadedAction, moveClipAction, removeClipAction } from '@/app/a/[cuenta]/pipeline/video-actions';
 import { ClipCheckLine, VideoFacts, VideoThumb } from './VideoCard';
 
-// El clip elegido para la publicación y cómo subirlo a mano al canal, que no
-// deja subirlo por API. Cuando se sube, se marca acá.
+// Un clip elegido para la publicación, en su lugar de la lista. El canal no
+// deja subirlo por API: se sube a mano y se marca acá, cada uno por separado.
 
 export function ClipCard({
   accountSlug,
@@ -20,6 +21,8 @@ export function ClipCard({
   rules,
   channelName,
   uploadedLabel,
+  index,
+  count,
 }: {
   accountSlug: string;
   publicationId: string;
@@ -29,48 +32,58 @@ export function ClipCard({
   channelName: string;
   // "el 21/10 a las 15:30 por Juani", si ya se subió.
   uploadedLabel: string | null;
+  // Su lugar en la lista, desde 0, y cuántos clips hay.
+  index: number;
+  count: number;
 }) {
   const action = useStepAction();
 
   return (
-    <div className="space-y-4">
+    <li className="space-y-3 rounded-lg border p-3">
       <div className="flex gap-3">
-        <VideoThumb videoId={video.id} className="h-32 w-20" />
+        <div className="relative">
+          <VideoThumb videoId={video.id} className="h-28 w-16" />
+          <span className="absolute left-1 top-1 rounded bg-foreground/80 px-1.5 text-[11px] tabular-nums text-background">{index + 1}</span>
+        </div>
         <div className="min-w-0 flex-1 space-y-1">
           <p className="break-all text-sm font-medium">{video.name}</p>
           <VideoFacts video={video} />
           {video.gone ? (
-            <p className="text-xs text-destructive">Ya no está en la carpeta del Drive. Elegí otro.</p>
+            <p className="text-xs text-destructive">Ya no está en la carpeta del Drive. Sacalo o elegí otro.</p>
           ) : (
             <ClipCheckLine check={check} clipName={rules.name} />
+          )}
+          {uploadedLabel ? (
+            <p className="flex items-start gap-1 text-xs">
+              <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+              Subido a {channelName} {uploadedLabel}.
+            </p>
+          ) : (
+            <p className="text-xs font-medium text-amber-700">Falta subirlo a {channelName}.</p>
           )}
         </div>
       </div>
 
-      {uploadedLabel ? (
-        <p className="flex items-start gap-2 rounded-md border px-3 py-2 text-sm">
-          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-          <span>
-            Subido a {channelName} {uploadedLabel}.
-          </span>
-        </p>
-      ) : (
-        <div className="space-y-2 rounded-md border px-3 py-3 text-sm">
-          <p className="font-medium">Falta subirlo a {channelName}</p>
-          <ol className="list-decimal space-y-1 pl-5">
-            {rules.guide.map((step) => (
-              <li key={step}>{step}</li>
-            ))}
-          </ol>
-        </div>
-      )}
-
       <div className="flex flex-wrap items-center gap-2">
+        <IconButton
+          label="Antes"
+          onClick={() => action.run(() => moveClipAction(accountSlug, publicationId, video.id, -1), undefined, 'up')}
+          disabled={action.pending || index === 0}
+        >
+          <ArrowUp className="h-3.5 w-3.5" />
+        </IconButton>
+        <IconButton
+          label="Después"
+          onClick={() => action.run(() => moveClipAction(accountSlug, publicationId, video.id, 1), undefined, 'down')}
+          disabled={action.pending || index === count - 1}
+        >
+          <ArrowDown className="h-3.5 w-3.5" />
+        </IconButton>
         {uploadedLabel ? (
           <Button
             size="sm"
             variant="outline"
-            onClick={() => action.run(() => markClipUploadedAction(accountSlug, publicationId, false), undefined, 'undo')}
+            onClick={() => action.run(() => markClipUploadedAction(accountSlug, publicationId, video.id, false), undefined, 'undo')}
             pending={action.running('undo')}
             disabled={action.pending}
           >
@@ -79,7 +92,7 @@ export function ClipCard({
         ) : (
           <Button
             size="sm"
-            onClick={() => action.run(() => markClipUploadedAction(accountSlug, publicationId, true), undefined, 'done')}
+            onClick={() => action.run(() => markClipUploadedAction(accountSlug, publicationId, video.id, true), undefined, 'done')}
             pending={action.running('done')}
             disabled={action.pending || video.gone}
           >
@@ -90,15 +103,15 @@ export function ClipCard({
         <Button
           size="sm"
           variant="ghost"
-          onClick={() => action.run(() => clearClipAction(accountSlug, publicationId), undefined, 'clear')}
+          onClick={() => action.run(() => removeClipAction(accountSlug, publicationId, video.id), undefined, 'clear')}
           pending={action.running('clear')}
           disabled={action.pending}
         >
           <X />
-          Sacar el clip
+          Sacar de los {rules.name}s
         </Button>
         <StatusText status={action.status} />
       </div>
-    </div>
+    </li>
   );
 }

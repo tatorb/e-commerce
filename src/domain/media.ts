@@ -9,13 +9,7 @@ import { z } from 'zod';
 // comprador que elige una medida ve primero las suyas y después las de todas.
 // Sin medidas marcadas, la foto es de todas.
 
-// Lo que acepta la mayoría de las categorías, y lo que ve el comprador en cada medida.
-export const MAX_PHOTOS = 12;
-
-/** Cuántas fotos puede elegir la publicación: las de cada medida, que se suman. */
-export function maxPhotos(measures: number): number {
-  return MAX_PHOTOS * Math.max(1, measures);
-}
+// Sin tope de fotos: si el canal no acepta tantas, lo dice al subir.
 
 // Las medidas de la foto, por su clave (variantKey). Vacío: todas.
 const variants = { variants: z.array(z.string().min(1).max(200)).max(100).optional() };
@@ -67,22 +61,10 @@ export function variantPhotos<T extends PhotoRef>(refs: T[], key: string): T[] {
   return [...refs.filter((r) => photoVariants(r).includes(key)), ...refs.filter((r) => photoVariants(r).length === 0)];
 }
 
-/** Las medidas que pasan el tope de fotos que ve el comprador. Con estas no se puede guardar. */
-export function overfullMeasures(refs: PhotoRef[], measures: { key: string; label: string }[]): string[] {
-  if (measures.length < 2) return [];
-  return measures.flatMap((m) => {
-    const n = variantPhotos(refs, m.key).length;
-    return n > MAX_PHOTOS ? [`La medida ${m.label} tiene ${n} fotos contando las de Todas: puede tener hasta ${MAX_PHOTOS}.`] : [];
-  });
-}
-
-/** Lo que conviene avisar de las medidas: las que se quedan sin fotos y las que tienen de más. */
+/** Lo que conviene avisar de las medidas: las que se quedan sin fotos. */
 export function mediaWarnings(refs: PhotoRef[], measures: { key: string; label: string }[]): string[] {
   if (measures.length < 2 || refs.length === 0) return [];
-  return [
-    ...measures.filter((m) => variantPhotos(refs, m.key).length === 0).map((m) => `La medida ${m.label} se queda sin fotos.`),
-    ...overfullMeasures(refs, measures),
-  ];
+  return measures.filter((m) => variantPhotos(refs, m.key).length === 0).map((m) => `La medida ${m.label} se queda sin fotos.`);
 }
 
 /** Las fotos que acepta un canal tal como vienen: los formatos y el peso máximo. */
@@ -165,8 +147,8 @@ export function parseVideoVariants(raw: unknown): Record<string, string[]> {
   );
 }
 
-/** Sin repetir y con el tope, que con varias medidas es el de todas juntas: lo que se guarda al elegir. */
-export function cleanMedia(refs: PhotoRef[], max = MAX_PHOTOS): PhotoRef[] {
+/** Sin repetir: lo que se guarda al elegir. */
+export function cleanMedia(refs: PhotoRef[]): PhotoRef[] {
   const seen = new Set<string>();
   const out: PhotoRef[] = [];
   for (const r of refs) {
@@ -175,5 +157,5 @@ export function cleanMedia(refs: PhotoRef[], max = MAX_PHOTOS): PhotoRef[] {
     seen.add(key);
     out.push(withVariants(r, photoVariants(r)));
   }
-  return out.slice(0, max);
+  return out;
 }

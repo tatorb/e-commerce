@@ -11,7 +11,7 @@ import { VideoCard } from './VideoCard';
 import { VideoUploader } from './VideoUploader';
 
 // El paso Videos: los videos del producto, guardados en su carpeta del Drive,
-// y el clip de esta publicación. Los videos se suben desde acá o se copian a
+// y los clips de esta publicación, en orden. Los videos se suben desde acá o se copian a
 // la carpeta desde la Mac.
 
 export function VideosStep({
@@ -30,7 +30,13 @@ export function VideosStep({
 }) {
   const channelName = data.channel.name;
   const checks = new Map(data.videos.map((v) => [v.id, clipRules ? checkClip(v, clipRules) : null]));
-  const clipVideo = data.clip ? (data.videos.find((v) => v.id === data.clip!.videoId) ?? null) : null;
+  // Los clips elegidos, en orden, con su video.
+  const clips = data.clips.flatMap((c) => {
+    const video = data.videos.find((v) => v.id === c.videoId);
+    return video ? [{ ...c, video }] : [];
+  });
+  const clipIds = new Set(clips.map((c) => c.videoId));
+  const missing = clips.filter((c) => !c.uploadedAt).length;
   const active = data.videos.filter((v) => !v.gone);
   const usable = active.filter((v) => {
     const c = checks.get(v.id);
@@ -52,28 +58,46 @@ export function VideosStep({
     <div className="space-y-6">
       {clipRules ? (
         <SectionCard
-          title={`Clip para ${channelName}`}
-          description={`Un video vertical de ${clipRules.minSeconds} a ${clipRules.maxSeconds} segundos que se ve en la publicación y en el feed de videos. ${channelName} no deja subirlo desde la app: se sube a mano y se marca acá.`}
+          title={`${clipRules.name[0].toUpperCase()}${clipRules.name.slice(1)}s para ${channelName}`}
+          count={clips.length}
+          description={`Videos verticales de ${clipRules.minSeconds} a ${clipRules.maxSeconds} segundos que se ven en la publicación y en el feed de videos. Podés elegir varios: el primero es el que ${channelName} muestra antes. ${channelName} no deja subirlos desde la app: se suben a mano y se marca cada uno.`}
         >
           <div className="space-y-3 p-4">
-            {data.clip && clipVideo ? (
-              <ClipCard
-                accountSlug={accountSlug}
-                publicationId={publicationId}
-                video={clipVideo}
-                check={checks.get(clipVideo.id)!}
-                rules={clipRules}
-                channelName={channelName}
-                uploadedLabel={
-                  data.clip.uploadedAt
-                    ? `el ${formatDateTime(data.clip.uploadedAt, timeZone)}${data.clip.uploadedBy ? `, por ${data.clip.uploadedBy}` : ''}`
-                    : null
-                }
-              />
+            {clips.length > 0 ? (
+              <>
+                <ol className="space-y-3">
+                  {clips.map((c, i) => (
+                    <ClipCard
+                      key={c.videoId}
+                      accountSlug={accountSlug}
+                      publicationId={publicationId}
+                      video={c.video}
+                      check={checks.get(c.videoId)!}
+                      rules={clipRules}
+                      channelName={channelName}
+                      uploadedLabel={c.uploadedAt ? `el ${formatDateTime(c.uploadedAt, timeZone)}${c.uploadedBy ? `, por ${c.uploadedBy}` : ''}` : null}
+                      index={i}
+                      count={clips.length}
+                    />
+                  ))}
+                </ol>
+                {missing > 0 ? (
+                  <div className="space-y-2 rounded-md border px-3 py-3 text-sm">
+                    <p className="font-medium">
+                      {missing === 1 ? `Falta subir 1 ${clipRules.name}` : `Faltan subir ${missing} ${clipRules.name}s`} a {channelName}
+                    </p>
+                    <ol className="list-decimal space-y-1 pl-5">
+                      {clipRules.guide.map((step) => (
+                        <li key={step}>{step}</li>
+                      ))}
+                    </ol>
+                  </div>
+                ) : null}
+              </>
             ) : (
               <p className="text-sm text-muted-foreground">
                 {usable.length > 0
-                  ? `Todavía no elegiste el ${clipRules.name}. Elegilo entre los videos de abajo, con Usar como ${clipRules.name}.`
+                  ? `Todavía no elegiste ningún ${clipRules.name}. Elegilos entre los videos de abajo, con Usar como ${clipRules.name}.`
                   : active.length > 0
                     ? `Ninguno de los videos del producto sirve como ${clipRules.name} todavía.`
                     : `Primero subí un video del producto.`}
@@ -117,7 +141,7 @@ export function VideosStep({
                   video={v}
                   check={checks.get(v.id) ?? null}
                   clipName={clipRules?.name ?? 'clip'}
-                  isClip={data.clip?.videoId === v.id}
+                  isClip={clipIds.has(v.id)}
                   timeLabel={formatRelativeDate(v.createdAt, timeZone)}
                 />
               ))}

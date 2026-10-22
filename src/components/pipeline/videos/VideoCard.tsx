@@ -151,7 +151,8 @@ export function VideoCard({
             {isClip ? (
               <span className="inline-flex items-center gap-1 rounded bg-foreground px-1.5 py-0.5 text-[11px] font-medium text-background">
                 <Clapperboard className="h-3 w-3" aria-hidden />
-                Clip de esta publicación
+                {clipName[0].toUpperCase()}
+                {clipName.slice(1)} de esta publicación
               </span>
             ) : null}
           </p>

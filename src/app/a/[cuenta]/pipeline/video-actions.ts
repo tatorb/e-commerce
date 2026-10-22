@@ -10,9 +10,10 @@ import { DriveError } from '@/lib/drive';
 import { publicAppUrl } from '@/lib/public-url';
 import {
   chooseClip,
-  clearClip,
   finishVideoUpload,
   markClipUploaded,
+  moveClip,
+  removeClip,
   saveVideoMeasure,
   startVideoUpload,
   syncProductVideos,
@@ -119,12 +120,18 @@ export async function chooseClipAction(accountSlug: string, publicationId: strin
   );
 }
 
-export async function clearClipAction(accountSlug: string, publicationId: string): Promise<Result> {
-  return simple(accountSlug, (accountId) => clearClip(prisma, { accountId, publicationId: String(publicationId) }));
+export async function removeClipAction(accountSlug: string, publicationId: string, videoId: string): Promise<Result> {
+  return simple(accountSlug, (accountId) => removeClip(prisma, { accountId, publicationId: String(publicationId), videoId: String(videoId) }));
 }
 
-export async function markClipUploadedAction(accountSlug: string, publicationId: string, uploaded: boolean): Promise<Result> {
+export async function moveClipAction(accountSlug: string, publicationId: string, videoId: string, by: number): Promise<Result> {
+  return simple(accountSlug, (accountId) =>
+    moveClip(prisma, { accountId, publicationId: String(publicationId), videoId: String(videoId), by: Number(by) < 0 ? -1 : 1 }),
+  );
+}
+
+export async function markClipUploadedAction(accountSlug: string, publicationId: string, videoId: string, uploaded: boolean): Promise<Result> {
   return simple(accountSlug, (accountId, userId) =>
-    markClipUploaded(prisma, { accountId, publicationId: String(publicationId), uploaded: Boolean(uploaded), userId }),
+    markClipUploaded(prisma, { accountId, publicationId: String(publicationId), videoId: String(videoId), uploaded: Boolean(uploaded), userId }),
   );
 }

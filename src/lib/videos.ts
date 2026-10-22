@@ -247,7 +247,10 @@ async function publicationFor(db: PrismaClient, accountId: string, publicationId
   return pub;
 }
 
-/** Elige el clip de la publicación, entre los videos de su producto. Si cambia, hay que volver a subirlo al canal. */
+/**
+ * Suma un clip a la publicación, entre los videos de su producto. Va al final:
+ * el orden es en el que se suben. Si ya estaba, no cambia.
+ */
 export async function chooseClip(
   db: PrismaClient,
   args: { accountId: string; publicationId: string; videoId: string; userId: string | null; now?: Date },
@@ -255,25 +258,44 @@ export async function chooseClip(
   const pub = await publicationFor(db, args.accountId, args.publicationId);
   const video = await db.productVideo.findFirst({ where: { id: args.videoId, productId: pub.productId, goneAt: null } });
   if (!video) throw new VideoError('El video no está entre los del producto.');
-  const current = await db.publicationClip.findUnique({ where: { publicationId: pub.id } });
-  if (current?.videoId === video.id) return;
-  const data = { videoId: video.id, chosenById: args.userId, chosenAt: args.now ?? new Date(), uploadedAt: null, uploadedById: null };
-  await db.publicationClip.upsert({ where: { publicationId: pub.id }, create: { publicationId: pub.id, ...data }, update: data });
+  const key = { publicationId_videoId: { publicationId: pub.id, videoId: video.id } };
+  if (await db.publicationClip.findUnique({ where: key })) return;
+  const last = await db.publicationClip.aggregate({ where: { publicationId: pub.id }, _max: { position: true } });
+  await db.publicationClip.create({
+    data: { publicationId: pub.id, videoId: video.id, position: (last._max.position ?? -1) + 1, chosenById: args.userId, chosenAt: args.now ?? new Date() },
+  });
 }
 
-export async function clearClip(db: PrismaClient, args: { accountId: string; publicationId: string }): Promise<void> {
+/** Saca un clip de la publicación. El video sigue entre los del producto. */
+export async function removeClip(db: PrismaClient, args: { accountId: string; publicationId: string; videoId: string }): Promise<void> {
   const pub = await publicationFor(db, args.accountId, args.publicationId);
-  await db.publicationClip.deleteMany({ where: { publicationId: pub.id } });
+  await db.publicationClip.deleteMany({ where: { publicationId: pub.id, videoId: args.videoId } });
 }
 
-/** Anota que el clip ya se subió a mano al canal, o lo desmarca. */
+/** Cambia de lugar un clip: by -1 lo sube, 1 lo baja. */
+export async function moveClip(db: PrismaClient, args: { accountId: string; publicationId: string; videoId: string; by: number }): Promise<void> {
+  const pub = await publicationFor(db, args.accountId, args.publicationId);
+  await db.$transaction(async (tx) => {
+    const clips = await tx.publicationClip.findMany({ where: { publicationId: pub.id }, orderBy: [{ position: 'asc' }, { chosenAt: 'asc' }], select: { videoId: true } });
+    const order = clips.map((c) => c.videoId);
+    const from = order.indexOf(args.videoId);
+    if (from < 0) throw new VideoError('Ese video ya no es un clip de la publicación.');
+    const to = Math.max(0, Math.min(order.length - 1, from + Math.sign(args.by)));
+    order.splice(to, 0, ...order.splice(from, 1));
+    for (const [position, videoId] of order.entries()) {
+      await tx.publicationClip.update({ where: { publicationId_videoId: { publicationId: pub.id, videoId } }, data: { position } });
+    }
+  });
+}
+
+/** Anota que un clip ya se subió a mano al canal, o lo desmarca. */
 export async function markClipUploaded(
   db: PrismaClient,
-  args: { accountId: string; publicationId: string; uploaded: boolean; userId: string | null; now?: Date },
+  args: { accountId: string; publicationId: string; videoId: string; uploaded: boolean; userId: string | null; now?: Date },
 ): Promise<void> {
   const pub = await publicationFor(db, args.accountId, args.publicationId);
   const r = await db.publicationClip.updateMany({
-    where: { publicationId: pub.id },
+    where: { publicationId: pub.id, videoId: args.videoId },
     data: args.uploaded ? { uploadedAt: args.now ?? new Date(), uploadedById: args.userId } : { uploadedAt: null, uploadedById: null },
   });
   if (r.count === 0) throw new VideoError('Primero elegí el clip.');
@@ -302,7 +324,8 @@ export async function loadVideosStep(db: PrismaClient, args: { accountId: string
     select: {
       productId: true,
       channelCopy: { select: { hasVideo: true, readAt: true } },
-      clip: {
+      clips: {
+        orderBy: [{ position: 'asc' }, { chosenAt: 'asc' }],
         select: {
           videoId: true,
           chosenAt: true,
@@ -344,15 +367,14 @@ export async function loadVideosStep(db: PrismaClient, args: { accountId: string
     driveEmail: email,
     folderUrl: folderId ? folderUrl(folderId) : null,
     videos,
-    clip: pub.clip
-      ? {
-          videoId: pub.clip.videoId,
-          chosenAt: pub.clip.chosenAt,
-          chosenBy: pub.clip.chosenBy?.name ?? null,
-          uploadedAt: pub.clip.uploadedAt,
-          uploadedBy: pub.clip.uploadedBy?.name ?? null,
-        }
-      : null,
+    // Los clips de la publicación, en el orden en que se suben.
+    clips: pub.clips.map((c) => ({
+      videoId: c.videoId,
+      chosenAt: c.chosenAt,
+      chosenBy: c.chosenBy?.name ?? null,
+      uploadedAt: c.uploadedAt,
+      uploadedBy: c.uploadedBy?.name ?? null,
+    })),
     channel: pub.store.channel,
     // Lo que dijo el canal en la última lectura.
     channelHasVideo: pub.channelCopy ? pub.channelCopy.hasVideo : null,

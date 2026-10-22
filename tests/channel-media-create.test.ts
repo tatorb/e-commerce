@@ -7,9 +7,7 @@ import { faceSummary, faceValues, fingerprint, fingerprintsOf } from '@/domain/c
 import {
   channelPhotos,
   cleanMedia,
-  maxPhotos,
   mediaWarnings,
-  overfullMeasures,
   parseMedia,
   parseVideoVariants,
   photoKey,
@@ -35,16 +33,12 @@ vi.mock('@/lib/files', async (original) => ({
 }));
 
 describe('las fotos elegidas', () => {
-  it('sin elegir siguen al canal; se guardan sin repetir y con tope', () => {
+  it('sin elegir siguen al canal; se guardan sin repetir y sin tope', () => {
     expect(parseMedia(null)).toBeNull();
     expect(parseMedia([{ kind: 'edit', editId: 'a' }, { kind: 'otra' }])).toEqual([{ kind: 'edit', editId: 'a' }]);
     const many = Array.from({ length: 15 }, (_, i) => ({ kind: 'asset' as const, url: `https://foto/${i}.jpg` }));
     expect(cleanMedia([...many.slice(0, 2), many[0]])).toHaveLength(2);
-    expect(cleanMedia(many)).toHaveLength(12);
-    // Con varias medidas, el tope es de 12 por cada una.
-    expect(maxPhotos(1)).toBe(12);
-    expect(maxPhotos(3)).toBe(36);
-    expect(cleanMedia(many, 24)).toHaveLength(15);
+    expect(cleanMedia(many)).toHaveLength(15);
     expect(photoKey({ kind: 'channel', id: 'P1', url: 'x' })).toBe(photoKey({ kind: 'channel', id: 'P1', url: 'y' }));
   });
 
@@ -79,20 +73,6 @@ describe('las fotos elegidas', () => {
     expect(mediaWarnings(refs, measures)).toEqual([]);
     // Con una sola medida no hay nada que avisar.
     expect(mediaWarnings([refs[2]], measures.slice(0, 1))).toEqual([]);
-  });
-
-  it('cada medida muestra hasta 12 fotos, contando las de todas', () => {
-    const measures = [
-      { key: 'sku:A', label: 'STD' },
-      { key: 'sku:B', label: '0,50' },
-    ];
-    const photo = (i: number, keys: string[]) => withVariants({ kind: 'asset', url: `https://f/${i}.jpg` }, keys);
-    const general = Array.from({ length: 4 }, (_, i) => photo(i, []));
-    const std = Array.from({ length: 8 }, (_, i) => photo(10 + i, ['sku:A']));
-    const half = Array.from({ length: 9 }, (_, i) => photo(20 + i, ['sku:B']));
-    expect(overfullMeasures([...general, ...std], measures)).toEqual([]);
-    expect(overfullMeasures([...general, ...std, ...half], measures)).toEqual(['La medida 0,50 tiene 13 fotos contando las de Todas: puede tener hasta 12.']);
-    expect(mediaWarnings([...general, ...std, ...half], measures)).toHaveLength(1);
   });
 
   it('las marcas se guardan sin repetir y una foto sin marcas es de todas', () => {
@@ -474,20 +454,13 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
       ]);
     });
 
-    it('con dos medidas se pueden elegir 24 fotos, 12 por medida, pero no más de 12 en una', async () => {
-      await db.asset.createMany({ data: Array.from({ length: 25 }, (_, i) => ({ productId, kind: 'PHOTO' as const, url: `https://otra/${i}.jpg`, position: i + 1 })) });
+    it('no hay tope de fotos, ni en total ni por medida', async () => {
+      await db.asset.createMany({ data: Array.from({ length: 30 }, (_, i) => ({ productId, kind: 'PHOTO' as const, url: `https://otra/${i}.jpg`, position: i + 1 })) });
       const pub = await db.publication.create({ data: { productId, storeId, externalId: 'MLA2', title: 'Aros Ford Sigma' } });
       await readAll();
-      expect((await loadMediaSources(db, accountId, pub.id)).max).toBe(24);
-      const ref = (i: number, key: string) => ({ kind: 'asset' as const, url: `https://otra/${i}.jpg`, variants: [key] });
-      const twelveEach = [...Array.from({ length: 12 }, (_, i) => ref(i, 'sku:A-00')), ...Array.from({ length: 12 }, (_, i) => ref(12 + i, 'sku:A-50 medida:0.50'))];
-      await saveMedia(db, { accountId, publicationId: pub.id, refs: twelveEach });
-      expect(parseMedia((await db.publication.findUniqueOrThrow({ where: { id: pub.id } })).media)).toHaveLength(24);
-      // Una más de Todas: cada medida tendría 13.
-      await expect(saveMedia(db, { accountId, publicationId: pub.id, refs: [...twelveEach.slice(1), { kind: 'asset', url: 'https://otra/24.jpg' }] })).rejects.toThrow(
-        'tiene 13 fotos',
-      );
-      await expect(saveMedia(db, { accountId, publicationId: pub.id, refs: [...twelveEach, ref(24, 'sku:A-00')] })).rejects.toThrow('hasta 24 fotos');
+      const refs = Array.from({ length: 30 }, (_, i) => ({ kind: 'asset' as const, url: `https://otra/${i}.jpg`, ...(i < 20 ? { variants: ['sku:A-00'] } : {}) }));
+      await saveMedia(db, { accountId, publicationId: pub.id, refs });
+      expect(parseMedia((await db.publication.findUniqueOrThrow({ where: { id: pub.id } })).media)).toHaveLength(30);
     });
 
     it('una variante del canal que la ficha no tiene lleva las fotos de todas, y sin variantes van solo las fotos', async () => {
@@ -554,7 +527,8 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
           variants: ['sku:A-50 medida:0.50'],
         },
       ]);
-      expect(sources.clip).toEqual({ videoId: video.id, name: 'clip', perVariant: false });
+      expect(sources.clip).toEqual({ name: 'clip', perVariant: false });
+      expect(sources.clipIds).toEqual([video.id]);
 
       // Sin mandar las fotos, quedan como están.
       await saveMedia(db, { accountId, publicationId: pub.id, videos: {} });

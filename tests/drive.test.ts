@@ -18,10 +18,11 @@ import {
 } from '@/lib/drive';
 import {
   chooseClip,
-  clearClip,
   finishVideoUpload,
   loadVideosStep,
   markClipUploaded,
+  moveClip,
+  removeClip,
   saveVideoMeasure,
   startVideoUpload,
   syncProductVideos,
@@ -345,40 +346,59 @@ describe.skipIf(!url)('el Drive y los videos en la base', () => {
     ).rejects.toThrow('no es de esta cuenta');
   });
 
-  it('elige el clip, lo marca subido y si cambia hay que volver a subirlo', async () => {
+  it('elige varios clips en orden, marca subido cada uno y los ordena', async () => {
     await connect();
     const { folderId } = await syncProductVideos(db, { accountId, productId });
-    for (const name of ['a.mp4', 'b.mp4']) {
+    for (const name of ['a.mp4', 'b.mp4', 'c.mp4']) {
       google.addFile({ name, parents: [folderId], data: Buffer.alloc(5), videoMediaMetadata: { width: 720, height: 1280, durationMillis: '20000' } });
     }
     await syncProductVideos(db, { accountId, productId });
-    const [a, b] = await db.productVideo.findMany({ orderBy: { name: 'asc' } });
+    const [a, b, c] = await db.productVideo.findMany({ orderBy: { name: 'asc' } });
+    const order = async () => (await loadVideosStep(db, { accountId, publicationId })).clips.map((x) => x.videoId);
 
-    await expect(markClipUploaded(db, { accountId, publicationId, uploaded: true, userId })).rejects.toThrow('Primero elegí');
+    await expect(markClipUploaded(db, { accountId, publicationId, videoId: a.id, uploaded: true, userId })).rejects.toThrow('Primero elegí');
+    // Se suman al final, en el orden en que se eligen.
     await chooseClip(db, { accountId, publicationId, videoId: a.id, userId });
-    await markClipUploaded(db, { accountId, publicationId, uploaded: true, userId });
+    await chooseClip(db, { accountId, publicationId, videoId: b.id, userId });
+    await chooseClip(db, { accountId, publicationId, videoId: c.id, userId });
+    expect(await order()).toEqual([a.id, b.id, c.id]);
+
+    // Cada uno se marca subido por separado.
+    await markClipUploaded(db, { accountId, publicationId, videoId: b.id, uploaded: true, userId });
     let step = await loadVideosStep(db, { accountId, publicationId });
-    expect(step.clip).toMatchObject({ videoId: a.id, uploadedBy: 'Juani' });
-    expect(step.videos.map((v) => v.name)).toEqual(['a.mp4', 'b.mp4']);
+    expect(step.clips.map((x) => [x.videoId, x.uploadedBy])).toEqual([
+      [a.id, null],
+      [b.id, 'Juani'],
+      [c.id, null],
+    ]);
     expect(step.folderUrl).toBe(`https://drive.google.com/drive/folders/${folderId}`);
 
-    // El mismo: no cambia nada.
-    await chooseClip(db, { accountId, publicationId, videoId: a.id, userId });
-    expect((await db.publicationClip.findUniqueOrThrow({ where: { publicationId } })).uploadedAt).not.toBeNull();
+    // Elegir de nuevo uno que ya está no cambia nada.
     await chooseClip(db, { accountId, publicationId, videoId: b.id, userId });
-    expect((await db.publicationClip.findUniqueOrThrow({ where: { publicationId } })).uploadedAt).toBeNull();
+    expect((await loadVideosStep(db, { accountId, publicationId })).clips[1].uploadedBy).toBe('Juani');
 
-    // A la papelera: sale de la lista, salvo si es el clip de esta publicación.
-    await trashVideo(db, { accountId, videoId: a.id });
-    expect(google.files.get(a.driveFileId)!.trashed).toBe(true);
+    // Ordenar: el último pasa antes, y el primero no sube más.
+    await moveClip(db, { accountId, publicationId, videoId: c.id, by: -1 });
+    expect(await order()).toEqual([a.id, c.id, b.id]);
+    await moveClip(db, { accountId, publicationId, videoId: a.id, by: -1 });
+    expect(await order()).toEqual([a.id, c.id, b.id]);
+
+    // Sacar uno deja los demás en su orden.
+    await removeClip(db, { accountId, publicationId, videoId: c.id });
+    expect(await order()).toEqual([a.id, b.id]);
+
+    // A la papelera: sale de la lista de videos, salvo si es un clip de esta publicación.
+    await trashVideo(db, { accountId, videoId: c.id });
+    expect(google.files.get(c.driveFileId)!.trashed).toBe(true);
     step = await loadVideosStep(db, { accountId, publicationId });
-    expect(step.videos.map((v) => v.name)).toEqual(['b.mp4']);
+    expect(step.videos.map((v) => v.name)).toEqual(['a.mp4', 'b.mp4']);
     await trashVideo(db, { accountId, videoId: b.id });
     step = await loadVideosStep(db, { accountId, publicationId });
-    expect(step.videos).toMatchObject([{ name: 'b.mp4', gone: true }]);
-    await expect(chooseClip(db, { accountId, publicationId, videoId: a.id, userId })).rejects.toThrow('no está entre los del producto');
-    await clearClip(db, { accountId, publicationId });
-    expect((await loadVideosStep(db, { accountId, publicationId })).clip).toBeNull();
+    expect(step.videos).toMatchObject([{ name: 'a.mp4' }, { name: 'b.mp4', gone: true }]);
+    await expect(chooseClip(db, { accountId, publicationId, videoId: c.id, userId })).rejects.toThrow('no está entre los del producto');
+    await removeClip(db, { accountId, publicationId, videoId: a.id });
+    await removeClip(db, { accountId, publicationId, videoId: b.id });
+    expect(await order()).toEqual([]);
   });
 
   it('sin el Drive conectado, el paso lo dice y no intenta leer', async () => {

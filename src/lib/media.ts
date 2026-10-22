@@ -6,8 +6,6 @@ import {
   asIsProblem,
   channelPhotos,
   cleanMedia,
-  maxPhotos,
-  overfullMeasures,
   parseMedia,
   parseVariations,
   parseVideoVariants,
@@ -155,7 +153,7 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
           },
         },
       },
-      clip: { select: { videoId: true } },
+      clips: { orderBy: [{ position: 'asc' }, { chosenAt: 'asc' }], select: { videoId: true } },
       channelCopy: { select: { photos: true, photoIds: true, photoOrigins: true, variations: true, missingSince: true } },
     },
   });
@@ -224,8 +222,6 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
     following: media === null,
     current,
     available: { channel: plain(channel), corrected, assets },
-    // Con varias medidas, 12 por cada una; cada medida muestra hasta 12.
-    max: maxPhotos(measures.length >= 2 ? measures.length : 1),
     // Las medidas que se pueden marcar: con menos de dos, no hay nada que elegir.
     measures: measures.length >= 2 ? measures : [],
     // Leída del canal y sin variantes: allá todas las fotos se ven juntas.
@@ -245,7 +241,9 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
         variants: marks(videoMarks[v.id] ?? []),
       };
     }),
-    clip: clipRules ? { videoId: p.clip?.videoId ?? null, name: clipRules.name, perVariant: clipRules.perVariant } : null,
+    // Cómo llama el canal a los clips, y los elegidos, en orden.
+    clip: clipRules ? { name: clipRules.name, perVariant: clipRules.perVariant } : null,
+    clipIds: p.clips.map((c) => c.videoId),
   };
 }
 
@@ -270,11 +268,8 @@ export async function saveMedia(
   }
   if (args.refs === null) data.media = Prisma.DbNull;
   else if (args.refs) {
-    const refs = cleanMedia(args.refs, sources.max).map((r) => withVariants(r, keys(photoVariants(r))));
+    const refs = cleanMedia(args.refs).map((r) => withVariants(r, keys(photoVariants(r))));
     if (refs.length === 0) throw new MediaError('Elegí al menos una foto.');
-    if (args.refs.length > sources.max) throw new MediaError(`Se pueden elegir hasta ${sources.max} fotos.`);
-    const overfull = overfullMeasures(refs, sources.measures);
-    if (overfull.length > 0) throw new MediaError(overfull.join(' '));
     const allowed = new Set([...sources.available.channel, ...sources.available.corrected, ...sources.available.assets].map((m) => m.key));
     if (refs.some((r) => !allowed.has(photoKey(r)))) throw new MediaError('Una de las fotos ya no está disponible. Recargá la página.');
     const blocked = sources.available.corrected.find((m) => m.blocked && refs.some((r) => photoKey(r) === m.key));

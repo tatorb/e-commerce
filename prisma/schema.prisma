@@ -397,7 +397,7 @@ model Publication {
   channelCopy       ChannelCopy?
   syncChanges       ChannelSyncChange[]
   buyerQuestions    BuyerQuestion[]
-  clip              PublicationClip?
+  clips             PublicationClip[]
   descriptionDraft  DescriptionDraft?
 
   @@unique([storeId, externalId])
@@ -1535,13 +1535,15 @@ model ProductVideo {
   @@map("product_videos")
 }
 
-// El clip elegido para una publicación, y la marca de que ya se subió a mano
-// al canal: Mercado Libre no deja subir clips por API.
+// Un clip elegido para una publicación, y la marca de que ya se subió a mano
+// al canal: Mercado Libre no deja subir clips por API. Una publicación puede
+// tener varios, en orden: el primero es el que el canal muestra antes.
 model PublicationClip {
-  publicationId String       @id
+  publicationId String
   publication   Publication  @relation(fields: [publicationId], references: [id], onDelete: Cascade)
   videoId       String
   video         ProductVideo @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  position      Int          @default(0)
   chosenById    String?
   chosenBy      User?        @relation("ClipChosenBy", fields: [chosenById], references: [id], onDelete: SetNull)
   chosenAt      DateTime     @default(now())
@@ -1549,6 +1551,7 @@ model PublicationClip {
   uploadedById  String?
   uploadedBy    User?        @relation("ClipUploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
 
+  @@id([publicationId, videoId])
   @@index([videoId])
   @@map("publication_clips")
 }

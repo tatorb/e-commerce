@@ -5,12 +5,12 @@ import { useRouter } from 'next/navigation';
 import { AlertTriangle, ArrowLeft, ArrowRight, Clapperboard, ImageOff, Play, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { IconButton } from '@/components/ui/section-card';
-import { MAX_PHOTOS, mediaWarnings, overfullMeasures, photoVariants, variantPhotos, withVariants } from '@/domain/media';
+import { mediaWarnings, photoVariants, variantPhotos, withVariants } from '@/domain/media';
 import { ClipCheckLine, VideoFacts, VideoPlayer, VideoThumb } from '@/components/pipeline/videos/VideoCard';
 import type { MediaItem, MediaSources, Measure } from '@/lib/media';
 import { cn } from '@/lib/utils/cn';
 import { saveMediaAction } from '@/app/a/[cuenta]/publicaciones/sync-actions';
-import { chooseClipAction } from '@/app/a/[cuenta]/pipeline/video-actions';
+import { chooseClipAction, moveClipAction, removeClipAction } from '@/app/a/[cuenta]/pipeline/video-actions';
 
 // Elegir y ordenar las fotos de una publicación: las que ya están en el canal,
 // las del paso Imágenes, corregidas o tal cual, y las demás del producto. Si el producto
@@ -102,13 +102,6 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
   const photosDirty = photosSignature(chosen) !== photosSignature(sources.current);
   const videosDirty = marksSignature(videoMarks) !== marksSignature(initialMarks());
   const dirty = photosDirty || videosDirty;
-  const full = chosen.length >= sources.max;
-  // Una medida con más fotos de las que se muestran no se puede guardar: lo dicen los avisos.
-  const overfull =
-    overfullMeasures(
-      chosen.map((m) => m.ref),
-      measures,
-    ).length > 0;
   const withMeasures = measures.length >= 2;
   const labelOf = (keys: string[]) => measures.filter((m) => keys.includes(m.key)).map((m) => m.label);
 
@@ -139,15 +132,15 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
     router.refresh();
   }
 
-  // El clip se elige al tocar: no espera a Guardar en el borrador, como en el paso Videos.
-  async function chooseClip(videoId: string) {
-    setBusy(`clip:${videoId}`);
+  // Los clips se eligen, se sacan y se ordenan al tocar: no esperan a Guardar en el borrador, como en el paso Videos.
+  async function changeClip(key: string, action: () => Promise<{ ok: true } | { ok: false; error: string }>, ok: string) {
+    setBusy(key);
     setMessage(null);
-    const r = await chooseClipAction(accountSlug, publicationId, videoId).catch(() => null);
+    const r = await action().catch(() => null);
     setBusy(null);
     if (!r) return setMessage({ kind: 'error', text: 'Se cortó la conexión con la app. Probá de nuevo.' });
     if (!r.ok) return setMessage({ kind: 'error', text: r.error });
-    setMessage({ kind: 'ok', text: clip ? `Listo: es el ${clip.name} de esta publicación. Se sube a mano a ${channelName}, desde el paso Videos.` : 'Listo.' });
+    setMessage({ kind: 'ok', text: ok });
     router.refresh();
   }
 
@@ -162,16 +155,21 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
 
   // Lo que ve el comprador en la medida elegida: primero sus fotos y después las de todas.
   const shown = viewing ? variantPhotos(chosen.map((m, at) => ({ ...m.ref, at })), viewing).map((r) => chosen[r.at]) : [];
-  const clipVideo = clip?.videoId ? sources.videos.find((v) => v.id === clip.videoId) : undefined;
-  const clipMarks = clipVideo ? (videoMarks[clipVideo.id] ?? []) : [];
+  // Los clips primero, en el orden en que se suben; después los demás videos.
+  const clipIds = sources.clipIds;
+  const clipVideos = clipIds.flatMap((id) => sources.videos.filter((v) => v.id === id));
+  const videos = [...clipVideos, ...sources.videos.filter((v) => !clipIds.includes(v.id))];
+  const clipLabel = clip ? `${clip.name[0].toUpperCase()}${clip.name.slice(1)}` : '';
   const warnings = withMeasures
     ? [
         ...mediaWarnings(
           chosen.map((m) => m.ref),
           measures,
         ),
-        ...(clip && clipVideo && !clip.perVariant && clipMarks.length > 0
-          ? [`El ${clip.name} es de ${labelOf(clipMarks).join(' y ')}, pero en ${channelName} se ve en todas las medidas.`]
+        ...(clip && !clip.perVariant
+          ? clipVideos
+              .filter((v) => (videoMarks[v.id] ?? []).length > 0)
+              .map((v) => `El ${clip.name} ${v.name} es de ${labelOf(videoMarks[v.id]).join(' y ')}, pero en ${channelName} se ve en todas las medidas.`)
           : []),
         ...(sources.channelWithoutVariants ? [`En ${channelName} esta publicación no tiene medidas: todas las fotos se ven juntas.`] : []),
       ]
@@ -184,14 +182,14 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
           <h3 className="text-sm font-semibold">
             Elegidas{' '}
             <span className="font-normal tabular-nums text-muted-foreground">
-              {chosen.length} de {sources.max}
+              {chosen.length}
             </span>
           </h3>
           {sources.following && !dirty ? <p className="text-xs text-muted-foreground">Son las que tiene en {channelName}.</p> : null}
         </div>
         {withMeasures ? (
           <p className="text-xs text-muted-foreground">
-            Marcá de qué medida es cada foto. Las de Todas se ven en todas las medidas. Cada medida muestra hasta {MAX_PHOTOS}, contando las de Todas.
+            Marcá de qué medida es cada foto. Las de Todas se ven en todas las medidas.
           </p>
         ) : null}
         {chosen.length === 0 ? (
@@ -238,13 +236,16 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
         <div className="space-y-2">
           <h3 className="text-sm font-semibold">Videos del producto</h3>
           <p className="text-xs text-muted-foreground">
-            {clip ? `Tocá Ver para mirarlo y elegí cuál va como ${clip.name}. También se elige en el paso Videos.` : 'Tocá Ver para mirarlo.'}
+            {clip
+              ? `Tocá Ver para mirarlo y elegí cuáles van como ${clip.name}. Podés elegir varios: el primero es el que ${channelName} muestra antes. Se suben a mano desde el paso Videos.`
+              : 'Tocá Ver para mirarlo.'}
             {withMeasures ? ' Marcá de qué medida es cada video.' : ''}
-            {clip && !clip.perVariant && withMeasures ? ` En ${channelName} se ve un solo ${clip.name} por publicación, en todas sus medidas.` : ''}
+            {clip && !clip.perVariant && withMeasures ? ` En ${channelName} los ${clip.name}s se ven en todas las medidas de la publicación.` : ''}
           </p>
           <ul className="grid gap-3 sm:grid-cols-2">
-            {sources.videos.map((v) => {
-              const isClip = clip?.videoId === v.id;
+            {videos.map((v) => {
+              const at = clipIds.indexOf(v.id);
+              const isClip = at >= 0;
               const open = playing === v.id;
               return (
                 <li key={v.id} className={cn('space-y-3 rounded-lg border p-3', isClip && 'border-foreground/60', open && 'sm:col-span-2')}>
@@ -256,7 +257,7 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
                         {isClip && clip ? (
                           <span className="inline-flex items-center gap-1 rounded bg-foreground px-1.5 py-0.5 text-[11px] font-medium text-background">
                             <Clapperboard className="h-3 w-3" aria-hidden />
-                            {`${clip.name[0].toUpperCase()}${clip.name.slice(1)} de esta publicación`}
+                            {clipIds.length > 1 ? `${clipLabel} ${at + 1}` : `${clipLabel} de esta publicación`}
                           </span>
                         ) : null}
                       </p>
@@ -273,11 +274,51 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
                             variant="outline"
                             pending={busy === `clip:${v.id}`}
                             disabled={busy !== null || v.check.pending || v.check.problems.length > 0}
-                            onClick={() => chooseClip(v.id)}
+                            onClick={() =>
+                              changeClip(
+                                `clip:${v.id}`,
+                                () => chooseClipAction(accountSlug, publicationId, v.id),
+                                `Listo: ${v.name} se sumó a los ${clip.name}s de esta publicación. Se sube a mano a ${channelName}, desde el paso Videos.`,
+                              )
+                            }
                           >
                             <Clapperboard />
                             Usar como {clip.name}
                           </Button>
+                        ) : null}
+                        {clip && isClip ? (
+                          <>
+                            <IconButton
+                              label="Antes"
+                              disabled={busy !== null || at === 0}
+                              onClick={() => changeClip(`up:${v.id}`, () => moveClipAction(accountSlug, publicationId, v.id, -1), `Listo: ${v.name} pasó antes.`)}
+                            >
+                              <ArrowLeft className="h-3.5 w-3.5" />
+                            </IconButton>
+                            <IconButton
+                              label="Después"
+                              disabled={busy !== null || at === clipIds.length - 1}
+                              onClick={() => changeClip(`down:${v.id}`, () => moveClipAction(accountSlug, publicationId, v.id, 1), `Listo: ${v.name} pasó después.`)}
+                            >
+                              <ArrowRight className="h-3.5 w-3.5" />
+                            </IconButton>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              pending={busy === `remove:${v.id}`}
+                              disabled={busy !== null}
+                              onClick={() =>
+                                changeClip(
+                                  `remove:${v.id}`,
+                                  () => removeClipAction(accountSlug, publicationId, v.id),
+                                  `Listo: ${v.name} ya no es ${clip.name} de esta publicación.`,
+                                )
+                              }
+                            >
+                              <X />
+                              Sacar de los {clip.name}s
+                            </Button>
+                          </>
                         ) : null}
                       </div>
                     </div>
@@ -319,7 +360,7 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
           <PhotoStrip items={shown} empty="Esta medida se queda sin fotos." />
           {clip ? (
             <p className="text-xs text-muted-foreground">
-              {clipVideo ? `${clip.name[0].toUpperCase()}${clip.name.slice(1)}: ${clipVideo.name}` : `Sin ${clip.name}: se elige en el paso Videos.`}
+              {clipVideos.length > 0 ? `${clipLabel}${clipVideos.length > 1 ? 's' : ''}: ${clipVideos.map((v) => v.name).join(', ')}` : `Sin ${clip.name}s: se eligen arriba, en los videos.`}
             </p>
           ) : null}
         </div>
@@ -349,9 +390,9 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
                   size="sm"
                   variant="outline"
                   className="h-7 w-full px-2 text-xs"
-                  disabled={full || busy !== null || Boolean(m.blocked)}
+                  disabled={busy !== null || Boolean(m.blocked)}
                   onClick={() => setChosen((list) => [...list, m])}
-                  title={m.blocked ?? (full ? `Hasta ${sources.max} fotos` : undefined)}
+                  title={m.blocked}
                 >
                   <Plus />
                   Agregar
@@ -365,7 +406,7 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
       <div className="flex flex-wrap items-center gap-2">
         <Button
           size="sm"
-          disabled={!dirty || chosen.length === 0 || busy !== null || overfull}
+          disabled={!dirty || chosen.length === 0 || busy !== null}
           pending={busy === 'save'}
           onClick={() => save({ refs: photosDirty ? chosen.map((m) => m.ref) : undefined, videos: videosDirty ? videoMarks : undefined }, 'save')}
         >
