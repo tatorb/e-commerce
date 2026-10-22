@@ -1,4 +1,5 @@
 import type { ChannelStatus } from '@/generated/prisma/enums';
+import type { ChannelVariation } from '@/domain/media';
 
 // Leer las publicaciones de una tienda desde su canal, con la cuenta
 // conectada. Cada canal lo resuelve en src/channels/<canal>/; el importador
@@ -37,6 +38,8 @@ export type ChannelListing = {
   skus: string[];
   // La medida de cada variante, cuando el canal las tiene.
   measures: { sku: string; measure: string }[];
+  // Cada variante con el código de sus fotos, aunque no tenga SKU o medida.
+  variations: ChannelVariation[];
   // Los demás datos de la ficha del canal. multiple: vino con varios valores.
   attributes: { id: string; name: string; value: string; multiple?: boolean }[];
   // Cuántos datos de la ficha del canal tiene cargados, contando marca y SKU.

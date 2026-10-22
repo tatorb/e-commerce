@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db';
+import { photoVariants } from '@/domain/media';
 import { channelFaceValues, faceSummary, faceValues, fingerprintsOf, type FaceField, type FaceValues } from '@/domain/channel-sync';
 import type { NameValue } from '@/domain/name-value';
 import { getChannelListings } from '@/channels/listings';
@@ -23,8 +24,10 @@ export type ChoiceRow = {
 
 function preview(field: FaceField, value: FaceValues[FaceField], other: FaceValues[FaceField]): string {
   if (field === 'photos') {
-    const n = (value as FaceValues['photos'])?.length ?? 0;
-    return n === 1 ? '1 foto' : `${n} fotos`;
+    const refs = (value as FaceValues['photos']) ?? [];
+    const marked = refs.filter((r) => photoVariants(r).length > 0).length;
+    const text = refs.length === 1 ? '1 foto' : `${refs.length} fotos`;
+    return marked > 0 ? `${text}, ${marked} con medida propia` : text;
   }
   if (field !== 'attributes') return ((value as string | null) ?? '').trim();
   // De los datos de catálogo, solo los que no coinciden.
@@ -61,7 +64,7 @@ export async function loadSyncOverview(accountId: string) {
         pipelineStatus: true,
         store: { select: { name: true, channel: { select: { name: true } } } },
         channelCopy: {
-          select: { title: true, description: true, attributes: true, photos: true, photoIds: true, fingerprints: true, agreed: true, missingSince: true },
+          select: { title: true, description: true, attributes: true, photos: true, photoIds: true, variations: true, fingerprints: true, agreed: true, missingSince: true },
         },
       },
       orderBy: { externalId: 'asc' },

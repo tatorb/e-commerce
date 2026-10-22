@@ -2,6 +2,8 @@
 // resuelve en src/channels/<canal>/; el resto de la app usa esta interfaz y
 // nunca conoce el formato del canal. Solo corre en el servidor.
 
+import type { VariantLike } from '@/domain/media';
+
 /** Los datos que hoy se pueden subir. */
 export type PublishField = 'title' | 'description' | 'attributes' | 'photos';
 export const PUBLISH_FIELDS: PublishField[] = ['title', 'description', 'attributes', 'photos'];
@@ -17,6 +19,16 @@ export type ChannelPicture =
   | { kind: 'existing'; id: string }
   | { kind: 'link'; url: string }
   | { kind: 'file'; data: Uint8Array; type: string; name: string };
+
+/**
+ * Qué fotos ve el comprador en cada medida, por su posición en la lista de
+ * fotos y en el orden en que las ve. general: las de todas las medidas, para
+ * las medidas del canal que la ficha no tiene.
+ */
+export type ChannelPictureLayout = {
+  variants: (VariantLike & { pictures: number[] })[];
+  general: number[];
+};
 
 /** Lo que hace falta para crear una publicación en el canal. */
 export type ChannelNewListing = {
@@ -48,8 +60,11 @@ export interface ChannelPublisher {
   listingTypes: { value: string; label: string }[];
   /** Crea la publicación. Lanza PublishError si el canal no la acepta. */
   create(accessToken: string, listing: ChannelNewListing): Promise<ChannelCreated>;
-  /** Deja las fotos de la publicación en ese orden. Devuelve el código de cada una, si lo informa. */
-  updatePictures(accessToken: string, externalId: string, pictures: ChannelPicture[]): Promise<string[] | null>;
+  /**
+   * Deja las fotos de la publicación en ese orden y, si tiene medidas, las de
+   * cada una. Devuelve el código de cada foto, si lo informa.
+   */
+  updatePictures(accessToken: string, externalId: string, pictures: ChannelPicture[], layout: ChannelPictureLayout): Promise<string[] | null>;
   /** Cambia el título o la descripción de una publicación propia. Lanza PublishError si el canal no lo acepta. */
   update(accessToken: string, externalId: string, field: 'title' | 'description', value: string): Promise<void>;
   /** Cambia esos datos de catálogo; los demás quedan como están. Lanza PublishError si el canal no lo acepta. */

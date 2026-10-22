@@ -12,6 +12,7 @@ export {
   type ChannelCreated,
   type ChannelNewListing,
   type ChannelPicture,
+  type ChannelPictureLayout,
   type ChannelPublisher,
   type PublishField,
 } from './publish-types';

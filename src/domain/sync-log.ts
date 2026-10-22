@@ -1,7 +1,7 @@
 import Papa from 'papaparse';
 import type { SyncChangeKind, SyncStatus, SyncTrigger } from '@/generated/prisma/enums';
 import { attributeDiff, FACE_FIELD_LABEL, isFaceField, SYNC_CHANGE_LABEL } from './channel-sync';
-import { parseMedia, type PhotoRef } from './media';
+import { parseMedia, photoVariants, type PhotoRef } from './media';
 import { parseNameValueList, type NameValue } from './name-value';
 
 // El Registro: todo lo que pasó entre la app y el canal, publicación por
@@ -170,7 +170,9 @@ function photoSummary(refs: PhotoRef[]): string {
     .filter(([n]) => (n as number) > 0)
     .map(([n, one, many]) => `${n} ${n === 1 ? one : many}`);
   const total = refs.length === 1 ? '1 foto' : `${refs.length} fotos`;
-  return parts.length > 1 ? `${total}: ${parts.slice(0, -1).join(', ')} y ${parts.at(-1)}` : `${total} ${parts[0].replace(/^\d+ /, '')}`;
+  const text = parts.length > 1 ? `${total}: ${parts.slice(0, -1).join(', ')} y ${parts.at(-1)}` : `${total} ${parts[0].replace(/^\d+ /, '')}`;
+  const marked = refs.filter((r) => photoVariants(r).length > 0).length;
+  return marked > 0 ? `${text}, ${marked} con medida propia` : text;
 }
 
 const lines = (list: NameValue[]) => list.map((a) => `${a.name}: ${a.value}`).join('\n');

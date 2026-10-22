@@ -31,6 +31,7 @@ function listing(over: Partial<ChannelListing> = {}): ChannelListing {
     origin: null,
     skus: ['EMB-001'],
     measures: [],
+    variations: [],
     attributes: [
       { id: 'CLUTCH_TYPE', name: 'Tipo de embrague', value: 'monodisco' },
       { id: 'INCLUDES_DISC', name: 'Incluye disco', value: 'Si' },

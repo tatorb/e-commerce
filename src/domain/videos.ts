@@ -50,6 +50,8 @@ export type ClipRules = {
   formats: string[];
   // Cómo se sube a mano, paso por paso.
   guide: string[];
+  // Si cada medida de la publicación puede tener su clip. Si no, el clip se ve en todas.
+  perVariant: boolean;
 };
 
 export type VideoMeasure = {

@@ -101,14 +101,24 @@ export async function readOneAction(accountSlug: string, publicationId: string):
 }
 
 /** Guarda las fotos elegidas, en orden. Null vuelve a usar las del canal. */
-export async function saveMediaAction(accountSlug: string, publicationId: string, refs: unknown): Promise<Result> {
+/**
+ * Guarda las fotos elegidas y las medidas de cada foto y cada video. refs null
+ * vuelve a las del canal; sin refs, las fotos quedan como están.
+ */
+export async function saveMediaAction(accountSlug: string, publicationId: string, input: { refs?: unknown; videos?: unknown }): Promise<Result> {
   await requireUser();
   const account = await getAccountBySlug(accountSlug);
   if (!account) return { ok: false, error: 'La cuenta no existe.' };
-  const parsed = z.object({ id: idSchema, refs: z.array(photoRefSchema).max(50).nullable() }).safeParse({ id: publicationId, refs });
+  const parsed = z
+    .object({
+      id: idSchema,
+      refs: z.array(photoRefSchema).max(50).nullable().optional(),
+      videos: z.record(z.string().max(40), z.array(z.string().min(1).max(200)).max(100)).optional(),
+    })
+    .safeParse({ id: publicationId, refs: input?.refs, videos: input?.videos });
   if (!parsed.success) return { ok: false, error: 'Las fotos que llegaron no tienen la forma esperada.' };
   try {
-    await saveMedia(prisma, { accountId: account.id, publicationId: parsed.data.id, refs: parsed.data.refs });
+    await saveMedia(prisma, { accountId: account.id, publicationId: parsed.data.id, refs: parsed.data.refs, videos: parsed.data.videos });
   } catch (e) {
     if (e instanceof MediaError) return { ok: false, error: e.message };
     throw e;

@@ -166,7 +166,7 @@ async function applyListing(
     title: listing.title,
     description: descriptionRead ? listing.description : (p.channelCopy?.description ?? null),
     attributes: listingAttributes(listing, ctx.adapter),
-    photos: channelPhotos(listing.photos, listing.photoIds),
+    photos: channelPhotos(listing.photos, listing.photoIds, listing.variations),
   };
   const channelPrints = fingerprintsOf(channel);
   const plans = planFaces(fingerprintsOf(app), channelPrints, parseFingerprints(p.channelCopy?.agreed));
@@ -215,6 +215,7 @@ async function applyListing(
     url: listing.url,
     photos: listing.photos,
     photoIds: listing.photoIds ?? [],
+    variations: listing.variations,
     hasVideo: listing.hasVideo,
     details: {
       brand: listing.brand,
@@ -472,7 +473,7 @@ export async function chooseFaces(
           attributes: true,
           media: true,
           channelCopy: {
-            select: { title: true, description: true, attributes: true, photos: true, photoIds: true, fingerprints: true, agreed: true, missingSince: true },
+            select: { title: true, description: true, attributes: true, photos: true, photoIds: true, variations: true, fingerprints: true, agreed: true, missingSince: true },
           },
         },
       });
@@ -525,7 +526,7 @@ export async function discardDrafts(
         attributes: true,
         media: true,
         channelCopy: {
-          select: { title: true, description: true, attributes: true, photos: true, photoIds: true, fingerprints: true, agreed: true, missingSince: true },
+          select: { title: true, description: true, attributes: true, photos: true, photoIds: true, variations: true, fingerprints: true, agreed: true, missingSince: true },
         },
       },
     });

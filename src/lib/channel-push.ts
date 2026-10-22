@@ -25,7 +25,7 @@ import {
   type FaceField,
   type FaceValues,
 } from '@/domain/channel-sync';
-import { channelPhotos, type PhotoRef } from '@/domain/media';
+import { channelPhotos, photoVariants, withVariants, type PhotoRef } from '@/domain/media';
 import type { NameValue } from '@/domain/name-value';
 import { writeContentField } from '@/domain/content';
 import { LATEST_MEASUREMENTS, latestMetrics } from '@/domain/measurements';
@@ -81,6 +81,7 @@ async function loadForPush(db: Db, accountId: string, publicationId: string) {
           photos: true,
           photoIds: true,
           photoOrigins: true,
+          variations: true,
         },
       },
     },
@@ -346,11 +347,11 @@ async function pushPhotos(
   },
 ): Promise<void> {
   const { p, refs } = args;
-  const { pictures, origins, problems } = await picturesFor(db, p.productId, refs);
+  const { pictures, origins, problems, layout, sent } = await picturesFor(db, p.productId, refs);
   if (problems.length > 0 || pictures.length === 0) return args.reject('photos', problems.join(' ') || 'Elegí al menos una foto.');
   let ids: string[] | null;
   try {
-    ids = await withAccessToken(db, p.store.id, (token) => args.publisher.updatePictures(token, p.externalId!, pictures));
+    ids = await withAccessToken(db, p.store.id, (token) => args.publisher.updatePictures(token, p.externalId!, pictures, layout));
   } catch (e) {
     if (!(e instanceof PublishError)) throw e;
     return args.reject('photos', e.message);
@@ -367,7 +368,11 @@ async function pushPhotos(
     // Con los códigos que devolvió el canal, la cara del canal ya tiene las fotos nuevas.
     if (ids && ids.length === pictures.length) {
       const urls = pictures.map((pic, i) => (pic.kind === 'link' ? pic.url : (known.get(ids![i]) ?? '')));
-      const print = fingerprint('photos', channelPhotos(urls, ids));
+      // Con las medidas con que se subió cada una; la lectura de confirmación trae las del canal.
+      const print = fingerprint(
+        'photos',
+        channelPhotos(urls, ids).map((ref, i) => withVariants(ref, photoVariants(sent[i]))),
+      );
       const added = Object.fromEntries(ids.flatMap((id, i) => (origins[i] ? [[id, origins[i]]] : [])));
       Object.assign(data, {
         photos: urls,

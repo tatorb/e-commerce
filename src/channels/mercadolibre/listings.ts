@@ -61,6 +61,21 @@ function statusOf(raw: unknown): ChannelStatus {
   return 'INACTIVE';
 }
 
+/** Las variantes de una publicación: su código, su SKU, su medida y el código de sus fotos. */
+export function variationsOf(item: Obj): { id: number | string; sku: string | null; measure: string | null; photoIds: string[] }[] {
+  return arr(item.variations).flatMap((v) => {
+    if (!isObj(v) || (typeof v.id !== 'number' && typeof v.id !== 'string')) return [];
+    const skuAttr = arr(v.attributes).find((a) => isObj(a) && a.id === SELLER_SKU);
+    const sku = (isObj(skuAttr) ? attributeValue(skuAttr) : null) ?? str(v.seller_custom_field);
+    const measure = arr(v.attribute_combinations)
+      .map((c) => (isObj(c) ? attributeValue(c) : null))
+      .filter((c): c is string => c !== null)
+      .join(' / ');
+    const photoIds = arr(v.picture_ids).flatMap((id) => (typeof id === 'string' && id ? [id] : typeof id === 'number' ? [String(id)] : []));
+    return [{ id: v.id, sku, measure: measure || null, photoIds }];
+  });
+}
+
 /** Una publicación de Mercado Libre en el formato neutro. Sin la descripción ni las visitas, que se piden aparte. */
 export function parseItem(item: Obj): ChannelListing {
   const attributes: ChannelListing['attributes'] = [];
@@ -87,16 +102,10 @@ export function parseItem(item: Obj): ChannelListing {
 
   // Cada variante tiene su SKU y su medida, por ejemplo "STD" o "0.50".
   const measures: ChannelListing['measures'] = [];
-  for (const v of arr(item.variations)) {
-    if (!isObj(v)) continue;
-    const skuAttr = arr(v.attributes).find((a) => isObj(a) && a.id === SELLER_SKU);
-    const sku = (isObj(skuAttr) ? attributeValue(skuAttr) : null) ?? str(v.seller_custom_field);
-    addSku(sku);
-    const measure = arr(v.attribute_combinations)
-      .map((c) => (isObj(c) ? attributeValue(c) : null))
-      .filter((c): c is string => c !== null)
-      .join(' / ');
-    if (sku && measure) measures.push({ sku, measure });
+  const variations = variationsOf(item);
+  for (const v of variations) {
+    addSku(v.sku);
+    if (v.sku && v.measure) measures.push({ sku: v.sku, measure: v.measure });
   }
 
   const pictures = arr(item.pictures)
@@ -126,6 +135,7 @@ export function parseItem(item: Obj): ChannelListing {
     origin,
     skus,
     measures,
+    variations: variations.map((v) => ({ sku: v.sku, measure: v.measure, photoIds: v.photoIds })),
     attributes,
     attributeCount: attributes.length + [brand, partNumber, origin].filter(Boolean).length + (skuAttr ? 1 : 0),
     updatedAt: str(item.last_updated),

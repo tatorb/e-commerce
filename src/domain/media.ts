@@ -4,17 +4,62 @@ import { z } from 'zod';
 // que ya está en el canal (con su código allá), una foto corregida en el paso
 // Imágenes, o una foto del producto por su link. Sin elegir (null), la
 // publicación usa las que tiene en el canal. Este módulo no sabe nada de canales.
+//
+// Si el producto tiene varias medidas, cada foto puede ser de algunas: el
+// comprador que elige una medida ve primero las suyas y después las de todas.
+// Sin medidas marcadas, la foto es de todas.
 
 // Lo que acepta la mayoría de las categorías.
 export const MAX_PHOTOS = 12;
 
+// Las medidas de la foto, por su clave (variantKey). Vacío: todas.
+const variants = { variants: z.array(z.string().min(1).max(200)).max(100).optional() };
+
 export const photoRefSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('channel'), id: z.string().min(1).max(100), url: z.string().max(2000).default('') }),
-  z.object({ kind: z.literal('edit'), editId: z.string().min(1).max(40) }),
-  z.object({ kind: z.literal('asset'), url: z.string().url().max(2000) }),
+  z.object({ kind: z.literal('channel'), id: z.string().min(1).max(100), url: z.string().max(2000).default(''), ...variants }),
+  z.object({ kind: z.literal('edit'), editId: z.string().min(1).max(40), ...variants }),
+  z.object({ kind: z.literal('asset'), url: z.string().url().max(2000), ...variants }),
 ]);
 
 export type PhotoRef = z.infer<typeof photoRefSchema>;
+
+/** Una medida, como la tiene la ficha o como la informa el canal. */
+export type VariantLike = { sku: string | null; measure: string | null };
+
+/**
+ * Lo que identifica a una medida: su SKU o, si no tiene, la medida. Sirve igual
+ * para la ficha y para lo que lee el canal. Null si no tiene ninguno de los dos.
+ */
+export function variantKey(v: VariantLike): string | null {
+  const sku = v.sku?.trim();
+  if (sku) return `sku:${sku.toUpperCase()}`;
+  const measure = v.measure?.replace(/\s+/g, ' ').trim();
+  return measure ? `medida:${measure.toLowerCase()}` : null;
+}
+
+/** Las medidas marcadas de la foto. Vacío: es de todas. */
+export function photoVariants(ref: PhotoRef): string[] {
+  return ref.variants ?? [];
+}
+
+/** La foto con esas medidas, sin repetir. Sin ninguna, queda de todas. */
+export function withVariants<T extends PhotoRef>(ref: T, keys: string[]): T {
+  const out: T = { ...ref };
+  delete out.variants;
+  const unique = [...new Set(keys)].sort();
+  return unique.length > 0 ? { ...out, variants: unique } : out;
+}
+
+/** Las fotos que ve el comprador en esa medida: primero las suyas y después las de todas, en el orden de la lista. */
+export function variantPhotos<T extends PhotoRef>(refs: T[], key: string): T[] {
+  return [...refs.filter((r) => photoVariants(r).includes(key)), ...refs.filter((r) => photoVariants(r).length === 0)];
+}
+
+/** Lo que conviene avisar de las medidas: las que se quedan sin fotos. */
+export function mediaWarnings(refs: PhotoRef[], measures: { key: string; label: string }[]): string[] {
+  if (measures.length < 2 || refs.length === 0) return [];
+  return measures.filter((m) => variantPhotos(refs, m.key).length === 0).map((m) => `La medida ${m.label} se queda sin fotos.`);
+}
 
 /** Lo que identifica a una foto, sin importar el link con que se la ve. */
 export function photoKey(ref: PhotoRef): string {
@@ -32,11 +77,48 @@ export function parseMedia(raw: unknown): PhotoRef[] | null {
   });
 }
 
-/** Las fotos que tiene la publicación en el canal, como se leyeron. */
-export function channelPhotos(photos: unknown, photoIds: unknown): PhotoRef[] {
+/** Una medida de la publicación en el canal, con el código de sus fotos. */
+export type ChannelVariation = VariantLike & { photoIds: string[] };
+
+/** Lee las medidas guardadas de lo que se leyó del canal. */
+export function parseVariations(raw: unknown): ChannelVariation[] {
+  if (!Array.isArray(raw)) return [];
+  const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v : null);
+  return raw.flatMap((v) => {
+    if (!v || typeof v !== 'object') return [];
+    const o = v as Record<string, unknown>;
+    const photoIds = Array.isArray(o.photoIds) ? o.photoIds.filter((id): id is string => typeof id === 'string' && id !== '') : [];
+    return [{ sku: text(o.sku), measure: text(o.measure), photoIds }];
+  });
+}
+
+/**
+ * Las fotos que tiene la publicación en el canal, como se leyeron. Con las
+ * medidas del canal, cada foto queda marcada con las suyas; la que está en
+ * todas, o en ninguna, es de todas.
+ */
+export function channelPhotos(photos: unknown, photoIds: unknown, variations: unknown = []): PhotoRef[] {
   const urls = Array.isArray(photos) ? photos : [];
   const ids = Array.isArray(photoIds) ? photoIds : [];
-  return ids.flatMap((id, i) => (typeof id === 'string' && id ? [{ kind: 'channel' as const, id, url: typeof urls[i] === 'string' ? urls[i] : '' }] : []));
+  const measures = parseVariations(variations);
+  return ids.flatMap((id, i) => {
+    if (typeof id !== 'string' || !id) return [];
+    const ref: PhotoRef = { kind: 'channel', id, url: typeof urls[i] === 'string' ? urls[i] : '' };
+    const own = measures.filter((m) => m.photoIds.includes(id));
+    if (own.length === 0 || own.length === measures.length) return [ref];
+    return [withVariants(ref, own.flatMap((m) => variantKey(m) ?? []))];
+  });
+}
+
+/** Las medidas de cada video de la publicación, por el id del video. Sin marcar, el video es de todas. */
+export function parseVideoVariants(raw: unknown): Record<string, string[]> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  return Object.fromEntries(
+    Object.entries(raw as Record<string, unknown>).flatMap(([id, keys]) => {
+      const list = Array.isArray(keys) ? [...new Set(keys.filter((k): k is string => typeof k === 'string' && k !== ''))].sort() : [];
+      return list.length > 0 ? [[id, list]] : [];
+    }),
+  );
 }
 
 /** Sin repetir y con el tope: lo que se guarda al elegir. */
@@ -47,7 +129,7 @@ export function cleanMedia(refs: PhotoRef[]): PhotoRef[] {
     const key = photoKey(r);
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push(r);
+    out.push(withVariants(r, photoVariants(r)));
   }
   return out.slice(0, MAX_PHOTOS);
 }

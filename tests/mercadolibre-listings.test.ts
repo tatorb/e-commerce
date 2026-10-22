@@ -50,8 +50,13 @@ const ITEMS: Record<string, object> = {
     attributes: [{ id: 'ORIGIN', name: 'Origen', value_name: 'Brasil' }],
     seller_custom_field: 'AROS',
     variations: [
-      { id: 1, attribute_combinations: [{ id: 'SIZE', name: 'Medida', value_name: 'STD' }], attributes: [{ id: 'SELLER_SKU', value_name: 'AROS-STD' }] },
-      { id: 2, attribute_combinations: [{ id: 'SIZE', name: 'Medida', value_name: '0.50' }], seller_custom_field: 'AROS-050' },
+      {
+        id: 1,
+        attribute_combinations: [{ id: 'SIZE', name: 'Medida', value_name: 'STD' }],
+        attributes: [{ id: 'SELLER_SKU', value_name: 'AROS-STD' }],
+        picture_ids: ['F1', 'F3'],
+      },
+      { id: 2, attribute_combinations: [{ id: 'SIZE', name: 'Medida', value_name: '0.50' }], seller_custom_field: 'AROS-050', picture_ids: ['F2', 'F3'] },
       { id: 3, attribute_combinations: [] },
     ],
   },
@@ -94,6 +99,12 @@ describe('de Mercado Libre al formato neutro', () => {
     expect(l.measures).toEqual([
       { sku: 'AROS-STD', measure: 'STD' },
       { sku: 'AROS-050', measure: '0.50' },
+    ]);
+    // Cada variante con sus fotos, aunque le falte el SKU o la medida.
+    expect(l.variations).toEqual([
+      { sku: 'AROS-STD', measure: 'STD', photoIds: ['F1', 'F3'] },
+      { sku: 'AROS-050', measure: '0.50', photoIds: ['F2', 'F3'] },
+      { sku: null, measure: null, photoIds: [] },
     ]);
     expect(parseItem({ id: 'MLA9', status: 'closed' }).status).toBe('INACTIVE');
     expect(parseItem({ id: 'MLA9', status: 'under_review' }).status).toBe('INACTIVE');

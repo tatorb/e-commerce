@@ -1,5 +1,5 @@
 import { cleanText } from './content';
-import { channelPhotos, parseMedia, photoKey, type PhotoRef } from './media';
+import { channelPhotos, parseMedia, photoKey, photoVariants, type PhotoRef } from './media';
 import { parseNameValueList, type NameValue } from './name-value';
 
 // Las caras de una publicación: lo que tiene la app y lo que está en el canal.
@@ -44,15 +44,30 @@ export function faceValues(p: { title: string | null; description: string | null
 }
 
 /** Los datos de la cara del canal, como los guarda la copia de lo que se leyó. */
-export function channelFaceValues(c: { title: string | null; description: string | null; attributes: unknown; photos: unknown; photoIds: unknown }): FaceValues {
-  return { title: c.title, description: c.description, attributes: parseNameValueList(c.attributes), photos: channelPhotos(c.photos, c.photoIds) };
+export function channelFaceValues(c: {
+  title: string | null;
+  description: string | null;
+  attributes: unknown;
+  photos: unknown;
+  photoIds: unknown;
+  variations: unknown;
+}): FaceValues {
+  return { title: c.title, description: c.description, attributes: parseNameValueList(c.attributes), photos: channelPhotos(c.photos, c.photoIds, c.variations) };
 }
 
 const oneSpace = (s: string) => s.replace(/\s+/g, ' ').trim();
 
 /** El dato como se compara: sin diferencias de espacios, saltos de línea ni orden de los datos de catálogo. */
 function normalized(field: FaceField, value: FaceValues[FaceField]): string {
-  if (field === 'photos') return ((value as PhotoRef[] | null) ?? []).map(photoKey).join('\n');
+  if (field === 'photos') {
+    // Las medidas cuentan solo si hay: las fotos sin medidas comparan como siempre.
+    return ((value as PhotoRef[] | null) ?? [])
+      .map((r) => {
+        const marks = photoVariants(r);
+        return marks.length > 0 ? `${photoKey(r)} @ ${[...marks].sort().join(',')}` : photoKey(r);
+      })
+      .join('\n');
+  }
   if (field === 'attributes') {
     return (value as NameValue[])
       .map((a) => `${oneSpace(a.name).toLowerCase()}=${oneSpace(a.value)}`)

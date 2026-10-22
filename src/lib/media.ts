@@ -1,14 +1,29 @@
 import type { PrismaClient } from '@/generated/prisma/client';
 import { Prisma } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
-import type { ChannelPicture } from '@/channels/publish';
-import { channelPhotos, cleanMedia, MAX_PHOTOS, parseMedia, photoKey, type PhotoRef } from '@/domain/media';
+import type { ChannelPicture, ChannelPictureLayout } from '@/channels/publish';
+import {
+  channelPhotos,
+  cleanMedia,
+  MAX_PHOTOS,
+  parseMedia,
+  parseVariations,
+  parseVideoVariants,
+  photoKey,
+  photoVariants,
+  variantKey,
+  variantPhotos,
+  withVariants,
+  type PhotoRef,
+  type VariantLike,
+} from '@/domain/media';
 import { LAST_PHOTO_STEP } from '@/domain/photo-steps';
 import { readStored } from '@/lib/stored-files';
 
 // Las fotos de una publicación: de dónde se pueden tomar (las que ya están en
 // el canal, las corregidas en el paso Imágenes y las del producto) y cuáles
-// quedaron elegidas, en orden. Recibe la base por parámetro para poder probarlo.
+// quedaron elegidas, en orden. Si el producto tiene varias medidas, también de
+// cuáles es cada foto y cada video. Recibe la base por parámetro para poder probarlo.
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -22,6 +37,27 @@ export type MediaItem = {
   label: string;
   note: string | null;
 };
+
+/** Una medida de la ficha, como se marca en las fotos. */
+export type Measure = { key: string; label: string; sku: string | null; measure: string | null };
+
+/** Las medidas de la ficha que se pueden marcar: las que tienen SKU o medida, sin repetir. */
+export function measuresOf(variants: VariantLike[]): Measure[] {
+  const out: Measure[] = [];
+  for (const v of variants) {
+    const key = variantKey(v);
+    if (!key || out.some((m) => m.key === key)) continue;
+    out.push({ key, label: v.measure?.trim() || v.sku!.trim(), sku: v.sku?.trim() || null, measure: v.measure?.trim() || null });
+  }
+  return out;
+}
+
+/** Las marcas que valen: de medidas de la ficha y, si están todas, ninguna, porque es de todas. */
+function knownVariants(keys: string[], measures: Measure[]): string[] {
+  if (measures.length < 2) return [];
+  const known = keys.filter((k) => measures.some((m) => m.key === k));
+  return new Set(known).size >= measures.length ? [] : known;
+}
 
 const viewUrl = (runId: string) => `/api/imagenes/ver?tipo=vista&paso=${encodeURIComponent(runId)}`;
 
@@ -58,19 +94,34 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
       productId: true,
       externalId: true,
       media: true,
+      videoVariants: true,
       store: { select: { channel: { select: { kind: true, name: true } } } },
-      product: { select: { assets: { where: { kind: 'PHOTO' }, orderBy: { position: 'asc' }, select: { url: true } } } },
-      channelCopy: { select: { photos: true, photoIds: true, photoOrigins: true, missingSince: true } },
+      product: {
+        select: {
+          assets: { where: { kind: 'PHOTO' }, orderBy: { position: 'asc' }, select: { url: true } },
+          variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } },
+          videos: {
+            where: { goneAt: null },
+            orderBy: [{ driveCreatedAt: 'asc' }, { createdAt: 'asc' }],
+            select: { id: true, name: true, durationMs: true },
+          },
+        },
+      },
+      clip: { select: { videoId: true } },
+      channelCopy: { select: { photos: true, photoIds: true, photoOrigins: true, variations: true, missingSince: true } },
     },
   });
   if (!p) throw new MediaError('La publicación no está en la cuenta.');
-  const channelName = getChannelAdapter(p.store.channel.kind, p.store.channel.name).name;
+  const adapter = getChannelAdapter(p.store.channel.kind, p.store.channel.name);
+  const channelName = adapter.name;
+  const measures = measuresOf(p.product.variants);
+  const marks = (keys: string[]) => knownVariants(keys, measures);
   const copy = p.channelCopy && !p.channelCopy.missingSince ? p.channelCopy : null;
   const origins = photoOriginsOf(copy?.photoOrigins);
   const edits = await finishedEdits(db, p.productId);
   const editNumber = new Map(edits.map((e, i) => [e.id, i + 1]));
 
-  const channel: MediaItem[] = channelPhotos(copy?.photos, copy?.photoIds).map((ref, i) => {
+  const channel: MediaItem[] = channelPhotos(copy?.photos, copy?.photoIds, copy?.variations).map((ref, i) => {
     const from = origins[ref.kind === 'channel' ? ref.id : ''];
     return {
       ref,
@@ -95,24 +146,38 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
 
   const all = new Map([...channel, ...corrected, ...assets].map((m) => [m.key, m]));
   const media = parseMedia(p.media);
-  const current = (media ?? channel.map((c) => c.ref)).map(
-    (ref): MediaItem =>
-      all.get(photoKey(ref)) ?? {
-        ref,
-        key: photoKey(ref),
-        thumb: ref.kind === 'edit' ? null : ref.url || null,
-        label: ref.kind === 'edit' ? 'Corregida' : 'Foto',
-        note: 'Ya no está disponible',
-      },
-  );
+  const current = (media ?? channel.map((c) => c.ref)).map((ref): MediaItem => {
+    const found = all.get(photoKey(ref)) ?? {
+      ref,
+      key: photoKey(ref),
+      thumb: ref.kind === 'edit' ? null : ref.url || null,
+      label: ref.kind === 'edit' ? 'Corregida' : 'Foto',
+      note: 'Ya no está disponible',
+    };
+    // Con las medidas que tiene en esta publicación; las que ya no están en la ficha se caen.
+    const kept = marks(photoVariants(ref));
+    const lost = measures.length >= 2 && photoVariants(ref).some((k) => !kept.includes(k)) && kept.length === 0;
+    return { ...found, ref: withVariants(found.ref, kept), note: lost ? 'Su medida ya no está en la ficha: quedó en Todas' : found.note };
+  });
+  // Las que se pueden elegir, sin marcas: al agregarlas son de todas.
+  const plain = (list: MediaItem[]) => list.map((m) => ({ ...m, ref: withVariants(m.ref, []) }));
+  const videoMarks = parseVideoVariants(p.videoVariants);
+  const clipRules = adapter.clips;
+  const variations = parseVariations(copy?.variations);
   return {
     publication: { id: p.id, productId: p.productId, externalId: p.externalId },
     channelName,
     // Sin elegir: usa las del canal.
     following: media === null,
     current,
-    available: { channel, corrected, assets },
+    available: { channel: plain(channel), corrected, assets },
     max: MAX_PHOTOS,
+    // Las medidas que se pueden marcar: con menos de dos, no hay nada que elegir.
+    measures: measures.length >= 2 ? measures : [],
+    // Leída del canal y sin variantes: allá todas las fotos se ven juntas.
+    channelWithoutVariants: copy !== null && measures.length >= 2 && variations.length === 0,
+    videos: p.product.videos.map((v) => ({ id: v.id, name: v.name, durationMs: v.durationMs, variants: marks(videoMarks[v.id] ?? []) })),
+    clip: clipRules ? { videoId: p.clip?.videoId ?? null, name: clipRules.name, perVariant: clipRules.perVariant } : null,
   };
 }
 
@@ -122,23 +187,31 @@ export type MediaSources = Awaited<ReturnType<typeof loadMediaSources>>;
  * Guarda las fotos elegidas, en orden. Null vuelve a usar las del canal. Solo
  * acepta fotos que la publicación puede usar.
  */
-export async function saveMedia(db: Db, args: { accountId: string; publicationId: string; refs: PhotoRef[] | null }): Promise<void> {
+export async function saveMedia(
+  db: Db,
+  args: { accountId: string; publicationId: string; refs?: PhotoRef[] | null; videos?: Record<string, string[]> },
+): Promise<void> {
   const sources = await loadMediaSources(db, args.accountId, args.publicationId);
-  if (args.refs === null) {
-    await db.publication.update({ where: { id: args.publicationId }, data: { media: Prisma.DbNull } });
-    return;
+  const keys = (list: string[]) => knownVariants(list, sources.measures);
+  const data: Prisma.PublicationUpdateInput = {};
+  if (args.videos) {
+    const known = new Set(sources.videos.map((v) => v.id));
+    data.videoVariants = Object.fromEntries(
+      Object.entries(args.videos).flatMap(([id, list]) => (known.has(id) && keys(list).length > 0 ? [[id, [...new Set(keys(list))].sort()]] : [])),
+    );
   }
-  const refs = cleanMedia(args.refs);
-  if (refs.length === 0) throw new MediaError('Elegí al menos una foto.');
-  if (args.refs.length > MAX_PHOTOS) throw new MediaError(`Se pueden elegir hasta ${MAX_PHOTOS} fotos.`);
-  const allowed = new Set([...sources.available.channel, ...sources.available.corrected, ...sources.available.assets].map((m) => m.key));
-  if (refs.some((r) => !allowed.has(photoKey(r)))) throw new MediaError('Una de las fotos ya no está disponible. Recargá la página.');
-  // Las del canal se guardan con su link, para verlas aunque cambie la lectura.
-  const byKey = new Map(sources.available.channel.map((m) => [m.key, m.ref]));
-  await db.publication.update({
-    where: { id: args.publicationId },
-    data: { media: refs.map((r) => byKey.get(photoKey(r)) ?? r) as Prisma.InputJsonValue },
-  });
+  if (args.refs === null) data.media = Prisma.DbNull;
+  else if (args.refs) {
+    const refs = cleanMedia(args.refs);
+    if (refs.length === 0) throw new MediaError('Elegí al menos una foto.');
+    if (args.refs.length > MAX_PHOTOS) throw new MediaError(`Se pueden elegir hasta ${MAX_PHOTOS} fotos.`);
+    const allowed = new Set([...sources.available.channel, ...sources.available.corrected, ...sources.available.assets].map((m) => m.key));
+    if (refs.some((r) => !allowed.has(photoKey(r)))) throw new MediaError('Una de las fotos ya no está disponible. Recargá la página.');
+    // Las del canal se guardan con su link, para verlas aunque cambie la lectura.
+    const byKey = new Map(sources.available.channel.map((m) => [m.key, m.ref]));
+    data.media = refs.map((r) => withVariants(byKey.get(photoKey(r)) ?? r, keys(photoVariants(r)))) as Prisma.InputJsonValue;
+  }
+  if (Object.keys(data).length > 0) await db.publication.update({ where: { id: args.publicationId }, data });
 }
 
 /** El JPG final de una foto corregida, para subirlo al canal. Null si ya no está. */
@@ -151,11 +224,15 @@ export async function correctedPhotoFile(db: PrismaClient, productId: string, ed
   return { data: new Uint8Array(await res.arrayBuffer()), type: 'image/jpeg', name: `${edit.name.replace(/\.[^.]+$/, '')}.jpg` };
 }
 
-/** Las fotos, como las pide el canal: las corregidas se suben como archivo. */
+/**
+ * Las fotos, como las pide el canal: las corregidas se suben como archivo. Con
+ * varias medidas en la ficha, también qué fotos ve el comprador en cada una.
+ */
 export async function picturesFor(db: PrismaClient, productId: string, refs: PhotoRef[]) {
   const pictures: ChannelPicture[] = [];
   const origins: (string | null)[] = [];
   const problems: string[] = [];
+  const sent: PhotoRef[] = [];
   for (const ref of refs) {
     if (ref.kind === 'channel') pictures.push({ kind: 'existing', id: ref.id });
     else if (ref.kind === 'asset') pictures.push({ kind: 'link', url: ref.url });
@@ -168,6 +245,17 @@ export async function picturesFor(db: PrismaClient, productId: string, refs: Pho
       pictures.push({ kind: 'file', ...file });
     }
     origins.push(ref.kind === 'edit' ? ref.editId : null);
+    sent.push(ref);
   }
-  return { pictures, origins, problems };
+  const variants = await db.productVariant.findMany({ where: { productId }, orderBy: { position: 'asc' }, select: { sku: true, measure: true } });
+  const measures = measuresOf(variants);
+  // Cada foto con las medidas que valen, y su lugar en la lista.
+  const marked = sent.map((ref) => withVariants(ref, knownVariants(photoVariants(ref), measures)));
+  const placed = marked.map((ref, at) => ({ ...ref, at }));
+  const layout: ChannelPictureLayout = {
+    variants: measures.length >= 2 ? measures.map((m) => ({ sku: m.sku, measure: m.measure, pictures: variantPhotos(placed, m.key).map((r) => r.at) })) : [],
+    general: placed.filter((r) => photoVariants(r).length === 0).map((r) => r.at),
+  };
+  // sent: las fotos que van, con las medidas con que van, en el mismo orden que pictures.
+  return { pictures, origins, problems, layout, sent: marked };
 }

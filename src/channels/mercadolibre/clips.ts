@@ -5,7 +5,7 @@ import type { ClipRules } from '@/domain/videos';
 // se suben a mano desde la cuenta del vendedor y pasan por una revisión.
 // Las medidas salen de lo que publican Mercado Libre y las herramientas para
 // vendedores; el peso máximo no está del todo claro, así que se toma el más
-// citado.
+// citado. El clip es uno por publicación: se ve en todas sus medidas.
 export const MERCADOLIBRE_CLIPS: ClipRules = {
   name: 'clip',
   minSeconds: 10,
@@ -22,4 +22,5 @@ export const MERCADOLIBRE_CLIPS: ClipRules = {
     'Mercado Libre lo revisa antes de mostrarlo. Puede tardar unas horas.',
     'Volvé acá y tocá Ya lo subí, así queda anotado.',
   ],
+  perVariant: false,
 };

@@ -1,5 +1,6 @@
-import { MercadoLibreRequestError, mlSend } from './http';
-import { PublishError, type ChannelAttributeUpdate, type ChannelPicture, type ChannelPublisher } from '../publish-types';
+import { MercadoLibreRequestError, mlGet, mlSend } from './http';
+import { variationsOf } from './listings';
+import { PublishError, type ChannelAttributeUpdate, type ChannelPicture, type ChannelPictureLayout, type ChannelPublisher } from '../publish-types';
 
 // Subir a Mercado Libre el título y la descripción de una publicación propia.
 // Si Mercado Libre no acepta el cambio, se explica por qué en castellano.
@@ -16,6 +17,7 @@ const KNOWN: [RegExp, string][] = [
   [/description.*(length|max|long)/i, 'La descripción es más larga de lo que acepta Mercado Libre.'],
   [/description.*(html|tag|link|url|mail|phone|contact)/i, 'Mercado Libre no acepta links, mails, teléfonos ni etiquetas HTML en la descripción.'],
   [/description/i, 'Mercado Libre no aceptó la descripción.'],
+  [/picture|image/i, 'Mercado Libre no aceptó las fotos.'],
   [/under_review|moderat/i, 'La publicación está en revisión en Mercado Libre: no se puede cambiar por ahora.'],
   [/closed|inactive|status/i, 'La publicación está finalizada en Mercado Libre: no se puede cambiar.'],
 ];
@@ -29,8 +31,8 @@ export function rejectionMessage(status: number, body: unknown): string {
   const detail = causes.map((c) => (typeof c.message === 'string' ? c.message : null)).find(Boolean) ?? (isObj(body) && typeof body.message === 'string' ? body.message : null);
   for (const [pattern, message] of KNOWN) {
     if (!pattern.test(codes)) continue;
-    // En los datos de catálogo, el detalle dice cuál fue.
-    return /attribute/i.test(pattern.source) && detail ? `${message.slice(0, -1)}: ${detail}` : message;
+    // En los datos de catálogo y en las fotos, el detalle dice cuál fue.
+    return /attribute|picture/i.test(pattern.source) && detail ? `${message.slice(0, -1)}: ${detail}` : message;
   }
   return detail ? `Mercado Libre no lo aceptó: ${detail}` : `Mercado Libre no lo aceptó (código ${status}).`;
 }
@@ -46,6 +48,21 @@ async function send(method: 'PUT' | 'POST', path: string, token: string, body: u
   } catch (e) {
     throw translated(e);
   }
+}
+
+async function get(path: string, token: string): Promise<unknown> {
+  try {
+    return await mlGet(path, token);
+  } catch (e) {
+    throw translated(e);
+  }
+}
+
+const sameText = (a: string | null, b: string | null) => !!a && !!b && a.replace(/\s+/g, ' ').trim().toLowerCase() === b.replace(/\s+/g, ' ').trim().toLowerCase();
+
+/** La medida de la ficha de una variante: por SKU y, si a alguna le falta, por la medida. */
+function variantOf(layout: ChannelPictureLayout, v: { sku: string | null; measure: string | null }) {
+  return layout.variants.find((x) => sameText(x.sku, v.sku)) ?? layout.variants.find((x) => (!x.sku || !v.sku) && sameText(x.measure, v.measure));
 }
 
 /** Las fotos como las pide Mercado Libre: los archivos se suben antes y quedan por su código. */
@@ -128,9 +145,27 @@ export const mercadolibrePublisher: ChannelPublisher = {
     };
   },
 
-  async updatePictures(accessToken, externalId, pictures) {
+  async updatePictures(accessToken, externalId, pictures, layout) {
+    const id = encodeURIComponent(externalId);
+    // Con variantes, las fotos de cada una van en el mismo pedido, y todas las
+    // variantes: Mercado Libre borra las que no van.
+    const item = await get(`/items/${id}?attributes=variations`, accessToken);
+    const variations = isObj(item) ? variationsOf(item) : [];
     const body = await picturesBody(accessToken, pictures);
-    const res = await send('PUT', `/items/${encodeURIComponent(externalId)}`, accessToken, { pictures: body });
+    const ref = (p: { id: string } | { source: string }) => ('id' in p ? p.id : p.source);
+    const everything = body.map((_, i) => i);
+    const res = await send('PUT', `/items/${id}`, accessToken, {
+      pictures: body,
+      ...(variations.length > 0
+        ? {
+            variations: variations.map((v) => {
+              const own = (variantOf(layout, v)?.pictures ?? layout.general).filter((i) => i >= 0 && i < body.length);
+              // Cada variante necesita al menos una foto.
+              return { id: v.id, picture_ids: (own.length > 0 ? own : everything).map((i) => ref(body[i])) };
+            }),
+          }
+        : {}),
+    });
     return pictureIdsOf(res) ?? (body.every((p) => 'id' in p) ? body.map((p) => (p as { id: string }).id) : null);
   },
 

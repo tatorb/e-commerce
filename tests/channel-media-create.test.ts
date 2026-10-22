@@ -3,8 +3,19 @@ import type { AddressInfo } from 'node:net';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PrismaClient } from '@/generated/prisma/client';
-import { faceSummary, faceValues, fingerprintsOf } from '@/domain/channel-sync';
-import { cleanMedia, parseMedia, photoKey } from '@/domain/media';
+import { faceSummary, faceValues, fingerprint, fingerprintsOf } from '@/domain/channel-sync';
+import {
+  channelPhotos,
+  cleanMedia,
+  mediaWarnings,
+  parseMedia,
+  parseVideoVariants,
+  photoKey,
+  variantKey,
+  variantPhotos,
+  withVariants,
+  type PhotoRef,
+} from '@/domain/media';
 import { createChecks, CreateError, createInChannel, warrantyText } from '@/lib/channel-create';
 import { pushDrafts } from '@/lib/channel-push';
 import { runSyncStep, startSync } from '@/lib/channel-sync';
@@ -31,6 +42,57 @@ describe('las fotos elegidas', () => {
     expect(photoKey({ kind: 'channel', id: 'P1', url: 'x' })).toBe(photoKey({ kind: 'channel', id: 'P1', url: 'y' }));
   });
 
+  it('cada medida se reconoce por su SKU o, si no tiene, por la medida', () => {
+    expect(variantKey({ sku: ' a-50 ', measure: '0.50' })).toBe('sku:A-50');
+    expect(variantKey({ sku: null, measure: ' 0.50  Mayor ' })).toBe('medida:0.50 mayor');
+    expect(variantKey({ sku: '', measure: null })).toBeNull();
+  });
+
+  it('el comprador ve primero las fotos de su medida y después las de todas, en el orden de la lista', () => {
+    const refs: PhotoRef[] = [
+      { kind: 'asset', url: 'https://f/general.jpg' },
+      withVariants({ kind: 'asset', url: 'https://f/caja-050.jpg' }, ['sku:B']),
+      withVariants({ kind: 'asset', url: 'https://f/caja-std.jpg' }, ['sku:A']),
+      { kind: 'asset', url: 'https://f/detalle.jpg' },
+    ];
+    const urls = (list: PhotoRef[]) => list.map((r) => (r.kind === 'asset' ? r.url.split('/').pop() : ''));
+    expect(urls(variantPhotos(refs, 'sku:B'))).toEqual(['caja-050.jpg', 'general.jpg', 'detalle.jpg']);
+    expect(urls(variantPhotos(refs, 'sku:A'))).toEqual(['caja-std.jpg', 'general.jpg', 'detalle.jpg']);
+    const measures = [
+      { key: 'sku:A', label: 'STD' },
+      { key: 'sku:C', label: '0.25' },
+    ];
+    expect(mediaWarnings([refs[2]], measures)).toEqual(['La medida 0.25 se queda sin fotos.']);
+    expect(mediaWarnings(refs, measures)).toEqual([]);
+    // Con una sola medida no hay nada que avisar.
+    expect(mediaWarnings([refs[2]], measures.slice(0, 1))).toEqual([]);
+  });
+
+  it('las marcas se guardan sin repetir y una foto sin marcas es de todas', () => {
+    const ref = withVariants({ kind: 'edit', editId: 'e1' }, ['sku:B', 'sku:A', 'sku:B']);
+    expect(ref).toEqual({ kind: 'edit', editId: 'e1', variants: ['sku:A', 'sku:B'] });
+    expect(withVariants(ref, [])).toEqual({ kind: 'edit', editId: 'e1' });
+    expect(cleanMedia([ref, { ...ref, variants: [] }])).toEqual([ref]);
+    expect(parseMedia([ref])).toEqual([ref]);
+    expect(parseVideoVariants({ v1: ['sku:B', 'sku:A'], v2: [], v3: 'x' })).toEqual({ v1: ['sku:A', 'sku:B'] });
+  });
+
+  it('del canal, cada foto queda con las medidas que la tienen; la que está en todas es de todas', () => {
+    const variations = [
+      { sku: 'A', measure: 'STD', photoIds: ['P1', 'P3'] },
+      { sku: null, measure: '0.50', photoIds: ['P2', 'P3'] },
+    ];
+    expect(channelPhotos(['u1', 'u2', 'u3'], ['P1', 'P2', 'P3'], variations)).toEqual([
+      { kind: 'channel', id: 'P1', url: 'u1', variants: ['sku:A'] },
+      { kind: 'channel', id: 'P2', url: 'u2', variants: ['medida:0.50'] },
+      { kind: 'channel', id: 'P3', url: 'u3' },
+    ]);
+    // Sin medidas marcadas, la huella es la de siempre; con marcas, cambia.
+    const plain = channelPhotos(['u1'], ['P1']);
+    expect(fingerprint('photos', plain)).toBe(fingerprint('photos', [{ kind: 'channel', id: 'P1', url: 'otro' }]));
+    expect(fingerprint('photos', [withVariants(plain[0], ['sku:A'])])).not.toBe(fingerprint('photos', plain));
+  });
+
   it('la garantía, si la ficha la tiene en la forma que pide el canal', () => {
     expect(warrantyText('6 meses')).toBe('6 meses');
     expect(warrantyText('1 mes')).toBe('1 mes');
@@ -43,7 +105,16 @@ describe('las fotos elegidas', () => {
 
 const url = process.env.TEST_DATABASE_URL;
 
-type Item = { title: string; price: number; pictures: { id: string; secure_url: string }[]; sold: number; category_id: string; attributes: object[] };
+type Variation = { id: number; seller_custom_field?: string; attribute_combinations: { id: string; value_name: string }[]; picture_ids: string[] };
+type Item = {
+  title: string;
+  price: number;
+  pictures: { id: string; secure_url: string }[];
+  sold: number;
+  category_id: string;
+  attributes: object[];
+  variations?: Variation[];
+};
 
 describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
   const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: url! }) });
@@ -89,12 +160,30 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
       }
       if (desc) return descriptions[desc[1]] ? json(200, { plain_text: descriptions[desc[1]] }) : json(404, {});
       const item = u.pathname.match(/^\/items\/(\w+)$/);
+      if (item && req.method === 'GET' && u.searchParams.get('attributes') === 'variations') {
+        const it = items[item[1]];
+        return it ? json(200, { id: item[1], variations: it.variations ?? [] }) : json(404, {});
+      }
       if (item && req.method === 'PUT' && body.pictures) {
         const it = items[item[1]];
+        const sent = body.pictures.map((p: { id?: string; source?: string }) => p.id ?? p.source);
+        const known = new Set(sent);
+        // Como Mercado Libre: con variantes, van todas, y cada una con fotos de la lista.
+        if (it.variations?.length) {
+          const got: { id: number; picture_ids: string[] }[] = body.variations ?? [];
+          if (got.length !== it.variations.length || got.some((v) => v.picture_ids.length === 0 || v.picture_ids.some((id) => !known.has(id)))) {
+            return json(400, { message: 'Validation error', cause: [{ code: 'item.variations.picture_ids.invalid', message: 'Las fotos de las variantes no coinciden' }] });
+          }
+        }
         it.pictures = body.pictures.map((p: { id?: string; source?: string }, i: number) => ({
           id: p.id ?? `LINK-${i}`,
           secure_url: p.source ?? it.pictures.find((x) => x.id === p.id)?.secure_url ?? `https://ml/${p.id}.jpg`,
         }));
+        const idOf = (ref: string) => it.pictures[sent.indexOf(ref)].id;
+        for (const v of body.variations ?? []) {
+          const mine = it.variations!.find((x) => x.id === v.id)!;
+          mine.picture_ids = v.picture_ids.map(idOf);
+        }
         return json(200, { id: item[1], pictures: it.pictures.map((p) => ({ id: p.id })) });
       }
       if (u.pathname === '/items/bulk') {
@@ -106,7 +195,18 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
             if (!it) return { code: 404, body: {} };
             return {
               code: 200,
-              body: { id, seller_id: 7, title: it.title, status: 'active', price: it.price, sold_quantity: it.sold, category_id: it.category_id, pictures: it.pictures, attributes: it.attributes },
+              body: {
+                id,
+                seller_id: 7,
+                title: it.title,
+                status: 'active',
+                price: it.price,
+                sold_quantity: it.sold,
+                category_id: it.category_id,
+                pictures: it.pictures,
+                attributes: it.attributes,
+                variations: it.variations ?? [],
+              },
             };
           }),
         );
@@ -240,6 +340,143 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     await db.channelSync.updateMany({ data: { startedAt: new Date(Date.now() - 3 * 3600_000) } });
     await readAll();
     expect((await state(pub.id)).choose).toEqual(['photos']);
+  });
+
+  describe('con medidas', () => {
+    beforeEach(async () => {
+      items.MLA2 = {
+        title: 'Aros Ford Sigma',
+        price: 100,
+        sold: 0,
+        category_id: 'MLA999',
+        attributes: [],
+        pictures: [
+          { id: 'P1', secure_url: 'https://ml/P1.jpg' },
+          { id: 'P2', secure_url: 'https://ml/P2.jpg' },
+          { id: 'P3', secure_url: 'https://ml/P3.jpg' },
+        ],
+        variations: [
+          { id: 11, seller_custom_field: 'A-00', attribute_combinations: [], picture_ids: ['P1', 'P3'] },
+          { id: 12, seller_custom_field: 'A-50', attribute_combinations: [{ id: 'SIZE', value_name: '0.50' }], picture_ids: ['P2', 'P3'] },
+        ],
+      };
+      await db.productVariant.createMany({
+        data: [
+          { productId, sku: 'A-00', measure: null, position: 0 },
+          { productId, sku: 'A-50', measure: '0.50', position: 1 },
+        ],
+      });
+    });
+
+    it('lee las fotos de cada medida, guarda las que se marcan a mano y las sube con cada medida', async () => {
+      const pub = await db.publication.create({ data: { productId, storeId, externalId: 'MLA2', title: 'Aros Ford Sigma' } });
+      await readAll();
+      let sources = await loadMediaSources(db, accountId, pub.id);
+      expect(sources.measures.map((m) => m.label)).toEqual(['A-00', '0.50']);
+      expect(sources.current.map((m) => m.ref)).toEqual([
+        { kind: 'channel', id: 'P1', url: 'https://ml/P1.jpg', variants: ['sku:A-00'] },
+        { kind: 'channel', id: 'P2', url: 'https://ml/P2.jpg', variants: ['sku:A-50'] },
+        { kind: 'channel', id: 'P3', url: 'https://ml/P3.jpg' },
+      ]);
+      expect(sources.channelWithoutVariants).toBe(false);
+      expect(await state(pub.id)).toEqual({ draft: [], choose: [], rejected: [] });
+
+      // Solo cambia la medida de una foto: es un cambio para subir.
+      await saveMedia(db, {
+        accountId,
+        publicationId: pub.id,
+        refs: [
+          { kind: 'channel', id: 'P1', url: '', variants: ['sku:A-50'] },
+          { kind: 'channel', id: 'P2', url: '', variants: ['sku:A-50'] },
+          { kind: 'channel', id: 'P3', url: '' },
+        ],
+      });
+      expect((await state(pub.id)).draft).toEqual(['photos']);
+
+      const result = await pushDrafts(db, { accountId, publicationId: pub.id, userId: null });
+      expect(result).toEqual({ sent: ['photos'], rejected: [], confirmed: true });
+      expect(calls[0].body).toEqual({
+        pictures: [{ id: 'P1' }, { id: 'P2' }, { id: 'P3' }],
+        variations: [
+          { id: 11, picture_ids: ['P3'] },
+          { id: 12, picture_ids: ['P1', 'P2', 'P3'] },
+        ],
+      });
+      expect(await state(pub.id)).toEqual({ draft: [], choose: [], rejected: [] });
+      sources = await loadMediaSources(db, accountId, pub.id);
+      expect(sources.following).toBe(true);
+      expect(sources.current.map((m) => m.ref.variants ?? [])).toEqual([['sku:A-50'], ['sku:A-50'], []]);
+    });
+
+    it('una variante del canal que la ficha no tiene lleva las fotos de todas, y sin variantes van solo las fotos', async () => {
+      items.MLA2.variations!.push({ id: 13, seller_custom_field: 'OTRA', attribute_combinations: [], picture_ids: ['P1'] });
+      const pub = await db.publication.create({ data: { productId, storeId, externalId: 'MLA2', title: 'Aros Ford Sigma' } });
+      await readAll();
+      await saveMedia(db, {
+        accountId,
+        publicationId: pub.id,
+        refs: [
+          { kind: 'channel', id: 'P2', url: '', variants: ['sku:A-50'] },
+          { kind: 'channel', id: 'P3', url: '' },
+        ],
+      });
+      await pushDrafts(db, { accountId, publicationId: pub.id, userId: null });
+      expect((calls[0].body as { variations: unknown }).variations).toEqual([
+        { id: 11, picture_ids: ['P3'] },
+        { id: 12, picture_ids: ['P2', 'P3'] },
+        { id: 13, picture_ids: ['P3'] },
+      ]);
+
+      // La publicación sin variantes en el canal: se avisa y se mandan solo las fotos.
+      const plain = await db.publication.create({ data: { productId, storeId, externalId: 'MLA1', title: 'Kit Embrague Ford Ka' } });
+      await readAll();
+      expect((await loadMediaSources(db, accountId, plain.id)).channelWithoutVariants).toBe(true);
+      calls.length = 0;
+      await saveMedia(db, { accountId, publicationId: plain.id, refs: [{ kind: 'channel', id: 'P2', url: '', variants: ['sku:A-50'] }] });
+      await pushDrafts(db, { accountId, publicationId: plain.id, userId: null });
+      expect(calls[0].body).toEqual({ pictures: [{ id: 'P2' }] });
+    });
+
+    it('descarta marcas de medidas que no están en la ficha, marcar todas es Todas, y guarda las medidas de los videos', async () => {
+      const pub = await db.publication.create({ data: { productId, storeId, externalId: 'MLA2', title: 'Aros Ford Sigma' } });
+      await readAll();
+      const video = await db.productVideo.create({ data: { productId, driveFileId: 'drive-1', name: 'giro.mp4', mimeType: 'video/mp4', origin: 'APP' } });
+      await db.publicationClip.create({ data: { publicationId: pub.id, videoId: video.id } });
+      await saveMedia(db, {
+        accountId,
+        publicationId: pub.id,
+        refs: [
+          { kind: 'channel', id: 'P1', url: '', variants: ['sku:A-00', 'sku:A-50'] },
+          { kind: 'channel', id: 'P2', url: '', variants: ['sku:NO-ESTA'] },
+        ],
+        videos: { [video.id]: ['sku:A-50', 'sku:NO-ESTA'], 'de-otro': ['sku:A-50'] },
+      });
+      const saved = await db.publication.findUniqueOrThrow({ where: { id: pub.id } });
+      expect(saved.media).toEqual([
+        { kind: 'channel', id: 'P1', url: 'https://ml/P1.jpg' },
+        { kind: 'channel', id: 'P2', url: 'https://ml/P2.jpg' },
+      ]);
+      expect(saved.videoVariants).toEqual({ [video.id]: ['sku:A-50'] });
+      const sources = await loadMediaSources(db, accountId, pub.id);
+      expect(sources.videos).toEqual([{ id: video.id, name: 'giro.mp4', durationMs: null, variants: ['sku:A-50'] }]);
+      expect(sources.clip).toEqual({ videoId: video.id, name: 'clip', perVariant: false });
+
+      // Sin mandar las fotos, quedan como están.
+      await saveMedia(db, { accountId, publicationId: pub.id, videos: {} });
+      const again = await db.publication.findUniqueOrThrow({ where: { id: pub.id } });
+      expect(again.media).toEqual(saved.media);
+      expect(again.videoVariants).toEqual({});
+
+      // Si la medida sale de la ficha, su marca se cae y la foto queda en Todas.
+      await db.productVariant.deleteMany({ where: { productId, sku: 'A-00' } });
+      await db.productVariant.create({ data: { productId, sku: 'A-25', measure: '0.25', position: 2 } });
+      await saveMedia(db, { accountId, publicationId: pub.id, refs: [{ kind: 'channel', id: 'P1', url: '', variants: ['sku:A-25'] }] });
+      await db.productVariant.deleteMany({ where: { productId, sku: 'A-25' } });
+      await db.productVariant.create({ data: { productId, sku: 'A-75', measure: '0.75', position: 3 } });
+      const gone = (await loadMediaSources(db, accountId, pub.id)).current[0];
+      expect(gone.ref.variants).toBeUndefined();
+      expect(gone.note).toBe('Su medida ya no está en la ficha: quedó en Todas');
+    });
   });
 
   it('no deja guardar fotos que la publicación no puede usar, ni una lista vacía', async () => {

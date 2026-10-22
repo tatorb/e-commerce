@@ -373,8 +373,11 @@ model Publication {
   // familia del producto (src/channels/<canal>/).
   channelCategory   String?
   // Las fotos de la publicación, en orden (src/domain/media.ts). Sin elegir,
-  // son las que tiene en el canal.
+  // son las que tiene en el canal. Cada foto puede ser de algunas medidas.
   media             Json?
+  // De qué medidas es cada video del producto en esta publicación:
+  // { "<id del video>": ["sku:..."] }. Sin marcar, el video es de todas.
+  videoVariants     Json                 @default("{}")
   source            RecordSource         @default(MANUAL)
   // Importación que la creó, para poder deshacerla.
   importRunId       String?
@@ -1199,6 +1202,9 @@ model ChannelCopy {
   // corregida salió cada una que subió la app: { "<código>": "<id de la foto>" }.
   photoIds          Json          @default("[]")
   photoOrigins      Json          @default("{}")
+  // Cada variante de la publicación en el canal, con el código de sus fotos:
+  // lista de { sku, measure, photoIds }.
+  variations        Json          @default("[]")
   hasVideo          Boolean       @default(false)
   // Marca, número de pieza, origen y SKU, como los informa el canal.
   details           Json          @default("{}")
