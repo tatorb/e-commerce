@@ -137,7 +137,15 @@ describe('las fotos elegidas', () => {
 
 const url = process.env.TEST_DATABASE_URL;
 
-type Variation = { id: number; seller_custom_field?: string; attribute_combinations: { id: string; value_name: string }[]; picture_ids: string[] };
+type Variation = {
+  id: number;
+  seller_custom_field?: string;
+  attribute_combinations: { id?: string; name?: string; value_name: string }[];
+  picture_ids: string[];
+  attributes?: { id: string; value_name: string }[];
+  available_quantity?: number;
+  price?: number;
+};
 type Item = {
   title: string;
   price: number;
@@ -184,8 +192,22 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
         }
         const id = 'MLA900';
         const pictures = body.pictures.map((p: { id?: string; source?: string }, i: number) => ({ id: p.id ?? `LINK-${i}`, secure_url: p.source ?? `https://ml/${p.id}.jpg` }));
-        items[id] = { title: body.title, price: body.price, pictures, sold: 0, category_id: body.category_id, attributes: body.attributes };
-        return json(201, { id, permalink: 'https://articulo.mercadolibre.com.ar/MLA-900', pictures: pictures.map((p: { id: string }) => ({ id: p.id })) });
+        // Como Mercado Libre: cada medida con su combinación, al mismo precio y con fotos de la lista.
+        const refs: string[] = body.pictures.map((p: { id?: string; source?: string }) => p.id ?? p.source);
+        const got: Omit<Variation, 'id'>[] = body.variations ?? [];
+        if (
+          got.some((v) => v.attribute_combinations.length === 0 || v.price !== body.price || v.picture_ids.length === 0 || v.picture_ids.some((r) => !refs.includes(r)))
+        ) {
+          return json(400, { message: 'Validation error', cause: [{ code: 'item.variations.invalid', message: 'Las variantes no son válidas' }] });
+        }
+        const variations = got.map((v, i) => ({ ...v, id: 100 + i, picture_ids: v.picture_ids.map((r) => pictures[refs.indexOf(r)].id) }));
+        items[id] = { title: body.title, price: body.price, pictures, sold: 0, category_id: body.category_id, attributes: body.attributes, variations };
+        return json(201, {
+          id,
+          permalink: 'https://articulo.mercadolibre.com.ar/MLA-900',
+          pictures: pictures.map((p: { id: string }) => ({ id: p.id })),
+          variations: variations.map((v) => ({ id: v.id, attribute_combinations: v.attribute_combinations, picture_ids: v.picture_ids })),
+        });
       }
       const desc = u.pathname.match(/^\/items\/(\w+)\/description$/);
       if (desc && req.method === 'POST') {
@@ -661,13 +683,106 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     expect(info.ready).toBe(true);
     expect(info.listingTypes.map((t) => t.value)).toEqual(['clasica', 'premium']);
 
-    // Con varias medidas, todavía no.
-    await db.productVariant.createMany({ data: [{ productId, sku: 'A', measure: 'STD', position: 0 }, { productId, sku: 'B', measure: '0.50', position: 1 }] });
-    info = await createChecks(db, { accountId, publicationId: pub.id });
-    expect(info.ready).toBe(false);
+    expect(info.measures).toEqual([]);
+
+    // Con varias medidas, cada una necesita su medida cargada, sin repetir, y sus fotos.
+    const measuresCheck = async () => (await createChecks(db, { accountId, publicationId: pub.id })).checks.find((c) => c.label === 'Medidas');
+    await db.productVariant.createMany({ data: [{ productId, sku: 'A', measure: 'STD', position: 0 }, { productId, sku: 'B', measure: null, position: 1 }] });
+    expect(await measuresCheck()).toMatchObject({ ok: false, detail: 'Cargá en la ficha la medida de B, es lo que elige el comprador.' });
+    await db.productVariant.updateMany({ where: { productId, sku: 'B' }, data: { measure: 'std' } });
+    expect(await measuresCheck()).toMatchObject({ ok: false, detail: 'std está más de una vez en la ficha.' });
+    await db.productVariant.updateMany({ where: { productId, sku: 'B' }, data: { measure: '0,50' } });
+    await saveMedia(db, { accountId, publicationId: pub.id, refs: [{ kind: 'asset', url: 'https://otra/foto.jpg', variants: ['sku:A medida:std'] }] });
+    expect(await measuresCheck()).toMatchObject({ ok: false, detail: 'La medida 0,50 no tiene fotos, elegilas en Organización de multimedia.' });
     await expect(createInChannel(db, { accountId, publicationId: pub.id, price: 100, quantity: 1, listingType: 'clasica', userId: null })).rejects.toThrow(
       'Medidas',
     );
+
+    await saveMedia(db, { accountId, publicationId: pub.id, refs: [{ kind: 'asset', url: 'https://otra/foto.jpg' }] });
+    info = await createChecks(db, { accountId, publicationId: pub.id });
+    expect(info.ready).toBe(true);
+    expect(info.checks.find((c) => c.label === 'Medidas')).toMatchObject({
+      ok: true,
+      detail: 'STD y 0,50, en la misma publicación. Comparten el precio y cada una lleva su SKU, su cantidad y sus fotos.',
+    });
+    expect(info.measures).toEqual([
+      { key: 'sku:A medida:std', label: 'STD' },
+      { key: 'sku:B medida:0.50', label: '0,50' },
+    ]);
+    // La cantidad se carga en cada medida.
+    await expect(
+      createInChannel(db, { accountId, publicationId: pub.id, price: 100, quantities: { 'sku:A medida:std': 2 }, listingType: 'clasica', userId: null }),
+    ).rejects.toThrow('La cantidad de 0,50 tiene que ser 1 o más.');
+    expect(calls.some((c) => c.path === '/items')).toBe(false);
+  });
+
+  it('con varias medidas crea una sola publicación, cada medida con su SKU, su cantidad y sus fotos', async () => {
+    // El mismo SKU en las dos medidas, como en algunas fábricas.
+    await db.productVariant.createMany({
+      data: [
+        { productId, sku: 'SP-413', measure: 'STD', position: 0 },
+        { productId, sku: 'SP-413', measure: '0,50', position: 1 },
+      ],
+    });
+    const std = 'sku:SP-413 medida:std';
+    const half = 'sku:SP-413 medida:0.50';
+    const pub = await db.publication.create({ data: { productId, storeId, title: 'Subconjunto Peugeot 1.6 SP-413', channelStatus: 'UNPUBLISHED' } });
+    const general = await correctedPhoto('general.jpg');
+    const box = await correctedPhoto('caja-050.jpg');
+    // La general es de todas; la del producto, de STD; la de la caja, de 0,50, que la ve primero.
+    await saveMedia(db, {
+      accountId,
+      publicationId: pub.id,
+      refs: [
+        { kind: 'edit', editId: general },
+        { kind: 'asset', url: 'https://otra/foto.jpg', variants: [std] },
+        { kind: 'edit', editId: box, variants: [half] },
+      ],
+    });
+
+    const created = await createInChannel(db, {
+      accountId,
+      publicationId: pub.id,
+      price: 80000,
+      quantities: { [std]: 2, [half]: 5 },
+      listingType: 'clasica',
+      userId: null,
+    });
+    expect(created).toMatchObject({ externalId: 'MLA900', confirmed: true });
+    const post = calls.find((c) => c.path === '/items')!.body as Record<string, unknown>;
+    expect(post.available_quantity).toBeUndefined();
+    expect(post.price).toBe(80000);
+    expect(post.pictures).toEqual([{ id: 'SUBIDA-1' }, { source: 'https://otra/foto.jpg' }, { id: 'SUBIDA-2' }]);
+    expect(post.attributes).not.toContainEqual(expect.objectContaining({ id: 'SELLER_SKU' }));
+    expect(post.variations).toEqual([
+      {
+        attribute_combinations: [{ name: 'Medida', value_name: 'STD' }],
+        price: 80000,
+        available_quantity: 2,
+        picture_ids: ['https://otra/foto.jpg', 'SUBIDA-1'],
+        attributes: [{ id: 'SELLER_SKU', value_name: 'SP-413' }],
+      },
+      {
+        attribute_combinations: [{ name: 'Medida', value_name: '0,50' }],
+        price: 80000,
+        available_quantity: 5,
+        picture_ids: ['SUBIDA-2', 'SUBIDA-1'],
+        attributes: [{ id: 'SELLER_SKU', value_name: 'SP-413' }],
+      },
+    ]);
+
+    // Queda al día: la app sigue a las fotos del canal, con lo que ve cada medida.
+    const after = await db.publication.findUniqueOrThrow({ where: { id: pub.id }, include: { channelCopy: true } });
+    expect(after.media).toBeNull();
+    expect(after.channelCopy!.variations).toEqual([
+      { sku: 'SP-413', measure: 'STD', photoIds: ['LINK-1', 'SUBIDA-1'] },
+      { sku: 'SP-413', measure: '0,50', photoIds: ['SUBIDA-2', 'SUBIDA-1'] },
+    ]);
+    const photos = channelPhotos(after.channelCopy!.photos, after.channelCopy!.photoIds, after.channelCopy!.variations);
+    const ids = (key: string) => variantPhotos(photos, key).map((r) => (r.kind === 'channel' ? r.id : ''));
+    expect(ids(std)).toEqual(['LINK-1', 'SUBIDA-1']);
+    expect(ids(half)).toEqual(['SUBIDA-2', 'SUBIDA-1']);
+    expect(await state(pub.id)).toEqual({ draft: [], choose: [], rejected: [] });
   });
 
   it('crea la publicación con sus datos, fotos y descripción, y queda con su código y al día', async () => {

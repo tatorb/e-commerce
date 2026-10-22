@@ -2,7 +2,7 @@
 // resuelve en src/channels/<canal>/; el resto de la app usa esta interfaz y
 // nunca conoce el formato del canal. Solo corre en el servidor.
 
-import type { VariantLike } from '@/domain/media';
+import type { ChannelVariation, VariantLike } from '@/domain/media';
 
 /** Los datos que hoy se pueden subir. */
 export type PublishField = 'title' | 'description' | 'attributes' | 'photos';
@@ -30,12 +30,19 @@ export type ChannelPictureLayout = {
   general: number[];
 };
 
+/**
+ * Una medida de la publicación nueva: lo que elige el comprador, su SKU, su
+ * cantidad y sus fotos, por su posición en la lista y en el orden en que las ve.
+ */
+export type ChannelNewVariant = VariantLike & { measure: string; quantity: number; pictures: number[] };
+
 /** Lo que hace falta para crear una publicación en el canal. */
 export type ChannelNewListing = {
   title: string;
   categoryId: string;
   price: number;
   currency: string;
+  // Sin medidas: la cantidad y el SKU de la publicación.
   quantity: number;
   listingType: string;
   description: string | null;
@@ -44,6 +51,8 @@ export type ChannelNewListing = {
   sku: string | null;
   // Por ejemplo "6 meses".
   warranty: string | null;
+  // Con dos o más, la publicación se crea con esas medidas, todas al mismo precio.
+  variants: ChannelNewVariant[];
 };
 
 export type ChannelCreated = {
@@ -51,6 +60,8 @@ export type ChannelCreated = {
   url: string | null;
   // El código de cada foto en el canal, en orden, si lo informa.
   pictureIds: string[] | null;
+  // Las medidas como quedaron en el canal, con el código de sus fotos. Vacío sin medidas.
+  variations: ChannelVariation[];
   // Lo que se creó pero quedó a medias, como la descripción.
   warnings: string[];
 };

@@ -16,20 +16,25 @@ const SELECT_CLASS =
 
 // Crear en el canal una publicación que todavía no está publicada: qué está
 // listo, qué falta, y lo que pide el canal al crearla (precio, cantidad y tipo).
+// Con varias medidas, la cantidad se carga en cada una.
 export function CreateInChannelCard({ accountSlug, publicationId, info }: { accountSlug: string; publicationId: string; info: CreateInfo }) {
   const router = useRouter();
   const [price, setPrice] = useState(info.price !== null ? String(info.price) : '');
   const [quantity, setQuantity] = useState('1');
+  const [quantities, setQuantities] = useState<Record<string, string>>(() => Object.fromEntries(info.measures.map((m) => [m.key, '1'])));
   const [listingType, setListingType] = useState(info.listingTypes[0]?.value ?? '');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const { channelName } = info;
+  const byMeasure = info.measures.length > 0;
+  const missingQuantity = byMeasure ? info.measures.some((m) => !quantities[m.key]?.trim()) : !quantity.trim();
 
   async function create() {
     if (!window.confirm(`¿Crear la publicación en ${channelName}? Queda publicada y a la venta.`)) return;
     setBusy(true);
     setMessage(null);
-    const r = await createInChannelAction(accountSlug, publicationId, { price: price.replace(',', '.'), quantity, listingType }).catch(() => null);
+    const amounts = byMeasure ? { quantities: Object.fromEntries(info.measures.map((m) => [m.key, quantities[m.key] ?? ''])) } : { quantity };
+    const r = await createInChannelAction(accountSlug, publicationId, { price: price.replace(',', '.'), ...amounts, listingType }).catch(() => null);
     setBusy(false);
     if (!r) return setMessage({ kind: 'error', text: 'Se cortó la conexión con la app. Antes de probar de nuevo, fijate en el canal si se creó.' });
     if (!r.ok) return setMessage({ kind: 'error', text: r.error });
@@ -60,15 +65,17 @@ export function CreateInChannelCard({ accountSlug, publicationId, info }: { acco
         </ul>
 
         {!info.blocked ? (
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className={cn('grid gap-3', byMeasure ? 'sm:grid-cols-2' : 'sm:grid-cols-3')}>
             <div className="space-y-1.5">
               <Label htmlFor="create-price">Precio</Label>
               <Input id="create-price" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="Por ejemplo 45000" />
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="create-quantity">Cantidad disponible</Label>
-              <Input id="create-quantity" inputMode="numeric" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
-            </div>
+            {!byMeasure ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="create-quantity">Cantidad disponible</Label>
+                <Input id="create-quantity" inputMode="numeric" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
+              </div>
+            ) : null}
             <div className="space-y-1.5">
               <Label htmlFor="create-type">Tipo de publicación</Label>
               <select id="create-type" className={SELECT_CLASS} value={listingType} onChange={(e) => setListingType(e.target.value)}>
@@ -82,8 +89,27 @@ export function CreateInChannelCard({ accountSlug, publicationId, info }: { acco
           </div>
         ) : null}
 
+        {!info.blocked && byMeasure ? (
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-medium">Cantidad disponible de cada medida</legend>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {info.measures.map((m, i) => (
+                <div key={m.key} className="space-y-1.5">
+                  <Label htmlFor={`create-quantity-${i}`}>{m.label}</Label>
+                  <Input
+                    id={`create-quantity-${i}`}
+                    inputMode="numeric"
+                    value={quantities[m.key] ?? ''}
+                    onChange={(e) => setQuantities((q) => ({ ...q, [m.key]: e.target.value }))}
+                  />
+                </div>
+              ))}
+            </div>
+          </fieldset>
+        ) : null}
+
         {!info.blocked ? (
-          <Button onClick={create} disabled={!info.ready || busy || !price.trim()} pending={busy}>
+          <Button onClick={create} disabled={!info.ready || busy || !price.trim() || missingQuantity} pending={busy}>
             <Upload />
             Crear en {channelName}
           </Button>

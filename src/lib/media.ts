@@ -71,6 +71,12 @@ function knownMarks<T extends PhotoRef>(ref: T, measures: Measure[]): T {
   return withMarks(ref, { ...ref, variants: knownVariants(photoVariants(ref), measures), positions });
 }
 
+/** Cuántas fotos ve el comprador en cada medida, con las marcas que valen. */
+export function photosPerMeasure(refs: PhotoRef[], measures: Measure[]): { measure: Measure; count: number }[] {
+  const marked = refs.map((ref) => knownMarks(ref, measures));
+  return measures.map((measure) => ({ measure, count: variantPhotos(marked, measure.key).length }));
+}
+
 const viewUrl = (runId: string) => `/api/imagenes/ver?tipo=vista&paso=${encodeURIComponent(runId)}`;
 
 /**

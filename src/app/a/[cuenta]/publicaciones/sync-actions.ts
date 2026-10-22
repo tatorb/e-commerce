@@ -134,13 +134,17 @@ export async function saveMediaAction(
   return { ok: true };
 }
 
+const quantitySchema = z.coerce.number().int('La cantidad tiene que ser un número entero.').min(1, 'La cantidad tiene que ser 1 o más.').max(100_000);
+
 const createSchema = z.object({
   price: z.coerce.number().positive('Cargá el precio.').max(1_000_000_000),
-  quantity: z.coerce.number().int('La cantidad tiene que ser un número entero.').min(1, 'La cantidad tiene que ser 1 o más.').max(100_000),
+  quantity: quantitySchema.optional(),
+  // Con varias medidas, la cantidad de cada una por su clave.
+  quantities: z.record(z.string().min(1).max(200), quantitySchema).optional(),
   listingType: z.string().min(1).max(40),
 });
 
-/** Crea la publicación en el canal, con el precio, la cantidad y el tipo que se eligieron. */
+/** Crea la publicación en el canal, con el precio, la cantidad de cada medida y el tipo que se eligieron. */
 export async function createInChannelAction(
   accountSlug: string,
   publicationId: string,

@@ -11,6 +11,7 @@ const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.i
 
 // Los motivos que más aparecen, por el código que manda Mercado Libre.
 const KNOWN: [RegExp, string][] = [
+  [/variation/i, 'Mercado Libre no aceptó las medidas.'],
   [/attribute/i, 'Mercado Libre no aceptó un dato de catálogo.'],
   [/title.*not_modifiable|title.*modif/i, 'Mercado Libre no deja cambiar el título de una publicación con ventas.'],
   [/title.*(length|max|long)/i, 'El título es más largo de lo que acepta la categoría en Mercado Libre.'],
@@ -32,8 +33,8 @@ export function rejectionMessage(status: number, body: unknown): string {
   const detail = causes.map((c) => (typeof c.message === 'string' ? c.message : null)).find(Boolean) ?? (isObj(body) && typeof body.message === 'string' ? body.message : null);
   for (const [pattern, message] of KNOWN) {
     if (!pattern.test(codes)) continue;
-    // En los datos de catálogo y en las fotos, el detalle dice cuál fue.
-    return /attribute|picture/i.test(pattern.source) && detail ? `${message.slice(0, -1)}: ${detail}` : message;
+    // En las medidas, los datos de catálogo y las fotos, el detalle dice cuál fue.
+    return /variation|attribute|picture/i.test(pattern.source) && detail ? `${message.slice(0, -1)}: ${detail}` : message;
   }
   return detail ? `Mercado Libre no lo aceptó: ${detail}` : `Mercado Libre no lo aceptó (código ${status}).`;
 }
@@ -121,18 +122,33 @@ export const mercadolibrePublisher: ChannelPublisher = {
 
   async create(accessToken, l) {
     const pictures = await picturesBody(accessToken, l.pictures);
-    const attributes = [...l.attributes.map(attributeBody), ...(l.sku ? [{ id: 'SELLER_SKU', value_name: l.sku }] : [])];
+    const ref = (p: { id: string } | { source: string }) => ('id' in p ? p.id : p.source);
+    const variants = l.variants.length >= 2 ? l.variants : [];
+    // Con medidas, el SKU y la cantidad van en cada una, y todas al mismo precio.
+    const sku = variants.length === 0 && l.sku ? [{ id: 'SELLER_SKU', value_name: l.sku }] : [];
     const created = await send('POST', '/items', accessToken, {
       title: l.title,
       category_id: l.categoryId,
       price: l.price,
       currency_id: l.currency,
-      available_quantity: l.quantity,
+      ...(variants.length === 0 ? { available_quantity: l.quantity } : {}),
       buying_mode: 'buy_it_now',
       listing_type_id: LISTING_TYPE_ID[l.listingType] ?? 'gold_special',
       condition: 'new',
       pictures,
-      attributes,
+      attributes: [...l.attributes.map(attributeBody), ...sku],
+      ...(variants.length > 0
+        ? {
+            variations: variants.map((v) => ({
+              // Las categorías de repuestos no traen un campo de medida para las variantes: va con su nombre.
+              attribute_combinations: [{ name: 'Medida', value_name: v.measure }],
+              price: l.price,
+              available_quantity: v.quantity,
+              picture_ids: v.pictures.filter((i) => i >= 0 && i < pictures.length).map((i) => ref(pictures[i])),
+              ...(v.sku ? { attributes: [{ id: 'SELLER_SKU', value_name: v.sku }] } : {}),
+            })),
+          }
+        : {}),
       ...(l.warranty
         ? { sale_terms: [{ id: 'WARRANTY_TYPE', value_name: 'Garantía del vendedor' }, { id: 'WARRANTY_TIME', value_name: l.warranty }] }
         : {}),
@@ -148,10 +164,19 @@ export const mercadolibrePublisher: ChannelPublisher = {
         warnings.push(`La publicación se creó, pero la descripción no: ${e.message} Queda en el borrador para subirla.`);
       }
     }
+    const pictureIds = pictureIdsOf(created);
+    // Las medidas en el orden en que se mandaron, con el código de sus fotos como las guardó Mercado Libre.
+    const back = isObj(created) ? variationsOf(created) : [];
+    const variations = variants.map((v, i) => {
+      const same = back.length === variants.length ? back[i] : null;
+      const sent = pictureIds ? v.pictures.flatMap((p) => (pictureIds[p] ? [pictureIds[p]] : [])) : [];
+      return { sku: v.sku, measure: same?.measure ?? v.measure, photoIds: same && same.photoIds.length > 0 ? same.photoIds : sent };
+    });
     return {
       externalId: id,
       url: isObj(created) && typeof created.permalink === 'string' ? created.permalink : null,
-      pictureIds: pictureIdsOf(created),
+      pictureIds,
+      variations,
       warnings,
     };
   },

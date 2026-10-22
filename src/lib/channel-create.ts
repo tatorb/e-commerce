@@ -2,22 +2,24 @@ import type { PrismaClient } from '@/generated/prisma/client';
 import { Prisma } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
 import { ConnectError } from '@/channels/connect';
-import { getChannelPublisher, PublishError, type ChannelAttributeUpdate } from '@/channels/publish';
+import { getChannelPublisher, PublishError, type ChannelAttributeUpdate, type ChannelNewVariant } from '@/channels/publish';
 import { normalizeText } from '@/domain/catalog-data';
 import { faceValues, fingerprint, fingerprintsOf } from '@/domain/channel-sync';
-import { channelPhotos, parseMedia } from '@/domain/media';
+import { channelPhotos, measureText, parseMedia, variantKey, type PhotoRef } from '@/domain/media';
 import { checkTitle } from '@/domain/titles';
 import { loadCatalogData } from '@/lib/catalog-data';
 import { readOne } from '@/lib/channel-sync';
 import { withAccessToken } from '@/lib/connections';
-import { picturesFor } from '@/lib/media';
+import { measuresOf, photosPerMeasure, picturesFor, type Measure } from '@/lib/media';
 import { loadTitleRules } from '@/lib/title-rules';
 
 // Crear en el canal una publicación que todavía no está publicada, con lo que
 // tiene la app: título, descripción, categoría, datos de catálogo, fotos y la
 // ficha. El precio, la cantidad y el tipo de publicación los pide el canal y se
-// cargan al crearla; después se manejan allá. Antes de crear se revisa todo y
-// se dice qué falta. Recibe la base por parámetro para poder probarlo.
+// cargan al crearla; después se manejan allá. Si la ficha tiene varias medidas,
+// se crea una sola publicación con todas: comparten el precio y cada una lleva
+// su SKU, su cantidad y sus fotos. Antes de crear se revisa todo y se dice qué
+// falta. Recibe la base por parámetro para poder probarlo.
 
 type Db = PrismaClient;
 
@@ -34,6 +36,31 @@ export function warrantyText(raw: string | null): string | null {
   const n = Number(m[1]);
   const unit = m[2].toLowerCase().startsWith('d') ? (n === 1 ? 'día' : 'días') : m[2].toLowerCase().startsWith('m') ? (n === 1 ? 'mes' : 'meses') : n === 1 ? 'año' : 'años';
   return `${n} ${unit}`;
+}
+
+/** Si las medidas se pueden crear juntas: cada una con su medida cargada, sin repetir, y con fotos. */
+function measuresCheck(measures: Measure[], media: PhotoRef[]): CreateCheck {
+  if (measures.length < 2) return { label: 'Medidas', ok: true, detail: 'Una sola.', blocking: true };
+  const unnamed = measures.filter((m) => !measureText(m.measure)).map((m) => m.label);
+  const named = measures.filter((m) => measureText(m.measure));
+  const repeated = named.filter((m, i) => named.findIndex((x) => measureText(x.measure) === measureText(m.measure)) !== i).map((m) => m.label);
+  const empty = media.length > 0 ? photosPerMeasure(media, measures).filter((x) => x.count === 0).map((x) => x.measure.label) : [];
+  const problems = [
+    ...(unnamed.length > 0 ? [`Cargá en la ficha la medida de ${names(unnamed)}, es lo que elige el comprador.`] : []),
+    ...(repeated.length > 0 ? [`${names([...new Set(repeated)])} está más de una vez en la ficha.`] : []),
+    ...(empty.length > 0
+      ? [`${empty.length === 1 ? 'La medida' : 'Las medidas'} ${names(empty)} no ${empty.length === 1 ? 'tiene' : 'tienen'} fotos, elegilas en Organización de multimedia.`]
+      : []),
+  ];
+  return {
+    label: 'Medidas',
+    ok: problems.length === 0,
+    detail:
+      problems.length > 0
+        ? problems.join(' ')
+        : `${names(measures.map((m) => m.label))}, en la misma publicación. Comparten el precio y cada una lleva su SKU, su cantidad y sus fotos.`,
+    blocking: true,
+  };
 }
 
 async function load(db: Db, accountId: string, publicationId: string) {
@@ -109,13 +136,8 @@ export async function createChecks(db: Db, args: { accountId: string; publicatio
     blocking: true,
   });
 
-  const variants = p.product.variants.filter((v) => v.sku || v.measure);
-  checks.push({
-    label: 'Medidas',
-    ok: variants.length <= 1,
-    detail: variants.length <= 1 ? 'Una sola.' : `Tiene ${variants.length} medidas: las publicaciones con variantes todavía no se crean desde la app.`,
-    blocking: true,
-  });
+  const measures = measuresOf(p.product.variants);
+  checks.push(measuresCheck(measures, media));
 
   checks.push({
     label: 'Descripción',
@@ -138,12 +160,24 @@ export async function createChecks(db: Db, args: { accountId: string; publicatio
     ready: !blocked && checks.every((c) => c.ok || !c.blocking),
     listingTypes: publisher?.listingTypes ?? [],
     price: p.price === null ? null : Number(p.price),
+    // Con varias medidas, la cantidad se carga en cada una.
+    measures: measures.length >= 2 ? measures.map((m) => ({ key: m.key, label: m.label })) : [],
   };
 }
 
 export type CreateInfo = Awaited<ReturnType<typeof createChecks>>;
 
-type CreateArgs = { accountId: string; publicationId: string; price: number; quantity: number; listingType: string; userId: string | null; now?: Date };
+type CreateArgs = {
+  accountId: string;
+  publicationId: string;
+  price: number;
+  // Sin medidas, la cantidad de la publicación; con medidas, la de cada una por su clave.
+  quantity?: number;
+  quantities?: Record<string, number>;
+  listingType: string;
+  userId: string | null;
+  now?: Date;
+};
 type Created = { externalId: string; url: string | null; warnings: string[]; confirmed: boolean };
 
 /**
@@ -171,7 +205,10 @@ async function create(db: Db, args: CreateArgs, info: CreateInfo): Promise<Creat
   const failing = info.checks.filter((c) => c.blocking && !c.ok);
   if (failing.length > 0) throw new CreateError(`Todavía no se puede crear: ${failing.map((c) => `${c.label}: ${c.detail}`).join(' ')}`);
   if (!(args.price > 0)) throw new CreateError('Cargá el precio.');
-  if (!Number.isInteger(args.quantity) || args.quantity < 1) throw new CreateError('La cantidad tiene que ser 1 o más.');
+  const quantityOk = (n: number | undefined): n is number => n !== undefined && Number.isInteger(n) && n >= 1;
+  if (info.measures.length === 0 && !quantityOk(args.quantity)) throw new CreateError('La cantidad tiene que ser 1 o más.');
+  const short = info.measures.filter((m) => !quantityOk(args.quantities?.[m.key])).map((m) => m.label);
+  if (short.length > 0) throw new CreateError(`La cantidad de ${names(short)} tiene que ser 1 o más.`);
   if (!info.listingTypes.some((t) => t.value === args.listingType)) throw new CreateError('Elegí el tipo de publicación.');
 
   const p = await load(db, args.accountId, args.publicationId);
@@ -190,9 +227,19 @@ async function create(db: Db, args: CreateArgs, info: CreateInfo): Promise<Creat
   const warnings: string[] = left.length > 0 ? [`No se mandaron ${names(left)}: no son campos de la categoría.`] : [];
 
   const media = parseMedia(p.media) ?? [];
-  const { pictures, origins, problems } = await picturesFor(db, p.product.id, media);
+  const { pictures, origins, problems, layout } = await picturesFor(db, p.product.id, media);
   if (problems.length > 0 || pictures.length === 0) throw new CreateError(problems.join(' ') || 'Elegí las fotos en Organización de multimedia.');
   const variant = p.product.variants.find((v) => v.sku);
+  // Cada medida con su cantidad y las fotos que ve el comprador en ella.
+  const variants: ChannelNewVariant[] =
+    info.measures.length >= 2
+      ? measuresOf(p.product.variants).map((m) => ({
+          sku: m.sku,
+          measure: m.measure!,
+          quantity: args.quantities![m.key],
+          pictures: layout.variants.find((v) => variantKey(v) === m.key)?.pictures ?? layout.general,
+        }))
+      : [];
 
   let created;
   try {
@@ -202,13 +249,14 @@ async function create(db: Db, args: CreateArgs, info: CreateInfo): Promise<Creat
         categoryId: category.id,
         price: args.price,
         currency: p.currency,
-        quantity: args.quantity,
+        quantity: args.quantity ?? 0,
         listingType: args.listingType,
         description: p.description?.trim() || null,
         attributes,
         pictures,
         sku: variant?.sku ?? null,
         warranty: warrantyText(p.product.warranty),
+        variants,
       }),
     );
   } catch (e) {
@@ -225,7 +273,7 @@ async function create(db: Db, args: CreateArgs, info: CreateInfo): Promise<Creat
   ];
   const channelPrints = {
     ...fingerprintsOf({ ...app, description: descriptionSent ? app.description : null, attributes: sentAttributes, photos: null }),
-    photos: fingerprint('photos', channelPhotos(ids.map(() => ''), ids)),
+    photos: fingerprint('photos', channelPhotos(ids.map(() => ''), ids, created.variations)),
   };
   await db.$transaction(async (tx) => {
     await tx.publication.update({
@@ -242,6 +290,7 @@ async function create(db: Db, args: CreateArgs, info: CreateInfo): Promise<Creat
       url: created.url,
       photos: ids.map(() => ''),
       photoIds: ids,
+      variations: created.variations,
       photoOrigins: Object.fromEntries(ids.flatMap((id, i) => (origins[i] ? [[id, origins[i]]] : []))),
       categoryId: category.id,
       attributeIds: Object.fromEntries(

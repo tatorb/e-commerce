@@ -21,6 +21,9 @@ describe('por qué Mercado Libre no aceptó un cambio', () => {
     expect(rejectionMessage(400, { cause: [{ code: 'item.title.length.invalid' }] })).toContain('más largo');
     expect(rejectionMessage(403, {})).toContain('permiso para modificar');
     expect(rejectionMessage(404, {})).toContain('no encontró');
+    expect(rejectionMessage(400, { cause: [{ code: 'item.variations.attribute_combinations.invalid', message: 'Medida no válida' }] })).toBe(
+      'Mercado Libre no aceptó las medidas: Medida no válida',
+    );
     expect(rejectionMessage(400, { message: 'Algo raro' })).toBe('Mercado Libre no lo aceptó: Algo raro');
     expect(rejectionMessage(500, null)).toBe('Mercado Libre no lo aceptó (código 500).');
   });

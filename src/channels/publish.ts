@@ -11,6 +11,7 @@ export {
   type ChannelAttributeUpdate,
   type ChannelCreated,
   type ChannelNewListing,
+  type ChannelNewVariant,
   type ChannelPicture,
   type ChannelPictureLayout,
   type ChannelPublisher,
