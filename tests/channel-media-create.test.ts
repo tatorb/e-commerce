@@ -20,7 +20,7 @@ import { createChecks, CreateError, createInChannel, warrantyText } from '@/lib/
 import { pushDrafts } from '@/lib/channel-push';
 import { runSyncStep, startSync } from '@/lib/channel-sync';
 import { encrypt } from '@/lib/crypto';
-import { loadMediaSources, MediaError, saveMedia } from '@/lib/media';
+import { loadMediaSources, measuresOf, MediaError, saveMedia } from '@/lib/media';
 import { resetVisitsTogether } from '@/channels/mercadolibre/listings';
 
 // Las fotos de cada publicación y crear publicaciones nuevas en el canal,
@@ -43,9 +43,16 @@ describe('las fotos elegidas', () => {
   });
 
   it('cada medida se reconoce por su SKU o, si no tiene, por la medida', () => {
-    expect(variantKey({ sku: ' a-50 ', measure: '0.50' })).toBe('sku:A-50');
-    expect(variantKey({ sku: null, measure: ' 0.50  Mayor ' })).toBe('medida:0.50 mayor');
+    expect(variantKey({ sku: ' a-50 ', measure: null })).toBe('sku:A-50');
+    expect(variantKey({ sku: null, measure: ' 0,50  mm ' })).toBe('medida:0.50');
     expect(variantKey({ sku: '', measure: null })).toBeNull();
+    // El mismo código para todas las medidas, como hace Persan: cuenta la medida.
+    expect(variantKey({ sku: 'SP-413', measure: '0,50' })).toBe(variantKey({ sku: 'sp-413', measure: '+0.50' }));
+    expect(variantKey({ sku: 'SP-413', measure: 'STD' })).not.toBe(variantKey({ sku: 'SP-413', measure: '0,50' }));
+    expect(measuresOf([{ sku: 'SP-413', measure: 'STD' }, { sku: 'SP-413', measure: '0,50' }, { sku: 'SP-413', measure: '0.50' }]).map((m) => m.label)).toEqual([
+      'STD',
+      '0,50',
+    ]);
   });
 
   it('el comprador ve primero las fotos de su medida y después las de todas, en el orden de la lista', () => {
@@ -83,7 +90,7 @@ describe('las fotos elegidas', () => {
       { sku: null, measure: '0.50', photoIds: ['P2', 'P3'] },
     ];
     expect(channelPhotos(['u1', 'u2', 'u3'], ['P1', 'P2', 'P3'], variations)).toEqual([
-      { kind: 'channel', id: 'P1', url: 'u1', variants: ['sku:A'] },
+      { kind: 'channel', id: 'P1', url: 'u1', variants: ['sku:A medida:std'] },
       { kind: 'channel', id: 'P2', url: 'u2', variants: ['medida:0.50'] },
       { kind: 'channel', id: 'P3', url: 'u3' },
     ]);
@@ -378,7 +385,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
       expect(sources.measures.map((m) => m.label)).toEqual(['A-00', '0.50']);
       expect(sources.current.map((m) => m.ref)).toEqual([
         { kind: 'channel', id: 'P1', url: 'https://ml/P1.jpg', variants: ['sku:A-00'] },
-        { kind: 'channel', id: 'P2', url: 'https://ml/P2.jpg', variants: ['sku:A-50'] },
+        { kind: 'channel', id: 'P2', url: 'https://ml/P2.jpg', variants: ['sku:A-50 medida:0.50'] },
         { kind: 'channel', id: 'P3', url: 'https://ml/P3.jpg' },
       ]);
       expect(sources.channelWithoutVariants).toBe(false);
@@ -389,8 +396,8 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
         accountId,
         publicationId: pub.id,
         refs: [
-          { kind: 'channel', id: 'P1', url: '', variants: ['sku:A-50'] },
-          { kind: 'channel', id: 'P2', url: '', variants: ['sku:A-50'] },
+          { kind: 'channel', id: 'P1', url: '', variants: ['sku:A-50 medida:0.50'] },
+          { kind: 'channel', id: 'P2', url: '', variants: ['sku:A-50 medida:0.50'] },
           { kind: 'channel', id: 'P3', url: '' },
         ],
       });
@@ -408,7 +415,43 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
       expect(await state(pub.id)).toEqual({ draft: [], choose: [], rejected: [] });
       sources = await loadMediaSources(db, accountId, pub.id);
       expect(sources.following).toBe(true);
-      expect(sources.current.map((m) => m.ref.variants ?? [])).toEqual([['sku:A-50'], ['sku:A-50'], []]);
+      expect(sources.current.map((m) => m.ref.variants ?? [])).toEqual([['sku:A-50 medida:0.50'], ['sku:A-50 medida:0.50'], []]);
+    });
+
+    it('con el mismo SKU en todas las medidas, las distingue por la medida', async () => {
+      await db.productVariant.deleteMany({ where: { productId } });
+      await db.productVariant.createMany({
+        data: [
+          { productId, sku: 'SP-413', measure: 'STD', position: 0 },
+          { productId, sku: 'SP-413', measure: '0,50', position: 1 },
+        ],
+      });
+      items.MLA2.variations = [
+        { id: 21, seller_custom_field: 'SP-413', attribute_combinations: [{ id: 'SIZE', value_name: 'STD' }], picture_ids: ['P1', 'P3'] },
+        { id: 22, seller_custom_field: 'SP-413', attribute_combinations: [{ id: 'SIZE', value_name: '0.50' }], picture_ids: ['P2', 'P3'] },
+      ];
+      const pub = await db.publication.create({ data: { productId, storeId, externalId: 'MLA2', title: 'Aros Ford Sigma' } });
+      await readAll();
+      const sources = await loadMediaSources(db, accountId, pub.id);
+      expect(sources.measures.map((m) => m.label)).toEqual(['STD', '0,50']);
+      // Lo que lee del canal, con "0.50", es la medida "0,50" de la ficha.
+      expect(sources.current.map((m) => m.ref.variants ?? [])).toEqual([['sku:SP-413 medida:std'], ['sku:SP-413 medida:0.50'], []]);
+      expect(await state(pub.id)).toEqual({ draft: [], choose: [], rejected: [] });
+
+      await saveMedia(db, {
+        accountId,
+        publicationId: pub.id,
+        refs: [
+          { kind: 'channel', id: 'P2', url: '', variants: ['sku:SP-413 medida:0.50'] },
+          { kind: 'channel', id: 'P1', url: '', variants: ['sku:SP-413 medida:std'] },
+          { kind: 'channel', id: 'P3', url: '' },
+        ],
+      });
+      await pushDrafts(db, { accountId, publicationId: pub.id, userId: null });
+      expect((calls[0].body as { variations: unknown }).variations).toEqual([
+        { id: 21, picture_ids: ['P1', 'P3'] },
+        { id: 22, picture_ids: ['P2', 'P3'] },
+      ]);
     });
 
     it('una variante del canal que la ficha no tiene lleva las fotos de todas, y sin variantes van solo las fotos', async () => {
@@ -419,7 +462,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
         accountId,
         publicationId: pub.id,
         refs: [
-          { kind: 'channel', id: 'P2', url: '', variants: ['sku:A-50'] },
+          { kind: 'channel', id: 'P2', url: '', variants: ['sku:A-50 medida:0.50'] },
           { kind: 'channel', id: 'P3', url: '' },
         ],
       });
@@ -435,7 +478,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
       await readAll();
       expect((await loadMediaSources(db, accountId, plain.id)).channelWithoutVariants).toBe(true);
       calls.length = 0;
-      await saveMedia(db, { accountId, publicationId: plain.id, refs: [{ kind: 'channel', id: 'P2', url: '', variants: ['sku:A-50'] }] });
+      await saveMedia(db, { accountId, publicationId: plain.id, refs: [{ kind: 'channel', id: 'P2', url: '', variants: ['sku:A-50 medida:0.50'] }] });
       await pushDrafts(db, { accountId, publicationId: plain.id, userId: null });
       expect(calls[0].body).toEqual({ pictures: [{ id: 'P2' }] });
     });
@@ -449,19 +492,19 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
         accountId,
         publicationId: pub.id,
         refs: [
-          { kind: 'channel', id: 'P1', url: '', variants: ['sku:A-00', 'sku:A-50'] },
+          { kind: 'channel', id: 'P1', url: '', variants: ['sku:A-00', 'sku:A-50 medida:0.50'] },
           { kind: 'channel', id: 'P2', url: '', variants: ['sku:NO-ESTA'] },
         ],
-        videos: { [video.id]: ['sku:A-50', 'sku:NO-ESTA'], 'de-otro': ['sku:A-50'] },
+        videos: { [video.id]: ['sku:A-50 medida:0.50', 'sku:NO-ESTA'], 'de-otro': ['sku:A-50 medida:0.50'] },
       });
       const saved = await db.publication.findUniqueOrThrow({ where: { id: pub.id } });
       expect(saved.media).toEqual([
         { kind: 'channel', id: 'P1', url: 'https://ml/P1.jpg' },
         { kind: 'channel', id: 'P2', url: 'https://ml/P2.jpg' },
       ]);
-      expect(saved.videoVariants).toEqual({ [video.id]: ['sku:A-50'] });
+      expect(saved.videoVariants).toEqual({ [video.id]: ['sku:A-50 medida:0.50'] });
       const sources = await loadMediaSources(db, accountId, pub.id);
-      expect(sources.videos).toEqual([{ id: video.id, name: 'giro.mp4', durationMs: null, variants: ['sku:A-50'] }]);
+      expect(sources.videos).toEqual([{ id: video.id, name: 'giro.mp4', durationMs: null, variants: ['sku:A-50 medida:0.50'] }]);
       expect(sources.clip).toEqual({ videoId: video.id, name: 'clip', perVariant: false });
 
       // Sin mandar las fotos, quedan como están.
@@ -473,7 +516,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
       // Si la medida sale de la ficha, su marca se cae y la foto queda en Todas.
       await db.productVariant.deleteMany({ where: { productId, sku: 'A-00' } });
       await db.productVariant.create({ data: { productId, sku: 'A-25', measure: '0.25', position: 2 } });
-      await saveMedia(db, { accountId, publicationId: pub.id, refs: [{ kind: 'channel', id: 'P1', url: '', variants: ['sku:A-25'] }] });
+      await saveMedia(db, { accountId, publicationId: pub.id, refs: [{ kind: 'channel', id: 'P1', url: '', variants: ['sku:A-25 medida:0.25'] }] });
       await db.productVariant.deleteMany({ where: { productId, sku: 'A-25' } });
       await db.productVariant.create({ data: { productId, sku: 'A-75', measure: '0.75', position: 3 } });
       const gone = (await loadMediaSources(db, accountId, pub.id)).current[0];

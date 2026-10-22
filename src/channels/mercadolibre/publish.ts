@@ -1,5 +1,6 @@
 import { MercadoLibreRequestError, mlGet, mlSend } from './http';
 import { variationsOf } from './listings';
+import { measureText, variantKey } from '@/domain/media';
 import { PublishError, type ChannelAttributeUpdate, type ChannelPicture, type ChannelPictureLayout, type ChannelPublisher } from '../publish-types';
 
 // Subir a Mercado Libre el título y la descripción de una publicación propia.
@@ -58,11 +59,21 @@ async function get(path: string, token: string): Promise<unknown> {
   }
 }
 
-const sameText = (a: string | null, b: string | null) => !!a && !!b && a.replace(/\s+/g, ' ').trim().toLowerCase() === b.replace(/\s+/g, ' ').trim().toLowerCase();
+const sameSku = (a: string | null, b: string | null) => !!a && !!b && a.trim().toUpperCase() === b.trim().toUpperCase();
+const sameMeasure = (a: string | null, b: string | null) => measureText(a) !== null && measureText(a) === measureText(b);
 
-/** La medida de la ficha de una variante: por SKU y, si a alguna le falta, por la medida. */
+/**
+ * La medida de la ficha de una variante: la que tiene el mismo SKU y la misma
+ * medida; si no, la única con ese SKU, o la única con esa medida.
+ */
 function variantOf(layout: ChannelPictureLayout, v: { sku: string | null; measure: string | null }) {
-  return layout.variants.find((x) => sameText(x.sku, v.sku)) ?? layout.variants.find((x) => (!x.sku || !v.sku) && sameText(x.measure, v.measure));
+  const key = variantKey(v);
+  const exact = key ? layout.variants.find((x) => variantKey(x) === key) : undefined;
+  if (exact) return exact;
+  const bySku = layout.variants.filter((x) => sameSku(x.sku, v.sku));
+  if (bySku.length === 1) return bySku[0];
+  const byMeasure = (bySku.length > 1 ? bySku : layout.variants).filter((x) => sameMeasure(x.measure, v.measure));
+  return byMeasure.length === 1 ? byMeasure[0] : undefined;
 }
 
 /** Las fotos como las pide Mercado Libre: los archivos se suben antes y quedan por su código. */

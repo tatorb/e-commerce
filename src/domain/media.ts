@@ -26,15 +26,22 @@ export type PhotoRef = z.infer<typeof photoRefSchema>;
 /** Una medida, como la tiene la ficha o como la informa el canal. */
 export type VariantLike = { sku: string | null; measure: string | null };
 
+/** La medida como se compara: "0,50 mm", "+0.50" y "0.50" son la misma. */
+export function measureText(measure: string | null | undefined): string | null {
+  const m = (measure ?? '').toLowerCase().replace(/\s+/g, '').replace(/,/g, '.').replace(/^\+/, '').replace(/mm$/, '');
+  return m || null;
+}
+
 /**
- * Lo que identifica a una medida: su SKU o, si no tiene, la medida. Sirve igual
- * para la ficha y para lo que lee el canal. Null si no tiene ninguno de los dos.
+ * Lo que identifica a una medida: su SKU y su medida juntos, porque hay
+ * fábricas que usan el mismo código para todas las medidas. Sirve igual para la
+ * ficha y para lo que lee el canal. Null si no tiene ninguno de los dos.
  */
 export function variantKey(v: VariantLike): string | null {
-  const sku = v.sku?.trim();
-  if (sku) return `sku:${sku.toUpperCase()}`;
-  const measure = v.measure?.replace(/\s+/g, ' ').trim();
-  return measure ? `medida:${measure.toLowerCase()}` : null;
+  const sku = v.sku?.trim().toUpperCase();
+  const measure = measureText(v.measure);
+  const key = [sku ? `sku:${sku}` : null, measure ? `medida:${measure}` : null].filter(Boolean).join(' ');
+  return key || null;
 }
 
 /** Las medidas marcadas de la foto. Vacío: es de todas. */
