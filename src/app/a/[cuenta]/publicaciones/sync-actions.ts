@@ -112,7 +112,7 @@ export async function saveMediaAction(accountSlug: string, publicationId: string
   const parsed = z
     .object({
       id: idSchema,
-      refs: z.array(photoRefSchema).max(50).nullable().optional(),
+      refs: z.array(photoRefSchema).max(1200).nullable().optional(),
       videos: z.record(z.string().max(40), z.array(z.string().min(1).max(200)).max(100)).optional(),
     })
     .safeParse({ id: publicationId, refs: input?.refs, videos: input?.videos });

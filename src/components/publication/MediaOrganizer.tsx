@@ -2,14 +2,15 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, ArrowLeft, ArrowRight, Film, ImageOff, Plus, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ArrowRight, Clapperboard, ImageOff, Play, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { IconButton } from '@/components/ui/section-card';
-import { mediaWarnings, photoVariants, variantPhotos, withVariants } from '@/domain/media';
-import { formatSeconds } from '@/domain/videos';
+import { MAX_PHOTOS, mediaWarnings, overfullMeasures, photoVariants, variantPhotos, withVariants } from '@/domain/media';
+import { ClipCheckLine, VideoFacts, VideoPlayer, VideoThumb } from '@/components/pipeline/videos/VideoCard';
 import type { MediaItem, MediaSources, Measure } from '@/lib/media';
 import { cn } from '@/lib/utils/cn';
 import { saveMediaAction } from '@/app/a/[cuenta]/publicaciones/sync-actions';
+import { chooseClipAction } from '@/app/a/[cuenta]/pipeline/video-actions';
 
 // Elegir y ordenar las fotos de una publicación: las que ya están en el canal,
 // las del paso Imágenes, corregidas o tal cual, y las demás del producto. Si el producto
@@ -96,10 +97,18 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const { channelName, measures, clip } = sources;
   const [viewing, setViewing] = useState<string | null>(measures[0]?.key ?? null);
+  // El video que se está mirando.
+  const [playing, setPlaying] = useState<string | null>(null);
   const photosDirty = photosSignature(chosen) !== photosSignature(sources.current);
   const videosDirty = marksSignature(videoMarks) !== marksSignature(initialMarks());
   const dirty = photosDirty || videosDirty;
   const full = chosen.length >= sources.max;
+  // Una medida con más fotos de las que se muestran no se puede guardar: lo dicen los avisos.
+  const overfull =
+    overfullMeasures(
+      chosen.map((m) => m.ref),
+      measures,
+    ).length > 0;
   const withMeasures = measures.length >= 2;
   const labelOf = (keys: string[]) => measures.filter((m) => keys.includes(m.key)).map((m) => m.label);
 
@@ -127,6 +136,18 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
       kind: 'ok',
       text: input.refs === null ? `Listo: vuelve a usar las fotos de ${channelName}.` : `Guardado en el borrador. Se sube a ${channelName} desde la publicación o desde Por subir.`,
     });
+    router.refresh();
+  }
+
+  // El clip se elige al tocar: no espera a Guardar en el borrador, como en el paso Videos.
+  async function chooseClip(videoId: string) {
+    setBusy(`clip:${videoId}`);
+    setMessage(null);
+    const r = await chooseClipAction(accountSlug, publicationId, videoId).catch(() => null);
+    setBusy(null);
+    if (!r) return setMessage({ kind: 'error', text: 'Se cortó la conexión con la app. Probá de nuevo.' });
+    if (!r.ok) return setMessage({ kind: 'error', text: r.error });
+    setMessage({ kind: 'ok', text: clip ? `Listo: es el ${clip.name} de esta publicación. Se sube a mano a ${channelName}, desde el paso Videos.` : 'Listo.' });
     router.refresh();
   }
 
@@ -168,7 +189,11 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
           </h3>
           {sources.following && !dirty ? <p className="text-xs text-muted-foreground">Son las que tiene en {channelName}.</p> : null}
         </div>
-        {withMeasures ? <p className="text-xs text-muted-foreground">Marcá de qué medida es cada foto. Las de Todas se ven en todas las medidas.</p> : null}
+        {withMeasures ? (
+          <p className="text-xs text-muted-foreground">
+            Marcá de qué medida es cada foto. Las de Todas se ven en todas las medidas. Cada medida muestra hasta {MAX_PHOTOS}, contando las de Todas.
+          </p>
+        ) : null}
         {chosen.length === 0 ? (
           <p className="rounded-md border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">Sin fotos. Agregalas desde abajo.</p>
         ) : (
@@ -209,36 +234,67 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
         )}
       </div>
 
-      {withMeasures && sources.videos.length > 0 ? (
+      {sources.videos.length > 0 ? (
         <div className="space-y-2">
           <h3 className="text-sm font-semibold">Videos del producto</h3>
           <p className="text-xs text-muted-foreground">
-            {clip ? `El ${clip.name} se elige en el paso Videos.` : 'Marcá de qué medida es cada video.'}
-            {clip && !clip.perVariant ? ` En ${channelName} se ve uno solo por publicación, en todas sus medidas.` : ''}
+            {clip ? `Tocá Ver para mirarlo y elegí cuál va como ${clip.name}. También se elige en el paso Videos.` : 'Tocá Ver para mirarlo.'}
+            {withMeasures ? ' Marcá de qué medida es cada video.' : ''}
+            {clip && !clip.perVariant && withMeasures ? ` En ${channelName} se ve un solo ${clip.name} por publicación, en todas sus medidas.` : ''}
           </p>
-          <ul className="divide-y rounded-md border">
-            {sources.videos.map((v) => (
-              <li key={v.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2">
-                <Film className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm">{v.name}</span>
-                  {v.durationMs !== null || clip?.videoId === v.id ? (
-                    <span className="block text-xs text-muted-foreground">
-                      {[v.durationMs !== null ? formatSeconds(v.durationMs) : null, clip?.videoId === v.id ? `Es el ${clip.name} de esta publicación` : null]
-                        .filter(Boolean)
-                        .join(' · ')}
-                    </span>
+          <ul className="grid gap-3 sm:grid-cols-2">
+            {sources.videos.map((v) => {
+              const isClip = clip?.videoId === v.id;
+              const open = playing === v.id;
+              return (
+                <li key={v.id} className={cn('space-y-3 rounded-lg border p-3', isClip && 'border-foreground/60', open && 'sm:col-span-2')}>
+                  <div className="flex gap-3">
+                    <VideoThumb videoId={v.id} className="h-28 w-16" />
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <p className="flex flex-wrap items-center gap-x-2 text-sm font-medium">
+                        <span className="break-all">{v.name}</span>
+                        {isClip && clip ? (
+                          <span className="inline-flex items-center gap-1 rounded bg-foreground px-1.5 py-0.5 text-[11px] font-medium text-background">
+                            <Clapperboard className="h-3 w-3" aria-hidden />
+                            {`${clip.name[0].toUpperCase()}${clip.name.slice(1)} de esta publicación`}
+                          </span>
+                        ) : null}
+                      </p>
+                      <VideoFacts video={v} />
+                      {v.check && clip && !isClip ? <ClipCheckLine check={v.check} clipName={clip.name} /> : null}
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
+                        <Button size="sm" variant="outline" onClick={() => setPlaying(open ? null : v.id)}>
+                          <Play />
+                          {open ? 'Cerrar' : 'Ver'}
+                        </Button>
+                        {clip && v.check && !isClip ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            pending={busy === `clip:${v.id}`}
+                            disabled={busy !== null || v.check.pending || v.check.problems.length > 0}
+                            onClick={() => chooseClip(v.id)}
+                          >
+                            <Clapperboard />
+                            Usar como {clip.name}
+                          </Button>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                  {open ? <VideoPlayer accountSlug={accountSlug} video={v} /> : null}
+                  {withMeasures ? (
+                    <MeasurePicker
+                      measures={measures}
+                      value={videoMarks[v.id] ?? []}
+                      onChange={(keys) => setVideoMarks((marks) => ({ ...marks, [v.id]: keys }))}
+                      disabled={busy !== null}
+                      label={`Medidas del video ${v.name}`}
+                    />
                   ) : null}
-                </span>
-                <MeasurePicker
-                  measures={measures}
-                  value={videoMarks[v.id] ?? []}
-                  onChange={(keys) => setVideoMarks((marks) => ({ ...marks, [v.id]: keys }))}
-                  disabled={busy !== null}
-                  label={`Medidas del video ${v.name}`}
-                />
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
         </div>
       ) : null}
@@ -309,7 +365,7 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
       <div className="flex flex-wrap items-center gap-2">
         <Button
           size="sm"
-          disabled={!dirty || chosen.length === 0 || busy !== null}
+          disabled={!dirty || chosen.length === 0 || busy !== null || overfull}
           pending={busy === 'save'}
           onClick={() => save({ refs: photosDirty ? chosen.map((m) => m.ref) : undefined, videos: videosDirty ? videoMarks : undefined }, 'save')}
         >

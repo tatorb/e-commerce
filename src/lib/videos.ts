@@ -25,7 +25,7 @@ export class VideoError extends Error {}
 
 // Quién lo midió: el navegador ve el video como se muestra, con el giro del
 // teléfono ya aplicado. Lo que informa Google queda hasta que lo mida.
-const BY_BROWSER = 'navegador';
+export const BY_BROWSER = 'navegador';
 const BY_DRIVE = 'drive';
 
 async function productFor(db: PrismaClient, accountId: string, productId: string) {

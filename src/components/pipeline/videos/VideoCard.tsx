@@ -33,7 +33,7 @@ export function VideoThumb({ videoId, className }: { videoId: string; className?
   );
 }
 
-export function VideoFacts({ video }: { video: VideoRow }) {
+export function VideoFacts({ video }: { video: Pick<VideoRow, 'durationMs' | 'width' | 'height' | 'size'> }) {
   const facts = [
     video.durationMs !== null ? formatSeconds(video.durationMs) : null,
     video.width && video.height ? `${video.width} × ${video.height}` : null,
@@ -73,6 +73,38 @@ export function ClipCheckLine({ check, clipName }: { check: ClipCheck; clipName:
   );
 }
 
+/**
+ * El video para mirarlo en la app. Al abrirlo, el navegador lo mide: si da
+ * otras medidas que las guardadas, se guardan.
+ */
+export function VideoPlayer({
+  accountSlug,
+  video,
+}: {
+  accountSlug: string;
+  video: Pick<VideoRow, 'id' | 'width' | 'height' | 'durationMs' | 'measuredByBrowser'>;
+}) {
+  const router = useRouter();
+  async function measured(e: React.SyntheticEvent<HTMLVideoElement>) {
+    const v = e.currentTarget;
+    if (!(v.videoWidth > 0 && v.videoHeight > 0 && Number.isFinite(v.duration))) return;
+    const measure = { width: v.videoWidth, height: v.videoHeight, durationMs: Math.round(v.duration * 1000) };
+    if (video.measuredByBrowser && measure.width === video.width && measure.height === video.height && measure.durationMs === video.durationMs) return;
+    const r = await saveVideoMeasureAction(accountSlug, video.id, measure).catch(() => null);
+    if (r?.ok && r.changed) router.refresh();
+  }
+  return (
+    <video
+      controls
+      playsInline
+      preload="metadata"
+      src={`/api/drive/videos/${video.id}`}
+      onLoadedMetadata={measured}
+      className="max-h-[70vh] w-full rounded-md bg-black"
+    />
+  );
+}
+
 export function VideoCard({
   accountSlug,
   publicationId,
@@ -109,15 +141,6 @@ export function VideoCard({
     });
   }
 
-  async function measured(e: React.SyntheticEvent<HTMLVideoElement>) {
-    const v = e.currentTarget;
-    if (!(v.videoWidth > 0 && v.videoHeight > 0 && Number.isFinite(v.duration))) return;
-    const measure = { width: v.videoWidth, height: v.videoHeight, durationMs: Math.round(v.duration * 1000) };
-    if (video.measuredByBrowser && measure.width === video.width && measure.height === video.height && measure.durationMs === video.durationMs) return;
-    const r = await saveVideoMeasureAction(accountSlug, video.id, measure).catch(() => null);
-    if (r?.ok && r.changed) router.refresh();
-  }
-
   return (
     <li className={cn('space-y-3 rounded-lg border p-3', isClip && 'border-foreground/60')}>
       <div className="flex gap-3">
@@ -144,16 +167,7 @@ export function VideoCard({
         </div>
       </div>
 
-      {playing ? (
-        <video
-          controls
-          playsInline
-          preload="metadata"
-          src={`/api/drive/videos/${video.id}`}
-          onLoadedMetadata={measured}
-          className="max-h-[70vh] w-full rounded-md bg-black"
-        />
-      ) : null}
+      {playing ? <VideoPlayer accountSlug={accountSlug} video={video} /> : null}
 
       {!video.gone ? (
         <div className="flex flex-wrap items-center gap-2">

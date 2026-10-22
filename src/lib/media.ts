@@ -6,7 +6,8 @@ import {
   asIsProblem,
   channelPhotos,
   cleanMedia,
-  MAX_PHOTOS,
+  maxPhotos,
+  overfullMeasures,
   parseMedia,
   parseVariations,
   parseVideoVariants,
@@ -19,6 +20,8 @@ import {
   type VariantLike,
 } from '@/domain/media';
 import { LAST_PHOTO_STEP } from '@/domain/photo-steps';
+import { checkClip } from '@/domain/videos';
+import { BY_BROWSER } from '@/lib/videos';
 import { photoFileHref } from '@/lib/photo-rules';
 import { readStored } from '@/lib/stored-files';
 
@@ -148,7 +151,7 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
           videos: {
             where: { goneAt: null },
             orderBy: [{ driveCreatedAt: 'asc' }, { createdAt: 'asc' }],
-            select: { id: true, name: true, durationMs: true },
+            select: { id: true, name: true, mimeType: true, size: true, width: true, height: true, durationMs: true, measuredBy: true },
           },
         },
       },
@@ -221,12 +224,27 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
     following: media === null,
     current,
     available: { channel: plain(channel), corrected, assets },
-    max: MAX_PHOTOS,
+    // Con varias medidas, 12 por cada una; cada medida muestra hasta 12.
+    max: maxPhotos(measures.length >= 2 ? measures.length : 1),
     // Las medidas que se pueden marcar: con menos de dos, no hay nada que elegir.
     measures: measures.length >= 2 ? measures : [],
     // Leída del canal y sin variantes: allá todas las fotos se ven juntas.
     channelWithoutVariants: copy !== null && measures.length >= 2 && variations.length === 0,
-    videos: p.product.videos.map((v) => ({ id: v.id, name: v.name, durationMs: v.durationMs, variants: marks(videoMarks[v.id] ?? []) })),
+    // Los videos del producto, para mirarlos, elegir el clip y marcar sus medidas.
+    videos: p.product.videos.map((v) => {
+      const measure = { name: v.name, mimeType: v.mimeType, size: v.size === null ? null : Number(v.size), width: v.width, height: v.height, durationMs: v.durationMs };
+      return {
+        id: v.id,
+        name: v.name,
+        durationMs: v.durationMs,
+        width: v.width,
+        height: v.height,
+        size: measure.size,
+        measuredByBrowser: v.measuredBy === BY_BROWSER,
+        check: clipRules ? checkClip(measure, clipRules) : null,
+        variants: marks(videoMarks[v.id] ?? []),
+      };
+    }),
     clip: clipRules ? { videoId: p.clip?.videoId ?? null, name: clipRules.name, perVariant: clipRules.perVariant } : null,
   };
 }
@@ -252,16 +270,18 @@ export async function saveMedia(
   }
   if (args.refs === null) data.media = Prisma.DbNull;
   else if (args.refs) {
-    const refs = cleanMedia(args.refs);
+    const refs = cleanMedia(args.refs, sources.max).map((r) => withVariants(r, keys(photoVariants(r))));
     if (refs.length === 0) throw new MediaError('Elegí al menos una foto.');
-    if (args.refs.length > MAX_PHOTOS) throw new MediaError(`Se pueden elegir hasta ${MAX_PHOTOS} fotos.`);
+    if (args.refs.length > sources.max) throw new MediaError(`Se pueden elegir hasta ${sources.max} fotos.`);
+    const overfull = overfullMeasures(refs, sources.measures);
+    if (overfull.length > 0) throw new MediaError(overfull.join(' '));
     const allowed = new Set([...sources.available.channel, ...sources.available.corrected, ...sources.available.assets].map((m) => m.key));
     if (refs.some((r) => !allowed.has(photoKey(r)))) throw new MediaError('Una de las fotos ya no está disponible. Recargá la página.');
     const blocked = sources.available.corrected.find((m) => m.blocked && refs.some((r) => photoKey(r) === m.key));
     if (blocked) throw new MediaError(`${blocked.label}: ${blocked.blocked}`);
     // Las del canal se guardan con su link, para verlas aunque cambie la lectura.
     const byKey = new Map(sources.available.channel.map((m) => [m.key, m.ref]));
-    data.media = refs.map((r) => withVariants(byKey.get(photoKey(r)) ?? r, keys(photoVariants(r)))) as Prisma.InputJsonValue;
+    data.media = refs.map((r) => withVariants(byKey.get(photoKey(r)) ?? r, photoVariants(r))) as Prisma.InputJsonValue;
   }
   if (Object.keys(data).length > 0) await db.publication.update({ where: { id: args.publicationId }, data });
 }
