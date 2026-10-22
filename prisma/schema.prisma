@@ -378,6 +378,10 @@ model Publication {
   // De qué medidas es cada video del producto en esta publicación:
   // { "<id del video>": ["sku:..."] }. Sin marcar, el video es de todas.
   videoVariants     Json                 @default("{}")
+  // Cuando el canal guarda cada medida como una publicación aparte, agrupadas
+  // en una familia: el código, el SKU y la medida de cada una, en el orden de
+  // la ficha. La primera es externalId. Vacío: una sola publicación en el canal.
+  variantListings   Json                 @default("[]")
   source            RecordSource         @default(MANUAL)
   // Importación que la creó, para poder deshacerla.
   importRunId       String?

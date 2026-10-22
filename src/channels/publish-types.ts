@@ -60,7 +60,9 @@ export type ChannelCreated = {
   url: string | null;
   // El código de cada foto en el canal, en orden, si lo informa.
   pictureIds: string[] | null;
-  // Las medidas como quedaron en el canal, con el código de sus fotos. Vacío sin medidas.
+  // Las medidas como quedaron en el canal, con el código de sus fotos. Vacío sin
+  // medidas. Si el canal guarda cada medida como una publicación aparte, cada
+  // una trae su código; la primera es externalId.
   variations: ChannelVariation[];
   // Lo que se creó pero quedó a medias, como la descripción.
   warnings: string[];
@@ -76,6 +78,13 @@ export interface ChannelPublisher {
    * cada una. Devuelve el código de cada foto, si lo informa.
    */
   updatePictures(accessToken: string, externalId: string, pictures: ChannelPicture[], layout: ChannelPictureLayout): Promise<string[] | null>;
+  /**
+   * Para las medidas que el canal guarda como publicaciones aparte: deja en
+   * cada una sus fotos, por su posición en la lista y en ese orden. Una foto
+   * que va en varias se sube una sola vez. Devuelve el código de las fotos de
+   * cada una, si el canal lo informa.
+   */
+  updateSeparatePictures(accessToken: string, listings: { externalId: string; pictures: number[] }[], pictures: ChannelPicture[]): Promise<(string[] | null)[]>;
   /** Cambia el título o la descripción de una publicación propia. Lanza PublishError si el canal no lo acepta. */
   update(accessToken: string, externalId: string, field: 'title' | 'description', value: string): Promise<void>;
   /** Cambia esos datos de catálogo; los demás quedan como están. Lanza PublishError si el canal no lo acepta. */

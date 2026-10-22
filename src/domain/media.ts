@@ -126,18 +126,40 @@ export function parseMedia(raw: unknown): PhotoRef[] | null {
   });
 }
 
-/** Una medida de la publicación en el canal, con el código de sus fotos. */
-export type ChannelVariation = VariantLike & { photoIds: string[] };
+/**
+ * Una medida de la publicación en el canal, con el código de sus fotos. Si el
+ * canal la guarda como una publicación aparte, también el código de esa.
+ */
+export type ChannelVariation = VariantLike & { photoIds: string[]; externalId?: string };
+
+const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v : null);
 
 /** Lee las medidas guardadas de lo que se leyó del canal. */
 export function parseVariations(raw: unknown): ChannelVariation[] {
   if (!Array.isArray(raw)) return [];
-  const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v : null);
   return raw.flatMap((v) => {
     if (!v || typeof v !== 'object') return [];
     const o = v as Record<string, unknown>;
     const photoIds = Array.isArray(o.photoIds) ? o.photoIds.filter((id): id is string => typeof id === 'string' && id !== '') : [];
-    return [{ sku: text(o.sku), measure: text(o.measure), photoIds }];
+    const externalId = text(o.externalId);
+    return [{ sku: text(o.sku), measure: text(o.measure), photoIds, ...(externalId ? { externalId } : {}) }];
+  });
+}
+
+/** Una medida que el canal guarda como una publicación aparte: su código, su SKU y su medida. */
+export type VariantListing = VariantLike & { externalId: string };
+
+/** Lee las publicaciones aparte de cada medida, sin repetir códigos. */
+export function parseVariantListings(raw: unknown): VariantListing[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  return raw.flatMap((v) => {
+    if (!v || typeof v !== 'object') return [];
+    const o = v as Record<string, unknown>;
+    const externalId = text(o.externalId);
+    if (!externalId || seen.has(externalId)) return [];
+    seen.add(externalId);
+    return [{ externalId, sku: text(o.sku), measure: text(o.measure) }];
   });
 }
 

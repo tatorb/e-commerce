@@ -3,6 +3,7 @@ import type { ChannelKind } from '@/generated/prisma/enums';
 import { ConnectError } from '@/channels/connect';
 import { getChannelQuestions, type ChannelQuestion } from '@/channels/questions';
 import { withAccessToken } from '@/lib/connections';
+import { variantListingOwners } from '@/lib/variant-listings';
 
 // Las preguntas de los compradores: se leen del canal y se guardan sin
 // repetir, unidas a su publicación si está en la app. Llegan con el aviso del
@@ -48,7 +49,8 @@ export async function saveQuestions(db: Db, storeId: string, questions: ChannelQ
       select: { id: true, externalId: true, status: true, text: true, answer: true, publicationId: true, answeredFrom: true },
     }),
   ]);
-  const publicationOf = new Map(publications.map((p) => [p.externalId, p.id]));
+  // Las de una medida que el canal guarda aparte van a la publicación de su familia.
+  const publicationOf = new Map<string | null, string>([...(await variantListingOwners(db, storeId)), ...publications.map((p) => [p.externalId, p.id] as const)]);
   const known = new Map(existing.map((e) => [e.externalId, e]));
 
   const fresh = valid.filter((q) => !known.has(q.externalId));

@@ -8,6 +8,7 @@ import { getChannelAdapter } from '@/channels';
 import { ConnectError } from '@/channels/connect';
 import { getChannelListings, LISTING_STATUSES, LISTINGS_BATCH, type ListingStatus } from '@/channels/listings';
 import { withAccessToken } from '@/lib/connections';
+import { variantListingOwners } from '@/lib/variant-listings';
 import { applyRows, previewRows, rowsInputSchema, undoImportRun, type RowPreview } from '@/importers/apply';
 import { listingToRow } from '@/importers/channel-listings';
 import type { ExistingKeys } from '@/importers/classify';
@@ -319,7 +320,10 @@ export async function listListingIdsAction(
   const found = await connectedStore(accountSlug, storeId);
   if (!found.ok) return { ok: false, error: found.error };
   try {
-    const ids = await withAccessToken(prisma, found.store.id, (token, userId) => found.listings.listIds(token, userId, statuses.data));
+    const listed = await withAccessToken(prisma, found.store.id, (token, userId) => found.listings.listIds(token, userId, statuses.data));
+    // Las medidas que el canal guarda aparte ya están en la app, en su familia.
+    const owners = await variantListingOwners(prisma, found.store.id);
+    const ids = listed.filter((id) => !owners.has(id));
     return { ok: true, ids: ids.slice(0, 20000) };
   } catch (e) {
     return channelFailure(e);

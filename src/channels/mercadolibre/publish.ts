@@ -1,7 +1,15 @@
 import { MercadoLibreRequestError, mlGet, mlSend } from './http';
 import { variationsOf } from './listings';
-import { measureText, variantKey } from '@/domain/media';
-import { PublishError, type ChannelAttributeUpdate, type ChannelPicture, type ChannelPictureLayout, type ChannelPublisher } from '../publish-types';
+import { measureText, variantKey, type ChannelVariation } from '@/domain/media';
+import {
+  PublishError,
+  type ChannelAttributeUpdate,
+  type ChannelCreated,
+  type ChannelNewListing,
+  type ChannelPicture,
+  type ChannelPictureLayout,
+  type ChannelPublisher,
+} from '../publish-types';
 
 // Subir a Mercado Libre el título y la descripción de una publicación propia.
 // Si Mercado Libre no acepta el cambio, se explica por qué en castellano.
@@ -104,6 +112,110 @@ function pictureIdsOf(body: unknown): string[] | null {
 
 const LISTING_TYPE_ID: Record<string, string> = { clasica: 'gold_special', premium: 'gold_pro' };
 
+/**
+ * Si la cuenta está en el modelo de "precio por variación": cada medida es una
+ * publicación aparte, sin título propio (Mercado Libre lo arma), agrupadas por
+ * nombre de familia. Si no se puede saber, se crea como siempre.
+ */
+async function separateVariants(token: string): Promise<boolean> {
+  try {
+    const me = await mlGet('/users/me', token);
+    return isObj(me) && Array.isArray(me.tags) && me.tags.includes('user_product_seller');
+  } catch (e) {
+    if (e instanceof MercadoLibreRequestError && (e.status === 401 || e.status === 429)) throw e;
+    return false;
+  }
+}
+
+type PictureBody = { id: string } | { source: string };
+
+/**
+ * Las fotos de cada publicación, de a una por vez: una foto por link se sube
+ * con la primera que la lleva y las demás usan el código que le dio Mercado
+ * Libre, así es la misma foto en todas.
+ */
+function pictureKeeper(body: PictureBody[]) {
+  const known = new Map<number, string>();
+  body.forEach((p, i) => {
+    if ('id' in p) known.set(i, p.id);
+  });
+  const valid = (list: number[]) => list.filter((i) => i >= 0 && i < body.length);
+  return {
+    valid,
+    of: (list: number[]): PictureBody[] => valid(list).map((i) => (known.has(i) ? { id: known.get(i)! } : body[i])),
+    // Anota los códigos que devolvió Mercado Libre; devuelve los de esas fotos, si los sabe.
+    learn(list: number[], ids: string[] | null): string[] | null {
+      const own = valid(list);
+      if (ids && ids.length === own.length) own.forEach((i, k) => known.set(i, ids[k]));
+      return own.every((i) => known.has(i)) ? own.map((i) => known.get(i)!) : null;
+    },
+    all: (): string[] | null => (body.every((_, i) => known.has(i)) ? body.map((_, i) => known.get(i)!) : null),
+  };
+}
+
+/** Con nombre de familia: una publicación por medida, cada una con su SKU, su cantidad y sus fotos. */
+async function createSeparate(accessToken: string, l: ChannelNewListing): Promise<ChannelCreated> {
+  const keeper = pictureKeeper(await picturesBody(accessToken, l.pictures));
+  const everything = l.pictures.map((_, i) => i);
+  const measures = l.variants.length >= 2 ? l.variants : [{ sku: l.sku, measure: null, quantity: l.quantity, pictures: everything }];
+  const created: (ChannelVariation & { externalId: string; url: string | null })[] = [];
+  const warnings: string[] = [];
+  for (const m of measures) {
+    const name = m.measure ? `La medida ${m.measure}` : 'La publicación';
+    let body: unknown;
+    try {
+      body = await send('POST', '/items', accessToken, {
+        family_name: l.title,
+        category_id: l.categoryId,
+        price: l.price,
+        currency_id: l.currency,
+        available_quantity: m.quantity,
+        buying_mode: 'buy_it_now',
+        listing_type_id: LISTING_TYPE_ID[l.listingType] ?? 'gold_special',
+        condition: 'new',
+        pictures: keeper.of(m.pictures),
+        attributes: [
+          ...l.attributes.map(attributeBody),
+          ...(m.sku ? [{ id: 'SELLER_SKU', value_name: m.sku }] : []),
+          // Las categorías de repuestos no traen un campo de medida: va con su nombre.
+          ...(m.measure ? [{ name: 'Medida', value_name: m.measure }] : []),
+        ],
+        ...(l.warranty
+          ? { sale_terms: [{ id: 'WARRANTY_TYPE', value_name: 'Garantía del vendedor' }, { id: 'WARRANTY_TIME', value_name: l.warranty }] }
+          : {}),
+      });
+    } catch (e) {
+      // Si ya se creó otra medida, se sigue con las demás y se avisa cuál faltó.
+      if (!(e instanceof PublishError) || created.length === 0) throw e;
+      warnings.push(`${name} no se creó: ${e.message}`);
+      continue;
+    }
+    const id = isObj(body) && typeof body.id === 'string' ? body.id : null;
+    if (!id) {
+      if (created.length === 0) throw new PublishError('Mercado Libre no devolvió el código de la publicación nueva.');
+      warnings.push(`${name} no se creó: Mercado Libre no devolvió su código.`);
+      continue;
+    }
+    const photoIds = keeper.learn(m.pictures, pictureIdsOf(body)) ?? [];
+    created.push({ externalId: id, url: isObj(body) && typeof body.permalink === 'string' ? body.permalink : null, sku: m.sku, measure: m.measure, photoIds });
+    if (l.description) {
+      try {
+        await send('POST', `/items/${encodeURIComponent(id)}/description`, accessToken, { plain_text: l.description });
+      } catch (e) {
+        if (!(e instanceof PublishError)) throw e;
+        warnings.push(`${name} se creó, pero la descripción no: ${e.message} Queda en el borrador para subirla.`);
+      }
+    }
+  }
+  return {
+    externalId: created[0].externalId,
+    url: created[0].url,
+    pictureIds: keeper.all(),
+    variations: l.variants.length >= 2 ? created.map((v) => ({ externalId: v.externalId, sku: v.sku, measure: v.measure, photoIds: v.photoIds })) : [],
+    warnings,
+  };
+}
+
 /** Un dato de catálogo como lo pide Mercado Libre: un valor por nombre, o la lista si acepta varios. */
 function attributeBody(a: ChannelAttributeUpdate) {
   if (!a.multiple) return { id: a.id, value_name: a.value };
@@ -121,6 +233,7 @@ export const mercadolibrePublisher: ChannelPublisher = {
   ],
 
   async create(accessToken, l) {
+    if (await separateVariants(accessToken)) return createSeparate(accessToken, l);
     const pictures = await picturesBody(accessToken, l.pictures);
     const ref = (p: { id: string } | { source: string }) => ('id' in p ? p.id : p.source);
     const variants = l.variants.length >= 2 ? l.variants : [];
@@ -203,6 +316,16 @@ export const mercadolibrePublisher: ChannelPublisher = {
         : {}),
     });
     return pictureIdsOf(res) ?? (body.every((p) => 'id' in p) ? body.map((p) => (p as { id: string }).id) : null);
+  },
+
+  async updateSeparatePictures(accessToken, listings, pictures) {
+    const keeper = pictureKeeper(await picturesBody(accessToken, pictures));
+    const out: (string[] | null)[] = [];
+    for (const l of listings) {
+      const res = await send('PUT', `/items/${encodeURIComponent(l.externalId)}`, accessToken, { pictures: keeper.of(l.pictures) });
+      out.push(keeper.learn(l.pictures, pictureIdsOf(res)));
+    }
+    return out;
   },
 
   async updateAttributes(accessToken, externalId, attributes) {

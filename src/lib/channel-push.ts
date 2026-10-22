@@ -25,7 +25,7 @@ import {
   type FaceField,
   type FaceValues,
 } from '@/domain/channel-sync';
-import { channelPhotos, withMarks, type PhotoRef } from '@/domain/media';
+import { channelPhotos, parseVariantListings, variantKey, withMarks, type ChannelVariation, type PhotoRef } from '@/domain/media';
 import type { NameValue } from '@/domain/name-value';
 import { writeContentField } from '@/domain/content';
 import { LATEST_MEASUREMENTS, latestMetrics } from '@/domain/measurements';
@@ -60,6 +60,7 @@ async function loadForPush(db: Db, accountId: string, publicationId: string) {
       id: true,
       productId: true,
       externalId: true,
+      variantListings: true,
       title: true,
       description: true,
       attributes: true,
@@ -95,6 +96,17 @@ type Loaded = Awaited<ReturnType<typeof loadForPush>>;
 function titleLocked(p: Loaded): boolean {
   const adapter = getChannelAdapter(p.store.channel.kind, p.store.channel.name);
   return resolveTitleLock(adapter.titleLock(latestMetrics(p.measurements)), p.titleLockedManual, Boolean(p.externalId)).locked === true;
+}
+
+/** Las publicaciones del canal a las que va cada cambio: la de cada medida si el canal las guarda aparte, o la única. */
+function targets(p: Loaded): string[] {
+  const family = parseVariantListings(p.variantListings);
+  return family.length >= 2 ? family.map((v) => v.externalId) : [p.externalId!];
+}
+
+/** Hace lo mismo en cada publicación del canal, en orden. Si una no lo acepta, se corta ahí. */
+async function eachTarget(p: Loaded, run: (externalId: string) => Promise<void>): Promise<void> {
+  for (const id of targets(p)) await run(id);
 }
 
 const names = (list: string[]) => (list.length <= 1 ? list.join('') : `${list.slice(0, -1).join(', ')} y ${list[list.length - 1]}`);
@@ -276,7 +288,7 @@ export async function pushDrafts(
           continue;
         }
         value = mergeAttributes(channel.attributes, plan.sent);
-        send = () => withAccessToken(db, p.store.id, (token) => publisher.updateAttributes(token, p.externalId!, plan.updates));
+        send = () => withAccessToken(db, p.store.id, (token) => eachTarget(p, (id) => publisher.updateAttributes(token, id, plan.updates)));
       } else {
         if (field === 'title' && titleLocked(p)) {
           result.rejected.push({ field, message: LOCKED_TITLE });
@@ -295,7 +307,7 @@ export async function pushDrafts(
         }
         const text = (app[field] ?? '').trim();
         value = text;
-        send = () => withAccessToken(db, p.store.id, (token) => publisher.update(token, p.externalId!, field, text));
+        send = () => withAccessToken(db, p.store.id, (token) => eachTarget(p, (id) => publisher.update(token, id, field, text)));
       }
       try {
         await send();
@@ -350,8 +362,27 @@ async function pushPhotos(
   const { pictures, origins, problems, layout, sent } = await picturesFor(db, p.productId, refs);
   if (problems.length > 0 || pictures.length === 0) return args.reject('photos', problems.join(' ') || 'Elegí al menos una foto.');
   let ids: string[] | null;
+  // Si el canal guarda cada medida aparte, cada una lleva lo que ve el comprador en esa medida.
+  const family = parseVariantListings(p.variantListings);
+  let variations: ChannelVariation[] | null = null;
   try {
-    ids = await withAccessToken(db, p.store.id, (token) => args.publisher.updatePictures(token, p.externalId!, pictures, layout));
+    if (family.length >= 2) {
+      const own = family.map((v) => ({
+        ...v,
+        pictures: layout.variants.find((x) => variantKey(x) === variantKey(v))?.pictures ?? layout.general,
+      }));
+      const each = await withAccessToken(db, p.store.id, (token) => args.publisher.updateSeparatePictures(token, own, pictures));
+      // El código de cada foto, por su lugar en la lista.
+      const byIndex = new Map<number, string>();
+      own.forEach((v, j) => {
+        const valid = v.pictures.filter((i) => i >= 0 && i < pictures.length);
+        each[j]?.forEach((id, k) => byIndex.set(valid[k], id));
+      });
+      ids = pictures.every((_, i) => byIndex.has(i)) ? pictures.map((_, i) => byIndex.get(i)!) : null;
+      variations = own.map((v, j) => ({ externalId: v.externalId, sku: v.sku, measure: v.measure, photoIds: each[j] ?? [] }));
+    } else {
+      ids = await withAccessToken(db, p.store.id, (token) => args.publisher.updatePictures(token, p.externalId!, pictures, layout));
+    }
   } catch (e) {
     if (!(e instanceof PublishError)) throw e;
     return args.reject('photos', e.message);
@@ -377,6 +408,7 @@ async function pushPhotos(
       Object.assign(data, {
         photos: urls,
         photoIds: ids,
+        ...(variations ? { variations } : {}),
         fingerprints: { ...parseFingerprints(current.fingerprints), photos: print },
         agreed: { ...parseFingerprints(current.agreed), photos: print },
         photoOrigins: { ...photoOriginsOf(current.photoOrigins), ...added },

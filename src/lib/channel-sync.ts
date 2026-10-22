@@ -16,12 +16,13 @@ import {
   type FaceValues,
   type Fingerprints,
 } from '@/domain/channel-sync';
-import { channelPhotos } from '@/domain/media';
+import { channelPhotos, parseVariantListings } from '@/domain/media';
 import { parseMetrics, type Metrics } from '@/domain/measurements';
 import type { NameValue } from '@/domain/name-value';
 import { isUniqueViolation } from '@/domain/publications';
 import { listingAttributeIds, listingAttributes } from '@/importers/channel-listings';
 import { withAccessToken } from '@/lib/connections';
+import { familyListing, readVariantListings, variantListingOwners } from '@/lib/variant-listings';
 
 // La lectura automática del canal: recorre las publicaciones de cada tienda
 // conectada, guarda la cara del canal y trae a la app lo que cambió allá,
@@ -299,27 +300,45 @@ export async function runSyncStep(
       const now = clock();
       const publications = await db.publication.findMany({
         where: { storeId: run.store.id, externalId: { in: batch } },
-        select: { id: true, externalId: true, channelCopy: { select: { channelUpdatedAt: true, descriptionReadAt: true, description: true, agreed: true } } },
+        select: {
+          id: true,
+          externalId: true,
+          variantListings: true,
+          channelCopy: { select: { channelUpdatedAt: true, descriptionReadAt: true, description: true, agreed: true } },
+        },
       });
       const byId = new Map(publications.map((p) => [p.externalId!, p]));
+      // Las medidas que el canal guarda aparte se leen con la primera.
+      const families = new Map(
+        publications.flatMap((p) => {
+          const family = parseVariantListings(p.variantListings);
+          return family.length >= 2 ? [[p.externalId!, family] as const] : [];
+        }),
+      );
+      const others = [...families.values()].flatMap((f) => f.map((v) => v.externalId)).filter((id) => !batch.includes(id));
       const withDescription = new Set<string>();
-      const result = await withAccessToken(db, run.store.id, (token, userId) =>
-        listings.readListings(token, userId, batch, {
+      const result = await withAccessToken(db, run.store.id, async (token, userId) => ({
+        ...(await listings.readListings(token, userId, batch, {
           description: (l) => {
             const need = needsDescription(byId.get(l.externalId)?.channelCopy, l, now);
             if (need) withDescription.add(l.externalId);
             return need;
           },
-        }),
-      );
+        })),
+        members: await readVariantListings(listings, token, userId, others),
+      }));
 
       const ctx = { syncId: run.id, adapter, day: dayIn(run.store.account.timezone, now), now };
       let read = 0;
       let updated = 0;
-      for (const listing of result.listings) {
-        const publication = byId.get(listing.externalId);
+      // Una medida aparte puede haber venido en la misma tanda que la primera.
+      const members = new Map([...result.members, ...result.listings.map((l) => [l.externalId, l] as const)]);
+      for (const found of result.listings) {
+        const publication = byId.get(found.externalId);
         // Se borró de la app mientras se leía.
         if (!publication) continue;
+        const family = families.get(found.externalId);
+        const listing = family ? familyListing(found, family, members) : found;
         try {
           const taken = await db.$transaction((tx) => applyListing(tx, ctx, publication.id, listing, withDescription.has(listing.externalId)));
           read++;
@@ -384,7 +403,10 @@ async function countToChoose(db: Db, storeId: string): Promise<number> {
 
 /** Las activas y pausadas del canal que la app no tiene. */
 async function countNewInChannel(db: Db, storeId: string, listings: NonNullable<ReturnType<typeof getChannelListings>>): Promise<number> {
-  const ids = await withAccessToken(db, storeId, (token, userId) => listings.listIds(token, userId, ['active', 'paused']));
+  const listed = await withAccessToken(db, storeId, (token, userId) => listings.listIds(token, userId, ['active', 'paused']));
+  // Las medidas que el canal guarda aparte ya están en la app, en su familia.
+  const owners = await variantListingOwners(db, storeId);
+  const ids = listed.filter((id) => !owners.has(id));
   const known = await db.publication.findMany({ where: { storeId, externalId: { in: ids } }, select: { externalId: true } });
   return ids.length - known.length;
 }
@@ -426,6 +448,7 @@ export async function readOne(db: Db, args: { accountId: string; publicationId: 
     select: {
       id: true,
       externalId: true,
+      variantListings: true,
       store: { select: { id: true, channel: { select: { kind: true, name: true } }, account: { select: { timezone: true } } } },
     },
   });
@@ -435,10 +458,14 @@ export async function readOne(db: Db, args: { accountId: string; publicationId: 
   const adapter = getChannelAdapter(p.store.channel.kind, p.store.channel.name);
   if (!listings) throw new SyncError(`Todavía no se pueden leer las publicaciones de ${adapter.name}.`);
   const externalId = p.externalId;
-  const result = await withAccessToken(db, p.store.id, (token, userId) =>
-    listings.readListings(token, userId, [externalId], { description: () => true }),
-  );
-  const listing = result.listings.find((l) => l.externalId === externalId);
+  const family = parseVariantListings(p.variantListings);
+  const others = family.length >= 2 ? family.map((v) => v.externalId).filter((id) => id !== externalId) : [];
+  const result = await withAccessToken(db, p.store.id, async (token, userId) => ({
+    ...(await listings.readListings(token, userId, [externalId], { description: () => true })),
+    members: await readVariantListings(listings, token, userId, others),
+  }));
+  const read = result.listings.find((l) => l.externalId === externalId);
+  const listing = read && family.length >= 2 ? familyListing(read, family, result.members) : read;
   if (!listing) {
     await db.channelCopy.updateMany({ where: { publicationId: p.id, missingSince: null }, data: { missingSince: now } });
     return null;

@@ -264,6 +264,7 @@ async function create(db: Db, args: CreateArgs, info: CreateInfo): Promise<Creat
     throw e;
   }
   warnings.push(...created.warnings);
+  const family = created.variations.flatMap((v) => (v.externalId ? [{ ...v, externalId: v.externalId }] : []));
   const descriptionSent = Boolean(app.description?.trim()) && created.warnings.length === 0;
 
   // La cara del canal, con lo que se mandó: la lectura de confirmación trae lo que guardó el canal.
@@ -278,7 +279,15 @@ async function create(db: Db, args: CreateArgs, info: CreateInfo): Promise<Creat
   await db.$transaction(async (tx) => {
     await tx.publication.update({
       where: { id: p.id },
-      data: { externalId: created.externalId, url: created.url, channelStatus: 'ACTIVE', price: args.price, media: Prisma.DbNull },
+      data: {
+        externalId: created.externalId,
+        url: created.url,
+        channelStatus: 'ACTIVE',
+        price: args.price,
+        media: Prisma.DbNull,
+        // Si el canal guardó cada medida como una publicación aparte, la app las sigue juntas.
+        variantListings: family.map((v) => ({ externalId: v.externalId, sku: v.sku, measure: v.measure })),
+      },
     });
     const copy = {
       readAt: now,
@@ -316,7 +325,13 @@ async function create(db: Db, args: CreateArgs, info: CreateInfo): Promise<Creat
 
   let confirmed = false;
   try {
-    confirmed = (await readOne(db, { accountId: args.accountId, publicationId: p.id })) !== null;
+    const taken = await readOne(db, { accountId: args.accountId, publicationId: p.id });
+    confirmed = taken !== null;
+    // Hay canales que arman su propio título: la app se queda con ese.
+    if (taken?.includes('title')) {
+      const now = await db.publication.findUnique({ where: { id: p.id }, select: { title: true } });
+      warnings.push(`${info.channelName} armó su propio título: «${now?.title ?? ''}». Quedó así en la app.`);
+    }
   } catch (e) {
     console.error('No se pudo leer la publicación recién creada', e instanceof Error ? e.message : e);
   }
