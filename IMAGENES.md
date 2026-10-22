@@ -81,12 +81,32 @@ El trabajador se conecta con la app y arranca solo cada vez que iniciás sesión
    - los ajustes que cambiaste usan tus valores
    - los que no tocaste quedan como estaban, sin volver a preguntarle a Claude
    - **Aplicar**, en cada ajuste, lo prende o lo apaga. Un ajuste apagado deja la foto como estaba en ese punto. Exportar no se apaga, porque es el que arma la foto final.
-5. Cuando te guste, tocá **Aprobar**. La foto queda **Lista**.
-6. El **JPG con fondo** y el **PNG transparente** quedan en la carpeta Fotos / Corregidas del producto en el Drive, con el nombre del original. También se bajan desde la app.
+5. **Para probar valores sin esperar a la Mac,** tocá **Editar en vivo**. Ver más abajo.
+6. Cuando te guste, tocá **Aprobar**. La foto queda **Lista**.
+7. El **JPG con fondo** y el **PNG transparente** quedan en la carpeta Fotos / Corregidas del producto en el Drive, con el nombre del original. También se bajan desde la app.
 
 Todo se guarda en el Google Drive del estudio, en la carpeta de cada producto. Si retocás a mano una foto en Corregidas, a Mercado Libre se sube tu versión. La carpeta Trabajo de la app no hace falta tocarla.
 
 Una foto ya aprobada también se puede rehacer. Las fotos del iPhone saltean solas el ajuste del lente, porque el teléfono ya lo corrige.
+
+### Editar en vivo
+
+Con **Editar en vivo**, la foto queda arriba y cada valor de lente, perspectiva, blancos, luces y color tiene una barra. Al moverla, la foto cambia al instante, sin esperar a la Mac.
+- **Lo de la Mac**, arriba de la foto, muestra lo que hizo la Mac para comparar.
+- **Quitar fondo, Recorte y Exportar** no se ven en vivo: se usa la silueta que hizo la Mac. Si cambiás el giro o la lente, la silueta se acomoda sola.
+- **Volver a lo de la Mac** deja los valores como estaban.
+- **Aplicar en la Mac** le pide a la Mac la foto final con esos valores. No le vuelve a preguntar a Claude, así que no tiene costo.
+- Es una vista previa en tamaño de pantalla: la foto final siempre la hace la Mac. Lo que ves en vivo y lo que hace la Mac se ven prácticamente iguales.
+- Funciona con las fotos que la Mac hizo después de actualizar el trabajador. En las anteriores, la app dice que hay que rehacerlas.
+
+## Actualizar el trabajador
+
+Cuando la app avisa que el trabajador está desactualizado, o para estrenar algo nuevo, como editar en vivo:
+1. Bajá el proyecto de nuevo, igual que en el paso 1 de la instalación. Reemplazá la carpeta vieja de Descargas.
+2. En la Terminal, entrá a la carpeta `trabajador-imagenes` nueva, igual que en el paso 3.
+3. Escribí `bash instalar.sh` y Enter.
+
+No hace falta crear otra llave ni volver a cargar las claves: quedan en el Llavero. Al terminar, el trabajador se reinicia solo con lo nuevo. Mientras no lo actualices, el anterior sigue andando, sin editar en vivo.
 
 ## Prender, apagar y revisar
 
@@ -163,6 +183,8 @@ Todo va **en una sola línea**, y recién al final se aprieta Enter:
 - **La conexión con la app** está en `mrb_imagenes/app.py`, y lo que pide la app se hace en `mrb_imagenes/trabajo.py`, ajuste por ajuste. La app hoy pide los 8 en un solo paso, pero el trabajador también sabe hacerlos repartidos en varios pasos. El programa que corre siempre es `principal.py`.
 - **La prueba en la Terminal**, `probar.sh`, sigue mostrando los 8 ajustes uno por uno.
 - **Los mensajes con la app** tienen ejemplos en `contrato/`, que prueban los dos lados.
+- **Editar en vivo:** con cada foto, `mrb_imagenes/vivo.py` sube un paquete con la foto preparada en tamaño de pantalla, una copia por cada combinación de correcciones de lente y la silueta. La app repite en el navegador las cuentas de lente, perspectiva, blancos, luces y color (`src/domain/photo-live.ts`). `tests/armar_referencia_vivo.py` saca números de referencia de las cuentas de la Mac, que la app compara con las suyas; si se cambia una cuenta, hay que volver a correrlo.
+- **La claridad** mide cada zona de la foto en tamaño de pantalla, 1200 px, y aplica la curva a la foto entera. Así da lo mismo en la Mac y en la vista en vivo.
 - **El arranque automático** es un servicio de usuario de macOS, `com.studiomrb.imagenes`, que arma `prender.sh` en `~/Library/LaunchAgents/`.
 - **Dónde vive:** el entorno de Python, el modelo, la dirección de la app y las fotos de trabajo quedan fuera del proyecto, en `~/Library/Application Support/MRB Imagenes/`. Las fotos de trabajo se borran solas a los 7 días sin uso; si faltan, se rearman desde el original.
 - **Pruebas:** `cd trabajador-imagenes && uv run pytest`. Verifican la regla de oro en cada ajuste:

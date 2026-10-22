@@ -26,7 +26,7 @@ export function originalTypeFor(name: string): string | null {
 
 /** Dónde la app muestra un archivo de la línea, solo con sesión iniciada. */
 export const photoFileHref = (
-  kind: 'antes' | 'original' | 'vista' | 'mascara' | 'png' | 'jpg',
+  kind: 'antes' | 'original' | 'vista' | 'mascara' | 'png' | 'jpg' | 'vivo',
   ids: { foto?: string; paso?: string },
   download = false,
 ) => `/api/imagenes/ver?${new URLSearchParams({ tipo: kind, ...(ids.foto ? { foto: ids.foto } : {}), ...(ids.paso ? { paso: ids.paso } : {}), ...(download ? { descargar: '1' } : {}) })}`;

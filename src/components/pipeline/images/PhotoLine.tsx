@@ -1,13 +1,14 @@
 'use client';
 
-import { useState } from 'react';
-import { AlertTriangle, Check, ChevronDown, Clock, Download, RotateCcw, SkipForward, Sparkles } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { AlertTriangle, Check, ChevronDown, Clock, Download, RotateCcw, SkipForward, SlidersHorizontal, Sparkles, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { StatusText } from '@/components/pipeline/StatusText';
 import { useStepAction } from '@/components/pipeline/useStepAction';
-import { PHOTO_ADJUSTMENT_LABEL, PHOTO_STEPS, RUN_STATUS_LABEL } from '@/domain/photo-steps';
+import { LIVE_PARTS, PHOTO_ADJUSTMENT_LABEL, PHOTO_STEPS, RUN_STATUS_LABEL } from '@/domain/photo-steps';
+import type { LiveEdits, LivePartKey } from '@/domain/photo-live';
 import type { StepParam, StepPart, StepRequest } from '@/domain/photo-contract';
 import { formatUsd } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
@@ -18,6 +19,7 @@ import {
   skipPhotoStepAction,
 } from '@/app/a/[cuenta]/pipeline/image-actions';
 import { CompareView } from './CompareView';
+import { LivePreview } from './LivePreview';
 import type { PhotoView, RunView } from './types';
 import { BrandMark } from '@/components/ui/brand-loader';
 
@@ -25,7 +27,8 @@ import { BrandMark } from '@/components/ui/brand-loader';
 // lo que dijo Claude, los valores y si se aplica, para aprobar o cambiar los
 // valores que haga falta y rehacer todo junto. Con más de un paso, los pasos
 // van arriba. Con varias fotos abiertas (compact), los ajustes arrancan
-// plegados para ver más fotos de una vez.
+// plegados para ver más fotos de una vez. Si la Mac subió el paquete, los
+// ajustes de lente a color se pueden mover en vivo y después aplicar en la Mac.
 
 const ORIGIN_LABEL: Record<string, string> = {
   claude: 'Claude',
@@ -116,8 +119,32 @@ function initialEdits(parts: StepPart[]): Edits {
   );
 }
 
-/** Lo que se le pide al trabajador al rehacer. Null si algún valor no es un número. */
-function requestFrom(parts: StepPart[], edits: Edits): StepRequest | null {
+const isLive = (paso: string) => LIVE_PARTS.includes(paso);
+
+const numberOf = (text: string | undefined) => Number(String(text ?? '').replace(',', '.'));
+
+/** Los valores de la pantalla para la vista en vivo, dentro de su rango. */
+function liveEditsFrom(parts: StepPart[], edits: Edits): LiveEdits {
+  const out: LiveEdits = {};
+  for (const part of parts) {
+    if (!isLive(part.paso)) continue;
+    const values: Record<string, number> = {};
+    for (const p of part.parametros) {
+      const n = numberOf(edits[part.paso].values[p.clave]);
+      const v = Number.isFinite(n) ? Math.min(Math.max(n, p.minimo), p.maximo) : shownValue(part, p);
+      values[p.clave] = p.tipo === 'si_no' ? (v >= 0.5 ? 1 : 0) : v;
+    }
+    out[part.paso as LivePartKey] = { on: edits[part.paso].on && part.no_aplica === null, values };
+  }
+  return out;
+}
+
+/**
+ * Lo que se le pide al trabajador al rehacer. Null si algún valor no es un
+ * número. En vivo, un ajuste que se vuelve a prender va con los valores que se
+ * vieron en la pantalla.
+ */
+function requestFrom(parts: StepPart[], edits: Edits, live: boolean): StepRequest | null {
   const valores: StepRequest['valores'] = {};
   const apagados: string[] = [];
   for (const part of parts) {
@@ -127,10 +154,10 @@ function requestFrom(parts: StepPart[], edits: Edits): StepRequest | null {
       continue;
     }
     // Un ajuste que estaba apagado y se vuelve a prender lo propone Claude.
-    if (!part.aplicado) continue;
+    if (!part.aplicado && !(live && isLive(part.paso))) continue;
     const out: Record<string, number> = {};
     for (const p of part.parametros) {
-      const n = Number(String(edits[part.paso].values[p.clave]).replace(',', '.'));
+      const n = numberOf(edits[part.paso].values[p.clave]);
       if (!Number.isFinite(n)) return null;
       out[p.clave] = n;
     }
@@ -143,6 +170,8 @@ function RunPanel({ accountSlug, run, photo, compact }: { accountSlug: string; r
   const step = PHOTO_STEPS[run.step];
   const { run: act, pending, running, status } = useStepAction();
   const [edits, setEdits] = useState<Edits>(() => initialEdits(run.parts));
+  const [live, setLive] = useState(false);
+  const liveEdits = useMemo(() => liveEditsFrom(run.parts, edits), [run.parts, edits]);
   const [showParts, setShowParts] = useState(!compact);
   // Al abrir o cerrar otras fotos, los ajustes se pliegan o se despliegan, sin perder lo que se cambió.
   const [wasCompact, setWasCompact] = useState(compact);
@@ -157,9 +186,10 @@ function RunPanel({ accountSlug, run, photo, compact }: { accountSlug: string; r
   );
   const ready = run.status === 'REVIEW' || run.status === 'APPROVED' || run.status === 'SKIPPED';
   const working = run.status === 'QUEUED' || run.status === 'PROCESSING';
+  const liveOn = live && run.liveHref !== null;
 
   function redo() {
-    const request = requestFrom(run.parts, edits);
+    const request = requestFrom(run.parts, edits, liveOn);
     act(
       () =>
         request
@@ -237,8 +267,37 @@ function RunPanel({ accountSlug, run, photo, compact }: { accountSlug: string; r
 
       {ready ? (
         <>
-          <CompareView before={run.beforeHref} after={run.afterHref} canOverlay={!step.reframes} />
+          {liveOn && run.liveHref ? (
+            // Arriba de todo mientras se mueven los valores de abajo.
+            <div className="sticky top-0 z-20 -mx-4 border-b bg-card px-4 py-2">
+              <LivePreview href={run.liveHref} macHref={run.afterHref} parts={run.parts} background={run.background} edits={liveEdits} />
+            </div>
+          ) : (
+            <CompareView before={run.beforeHref} after={run.afterHref} canOverlay={!step.reframes} />
+          )}
           {run.requested ? <p className="text-xs text-muted-foreground">Rehecho con los valores que pediste.</p> : null}
+          {run.liveHref && step.parts.some(isLive) ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant={liveOn ? 'secondary' : 'outline'}
+                aria-pressed={liveOn}
+                onClick={() => {
+                  setLive(!liveOn);
+                  if (!liveOn) setShowParts(true);
+                }}
+              >
+                <SlidersHorizontal className="h-4 w-4" />
+                {liveOn ? 'Dejar de editar en vivo' : 'Editar en vivo'}
+              </Button>
+              {!liveOn ? (
+                <span className="text-xs text-muted-foreground">Mové lente, perspectiva, blancos, luces y color y mirá el cambio al instante.</span>
+              ) : null}
+            </div>
+          ) : run.status === 'REVIEW' && step.parts.some(isLive) ? (
+            <p className="text-xs text-muted-foreground">Para editar en vivo, actualizá el trabajador de la Mac y rehacé la foto.</p>
+          ) : null}
 
           {compact ? (
             <Button type="button" size="sm" variant="ghost" aria-expanded={showParts} onClick={() => setShowParts(!showParts)}>
@@ -247,7 +306,8 @@ function RunPanel({ accountSlug, run, photo, compact }: { accountSlug: string; r
             </Button>
           ) : null}
           {showParts ? (
-            <div className="space-y-3">
+            // En vivo, lo que toma el foco queda a la vista, debajo de la foto y arriba de los botones.
+            <div className={cn('space-y-3', liveOn && '[&_input]:scroll-mt-[44vh] [&_input]:scroll-mb-32 sm:[&_input]:scroll-mt-[60vh]')}>
               {run.parts.map((part) => (
                 <PartCard
                   key={part.paso}
@@ -255,6 +315,7 @@ function RunPanel({ accountSlug, run, photo, compact }: { accountSlug: string; r
                   edit={edits[part.paso]}
                   onChange={(e) => setEdits({ ...edits, [part.paso]: e })}
                   disabled={pending}
+                  live={liveOn}
                 />
               ))}
             </div>
@@ -311,11 +372,23 @@ function RunPanel({ accountSlug, run, photo, compact }: { accountSlug: string; r
                 onClick={redo}
               >
                 <RotateCcw className="h-4 w-4" />
-                {run.status === 'REVIEW' || run.step === PHOTO_STEPS.length - 1 ? 'Rehacer con estos valores' : 'Rehacer desde acá con estos valores'}
+                {liveOn && edited
+                  ? 'Aplicar en la Mac'
+                  : run.status === 'REVIEW' || run.step === PHOTO_STEPS.length - 1
+                    ? 'Rehacer con estos valores'
+                    : 'Rehacer desde acá con estos valores'}
               </Button>
+              {edited ? (
+                <Button size="sm" variant="ghost" disabled={pending} onClick={() => setEdits(initialEdits(run.parts))}>
+                  <Undo2 className="h-4 w-4" />
+                  Volver a lo de la Mac
+                </Button>
+              ) : null}
               <StatusText status={status} />
             </div>
-            {edited && run.status === 'REVIEW' ? (
+            {edited && liveOn ? (
+              <p className="text-xs text-muted-foreground">Así se vería. Aplicá en la Mac para que haga la foto final con estos valores.</p>
+            ) : edited && run.status === 'REVIEW' ? (
               <p className="text-xs text-muted-foreground">Cambiaste valores: rehacé para ver cómo queda antes de aprobar.</p>
             ) : null}
             {run.status !== 'REVIEW' && run.step < PHOTO_STEPS.length - 1 ? (
@@ -338,14 +411,17 @@ function PartCard({
   edit,
   onChange,
   disabled,
+  live,
 }: {
   part: StepPart;
   edit: Edits[string];
   onChange: (e: Edits[string]) => void;
   disabled: boolean;
+  live: boolean;
 }) {
   const label = PHOTO_ADJUSTMENT_LABEL[part.paso] ?? part.paso;
   const id = `ajuste-${part.paso}`;
+  const liveHere = live && isLive(part.paso);
   // Sin Exportar no hay foto final; lo que no aplica no se puede prender.
   const switchable = part.no_aplica === null && part.paso !== 'exportar';
   return (
@@ -368,6 +444,7 @@ function PartCard({
         ) : null}
       </div>
       <div className="space-y-2 p-3">
+        {live && !isLive(part.paso) ? <p className="text-xs text-muted-foreground">No se ve en vivo: cambia cuando se aplica en la Mac.</p> : null}
         {part.no_aplica ? (
           <p className="text-sm text-muted-foreground">Se salteó solo: {part.no_aplica}</p>
         ) : !edit.on ? (
@@ -384,17 +461,18 @@ function PartCard({
                   {part.propuesta.aviso ? <span className="block text-amber-700">{part.propuesta.aviso}</span> : null}
                 </p>
               </div>
-            ) : !part.aplicado ? (
+            ) : !part.aplicado && !liveHere ? (
               <p className="text-sm text-muted-foreground">Al rehacer, Claude propone los valores.</p>
             ) : null}
             {part.nota ? <p className="rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-sm">{part.nota}</p> : null}
-            {part.parametros.length > 0 && part.aplicado ? (
+            {part.parametros.length > 0 && (part.aplicado || liveHere) ? (
               <ValuesForm
                 idPrefix={part.paso}
                 params={part.parametros}
                 values={edit.values}
                 onChange={(values) => onChange({ ...edit, values })}
                 disabled={disabled}
+                slider={liveHere}
               />
             ) : null}
             {Object.keys(part.medidas).length > 0 ? (
@@ -422,12 +500,15 @@ function ValuesForm({
   values,
   onChange,
   disabled,
+  slider,
 }: {
   idPrefix: string;
   params: StepParam[];
   values: Record<string, string>;
   onChange: (v: Record<string, string>) => void;
   disabled: boolean;
+  // En vivo, cada número va con una barra para moverlo.
+  slider: boolean;
 }) {
   return (
     <fieldset className="space-y-2">
@@ -476,6 +557,19 @@ function ValuesForm({
                 />
                 {p.unidad.trim() ? <span className="text-xs text-muted-foreground">{p.unidad.trim()}</span> : null}
               </div>
+              {slider ? (
+                <input
+                  type="range"
+                  aria-label={p.etiqueta}
+                  min={p.minimo}
+                  max={p.maximo}
+                  step={p.paso || 'any'}
+                  value={Number.isFinite(numberOf(values[p.clave])) ? numberOf(values[p.clave]) : p.defecto}
+                  onChange={(e) => onChange({ ...values, [p.clave]: e.target.value })}
+                  disabled={disabled}
+                  className="col-span-2 h-6 w-full cursor-pointer accent-primary"
+                />
+              ) : null}
             </div>
           );
         })}

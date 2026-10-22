@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { z } from 'zod';
 import type { Prisma } from '@/generated/prisma/client';
-import { PHOTO_PROTOCOL, type Transfer } from '@/domain/photo-contract';
+import { PHOTO_PROTOCOLS, type Transfer } from '@/domain/photo-contract';
 import { prisma } from './db';
 import { driveEmail, NOT_CONNECTED } from './drive';
 import { signedDownloadUrl } from './files';
@@ -29,7 +29,7 @@ export async function workerRequest<S extends z.ZodType>(
     return { ok: false, res: fail(400, 'Pedido inválido.') };
   }
   const protocol = raw && typeof raw === 'object' ? (raw as { protocolo?: unknown }).protocolo : undefined;
-  if (protocol !== PHOTO_PROTOCOL) return { ok: false, res: fail(409, OUTDATED) };
+  if (!(PHOTO_PROTOCOLS as readonly unknown[]).includes(protocol)) return { ok: false, res: fail(409, OUTDATED) };
   const parsed = schema.safeParse(raw);
   if (!parsed.success) return { ok: false, res: fail(400, `Pedido inválido: ${parsed.error.issues[0]?.path.join('.')} ${parsed.error.issues[0]?.message}`) };
   const auth = await verifyWorkerRequest(prisma, req.headers.get('authorization'), new Date(), info?.(parsed.data) ?? null);

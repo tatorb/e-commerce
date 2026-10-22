@@ -1,8 +1,19 @@
 import type { PrismaClient } from '@/generated/prisma/client';
 import { Prisma } from '@/generated/prisma/client';
 import type { PhotoRunStatus } from '@/generated/prisma/enums';
-import type { Job, RecipeEntry, StepPart, StepProposal, StepRequest, Transfer, UploadKind, WorkerDone } from '@/domain/photo-contract';
-import { LAST_PHOTO_STEP, OPEN_RUN_STATUSES, PHOTO_STEPS } from '@/domain/photo-steps';
+import {
+  LIVE_PROTOCOL,
+  type Job,
+  type PhotoProtocol,
+  type RecipeEntry,
+  type StepPart,
+  type StepProposal,
+  type StepRequest,
+  type Transfer,
+  type UploadKind,
+  type WorkerDone,
+} from '@/domain/photo-contract';
+import { LAST_PHOTO_STEP, LIVE_PARTS, OPEN_RUN_STATUSES, PHOTO_STEPS } from '@/domain/photo-steps';
 import { parsePhotoSettings, type PhotoSettingsValues } from '@/domain/photo-settings';
 import { loadPhotoSettings } from './photo-settings';
 
@@ -83,6 +94,8 @@ export async function startPhoto(tx: Tx, editId: string) {
 export type RunFiles = { productId: string; editId: string; runId: string; originalName: string };
 
 export type JobDeps = {
+  // Con qué versión de mensajes habla el trabajador: decide qué puede subir.
+  protocol: PhotoProtocol;
   download: (edit: { id: string; originalUrl: string }) => Promise<Transfer>;
   uploads: (run: RunFiles, kinds: UploadKind[]) => Promise<Partial<Record<UploadKind, Transfer>>>;
 };
@@ -173,6 +186,7 @@ export async function buildJob(db: PrismaClient, runId: string, deps: JobDeps): 
   if (run.step === 0) kinds.push('antes');
   if (step.parts.includes('fondo')) kinds.push('mascara');
   if (step.parts.includes('exportar')) kinds.push('png', 'jpg');
+  if (deps.protocol >= LIVE_PROTOCOL && step.parts.some((p) => LIVE_PARTS.includes(p))) kinds.push('vivo');
   const subidas = await deps.uploads({ productId: edit.productId, editId: edit.id, runId: run.id, originalName: edit.originalName }, kinds);
   const product = [edit.product.productType, edit.product.name].filter(Boolean).join(': ') || null;
   const request = requestOf(run.requested);
@@ -260,6 +274,7 @@ export async function submitResult(
         maskUrl: urls.mascara ?? null,
         pngUrl: urls.png ?? null,
         jpgUrl: urls.jpg ?? null,
+        liveUrl: urls.vivo ?? null,
         aiUsage: cost > 0 ? { costo_usd: Math.round(cost * 100000) / 100000 } : Prisma.DbNull,
         seconds: done.segundos,
         leaseUntil: null,

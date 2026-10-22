@@ -1,5 +1,6 @@
 import type { PhotoStepRun } from '@/generated/prisma/client';
 import { currentRuns, photoProgress, photoProgressText } from '@/domain/photo-steps';
+import { parsePhotoSettings } from '@/domain/photo-settings';
 import { formatDateTime } from '@/lib/format';
 import { photoFileHref } from '@/lib/photo-rules';
 import { partsOf } from '@/lib/photo-queue';
@@ -65,6 +66,8 @@ function runView(run: PhotoStepRun & { decidedBy: { name: string } | null }, bef
     maskHref: run.maskUrl ? photoFileHref('mascara', { paso: run.id }, true) : null,
     pngHref: run.pngUrl ? photoFileHref('png', { paso: run.id }, true) : null,
     jpgHref: run.jpgUrl ? photoFileHref('jpg', { paso: run.id }, true) : null,
+    liveHref: run.liveUrl ? photoFileHref('vivo', { paso: run.id }) : null,
+    background: parsePhotoSettings(run.settings).fondo,
     costUsd: typeof usage?.costo_usd === 'number' ? usage.costo_usd : null,
     seconds: run.seconds,
     error: run.error,

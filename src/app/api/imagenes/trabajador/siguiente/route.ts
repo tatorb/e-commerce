@@ -25,6 +25,7 @@ export async function POST(req: Request) {
   try {
     const job = await withDriveToken(prisma, (token, email) =>
       buildJob(prisma, claimed.runId, {
+        protocol: r.body.protocolo,
         download: (edit) => originalTransfer(base, edit),
         uploads: async (run, kinds) =>
           outputTransfers(prisma, token, email, { owner: await photoOwner(prisma, run.productId), runId: run.runId, originalName: run.originalName, kinds }),

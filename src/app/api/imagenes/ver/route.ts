@@ -11,7 +11,7 @@ import { inVercel, readStored, storageError } from '@/lib/stored-files';
 
 export const dynamic = 'force-dynamic';
 
-const KINDS = ['antes', 'original', 'vista', 'mascara', 'png', 'jpg'] as const;
+const KINDS = ['antes', 'original', 'vista', 'mascara', 'png', 'jpg', 'vivo'] as const;
 type Kind = (typeof KINDS)[number];
 const LIGHT: Kind[] = ['antes', 'vista'];
 
@@ -31,11 +31,11 @@ export async function GET(req: Request) {
     contentType = kind === 'original' && edit ? edit.originalType : contentType;
   } else {
     const run = await prisma.photoStepRun.findUnique({ where: { id: params.get('paso') ?? '' }, include: { edit: true } });
-    const field = { vista: 'previewUrl', mascara: 'maskUrl', png: 'pngUrl', jpg: 'jpgUrl' } as const;
+    const field = { vista: 'previewUrl', mascara: 'maskUrl', png: 'pngUrl', jpg: 'jpgUrl', vivo: 'liveUrl' } as const;
     url = run ? run[field[kind]] : null;
     const base = run ? run.edit.originalName.replace(/\.[^.]+$/, '') : 'foto';
-    name = { vista: `${base}-vista.jpg`, mascara: `${base}-silueta.png`, png: `${base}.png`, jpg: `${base}.jpg` }[kind];
-    contentType = kind === 'mascara' || kind === 'png' ? 'image/png' : 'image/jpeg';
+    name = { vista: `${base}-vista.jpg`, mascara: `${base}-silueta.png`, png: `${base}.png`, jpg: `${base}.jpg`, vivo: `${base}-en-vivo.bin` }[kind];
+    contentType = kind === 'vivo' ? 'application/octet-stream' : kind === 'mascara' || kind === 'png' ? 'image/png' : 'image/jpeg';
   }
   if (!url) return new NextResponse('El archivo no existe.', { status: 404 });
 

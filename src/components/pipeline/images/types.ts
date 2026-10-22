@@ -18,6 +18,10 @@ export type RunView = {
   maskHref: string | null;
   pngHref: string | null;
   jpgHref: string | null;
+  // El paquete para editar en vivo, si la Mac lo subió.
+  liveHref: string | null;
+  // El color de fondo del JPG con que se hizo.
+  background: string;
   costUsd: number | null;
   seconds: number | null;
   error: string | null;

@@ -32,6 +32,7 @@ const OUTPUTS: Record<UploadKind, { label: string; ext: string; contentType: str
   mascara: { label: 'silueta', ext: 'png', contentType: 'image/png' },
   png: { label: 'corregida', ext: 'png', contentType: 'image/png' },
   jpg: { label: 'corregida', ext: 'jpg', contentType: 'image/jpeg' },
+  vivo: { label: 'para editar en vivo', ext: 'bin', contentType: 'application/octet-stream' },
 };
 
 export const outputType = (kind: UploadKind) => OUTPUTS[kind].contentType;

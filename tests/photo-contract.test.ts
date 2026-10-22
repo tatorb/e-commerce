@@ -15,7 +15,7 @@ describe('lo que se dicen la app y el trabajador', () => {
     const done = resultSchema.parse(example('resultado.json'));
     expect(done.ok).toBe(true);
     if (done.ok) {
-      expect(done.archivos).toEqual(['antes', 'vista', 'mascara', 'png', 'jpg']);
+      expect(done.archivos).toEqual(['antes', 'vista', 'mascara', 'png', 'jpg', 'vivo']);
       expect(done.partes.map((p) => p.paso)).toEqual(PHOTO_STEPS[0].parts);
       expect(done.partes[0].parametros[0].tipo).toBe('si_no');
     }
@@ -27,6 +27,9 @@ describe('lo que se dicen la app y el trabajador', () => {
     expect(example('resultado.json').protocolo).toBe(PHOTO_PROTOCOL);
     expect(nextRequestSchema.safeParse({ protocolo: PHOTO_PROTOCOL + 1 }).success).toBe(false);
     expect(heartbeatSchema.safeParse({ protocolo: PHOTO_PROTOCOL, id: 'x', turno: 1 }).success).toBe(true);
+    // Un trabajador con el protocolo anterior sigue andando, sin la edición en vivo.
+    expect(heartbeatSchema.safeParse({ protocolo: 2, id: 'x', turno: 1 }).success).toBe(true);
+    expect(nextRequestSchema.safeParse({ protocolo: 1 }).success).toBe(false);
   });
 
   it('rechaza archivos desconocidos y valores que no son números', () => {

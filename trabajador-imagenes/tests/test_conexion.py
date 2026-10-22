@@ -46,7 +46,7 @@ def test_entiende_el_trabajo_de_ejemplo():
     assert (t.grupo, t.indice, t.pasos) == ("corregir", 0, CLAVES)
     assert t.pedidos is not None and t.pedidos.valores["fondo"]["dureza"] == 20 and t.pedidos.apagados == ["luces"]
     assert t.receta == []
-    assert set(t.subidas) == {"antes", "vista", "mascara", "png", "jpg"}
+    assert set(t.subidas) == {"antes", "vista", "mascara", "png", "jpg", "vivo"}
     assert r.volver_en == 5
 
 
@@ -218,6 +218,7 @@ EN_DOS = [("corregir", CLAVES[:5]), ("terminar", CLAVES[5:])]
 def _trabajo(indice: int, receta: list, pedidos=None, id=None, grupos=UN_PASO) -> Trabajo:
     grupo, pasos = grupos[indice]
     tipos = ["vista"] + (["antes"] if indice == 0 else []) + (["mascara", "png", "jpg"] if "exportar" in pasos else [])
+    tipos += ["vivo"] if "lente" in pasos else []
     corrida = id or f"c{indice}"
     return Trabajo.model_validate(
         {
@@ -259,7 +260,7 @@ def test_los_8_ajustes_en_un_paso_como_los_pide_la_app(tmp_path):
     assert all(p.aplicado for p in hecho.partes[1:])
     # Claude miró cada ajuste que aplica, uno por uno: todos menos lente.
     assert inspector.pedidos == 7
-    assert sorted(hecho.archivos) == ["antes", "jpg", "mascara", "png", "vista"]
+    assert sorted(hecho.archivos) == ["antes", "jpg", "mascara", "png", "vista", "vivo"]
     assert hecho.original is not None and (hecho.original.ancho, hecho.original.alto) == (800, 600)
     final = Image.open(io.BytesIO(cliente.subidas["https://deposito/c0/jpg"]))
     assert final.size[0] == final.size[1]
@@ -302,7 +303,7 @@ def test_en_2_pasos_el_segundo_sigue_desde_el_primero(tmp_path):
     assert corregir.partes[1].propuesta and corregir.partes[1].propuesta.razon == "Propuesta para perspectiva."
     assert corregir.partes[1].uso_claude == {"costo_usd": 0.01}
     assert {p.clave for p in corregir.partes[1].parametros} >= {"giro"}
-    assert sorted(corregir.archivos) == ["antes", "vista"]
+    assert sorted(corregir.archivos) == ["antes", "vista", "vivo"]
     assert corregir.original is not None and (corregir.original.ancho, corregir.original.alto) == (800, 600)
     # Claude miró cada ajuste que aplica, uno por uno.
     assert inspector.pedidos == 4

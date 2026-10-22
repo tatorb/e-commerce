@@ -31,7 +31,8 @@
       "vista": { "url": "https://vercel.com/api/blob/?pathname=imagenes%2Fp%2Ffoto-1%2Fcorrida-corregir%2Fvista.jpg&vercel-blob-signature=x", "metodo": "PUT", "encabezados": { "x-api-version": "12", "x-content-type": "image/jpeg" } },
       "mascara": { "url": "https://vercel.com/api/blob/?pathname=imagenes%2Fp%2Ffoto-1%2Fcorrida-corregir%2Fmascara.png&vercel-blob-signature=x", "metodo": "PUT", "encabezados": { "x-api-version": "12", "x-content-type": "image/png" } },
       "png": { "url": "https://vercel.com/api/blob/?pathname=imagenes%2Fp%2Ffoto-1%2Fcorrida-corregir%2Ffinal.png&vercel-blob-signature=x", "metodo": "PUT", "encabezados": { "x-api-version": "12", "x-content-type": "image/png" } },
-      "jpg": { "url": "https://vercel.com/api/blob/?pathname=imagenes%2Fp%2Ffoto-1%2Fcorrida-corregir%2Ffinal.jpg&vercel-blob-signature=x", "metodo": "PUT", "encabezados": { "x-api-version": "12", "x-content-type": "image/jpeg" } }
+      "jpg": { "url": "https://vercel.com/api/blob/?pathname=imagenes%2Fp%2Ffoto-1%2Fcorrida-corregir%2Ffinal.jpg&vercel-blob-signature=x", "metodo": "PUT", "encabezados": { "x-api-version": "12", "x-content-type": "image/jpeg" } },
+      "vivo": { "url": "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=ejemplo-vivo", "metodo": "PUT", "encabezados": { "Content-Type": "application/octet-stream" } }
     }
   },
   "volver_en": 5

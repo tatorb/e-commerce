@@ -7,14 +7,18 @@ import type { PhotoSettingsValues } from './photo-settings';
 // y los ejemplos de trabajador-imagenes/contrato/ los prueban los dos.
 
 // Sube cuando cambia la forma de los mensajes: un trabajador viejo recibe un
-// aviso para actualizarse en lugar de un error raro.
-export const PHOTO_PROTOCOL = 2;
+// aviso para actualizarse en lugar de un error raro. El 3 suma el paquete para
+// editar en vivo; un trabajador con el 2 sigue andando, sin ese paquete.
+export const PHOTO_PROTOCOLS = [2, 3] as const;
+export type PhotoProtocol = (typeof PHOTO_PROTOCOLS)[number];
+export const PHOTO_PROTOCOL: PhotoProtocol = 3;
+export const LIVE_PROTOCOL: PhotoProtocol = 3;
 
 // Cómo bajar o subir un archivo: la app arma el pedido completo, así el
 // trabajador no depende de cómo funciona el depósito por dentro.
 export type Transfer = { url: string; metodo: 'GET' | 'PUT'; encabezados: Record<string, string> };
 
-export const UPLOAD_KINDS = ['antes', 'vista', 'mascara', 'png', 'jpg'] as const;
+export const UPLOAD_KINDS = ['antes', 'vista', 'mascara', 'png', 'jpg', 'vivo'] as const;
 export type UploadKind = (typeof UPLOAD_KINDS)[number];
 
 // Un ajuste ya hecho de un paso aprobado: con qué valores, o si no se aplicó.
@@ -52,9 +56,10 @@ export type Job = {
 
 export type NextResponse = { trabajo: Job | null; volver_en: number };
 
-const protocol = z.literal(PHOTO_PROTOCOL, {
-  error: 'El trabajador de imágenes está desactualizado: hay que actualizarlo.',
-});
+const protocol = z.union(
+  PHOTO_PROTOCOLS.map((p) => z.literal(p)),
+  { error: 'El trabajador de imágenes está desactualizado: hay que actualizarlo.' },
+);
 
 const shortText = (max: number) => z.string().max(max);
 const numbers = z.record(z.string().max(60), z.number());

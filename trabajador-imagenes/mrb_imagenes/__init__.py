@@ -4,4 +4,4 @@ Regla de oro: solo se corrige la foto original. Nada se genera, rellena ni
 inventa, y el original nunca se pisa ni se borra.
 """
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"

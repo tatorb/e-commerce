@@ -2,8 +2,8 @@
 
 Un paso tiene varios ajustes que se hacen de corrido. Consigue la foto que
 entra al paso y, ajuste por ajuste, la mide, le pide valores a Claude (o usa
-los que pidió la persona) y aplica. Al final sube las vistas y arma el
-resultado.
+los que pidió la persona) y aplica. Al final sube las vistas, el paquete para
+editar en vivo en la app y arma el resultado.
 
 Las fotos intermedias en tamaño completo quedan en la Mac, en una carpeta por
 foto: pesan mucho y subirlas en cada paso haría todo lento. Si esa carpeta se
@@ -38,6 +38,7 @@ from .imagen import Foto, guardar_intermedia, leer_intermedia, leer_original, vi
 from .inspector import Inspector
 from .linea import aplicar, medir_y_proponer
 from .pasos.base import Paso
+from .vivo import armar_paquete
 
 # Las carpetas de fotos que no se tocan hace este tiempo se borran solas.
 DIAS_EN_LA_MAC = 7
@@ -266,6 +267,8 @@ def procesar(
         archivos["png"] = finales["final.png"]
     if "final.jpg" in finales:
         archivos["jpg"] = finales["final.jpg"]
+    if "vivo" in trabajo.subidas:
+        archivos["vivo"] = armar_paquete(entrada, por_clave.get("lente"), ajustes, mascara)
     for tipo, contenido in archivos.items():
         destino = trabajo.subidas.get(tipo)  # type: ignore[call-overload]
         if destino is None:

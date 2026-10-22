@@ -19,6 +19,10 @@ export const PHOTO_ADJUSTMENT_LABEL: Record<string, string> = {
   exportar: 'Exportar',
 };
 
+// Los ajustes que se pueden probar en vivo en la pantalla, sin esperar a la
+// Mac. Quitar fondo y recorte no: dependen del modelo que corre en la Mac.
+export const LIVE_PARTS: readonly string[] = ['lente', 'perspectiva', 'blancos', 'luces', 'color'];
+
 export type PhotoStep = {
   key: string;
   label: string;

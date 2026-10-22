@@ -330,3 +330,20 @@ def test_el_modelo_del_fondo_se_elige_por_la_memoria(monkeypatch):
     assert fondo.elegir_modelo("liviano") == "isnet-general-use"
     monkeypatch.setenv("MRB_MODELO_FONDO", "liviano")
     assert fondo.elegir_modelo() == "isnet-general-use"
+
+
+def test_la_claridad_da_lo_mismo_en_chico_y_en_grande():
+    """La app la calcula sobre una copia chica para editar en vivo: tiene que coincidir con la Mac."""
+    import cv2
+
+    from mrb_imagenes.pasos.luces import _FUERZA, aplicar_curvas, celdas_de, contraste_local, curvas_locales
+
+    grande = foto_de_prueba(1800, 2400)
+    l = luminancia(a_lineal(grande.rgb))
+    hecho = contraste_local(l, 40)
+    assert np.abs(hecho - l).mean() > 0.002  # cambia algo
+    chica = cv2.resize(l, (1200, 900), interpolation=cv2.INTER_AREA)
+    curvas, cy, cx = curvas_locales(chica, 5.0, celdas_de(1800, 2400))
+    en_chico = np.clip(chica + 0.4 * _FUERZA * (aplicar_curvas(chica, curvas, cy, cx) - chica), 0, 1)
+    achicado = cv2.resize(hecho, (1200, 900), interpolation=cv2.INTER_AREA)
+    assert np.abs(en_chico - achicado).mean() < 0.002

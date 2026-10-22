@@ -1,5 +1,5 @@
 {
-  "protocolo": 2,
+  "protocolo": 3,
   "id": "corrida-corregir",
   "turno": 2,
   "ok": true,
@@ -132,6 +132,6 @@
     }
   ],
   "segundos": 39.2,
-  "archivos": ["antes", "vista", "mascara", "png", "jpg"],
+  "archivos": ["antes", "vista", "mascara", "png", "jpg", "vivo"],
   "original": { "ancho": 4032, "alto": 3024, "camara": { "marca": "Apple", "modelo": "iPhone 13" } }
 }

@@ -18,6 +18,7 @@ import {
   retryStep,
   submitFailure,
   submitResult,
+  type JobDeps,
 } from '@/lib/photo-queue';
 import { addChannelPhotos, addDriveOriginal } from '@/lib/photos';
 import { loadPhotoSettings, PhotoSettingsError, savePhotoSettings } from '@/lib/photo-settings';
@@ -35,7 +36,8 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
   // El Drive simulado: lo que el trabajador "subió", como "<intento>:<tipo>".
   let uploaded: Set<string>;
 
-  const deps = {
+  const deps: JobDeps = {
+    protocol: PHOTO_PROTOCOL,
     download: async (e: { originalUrl: string }): Promise<Transfer> => ({ url: `https://app.example/original?${e.originalUrl}`, metodo: 'GET', encabezados: {} }),
     uploads: async (run: { runId: string }, kinds: UploadKind[]) =>
       Object.fromEntries(
@@ -199,9 +201,17 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
       tipo: 'image/heic',
       bajar: { url: `https://app.example/original?${edit.originalUrl}`, metodo: 'GET', encabezados: {} },
     });
-    expect(Object.keys(job.subidas).sort()).toEqual(['antes', 'jpg', 'mascara', 'png', 'vista']);
+    expect(Object.keys(job.subidas).sort()).toEqual(['antes', 'jpg', 'mascara', 'png', 'vista', 'vivo']);
     expect(job.subidas.vista!.url).toBe(`https://subir.example/?corrida=${job.id}&tipo=vista`);
     expect(job.receta).toEqual([]);
+  });
+
+  it('a un trabajador con el protocolo anterior no le pide el paquete para editar en vivo', async () => {
+    const w = await worker();
+    await photo();
+    const claimed = await claimNext(db, w);
+    const job = await buildJob(db, claimed!.runId, { ...deps, protocol: 2 });
+    expect(Object.keys(job.subidas).sort()).toEqual(['antes', 'jpg', 'mascara', 'png', 'vista']);
   });
 
   it('el pedido tiene la misma forma que el ejemplo que lee el trabajador', async () => {
@@ -235,6 +245,7 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     // El costo de Claude es la suma de los ajustes.
     expect(run.aiUsage).toEqual({ costo_usd: 0.08 });
     expect(run.previewUrl).toBe(`drive:${job.id}:vista`);
+    expect(run.liveUrl).toBe(`drive:${job.id}:vivo`);
     expect(run.leaseUntil).toBeNull();
     const e = await db.photoEdit.findUniqueOrThrow({ where: { id: edit.id } });
     expect([e.width, e.height, e.camera]).toEqual([4032, 3024, { marca: 'Apple' }]);
