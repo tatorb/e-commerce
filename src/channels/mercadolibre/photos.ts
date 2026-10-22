@@ -4,6 +4,15 @@
 //   https://http2.mlstatic.com/D_602711-MLA79386766431_092024-O.jpg
 //   https://http2.mlstatic.com/D_NQ_NP_2X_602711-MLA79386766431_092024-F.webp
 
+import type { ChannelPhotoRules } from '@/domain/media';
+
+// Las fotos que acepta Mercado Libre tal como vienen.
+export const MERCADOLIBRE_PHOTOS: ChannelPhotoRules = {
+  types: ['image/jpeg', 'image/png'],
+  typesLabel: 'JPG o PNG',
+  maxBytes: 10 * 1024 * 1024,
+};
+
 const PICTURE = /^(.*\/)(?:D_NQ_NP_(?:2X_)?|D_)([^/]+)-[A-Z]\.(?:jpe?g|webp|png)$/i;
 
 export function mercadolibreFullSizePhoto(url: string): string | null {

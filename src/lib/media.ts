@@ -3,6 +3,7 @@ import { Prisma } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
 import type { ChannelPicture, ChannelPictureLayout } from '@/channels/publish';
 import {
+  asIsProblem,
   channelPhotos,
   cleanMedia,
   MAX_PHOTOS,
@@ -18,10 +19,11 @@ import {
   type VariantLike,
 } from '@/domain/media';
 import { LAST_PHOTO_STEP } from '@/domain/photo-steps';
+import { photoFileHref } from '@/lib/photo-rules';
 import { readStored } from '@/lib/stored-files';
 
 // Las fotos de una publicación: de dónde se pueden tomar (las que ya están en
-// el canal, las corregidas en el paso Imágenes y las del producto) y cuáles
+// el canal, las del paso Imágenes, corregidas o tal cual, y las del producto) y cuáles
 // quedaron elegidas, en orden. Si el producto tiene varias medidas, también de
 // cuáles es cada foto y cada video. Recibe la base por parámetro para poder probarlo.
 
@@ -36,6 +38,8 @@ export type MediaItem = {
   thumb: string | null;
   label: string;
   note: string | null;
+  // Por qué no se puede elegir para este canal, por ejemplo un original que no acepta tal cual.
+  blocked?: string;
 };
 
 /** Una medida de la ficha, como se marca en las fotos. */
@@ -61,14 +65,29 @@ function knownVariants(keys: string[], measures: Measure[]): string[] {
 
 const viewUrl = (runId: string) => `/api/imagenes/ver?tipo=vista&paso=${encodeURIComponent(runId)}`;
 
-/** El último intento terminado de cada foto corregida, con su JPG final. */
-async function finishedEdits(db: Db, productId: string) {
+/**
+ * Las fotos del paso Imágenes que se pueden usar: las corregidas, con su JPG
+ * final aprobado, y las que se usan tal cual, con su original sin tocar.
+ */
+type FinishedEdit = {
+  id: string;
+  asIs: boolean;
+  file: { url: string; type: string; name: string; size: number | null };
+  thumb: string | null;
+};
+
+async function finishedEdits(db: Db, productId: string): Promise<FinishedEdit[]> {
   const edits = await db.photoEdit.findMany({
     where: { productId, archivedAt: null },
     orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
     select: {
       id: true,
       originalName: true,
+      originalUrl: true,
+      originalType: true,
+      originalSize: true,
+      previewUrl: true,
+      asIs: true,
       runs: {
         where: { step: LAST_PHOTO_STEP, status: 'APPROVED', jpgUrl: { not: null } },
         orderBy: { createdAt: 'desc' },
@@ -77,8 +96,34 @@ async function finishedEdits(db: Db, productId: string) {
       },
     },
   });
-  return edits.filter((e) => e.runs.length > 0).map((e) => ({ id: e.id, name: e.originalName, run: e.runs[0] }));
+  return edits.flatMap((e): FinishedEdit[] => {
+    if (e.asIs) {
+      return [
+        {
+          id: e.id,
+          asIs: true,
+          // Va el mismo archivo que se subió, con su nombre.
+          file: { url: e.originalUrl, type: e.originalType, name: e.originalName, size: e.originalSize },
+          thumb: photoFileHref(e.previewUrl ? 'antes' : 'original', { foto: e.id }),
+        },
+      ];
+    }
+    const run = e.runs[0];
+    if (!run?.jpgUrl) return [];
+    return [
+      {
+        id: e.id,
+        asIs: false,
+        // Del Drive: si se retocó a mano desde la Mac, va la versión retocada.
+        file: { url: run.jpgUrl, type: 'image/jpeg', name: `${e.originalName.replace(/\.[^.]+$/, '')}.jpg`, size: null },
+        thumb: run.previewUrl ? viewUrl(run.id) : null,
+      },
+    ];
+  });
 }
+
+/** Cómo se nombra una foto del paso Imágenes en la lista. */
+const editLabel = (e: { asIs: boolean }, n: number) => (e.asIs ? `Original ${n}, sin editar` : `Corregida ${n}`);
 
 /** De qué foto corregida salió cada foto que la app subió al canal, por su código allá. */
 export function photoOriginsOf(raw: unknown): Record<string, string> {
@@ -119,7 +164,7 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
   const copy = p.channelCopy && !p.channelCopy.missingSince ? p.channelCopy : null;
   const origins = photoOriginsOf(copy?.photoOrigins);
   const edits = await finishedEdits(db, p.productId);
-  const editNumber = new Map(edits.map((e, i) => [e.id, i + 1]));
+  const editName = new Map(edits.map((e, i) => [e.id, editLabel(e, i + 1)]));
 
   const channel: MediaItem[] = channelPhotos(copy?.photos, copy?.photoIds, copy?.variations).map((ref, i) => {
     const from = origins[ref.kind === 'channel' ? ref.id : ''];
@@ -128,17 +173,22 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
       key: photoKey(ref),
       thumb: ref.kind === 'channel' ? ref.url || null : null,
       label: `En ${channelName}, foto ${i + 1}`,
-      note: from && editNumber.has(from) ? `Es la corregida ${editNumber.get(from)}` : null,
+      note: from && editName.has(from) ? `Es ${editName.get(from)!.startsWith('Original') ? 'el' : 'la'} ${editName.get(from)!.toLowerCase()}` : null,
     };
   });
   const inChannel = new Set(channel.map((c) => (c.ref.kind === 'channel' ? origins[c.ref.id] : undefined)).filter(Boolean));
-  const corrected: MediaItem[] = edits.map((e, i) => ({
-    ref: { kind: 'edit', editId: e.id },
-    key: photoKey({ kind: 'edit', editId: e.id }),
-    thumb: e.run.previewUrl ? viewUrl(e.run.id) : null,
-    label: `Corregida ${i + 1}`,
-    note: inChannel.has(e.id) ? `Ya está en ${channelName}` : null,
-  }));
+  const corrected: MediaItem[] = edits.map((e, i) => {
+    // La que se usa tal cual tiene que poder ir al canal como está.
+    const blocked = e.asIs && e.file.size !== null ? asIsProblem({ type: e.file.type, size: e.file.size }, adapter.photos, channelName) : null;
+    return {
+      ref: { kind: 'edit', editId: e.id },
+      key: photoKey({ kind: 'edit', editId: e.id }),
+      thumb: e.thumb,
+      label: editLabel(e, i + 1),
+      note: blocked ?? (inChannel.has(e.id) ? `Ya está en ${channelName}` : null),
+      ...(blocked ? { blocked } : {}),
+    };
+  });
   const channelUrls = new Set(channel.map((c) => c.thumb));
   const assets: MediaItem[] = p.product.assets
     .filter((a) => !channelUrls.has(a.url) && /^https?:\/\//.test(a.url))
@@ -207,6 +257,8 @@ export async function saveMedia(
     if (args.refs.length > MAX_PHOTOS) throw new MediaError(`Se pueden elegir hasta ${MAX_PHOTOS} fotos.`);
     const allowed = new Set([...sources.available.channel, ...sources.available.corrected, ...sources.available.assets].map((m) => m.key));
     if (refs.some((r) => !allowed.has(photoKey(r)))) throw new MediaError('Una de las fotos ya no está disponible. Recargá la página.');
+    const blocked = sources.available.corrected.find((m) => m.blocked && refs.some((r) => photoKey(r) === m.key));
+    if (blocked) throw new MediaError(`${blocked.label}: ${blocked.blocked}`);
     // Las del canal se guardan con su link, para verlas aunque cambie la lectura.
     const byKey = new Map(sources.available.channel.map((m) => [m.key, m.ref]));
     data.media = refs.map((r) => withVariants(byKey.get(photoKey(r)) ?? r, keys(photoVariants(r)))) as Prisma.InputJsonValue;
@@ -214,14 +266,16 @@ export async function saveMedia(
   if (Object.keys(data).length > 0) await db.publication.update({ where: { id: args.publicationId }, data });
 }
 
-/** El JPG final de una foto corregida, para subirlo al canal. Null si ya no está. */
+/**
+ * El archivo de una foto del paso Imágenes, para subirlo al canal: el JPG
+ * final de la corregida o el original de la que se usa tal cual. Null si ya no está.
+ */
 export async function correctedPhotoFile(db: PrismaClient, productId: string, editId: string): Promise<{ data: Uint8Array; type: string; name: string } | null> {
   const edit = (await finishedEdits(db, productId)).find((e) => e.id === editId);
-  if (!edit?.run.jpgUrl) return null;
-  // Del Drive: si se retocó a mano desde la Mac, va la versión retocada.
-  const res = await readStored(db, edit.run.jpgUrl);
+  if (!edit) return null;
+  const res = await readStored(db, edit.file.url);
   if (!res) return null;
-  return { data: new Uint8Array(await res.arrayBuffer()), type: 'image/jpeg', name: `${edit.name.replace(/\.[^.]+$/, '')}.jpg` };
+  return { data: new Uint8Array(await res.arrayBuffer()), type: edit.file.type, name: edit.file.name };
 }
 
 /**
@@ -239,7 +293,7 @@ export async function picturesFor(db: PrismaClient, productId: string, refs: Pho
     else {
       const file = await correctedPhotoFile(db, productId, ref.editId);
       if (!file) {
-        problems.push('Una foto corregida ya no está disponible: sacala de la lista.');
+        problems.push('Una foto del paso Imágenes ya no está disponible: sacala de la lista.');
         continue;
       }
       pictures.push({ kind: 'file', ...file });

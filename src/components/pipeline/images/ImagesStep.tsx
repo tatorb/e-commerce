@@ -13,12 +13,14 @@ import { buildPhotoView } from './build-views';
 import { photosHref, toggledPhotos } from './open-photos';
 import { PhotoLine } from './PhotoLine';
 import { PhotoUploader } from './PhotoUploader';
-import { ArchivePhotoButton, ChannelPhotosButton } from './PhotoListActions';
+import { ArchivePhotoButton, AsIsButton, ChannelPhotosButton } from './PhotoListActions';
+import { asIsProblem, type ChannelPhotoRules } from '@/domain/media';
 import { WorkerStatusLine } from './WorkerStatusLine';
 import { BrandMark } from '@/components/ui/brand-loader';
 
 // El paso Imágenes: las fotos del producto, cada una con su línea de
-// corrección. El trabajador de la Mac procesa cada paso; acá se aprueba.
+// corrección. El trabajador de la Mac procesa cada paso; acá se aprueba. Una
+// foto que ya viene editada se usa tal cual, sin pasar por la Mac.
 // Se pueden abrir varias fotos juntas, una debajo de otra, para revisarlas
 // sin ir y volver.
 
@@ -32,6 +34,7 @@ export function ImagesStep({
   worker,
   channelPhotos,
   channelName,
+  photoRules,
   sharedWith,
   drive,
 }: {
@@ -46,6 +49,8 @@ export function ImagesStep({
   worker: WorkerState;
   channelPhotos: number;
   channelName: string;
+  // Lo que acepta el canal tal como viene, para las fotos que se usan tal cual.
+  photoRules: ChannelPhotoRules | null;
   sharedWith: number;
   // Si el Drive del estudio está conectado, y la carpeta Fotos del producto si ya se armó.
   drive: { ready: boolean; folderUrl: string | null };
@@ -68,7 +73,7 @@ export function ImagesStep({
         title="Fotos"
         count={photos.length}
         description={withSharedNote(
-          'La Mac le hace a cada foto los 9 ajustes de corrido, de la lente a la exportación, y espera tu aprobación. Si querés cambiar algo, cambiás los valores que quieras y se rehace todo junto. Solo se corrige la foto original: nada se genera ni se inventa, salvo una sombra suave sobre el fondo, y el original no se toca. Todo se guarda en la carpeta Fotos del producto en el Drive: lo que copies a Originales desde la Mac entra a la línea, y las aprobadas quedan en Corregidas.',
+          'La Mac le hace a cada foto los 9 ajustes de corrido, de la lente a la exportación, y espera tu aprobación. Si querés cambiar algo, cambiás los valores que quieras y se rehace todo junto. Solo se corrige la foto original: nada se genera ni se inventa, salvo una sombra suave sobre el fondo, y el original no se toca. Si una foto ya viene editada, usala tal cual: no se le cambia nada. Todo se guarda en la carpeta Fotos del producto en el Drive: lo que copies a Originales desde la Mac entra a la línea, y las aprobadas quedan en Corregidas.',
           sharedWith,
         )}
       >
@@ -83,7 +88,7 @@ export function ImagesStep({
                 folderUrl={drive.folderUrl}
                 label="Abrir la carpeta Fotos en el Drive"
               />
-              <PhotoUploader accountSlug={accountSlug} publicationId={publicationId} />
+              <PhotoUploader accountSlug={accountSlug} publicationId={publicationId} photoRules={photoRules} channelName={channelName} />
               <ChannelPhotosButton accountSlug={accountSlug} publicationId={publicationId} count={channelPhotos} channelName={channelName} />
             </div>
           )}
@@ -182,6 +187,13 @@ export function ImagesStep({
                   Original
                 </a>
               </Button>
+              <AsIsButton
+                accountSlug={accountSlug}
+                publicationId={publicationId}
+                editId={photo.id}
+                asIs={photo.asIs}
+                problem={asIsProblem({ type: photo.originalType, size: photo.originalSize }, photoRules, channelName)}
+              />
               <ArchivePhotoButton accountSlug={accountSlug} editId={photo.id} />
               {open.length > 1 ? (
                 <Button asChild size="sm" variant="ghost">
@@ -194,7 +206,24 @@ export function ImagesStep({
           }
         >
           <div className="p-4">
-            <PhotoLine accountSlug={accountSlug} photo={photo} compact={open.length > 1} />
+            {photo.asIs ? (
+              <div className="space-y-3">
+                {photo.originalViewHref ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={photo.originalViewHref}
+                    alt={photo.name}
+                    className="mx-auto block h-[30vh] w-auto max-w-full rounded-md border bg-muted object-contain sm:h-[46vh]"
+                  />
+                ) : null}
+                <p className="text-sm text-muted-foreground">
+                  Se usa el original tal cual: la Mac no lo procesa, Claude no lo mira y no se le cambia nada. Se elige en Organización de multimedia y
+                  va a {channelName} como está.
+                </p>
+              </div>
+            ) : (
+              <PhotoLine accountSlug={accountSlug} photo={photo} compact={open.length > 1} />
+            )}
           </div>
         </SectionCard>
       ))}

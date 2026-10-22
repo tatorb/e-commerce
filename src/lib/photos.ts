@@ -4,7 +4,7 @@ import { channelPhotoUrl } from '@/channels';
 import { isUniqueViolation } from '@/domain/publications';
 import { folderUrl, getFile, knownFolderId, listFiles, withDriveToken, type DriveFile } from './drive';
 import { CHANNEL_PHOTO_MAX_BYTES, ORIGINAL_MAX_BYTES, originalTypeFor, photoFolderId, photoOwner } from './photo-files';
-import { startPhoto } from './photo-queue';
+import { setAsIs, startPhoto } from './photo-queue';
 import { driveRef } from './stored-files';
 
 // Las fotos de un producto en la línea de imágenes. Los originales se guardan
@@ -17,6 +17,7 @@ export class PhotoError extends Error {}
 
 // ───────────────────────────── Sumar fotos ─────────────────────────────
 
+// Una foto que ya viene editada no entra a la cola: se usa tal cual.
 async function createEdit(
   db: PrismaClient,
   data: Omit<Prisma.PhotoEditUncheckedCreateInput, 'position'>,
@@ -24,10 +25,13 @@ async function createEdit(
   return db.$transaction(async (tx) => {
     const last = await tx.photoEdit.aggregate({ where: { productId: data.productId }, _max: { position: true } });
     const edit = await tx.photoEdit.create({ data: { ...data, position: (last._max.position ?? -1) + 1 } });
-    await startPhoto(tx, edit.id);
+    if (!data.asIs) await startPhoto(tx, edit.id);
     return edit;
   });
 }
+
+/** Por qué una foto no se puede usar tal cual en el canal de la publicación, o null si se puede. */
+export type AsIsCheck = (file: { type: string; size: number }) => string | null;
 
 /** Si el archivo sirve como original. Null si sirve, o el motivo. */
 export function originalProblem(file: { name: string; size?: string | number | null }): string | null {
@@ -36,10 +40,13 @@ export function originalProblem(file: { name: string; size?: string | number | n
   return null;
 }
 
-/** Anota un original que ya está en el Drive y arranca su línea. Si ya estaba anotado, no lo repite. */
+/**
+ * Anota un original que ya está en el Drive y arranca su línea, o lo deja para
+ * usarlo tal cual. Si ya estaba anotado, no lo repite.
+ */
 export async function addDriveOriginal(
   db: PrismaClient,
-  args: { productId: string; file: { id: string; name: string; size?: string | number | null }; userId: string | null },
+  args: { productId: string; file: { id: string; name: string; size?: string | number | null }; userId: string | null; asIs?: boolean },
 ) {
   const problem = originalProblem(args.file);
   if (problem) throw new PhotoError(problem);
@@ -54,6 +61,7 @@ export async function addDriveOriginal(
       originalName: args.file.name.trim().slice(0, 200) || 'foto',
       originalType: originalTypeFor(args.file.name)!,
       originalSize: Number(args.file.size ?? 0),
+      asIs: args.asIs ?? false,
       createdById: args.userId,
     });
   } catch (e) {
@@ -70,11 +78,12 @@ async function productInAccount(db: PrismaClient, accountId: string, productId: 
 
 /**
  * Anota los originales que el navegador terminó de subir al Drive. Confirma
- * con Google que estén en la carpeta Originales del producto.
+ * con Google que estén en la carpeta Originales del producto. Con asIs, se
+ * usan tal cual; la que el canal no acepta así queda para corregir en la Mac.
  */
 export async function addUploadedOriginals(
   db: PrismaClient,
-  args: { accountId: string; productId: string; fileIds: string[]; userId: string | null },
+  args: { accountId: string; productId: string; fileIds: string[]; userId: string | null; asIs?: AsIsCheck },
 ): Promise<{ added: number; problems: string[] }> {
   await productInAccount(db, args.accountId, args.productId);
   const owner = await photoOwner(db, args.productId);
@@ -89,7 +98,13 @@ export async function addUploadedOriginals(
         continue;
       }
       try {
-        await addDriveOriginal(db, { productId: args.productId, file, userId: args.userId });
+        const type = originalTypeFor(file.name ?? '') ?? '';
+        const problem = args.asIs ? args.asIs({ type, size: Number(file.size ?? 0) }) : null;
+        if (problem) problems.push(`${file.name}: ${problem} Quedó para corregir en la Mac.`);
+        const asIs = Boolean(args.asIs) && !problem;
+        const edit = await addDriveOriginal(db, { productId: args.productId, file, userId: args.userId, asIs });
+        // Si al leer la carpeta ya había entrado a la línea, igual se usa tal cual.
+        if (asIs && !edit.asIs) await setAsIs(db, { editId: edit.id, asIs: true });
         added++;
       } catch (e) {
         if (!(e instanceof PhotoError)) throw e;

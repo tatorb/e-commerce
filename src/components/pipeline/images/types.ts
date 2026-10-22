@@ -33,6 +33,12 @@ export type PhotoView = {
   id: string;
   name: string;
   source: PhotoSource;
+  // Ya viene editada: se usa el original tal cual, sin pasar por la Mac.
+  asIs: boolean;
+  // Cómo se ve el original en la pantalla, si el navegador lo puede mostrar.
+  originalViewHref: string | null;
+  originalType: string;
+  originalSize: number;
   size: string | null;
   camera: string | null;
   thumbHref: string | null;

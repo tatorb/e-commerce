@@ -1104,6 +1104,8 @@ model PhotoEdit {
   height       Int?
   camera       Json?
   position     Int            @default(0)
+  // Ya viene editada: se usa el original tal cual, sin pasar por la Mac ni por Claude.
+  asIs         Boolean        @default(false)
   // Sacada de la lista. El original sigue en el depósito.
   archivedAt   DateTime?
   createdById  String?

@@ -11,6 +11,9 @@ import type { PhotoView, RunView } from './types';
 
 type Edit = Awaited<ReturnType<typeof loadPhotoLine>>[number];
 
+// Los originales que el navegador puede mostrar sin que la Mac arme una vista.
+const BROWSER_TYPES = ['image/jpeg', 'image/png'];
+
 const obj = (v: unknown): Record<string, unknown> | null => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null);
 
 function cameraText(camera: unknown): string | null {
@@ -38,16 +41,23 @@ export function buildPhotoView(edit: Edit, timeZone: string): PhotoView {
     if (run.status === 'APPROVED' && view.afterHref) before = view.afterHref;
   }
   const last = [...steps].reverse().find((s) => s?.afterHref);
+  // El original se ve como está si el navegador lo muestra; si no, la vista que armó la Mac.
+  const shown = BROWSER_TYPES.includes(edit.originalType) ? photoFileHref('original', { foto: edit.id }) : edit.previewUrl ? original : null;
   return {
     id: edit.id,
     name: edit.originalName,
     source: edit.source,
+    asIs: edit.asIs,
+    originalViewHref: shown,
+    originalType: edit.originalType,
+    originalSize: edit.originalSize,
     size: edit.width && edit.height ? `${edit.width} × ${edit.height} px` : null,
     camera: cameraText(edit.camera),
-    thumbHref: last?.afterHref ?? (edit.previewUrl ? original : null),
+    thumbHref: edit.asIs ? (edit.previewUrl ? original : shown) : (last?.afterHref ?? (edit.previewUrl ? original : null)),
     originalHref: photoFileHref('original', { foto: edit.id }, true),
-    progress,
-    progressText: photoProgressText(progress),
+    // La que se usa tal cual ya está lista.
+    progress: edit.asIs ? { kind: 'done' } : progress,
+    progressText: edit.asIs ? 'Original, sin editar' : photoProgressText(progress),
     steps,
     costUsd: edit.runs.reduce((sum, r) => sum + (typeof obj(r.aiUsage)?.costo_usd === 'number' ? (obj(r.aiUsage)!.costo_usd as number) : 0), 0),
   };

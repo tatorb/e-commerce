@@ -107,8 +107,9 @@ export async function runOutputs(token: string, runId: string): Promise<Partial<
  */
 export async function syncCorrected(db: PrismaClient, productId: string): Promise<void> {
   const owner = await photoOwner(db, productId);
+  // Las que se usan tal cual no tienen corregida: su original queda en Originales.
   const edits = await db.photoEdit.findMany({
-    where: { productId, archivedAt: null },
+    where: { productId, archivedAt: null, asIs: false },
     orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
     select: {
       originalName: true,

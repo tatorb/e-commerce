@@ -61,6 +61,26 @@ export function mediaWarnings(refs: PhotoRef[], measures: { key: string; label: 
   return measures.filter((m) => variantPhotos(refs, m.key).length === 0).map((m) => `La medida ${m.label} se queda sin fotos.`);
 }
 
+/** Las fotos que acepta un canal tal como vienen: los formatos y el peso máximo. */
+export type ChannelPhotoRules = {
+  // Los tipos que acepta, por ejemplo image/jpeg.
+  types: string[];
+  // Cómo se dicen, por ejemplo "JPG o PNG".
+  typesLabel: string;
+  maxBytes: number;
+};
+
+/**
+ * Por qué una foto no puede ir al canal tal como está, o null si puede. Una
+ * foto que se usa tal cual no se convierte ni se achica.
+ */
+export function asIsProblem(file: { type: string; size: number }, rules: ChannelPhotoRules | null, channelName: string): string | null {
+  if (!rules) return null;
+  if (!rules.types.includes(file.type)) return `${channelName} solo acepta fotos ${rules.typesLabel}: exportala así desde la Mac para usarla tal cual.`;
+  if (file.size > rules.maxBytes) return `${channelName} acepta fotos de hasta ${Math.round(rules.maxBytes / 1024 / 1024)} MB y esta pesa ${(file.size / 1024 / 1024).toFixed(1).replace('.', ',')} MB.`;
+  return null;
+}
+
 /** Lo que identifica a una foto, sin importar el link con que se la ve. */
 export function photoKey(ref: PhotoRef): string {
   if (ref.kind === 'channel') return `canal:${ref.id}`;

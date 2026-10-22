@@ -14,7 +14,7 @@ import {
   type UploadKind,
   type WorkerDone,
 } from '@/domain/photo-contract';
-import { LAST_PHOTO_STEP, LIVE_PARTS, OPEN_RUN_STATUSES, PHOTO_STEPS } from '@/domain/photo-steps';
+import { LAST_PHOTO_STEP, LIVE_PARTS, OPEN_RUN_STATUSES, PHOTO_STEPS, photoProgress } from '@/domain/photo-steps';
 import { parsePhotoSettings, type PhotoSettingsValues } from '@/domain/photo-settings';
 import { loadPhotoSettings } from './photo-settings';
 
@@ -113,7 +113,7 @@ export async function claimNext(db: PrismaClient, workerId: string, now = new Da
         SELECT r.id, r.attempts
         FROM photo_step_runs r
         JOIN photo_edits e ON e.id = r."editId"
-        WHERE e."archivedAt" IS NULL
+        WHERE e."archivedAt" IS NULL AND NOT e."asIs"
           AND (r.status = 'QUEUED'
             OR (r.status = 'PROCESSING' AND (r."leaseUntil" < ${now} OR r."workerId" = ${workerId})))
         ORDER BY (r.status = 'PROCESSING' AND r."workerId" = ${workerId}) DESC, r."createdAt" ASC
@@ -406,6 +406,33 @@ export async function retryStep(db: PrismaClient, args: { runId: string; userId:
     const failed = await openRun(tx, args.runId, ['FAILED'], 'reintentar');
     await tx.photoStepRun.update({ where: { id: failed.id }, data: { status: 'REPLACED', openFor: null } });
     return queueStep(tx, failed.editId, failed.step, requestOf(failed.requested));
+  });
+}
+
+/**
+ * Usa el original tal cual, porque ya viene editado: la Mac no lo procesa y
+ * Claude no lo mira. Lo que estaba en la cola o esperando aprobación se corta.
+ * Al volver a corregirla, si ya tenía una corrección aprobada vale esa; si no,
+ * arranca su línea.
+ */
+export async function setAsIs(db: PrismaClient, args: { editId: string; asIs: boolean }) {
+  return db.$transaction(async (tx) => {
+    await lockEdit(tx, args.editId);
+    const edit = await tx.photoEdit.findUniqueOrThrow({
+      where: { id: args.editId },
+      select: { archivedAt: true, asIs: true, runs: { select: { step: true, status: true } } },
+    });
+    if (edit.archivedAt) throw new PhotoQueueError('Esa foto se sacó de la lista.');
+    if (edit.asIs === args.asIs) return;
+    if (args.asIs) {
+      await tx.photoStepRun.updateMany({
+        where: { editId: args.editId, status: { in: OPEN_RUN_STATUSES } },
+        data: { status: 'REPLACED', openFor: null, workerId: null, leaseUntil: null },
+      });
+    } else if (photoProgress(edit.runs).kind === 'empty') {
+      await startPhoto(tx, args.editId);
+    }
+    await tx.photoEdit.update({ where: { id: args.editId }, data: { asIs: args.asIs } });
   });
 }
 

@@ -90,6 +90,15 @@ Todo se guarda en el Google Drive del estudio, en la carpeta de cada producto. S
 
 Una foto ya aprobada también se puede rehacer. Las fotos del iPhone saltean solas el ajuste del lente, porque el teléfono ya lo corrige.
 
+### Fotos que ya vienen editadas
+
+Si una foto ya la trajiste editada, usala **tal cual**: la Mac no la procesa, Claude no la mira y no se le cambia nada.
+- **Al subirla:** marcá **Ya vienen editadas: usarlas tal cual** antes de arrastrarla.
+- **Si ya estaba en la línea:** abrila y tocá **Usar el original tal cual**. Si la Mac la estaba corrigiendo, se corta.
+- La foto queda como **Original, sin editar** y aparece en Organización de multimedia junto a las corregidas. A Mercado Libre va el mismo archivo que subiste.
+- **Corregirla en la Mac** la vuelve a la línea. Si ya tenía una corrección aprobada, vale esa.
+- Mercado Libre la acepta tal cual solo en **JPG o PNG, hasta 10 MB**. Una HEIC o TIFF hay que exportarla como JPG desde la Mac. Si pesa más, la app avisa y no la achica.
+
 ### La sombra
 
 Con el fondo quitado, la pieza queda flotando sobre blanco. El ajuste **Sombra** le devuelve una sombra suave, copiada de la que tenía la foto:

@@ -114,6 +114,10 @@ export default async function PipelineStepPage({
             ready: email !== null,
             folderUrl: email ? await knownFolderId(prisma, `fotos:${pub.productId}`, email).then((id) => (id ? folderUrl(id) : null)) : null,
           })),
+          // Lo que acepta el canal tal como viene, para las fotos que se usan tal cual.
+          prisma.publication
+            .findUniqueOrThrow({ where: { id: pub.id }, select: { store: { select: { channel: true } } } })
+            .then((p) => getChannelAdapter(p.store.channel.kind, p.store.channel.name).photos),
         ])
       : null,
     // Publicación carga el ID del canal, con el formato de cada canal, y lo que falta subir.
@@ -274,6 +278,7 @@ export default async function PipelineStepPage({
             worker={images[1]}
             channelPhotos={images[2]}
             channelName={pub.channelName}
+            photoRules={images[5]}
             sharedWith={images[3]}
             drive={images[4]}
           />

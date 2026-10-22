@@ -123,6 +123,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
   let items: Record<string, Item> = {};
   let descriptions: Record<string, string> = {};
   let uploads = 0;
+  const uploadedFiles: string[] = [];
   let accountId = '';
   let storeId = '';
   let productId = '';
@@ -141,6 +142,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
 
       if (u.pathname === '/pictures/items/upload' && req.method === 'POST') {
         expect(raw).toContain('name="file"');
+        uploadedFiles.push(raw);
         uploads++;
         return json(201, { id: `SUBIDA-${uploads}` });
       }
@@ -231,6 +233,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     );
     resetVisitsTogether();
     calls.length = 0;
+    uploadedFiles.length = 0;
     uploads = 0;
     descriptions = {};
     items = {
@@ -477,6 +480,42 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
       expect(gone.ref.variants).toBeUndefined();
       expect(gone.note).toBe('Su medida ya no está en la ficha: quedó en Todas');
     });
+  });
+
+  it('el original que se usa tal cual se elige como las corregidas y va al canal sin cambios', async () => {
+    const pub = await db.publication.create({ data: { productId, storeId, externalId: 'MLA1', title: 'Kit Embrague Ford Ka' } });
+    const asIs = (name: string, type: string, size: number) =>
+      db.photoEdit.create({
+        data: { productId, source: 'UPLOAD', originalUrl: `https://deposito/${name}`, originalName: name, originalType: type, originalSize: size, asIs: true },
+      });
+    const ready = await asIs('editada en la Mac.jpg', 'image/jpeg', 4);
+    const heic = await asIs('del iPhone.heic', 'image/heic', 4);
+    const heavy = await asIs('enorme.png', 'image/png', 11 * 1024 * 1024);
+    const editId = await correctedPhoto('frente.jpg');
+    await readAll();
+
+    const sources = await loadMediaSources(db, accountId, pub.id);
+    expect(sources.available.corrected.map((m) => [m.label, m.blocked ?? null])).toEqual([
+      ['Original 1, sin editar', null],
+      ['Original 2, sin editar', 'Mercado Libre solo acepta fotos JPG o PNG: exportala así desde la Mac para usarla tal cual.'],
+      ['Original 3, sin editar', 'Mercado Libre acepta fotos de hasta 10 MB y esta pesa 11,0 MB.'],
+      ['Corregida 4', null],
+    ]);
+    expect(sources.available.corrected[0].thumb).toBe(`/api/imagenes/ver?tipo=original&foto=${ready.id}`);
+    for (const blocked of [heic, heavy]) {
+      await expect(saveMedia(db, { accountId, publicationId: pub.id, refs: [{ kind: 'edit', editId: blocked.id }] })).rejects.toThrow(MediaError);
+    }
+
+    await saveMedia(db, { accountId, publicationId: pub.id, refs: [{ kind: 'edit', editId: ready.id }, { kind: 'edit', editId }] });
+    const result = await pushDrafts(db, { accountId, publicationId: pub.id, userId: null });
+    expect(result).toEqual({ sent: ['photos'], rejected: [], confirmed: true });
+    // El original va con su nombre y su tipo, y los mismos bytes que se guardaron.
+    expect(uploadedFiles[0]).toContain('filename="editada en la Mac.jpg"');
+    expect(uploadedFiles[0]).toContain('Content-Type: image/jpeg');
+    expect(uploadedFiles[1]).toContain('filename="frente.jpg"');
+    const after = await db.channelCopy.findUniqueOrThrow({ where: { publicationId: pub.id } });
+    expect(after.photoOrigins).toEqual({ 'SUBIDA-1': ready.id, 'SUBIDA-2': editId });
+    expect((await loadMediaSources(db, accountId, pub.id)).current[0].note).toBe('Es el original 1, sin editar');
   });
 
   it('no deja guardar fotos que la publicación no puede usar, ni una lista vacía', async () => {

@@ -16,6 +16,7 @@ import {
   PhotoQueueError,
   redoStep,
   retryStep,
+  setAsIs,
   submitFailure,
   submitResult,
   type JobDeps,
@@ -411,6 +412,44 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     expect(await claimNext(db, w)).toBeNull();
     expect((await runsOf(edit.id)).map((r) => [r.status, r.openFor])).toEqual([['REPLACED', null]]);
     expect((await db.photoEdit.findUniqueOrThrow({ where: { id: edit.id } })).archivedAt).not.toBeNull();
+  });
+
+  it('la que ya viene editada no entra a la cola, y se puede pasar de tal cual a corregir y al revés', async () => {
+    const w = await worker();
+    const ready = await addDriveOriginal(db, { productId, file: { id: 'lista', name: 'lista.jpg', size: 2000000 }, userId, asIs: true });
+    expect(ready.asIs).toBe(true);
+    expect(await runsOf(ready.id)).toEqual([]);
+    expect(await claimNext(db, w)).toBeNull();
+
+    // Si ya estaba anotada para corregir, por ejemplo al leer la carpeta, se pasa a tal cual.
+    const twice = await addDriveOriginal(db, { productId, file: { id: 'otra', name: 'otra.jpg', size: 1000 }, userId });
+    await setAsIs(db, { editId: twice.id, asIs: true });
+    expect((await runsOf(twice.id)).map((r) => r.status)).toEqual(['REPLACED']);
+
+    // Volver a corregirla: arranca su línea.
+    await setAsIs(db, { editId: ready.id, asIs: false });
+    expect((await runsOf(ready.id)).map((r) => r.status)).toEqual(['QUEUED']);
+
+    // Mientras la Mac la procesa, se marca tal cual: el trabajo se corta y su resultado no se acepta.
+    const claimed = (await claimNext(db, w))!;
+    const job = await buildJob(db, claimed.runId, deps);
+    await setAsIs(db, { editId: ready.id, asIs: true });
+    for (const kind of Object.keys(job.subidas) as UploadKind[]) uploaded.add(`${job.id}:${kind}`);
+    const r = await submitResult(db, w, done(job, { archivos: Object.keys(job.subidas) as UploadKind[] }), { collect });
+    expect(r.aceptado).toBe(false);
+    expect((await runsOf(ready.id)).map((x) => [x.status, x.openFor])).toEqual([['REPLACED', null]]);
+    expect(await claimNext(db, w)).toBeNull();
+
+    // Una ya aprobada que pasa a tal cual y vuelve: vale la corrección aprobada, sin rehacerla.
+    const edit = await photo('IMG_2.jpg');
+    await work(w);
+    await approveStep(db, { runId: (await openRun(edit.id)).id, userId });
+    await setAsIs(db, { editId: edit.id, asIs: true });
+    await setAsIs(db, { editId: edit.id, asIs: false });
+    expect((await runsOf(edit.id)).map((x) => x.status)).toEqual(['APPROVED']);
+    // Si ya se sacó de la lista, no.
+    await archivePhoto(db, edit.id);
+    await expect(setAsIs(db, { editId: edit.id, asIs: true })).rejects.toThrow(PhotoQueueError);
   });
 
   it('la llave: vale una sola, se corta, y el estado dice si está conectado', async () => {

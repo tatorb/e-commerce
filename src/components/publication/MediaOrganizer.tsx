@@ -12,7 +12,7 @@ import { cn } from '@/lib/utils/cn';
 import { saveMediaAction } from '@/app/a/[cuenta]/publicaciones/sync-actions';
 
 // Elegir y ordenar las fotos de una publicación: las que ya están en el canal,
-// las corregidas en el paso Imágenes y las demás del producto. Si el producto
+// las del paso Imágenes, corregidas o tal cual, y las demás del producto. Si el producto
 // tiene varias medidas, también de cuáles es cada foto y cada video, a mano.
 // Lo que se guarda queda en el borrador hasta que se sube.
 
@@ -132,7 +132,7 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
 
   const taken = new Set(chosen.map((m) => m.key));
   const groups = [
-    { title: 'Corregidas en el paso Imágenes', items: sources.available.corrected },
+    { title: 'Del paso Imágenes', items: sources.available.corrected },
     { title: `En ${channelName}`, items: sources.available.channel },
     { title: 'Otras fotos del producto', items: sources.available.assets },
   ]
@@ -287,14 +287,15 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
             {g.items.map((m) => (
               <li key={m.key} className="space-y-1">
                 <PhotoThumb item={m} className="opacity-90" />
-                {m.note ? <p className="truncate text-[11px] text-muted-foreground">{m.note}</p> : null}
+                <p className="truncate text-[11px]">{m.label}</p>
+                {m.note ? <p className={cn('text-[11px]', m.blocked ? 'text-destructive' : 'truncate text-muted-foreground')}>{m.note}</p> : null}
                 <Button
                   size="sm"
                   variant="outline"
                   className="h-7 w-full px-2 text-xs"
-                  disabled={full || busy !== null}
+                  disabled={full || busy !== null || Boolean(m.blocked)}
                   onClick={() => setChosen((list) => [...list, m])}
-                  title={full ? `Hasta ${sources.max} fotos` : undefined}
+                  title={m.blocked ?? (full ? `Hasta ${sources.max} fotos` : undefined)}
                 >
                   <Plus />
                   Agregar
