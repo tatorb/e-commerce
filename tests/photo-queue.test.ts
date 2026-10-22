@@ -93,7 +93,7 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
       id: job.id,
       turno: job.turno,
       ok: true,
-      partes: (job.pasos ?? ['lente', 'perspectiva', 'blancos', 'luces', 'color', 'fondo', 'recorte', 'exportar']).map((p) => part(p)),
+      partes: (job.pasos ?? ['lente', 'perspectiva', 'blancos', 'luces', 'color', 'fondo', 'recorte', 'sombra', 'exportar']).map((p) => part(p)),
       segundos: 10,
       archivos: ['vista'],
       original: null,
@@ -189,11 +189,15 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     expect(run.error).toMatch(/3 veces/);
   });
 
-  it('el pedido lleva los 8 ajustes, lo que hay que subir y el contexto', async () => {
+  it('el pedido lleva los 9 ajustes, lo que hay que subir y el contexto', async () => {
     const w = await worker();
     const edit = await photo();
     const { job } = await work(w);
-    expect([job.grupo, job.indice, job.pasos]).toEqual(['corregir', 0, ['lente', 'perspectiva', 'blancos', 'luces', 'color', 'fondo', 'recorte', 'exportar']]);
+    expect([job.grupo, job.indice, job.pasos]).toEqual([
+      'corregir',
+      0,
+      ['lente', 'perspectiva', 'blancos', 'luces', 'color', 'fondo', 'recorte', 'sombra', 'exportar'],
+    ]);
     expect(job.producto).toBe('Pistón: Kit de pistones');
     expect(job.pedidos).toBeNull();
     expect(job.original).toEqual({
@@ -212,6 +216,17 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     const claimed = await claimNext(db, w);
     const job = await buildJob(db, claimed!.runId, { ...deps, protocol: 2 });
     expect(Object.keys(job.subidas).sort()).toEqual(['antes', 'jpg', 'mascara', 'png', 'vista']);
+  });
+
+  it('a un trabajador que todavía no sabe hacer la sombra no se la pide', async () => {
+    const w = await worker();
+    await photo();
+    const claimed = await claimNext(db, w);
+    const old = await buildJob(db, claimed!.runId, { ...deps, protocol: 3 });
+    expect(old.pasos).not.toContain('sombra');
+    expect(Object.keys(old.subidas)).toContain('vivo');
+    const now = await buildJob(db, claimed!.runId, deps);
+    expect(now.pasos).toContain('sombra');
   });
 
   it('el pedido tiene la misma forma que el ejemplo que lee el trabajador', async () => {
@@ -243,7 +258,7 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     expect((run.parts as StepPart[]).map((p) => p.paso)).toEqual(job.pasos);
     expect((run.parts as StepPart[])[1].propuesta).toEqual({ valores: { giro: 1.5 }, razon: 'Propuesta para perspectiva.', origen: 'claude' });
     // El costo de Claude es la suma de los ajustes.
-    expect(run.aiUsage).toEqual({ costo_usd: 0.08 });
+    expect(run.aiUsage).toEqual({ costo_usd: 0.09 });
     expect(run.previewUrl).toBe(`drive:${job.id}:vista`);
     expect(run.liveUrl).toBe(`drive:${job.id}:vivo`);
     expect(run.leaseUntil).toBeNull();
@@ -271,7 +286,7 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     const w = await worker();
     const edit = await photo();
     const lente = part('lente', { aplicado: false, no_aplica: 'La foto no tiene datos de lente.', propuesta: null, valores: {} });
-    const { job } = await work(w, { partes: [lente, ...['perspectiva', 'blancos', 'luces', 'color', 'fondo', 'recorte', 'exportar'].map((p) => part(p))] });
+    const { job } = await work(w, { partes: [lente, ...['perspectiva', 'blancos', 'luces', 'color', 'fondo', 'recorte', 'sombra', 'exportar'].map((p) => part(p))] });
     const run = await openRun(edit.id);
     expect([run.id, run.status]).toEqual([job.id, 'REVIEW']);
     expect((run.parts as StepPart[])[0]).toMatchObject({ paso: 'lente', aplicado: false, no_aplica: 'La foto no tiene datos de lente.' });

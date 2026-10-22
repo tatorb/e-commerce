@@ -5,13 +5,14 @@
     "foto": "foto-1",
     "grupo": "corregir",
     "indice": 0,
-    "pasos": ["lente", "perspectiva", "blancos", "luces", "color", "fondo", "recorte", "exportar"],
+    "pasos": ["lente", "perspectiva", "blancos", "luces", "color", "fondo", "recorte", "sombra", "exportar"],
     "producto": "Pistón: Kit de pistones de ejemplo",
     "ajustes": {
       "margen": 8,
       "fondo": "#FFFFFF",
       "calidad_jpg": 95,
-      "topes": { "giro": 10, "perspectiva": 15, "blancos": 100, "temperatura": 30, "exposicion": 1, "sombras": 60, "luces": 60, "claridad": 40, "saturacion": 30, "vivacidad": 30 }
+      "con_sombra": true,
+      "topes": { "giro": 10, "perspectiva": 15, "blancos": 100, "temperatura": 30, "exposicion": 1, "sombras": 60, "luces": 60, "claridad": 40, "saturacion": 30, "vivacidad": 30, "sombra": 40 }
     },
     "pedidos": {
       "valores": {

@@ -31,6 +31,7 @@ from mrb_imagenes.pasos.color import Color  # noqa: E402
 from mrb_imagenes.pasos.luces import Luces, curva  # noqa: E402
 from mrb_imagenes.pasos.perspectiva import homografia  # noqa: E402
 from mrb_imagenes.pasos.recorte import caja_de_la_pieza, encuadre  # noqa: E402
+from mrb_imagenes.pasos.sombra import dibujar_sombra  # noqa: E402
 
 DESTINO = AQUI.parents[1] / "tests" / "fixtures" / "photo-live-reference.json"
 AJUSTES = leer_ajustes()
@@ -101,6 +102,19 @@ def armar() -> dict:
     for valores in ({"giro": 3.0, "vertical": 4.0, "horizontal": -2.0}, {"giro": -8.0, "vertical": 0.0, "horizontal": 0.0}, {"giro": 0.0, "vertical": -12.0, "horizontal": 6.0}):
         matriz, caja = _caja_de_perspectiva(60, 80, valores)
         salida["perspectiva"].append({"ancho": 80, "alto": 60, "valores": valores, "matriz": matriz, "caja": caja})
+
+    # La sombra: una pieza en L chica y una más grande que 512 px, que se dibuja achicada.
+    chica = np.zeros((70, 90), np.float32)
+    chica[15:45, 20:50] = 1.0
+    chica[40:52, 20:75] = 0.8
+    salida["sombra"] = []
+    for valores in ({"intensidad": 30.0, "direccion": 25.0, "distancia": 18.0, "suavidad": 55.0}, {"intensidad": 20.0, "direccion": -120.0, "distancia": 8.0, "suavidad": 0.0}):
+        salida["sombra"].append({"ancho": 90, "alto": 70, "alfa": _plana(chica, 2), "valores": valores, "resultado": _plana(dibujar_sombra(chica, valores))})
+    yy, xx = np.mgrid[0:450, 0:600]
+    grande = (((xx - 300) / 160) ** 2 + ((yy - 200) / 110) ** 2 <= 1).astype(np.float32)
+    grande[300:340, 120:480] = 1.0
+    valores = {"intensidad": 25.0, "direccion": 10.0, "distancia": 12.0, "suavidad": 70.0}
+    salida["sombra_grande"] = {"valores": valores, "paso": 8, "resultado": _plana(dibujar_sombra(grande, valores)[::8, ::8])}
 
     alfa = np.zeros((40, 60), np.float32)
     alfa[10:22, 18:41] = 1.0

@@ -8,11 +8,14 @@ import type { PhotoSettingsValues } from './photo-settings';
 
 // Sube cuando cambia la forma de los mensajes: un trabajador viejo recibe un
 // aviso para actualizarse en lugar de un error raro. El 3 suma el paquete para
-// editar en vivo; un trabajador con el 2 sigue andando, sin ese paquete.
-export const PHOTO_PROTOCOLS = [2, 3] as const;
+// editar en vivo y el 4, el ajuste Sombra. Un trabajador anterior sigue
+// andando, sin lo que todavía no sabe hacer.
+export const PHOTO_PROTOCOLS = [2, 3, 4] as const;
 export type PhotoProtocol = (typeof PHOTO_PROTOCOLS)[number];
-export const PHOTO_PROTOCOL: PhotoProtocol = 3;
+export const PHOTO_PROTOCOL: PhotoProtocol = 4;
 export const LIVE_PROTOCOL: PhotoProtocol = 3;
+// Desde qué protocolo sabe hacer el trabajador cada ajuste nuevo.
+export const PART_PROTOCOL: Record<string, PhotoProtocol> = { sombra: 4 };
 
 // Cómo bajar o subir un archivo: la app arma el pedido completo, así el
 // trabajador no depende de cómo funciona el depósito por dentro.

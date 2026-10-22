@@ -16,7 +16,8 @@ export type PhotoCapKey =
   | 'luces'
   | 'claridad'
   | 'saturacion'
-  | 'vivacidad';
+  | 'vivacidad'
+  | 'sombra';
 
 export type PhotoSettingsValues = {
   // Margen alrededor de la pieza, en % del lado del cuadrado final.
@@ -24,6 +25,8 @@ export type PhotoSettingsValues = {
   // Color de fondo del JPG final, #RRGGBB.
   fondo: string;
   calidad_jpg: number;
+  // Si las fotos nuevas llevan sombra. En cada foto se puede prender o apagar.
+  con_sombra: boolean;
   topes: Record<PhotoCapKey, number>;
 };
 
@@ -38,6 +41,7 @@ export const PHOTO_CAPS: { key: PhotoCapKey; label: string; unit: string; help: 
   { key: 'claridad', label: 'Claridad', unit: '', help: 'El realce del contraste local, que hace leer los detalles.', default: 40, step: 1 },
   { key: 'saturacion', label: 'Saturación', unit: '%', help: 'Cuánto se puede subir o bajar la intensidad de los colores.', default: 30, step: 1 },
   { key: 'vivacidad', label: 'Vivacidad', unit: '', help: 'Como la saturación, pero cuida los colores que ya son intensos.', default: 30, step: 1 },
+  { key: 'sombra', label: 'Sombra de la pieza', unit: '%', help: 'Qué tan oscura puede ser la sombra que se agrega debajo de la pieza.', default: 40, step: 1 },
 ];
 
 export const MARGIN_RANGE = { min: 2, max: 25 };
@@ -48,6 +52,7 @@ export const DEFAULT_PHOTO_SETTINGS: PhotoSettingsValues = {
   margen: 8,
   fondo: '#FFFFFF',
   calidad_jpg: 95,
+  con_sombra: true,
   topes: Object.fromEntries(PHOTO_CAPS.map((c) => [c.key, c.default])) as Record<PhotoCapKey, number>,
 };
 
@@ -78,6 +83,7 @@ export const photoSettingsSchema = z.object({
     JPG_QUALITY_RANGE.max,
     `La calidad del JPG va de ${JPG_QUALITY_RANGE.min} a ${JPG_QUALITY_RANGE.max}.`,
   ).transform((n) => Math.round(n)),
+  con_sombra: z.boolean().default(true),
   topes: z.object(
     Object.fromEntries(
       PHOTO_CAPS.map((c) => [c.key, numberish(0, capMax(c.key), `${c.label}: el tope va de 0 a ${capMax(c.key)}.`)]),
@@ -97,6 +103,7 @@ export function parsePhotoSettings(raw: unknown): PhotoSettingsValues {
     margen: num(r.margen, MARGIN_RANGE.min, MARGIN_RANGE.max, DEFAULT_PHOTO_SETTINGS.margen),
     fondo: typeof r.fondo === 'string' && COLOR.test(r.fondo) ? r.fondo.toUpperCase() : DEFAULT_PHOTO_SETTINGS.fondo,
     calidad_jpg: Math.round(num(r.calidad_jpg, JPG_QUALITY_RANGE.min, JPG_QUALITY_RANGE.max, DEFAULT_PHOTO_SETTINGS.calidad_jpg)),
+    con_sombra: typeof r.con_sombra === 'boolean' ? r.con_sombra : DEFAULT_PHOTO_SETTINGS.con_sombra,
     topes: Object.fromEntries(PHOTO_CAPS.map((c) => [c.key, num(topes[c.key], 0, capMax(c.key), c.default)])) as Record<
       PhotoCapKey,
       number

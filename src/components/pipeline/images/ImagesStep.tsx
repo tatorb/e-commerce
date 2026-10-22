@@ -68,7 +68,7 @@ export function ImagesStep({
         title="Fotos"
         count={photos.length}
         description={withSharedNote(
-          'La Mac le hace a cada foto los 8 ajustes de corrido, de la lente a la exportación, y espera tu aprobación. Si querés cambiar algo, cambiás los valores que quieras y se rehace todo junto. Solo se corrige la foto original: nada se genera ni se inventa, y el original no se toca. Todo se guarda en la carpeta Fotos del producto en el Drive: lo que copies a Originales desde la Mac entra a la línea, y las aprobadas quedan en Corregidas.',
+          'La Mac le hace a cada foto los 9 ajustes de corrido, de la lente a la exportación, y espera tu aprobación. Si querés cambiar algo, cambiás los valores que quieras y se rehace todo junto. Solo se corrige la foto original: nada se genera ni se inventa, salvo una sombra suave sobre el fondo, y el original no se toca. Todo se guarda en la carpeta Fotos del producto en el Drive: lo que copies a Originales desde la Mac entra a la línea, y las aprobadas quedan en Corregidas.',
           sharedWith,
         )}
       >

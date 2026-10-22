@@ -1,5 +1,5 @@
 {
-  "protocolo": 3,
+  "protocolo": 4,
   "id": "corrida-corregir",
   "turno": 2,
   "ok": true,
@@ -117,14 +117,32 @@
       "segundos": 3.2
     },
     {
+      "paso": "sombra",
+      "aplicado": true,
+      "no_aplica": null,
+      "propuesta": { "valores": { "intensidad": 18, "direccion": 20, "distancia": 9, "suavidad": 75 }, "razon": "La luz viene de arriba a la izquierda: sombra suave hacia abajo a la derecha.", "origen": "claude", "aviso": null },
+      "valores": { "intensidad": 18, "direccion": 20, "distancia": 9, "suavidad": 75 },
+      "medidas": { "sombra_detectada": true, "direccion_grados": 24, "cae_hacia": "abajo", "llega_pct_de_la_pieza": 8.6, "oscuridad_pct": 21.4 },
+      "parametros": [
+        { "clave": "intensidad", "etiqueta": "Intensidad", "ayuda": "Qué tan oscura es la sombra donde es más densa.", "minimo": 0, "maximo": 40, "defecto": 20, "paso": 1, "unidad": " %", "tipo": "numero" },
+        { "clave": "direccion", "etiqueta": "Dirección", "ayuda": "Hacia dónde cae: 0 abajo, 90 a la derecha, -90 a la izquierda, 180 arriba.", "minimo": -180, "maximo": 180, "defecto": 0, "paso": 1, "unidad": "°", "tipo": "numero" },
+        { "clave": "distancia", "etiqueta": "Distancia", "ayuda": "Hasta dónde llega, en % del tamaño de la pieza.", "minimo": 0, "maximo": 40, "defecto": 10, "paso": 0.5, "unidad": " %", "tipo": "numero" },
+        { "clave": "suavidad", "etiqueta": "Suavidad", "ayuda": "0 deja el borde de la sombra nítido; 100, muy difuso.", "minimo": 0, "maximo": 100, "defecto": 60, "paso": 1, "unidad": "", "tipo": "numero" }
+      ],
+      "nota": null,
+      "uso_claude": { "input_tokens": 2300, "output_tokens": 90, "costo_usd": 0.01 },
+      "segundos": 1.4
+    },
+    {
       "paso": "exportar",
       "aplicado": true,
       "no_aplica": null,
-      "propuesta": { "valores": { "calidad": 95 }, "razon": "Se ve nítida y con el fondo limpio.", "origen": "claude", "aviso": null },
-      "valores": { "calidad": 95 },
+      "propuesta": { "valores": { "calidad": 95, "sombra_png": 1 }, "razon": "Se ve nítida y con el fondo limpio.", "origen": "claude", "aviso": null },
+      "valores": { "calidad": 95, "sombra_png": 1 },
       "medidas": { "lado_px": [2653, 2653], "transparente": true, "fondo_jpg": "#FFFFFF" },
       "parametros": [
-        { "clave": "calidad", "etiqueta": "Calidad del JPG", "ayuda": "Calidad de compresión del JPG final.", "minimo": 80, "maximo": 100, "defecto": 95, "paso": 1, "unidad": "", "tipo": "numero" }
+        { "clave": "calidad", "etiqueta": "Calidad del JPG", "ayuda": "Calidad de compresión del JPG final.", "minimo": 80, "maximo": 100, "defecto": 95, "paso": 1, "unidad": "", "tipo": "numero" },
+        { "clave": "sombra_png", "etiqueta": "Sombra en el PNG", "ayuda": "Si la foto tiene sombra, la lleva también el PNG transparente.", "minimo": 0, "maximo": 1, "defecto": 1, "paso": 1, "unidad": "", "tipo": "si_no" }
       ],
       "nota": null,
       "uso_claude": { "modelo": "claude-opus-5-5", "input_tokens": 2100, "output_tokens": 80, "costo_usd": 0.01 },

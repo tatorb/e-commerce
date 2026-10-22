@@ -20,12 +20,13 @@ import { resetPhotoSettingsAction, savePhotoSettingsAction } from '@/app/a/[cuen
 // Los ajustes de la línea de imágenes de una cuenta: el estándar del recorte y
 // la exportación, y lo máximo que se puede corregir en cada ajuste.
 
-type Values = { margen: string; fondo: string; calidad_jpg: string; topes: Record<PhotoCapKey, string> };
+type Values = { margen: string; fondo: string; calidad_jpg: string; con_sombra: boolean; topes: Record<PhotoCapKey, string> };
 
 const toValues = (s: PhotoSettingsValues): Values => ({
   margen: String(s.margen),
   fondo: s.fondo,
   calidad_jpg: String(s.calidad_jpg),
+  con_sombra: s.con_sombra,
   topes: Object.fromEntries(PHOTO_CAPS.map((c) => [c.key, String(s.topes[c.key])])) as Record<PhotoCapKey, string>,
 });
 
@@ -121,6 +122,22 @@ export function PhotoSettingsForm({ accountSlug, settings, custom }: { accountSl
             </p>
           </div>
         </div>
+        <label htmlFor="con-sombra" className="flex items-start gap-2 text-sm">
+          <input
+            id="con-sombra"
+            type="checkbox"
+            className="mt-0.5 h-4 w-4"
+            checked={values.con_sombra}
+            onChange={(e) => set({ con_sombra: e.target.checked })}
+            disabled={pending}
+          />
+          <span>
+            <span className="font-medium">Sombra en las fotos nuevas</span>
+            <span className="block text-xs text-muted-foreground">
+              Una sombra suave debajo de la pieza, copiada de la que tenía la foto. En cada foto se puede prender o apagar.
+            </span>
+          </span>
+        </label>
       </div>
 
       <div className="space-y-3">

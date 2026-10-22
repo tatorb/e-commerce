@@ -22,7 +22,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 # Sube cuando cambia la forma de los mensajes, igual que PHOTO_PROTOCOL en la app.
-PROTOCOLO = 3
+PROTOCOLO = 4
 
 # "vivo" es el paquete para editar la foto en vivo en la app (vivo.py).
 TipoSubida = Literal["antes", "vista", "mascara", "png", "jpg", "vivo"]

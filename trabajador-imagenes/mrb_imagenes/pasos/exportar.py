@@ -1,8 +1,10 @@
-"""Paso 8. Exportar.
+"""Paso 9. Exportar.
 
 Dos archivos, sin bajar la resolución: un PNG con fondo transparente y un JPG
 con fondo blanco puro (o el color de Ajustes). Los dos con el perfil sRGB y
-sin los datos de la cámara, así no viaja la ubicación GPS.
+sin los datos de la cámara, así no viaja la ubicación GPS. Si la foto tiene
+sombra, el JPG la lleva sobre el fondo y el PNG como transparencia gris, salvo
+que se apague para el PNG.
 """
 
 from __future__ import annotations
@@ -24,12 +26,22 @@ def sobre_fondo(foto: Foto, fondo: tuple[float, float, float]) -> np.ndarray:
     if foto.alfa is None:
         return foto.rgb
     a = foto.alfa[..., None]
-    return foto.rgb * a + np.array(fondo, dtype=np.float32) * (1 - a)
+    base = np.array(fondo, dtype=np.float32)
+    if foto.sombra is not None:
+        # La sombra oscurece el fondo, nunca la pieza.
+        base = base * (1 - foto.sombra[..., None])
+    return foto.rgb * a + base * (1 - a)
 
 
-def png_transparente(foto: Foto) -> bytes:
-    rgb = np.round(np.clip(foto.rgb, 0, 1) * 255).astype(np.uint8)
-    alfa = np.full(rgb.shape[:2], 255, np.uint8) if foto.alfa is None else np.round(np.clip(foto.alfa, 0, 1) * 255).astype(np.uint8)
+def png_transparente(foto: Foto, con_sombra: bool = True) -> bytes:
+    rgb, alfa_f = foto.rgb, foto.alfa
+    if con_sombra and foto.sombra is not None and alfa_f is not None:
+        # La pieza sobre una sombra negra semitransparente: donde no hay pieza queda solo la sombra.
+        total = alfa_f + foto.sombra * (1 - alfa_f)
+        rgb = rgb * (alfa_f / np.maximum(total, 1e-6))[..., None]
+        alfa_f = total
+    rgb = np.round(np.clip(rgb, 0, 1) * 255).astype(np.uint8)
+    alfa = np.full(rgb.shape[:2], 255, np.uint8) if alfa_f is None else np.round(np.clip(alfa_f, 0, 1) * 255).astype(np.uint8)
     salida = io.BytesIO()
     Image.fromarray(np.dstack([rgb, alfa]), "RGBA").save(salida, "PNG", icc_profile=perfil_srgb(), optimize=False, compress_level=6)
     return salida.getvalue()
@@ -43,10 +55,13 @@ class Exportar(Paso):
         "limpios, sin halos ni restos del fondo. Si ves un problema, nombralo en la razón para que la persona rehaga el "
         "paso que corresponde. Proponé la calidad del JPG."
     )
-    parametros = (Parametro("calidad", "Calidad del JPG", "Calidad de compresión del JPG final.", 80, 100, 95, 1),)
+    parametros = (
+        Parametro("calidad", "Calidad del JPG", "Calidad de compresión del JPG final.", 80, 100, 95, 1),
+        Parametro("sombra_png", "Sombra en el PNG", "Si la foto tiene sombra, la lleva también el PNG transparente.", 0, 1, 1, tipo="si_no"),
+    )
 
     def defectos(self, ajustes: dict) -> dict[str, float]:
-        return {"calidad": float(ajustes.get("calidad_jpg", 95))}
+        return {"calidad": float(ajustes.get("calidad_jpg", 95)), "sombra_png": 1.0}
 
     def medir(self, foto: Foto, ajustes: dict) -> Medicion:
         medidas = {"lado_px": [foto.ancho, foto.alto], "transparente": foto.alfa is not None, "fondo_jpg": ajustes["fondo"]}
@@ -56,7 +71,7 @@ class Exportar(Paso):
         return Foto(rgb=sobre_fondo(foto, color_fondo({"fondo": medicion.medidas["fondo_jpg"]})), datos=foto.datos)
 
     def aplicar(self, foto: Foto, valores: dict[str, float], ajustes: dict, medicion: Medicion) -> Resultado:
-        png = png_transparente(foto)
+        png = png_transparente(foto, con_sombra=valores.get("sombra_png", 1) >= 0.5)
         jpg = a_jpeg(sobre_fondo(foto, color_fondo(ajustes)), int(valores["calidad"]), icc=perfil_srgb())
         nota = None
         if len(jpg) > PESO_MAXIMO_ML:

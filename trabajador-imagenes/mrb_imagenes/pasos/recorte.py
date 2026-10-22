@@ -86,8 +86,10 @@ class Recorte(Paso):
                 f"La foto final queda de {lado} px de lado, menos de los {LADO_MINIMO_RECOMENDADO} que pide Mercado Libre "
                 "para el zoom. No se agranda, porque eso inventaría píxeles."
             )
+        # Dónde quedó la foto real dentro del cuadrado: el paso Sombra mide ahí la sombra que tenía.
+        datos = {**foto.datos, "zona_de_foto": [dx0, dy0, dx0 + (sx1 - sx0), dy0 + (sy1 - sy0)]}
         return Resultado(
-            foto=Foto(rgb=rgb, alfa=alfa, datos=foto.datos),
+            foto=Foto(rgb=rgb, alfa=alfa, datos=datos),
             valores=valores,
             medidas={"lado_px": lado, "lienzo_agregado": lienzo},
             nota=" ".join(notas) or None,

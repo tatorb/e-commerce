@@ -60,7 +60,7 @@ def test_el_resultado_tiene_la_forma_del_ejemplo():
 
 
 def test_los_pasos_son_los_de_la_app():
-    # Los mismos 8 ajustes, en el mismo orden, que los pasos de src/domain/photo-steps.ts.
+    # Los mismos 9 ajustes, en el mismo orden, que los pasos de src/domain/photo-steps.ts.
     app = Path(__file__).resolve().parents[2] / "src" / "domain" / "photo-steps.ts"
     if not app.exists():
         pytest.skip("Sin el código de la app al lado.")
@@ -215,7 +215,7 @@ UN_PASO = [("corregir", CLAVES)]
 EN_DOS = [("corregir", CLAVES[:5]), ("terminar", CLAVES[5:])]
 
 
-def _trabajo(indice: int, receta: list, pedidos=None, id=None, grupos=UN_PASO) -> Trabajo:
+def _trabajo(indice: int, receta: list, pedidos=None, id=None, grupos=UN_PASO, ajustes=None) -> Trabajo:
     grupo, pasos = grupos[indice]
     tipos = ["vista"] + (["antes"] if indice == 0 else []) + (["mascara", "png", "jpg"] if "exportar" in pasos else [])
     tipos += ["vivo"] if "lente" in pasos else []
@@ -229,7 +229,7 @@ def _trabajo(indice: int, receta: list, pedidos=None, id=None, grupos=UN_PASO) -
             "indice": indice,
             "pasos": pasos,
             "producto": "Kit de prueba",
-            "ajustes": {},
+            "ajustes": ajustes or {},
             "pedidos": pedidos,
             "original": {"nombre": "IMG_1.JPG", "tipo": "image/jpeg", "bajar": {"url": "https://deposito/original", "metodo": "GET"}},
             "receta": receta,
@@ -249,7 +249,7 @@ def _a_receta(hecho, indice: int, grupos=EN_DOS) -> dict:
     }
 
 
-def test_los_8_ajustes_en_un_paso_como_los_pide_la_app(tmp_path):
+def test_los_9_ajustes_en_un_paso_como_los_pide_la_app(tmp_path):
     pasos = armar_pasos(_segmentador)
     cliente = _ClienteEnMemoria(_original())
     inspector = _InspectorQueCuenta()
@@ -259,7 +259,7 @@ def test_los_8_ajustes_en_un_paso_como_los_pide_la_app(tmp_path):
     assert not hecho.partes[0].aplicado and hecho.partes[0].no_aplica  # la foto no tiene datos de lente
     assert all(p.aplicado for p in hecho.partes[1:])
     # Claude miró cada ajuste que aplica, uno por uno: todos menos lente.
-    assert inspector.pedidos == 7
+    assert inspector.pedidos == 8
     assert sorted(hecho.archivos) == ["antes", "jpg", "mascara", "png", "vista", "vivo"]
     assert hecho.original is not None and (hecho.original.ancho, hecho.original.alto) == (800, 600)
     final = Image.open(io.BytesIO(cliente.subidas["https://deposito/c0/jpg"]))
@@ -278,8 +278,8 @@ def test_rehacer_el_paso_con_otros_valores_vuelve_a_partir_del_original(tmp_path
     pedidos = {"valores": {"recorte": {"margen": 20}}, "apagados": ["luces", "color"]}
     antes = inspector.pedidos
     otro = procesar(_trabajo(0, [], pedidos=pedidos, id="r2"), pasos, inspector, cliente, tmp_path)
-    # Claude volvió a mirar los ajustes sin valores pedidos: perspectiva, blancos, fondo y exportar.
-    assert inspector.pedidos == antes + 4
+    # Claude volvió a mirar los ajustes sin valores pedidos: perspectiva, blancos, fondo, sombra y exportar.
+    assert inspector.pedidos == antes + 5
     por_paso = {p.paso: p for p in otro.partes}
     assert not por_paso["luces"].aplicado and not por_paso["color"].aplicado
     assert por_paso["recorte"].valores["margen"] == 20 and por_paso["recorte"].propuesta is None
@@ -335,7 +335,7 @@ def test_si_la_mac_ya_no_tiene_las_fotos_las_rearma_con_la_receta(tmp_path):
     antes = inspector.pedidos
     procesar(_trabajo(1, [_a_receta(corregir, 0)], grupos=EN_DOS), pasos, inspector, cliente, tmp_path)
     assert cliente.bajadas == 2
-    assert inspector.pedidos == antes + 3  # solo fondo, recorte y exportar, los del paso pedido
+    assert inspector.pedidos == antes + 4  # solo fondo, recorte, sombra y exportar, los del paso pedido
     assert cliente.subidas["https://deposito/c1/vista"] == vista_con_cache
 
 
@@ -347,13 +347,27 @@ def test_con_valores_pedidos_y_ajustes_apagados_no_le_pregunta_a_claude(tmp_path
     hecho = procesar(_trabajo(0, [], pedidos=pedidos), pasos, inspector, cliente, tmp_path)
     por_paso = {p.paso: p for p in hecho.partes}
     # Claude no miró perspectiva, que tenía valores pedidos, ni luces, que estaba apagado.
-    assert inspector.pedidos == 5
+    assert inspector.pedidos == 6
     assert por_paso["perspectiva"].propuesta is None
     # Se pidió más que el tope de 10°: se usa el tope y se avisa.
     assert por_paso["perspectiva"].valores["giro"] == 10
     assert "tope" in (por_paso["perspectiva"].nota or "")
     assert not por_paso["luces"].aplicado and por_paso["luces"].no_aplica is None
     assert por_paso["luces"].parametros  # para poder volver a prenderlo con valores
+
+
+def test_si_la_cuenta_no_quiere_sombra_arranca_apagada_y_se_puede_prender(tmp_path):
+    pasos = armar_pasos(_segmentador)
+    cliente = _ClienteEnMemoria(_original())
+    inspector = _InspectorQueCuenta()
+    hecho = procesar(_trabajo(0, [], id="s1", ajustes={"con_sombra": False}), pasos, inspector, cliente, tmp_path)
+    sombra = {p.paso: p for p in hecho.partes}["sombra"]
+    assert not sombra.aplicado and sombra.no_aplica is None and sombra.parametros
+    assert inspector.pedidos == 7  # todos menos lente y sombra
+    # Al rehacer, si no está entre los apagados, se hace.
+    pedidos = {"valores": {"sombra": {"intensidad": 20, "direccion": 0, "distancia": 10, "suavidad": 60}}, "apagados": []}
+    otro = procesar(_trabajo(0, [], pedidos=pedidos, id="s2", ajustes={"con_sombra": False}), pasos, inspector, cliente, tmp_path)
+    assert {p.paso: p for p in otro.partes}["sombra"].aplicado
 
 
 def test_si_la_app_cancela_no_entrega_nada(tmp_path):

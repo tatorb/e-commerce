@@ -63,6 +63,9 @@ describe('ajustes de imágenes', () => {
     expect(parsePhotoSettings(null)).toEqual(DEFAULT_PHOTO_SETTINGS);
     const s = parsePhotoSettings({ margen: 40, fondo: '#abcdef', calidad_jpg: 90.4, topes: { giro: 3, luces: -1 } });
     expect([s.margen, s.fondo, s.calidad_jpg, s.topes.giro, s.topes.luces]).toEqual([8, '#ABCDEF', 90, 3, 60]);
+    // La sombra viene prendida si no se eligió otra cosa.
+    expect([s.con_sombra, s.topes.sombra]).toEqual([true, 40]);
+    expect(parsePhotoSettings({ con_sombra: false }).con_sombra).toBe(false);
   });
 
   it('valida lo que se carga en Ajustes', () => {

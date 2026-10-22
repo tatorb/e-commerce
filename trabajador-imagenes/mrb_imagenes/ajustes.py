@@ -15,6 +15,8 @@ AJUSTES_DEFECTO: dict = {
     # Color de fondo del JPG final.
     "fondo": "#FFFFFF",
     "calidad_jpg": 95,
+    # Si las fotos nuevas llevan sombra. Se puede prender o apagar en cada foto.
+    "con_sombra": True,
     # Topes: lo máximo que se puede corregir en cada ajuste.
     "topes": {
         "giro": 10,  # grados
@@ -27,6 +29,7 @@ AJUSTES_DEFECTO: dict = {
         "claridad": 40,
         "saturacion": 30,  # %
         "vivacidad": 30,
+        "sombra": 40,  # % de oscuridad de la sombra que se agrega
     },
 }
 
@@ -44,6 +47,8 @@ def leer_ajustes(datos: dict | None = None) -> dict:
         salida["fondo"] = datos["fondo"].upper()
     if isinstance(datos.get("calidad_jpg"), (int, float)) and 80 <= datos["calidad_jpg"] <= 100:
         salida["calidad_jpg"] = int(datos["calidad_jpg"])
+    if isinstance(datos.get("con_sombra"), bool):
+        salida["con_sombra"] = datos["con_sombra"]
     for clave, valor in (datos.get("topes") or {}).items():
         if clave in salida["topes"] and isinstance(valor, (int, float)) and valor >= 0:
             # Un tope nunca puede superar el máximo técnico del paso.

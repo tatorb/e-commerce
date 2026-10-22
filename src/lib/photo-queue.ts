@@ -3,6 +3,7 @@ import { Prisma } from '@/generated/prisma/client';
 import type { PhotoRunStatus } from '@/generated/prisma/enums';
 import {
   LIVE_PROTOCOL,
+  PART_PROTOCOL,
   type Job,
   type PhotoProtocol,
   type RecipeEntry,
@@ -197,7 +198,8 @@ export async function buildJob(db: PrismaClient, runId: string, deps: JobDeps): 
     foto: edit.id,
     grupo: step.key,
     indice: run.step,
-    pasos: step.parts,
+    // Un trabajador sin actualizar no recibe los ajustes que todavía no sabe hacer.
+    pasos: step.parts.filter((p) => (PART_PROTOCOL[p] ?? 2) <= deps.protocol),
     producto: product,
     ajustes: parsePhotoSettings(run.settings),
     pedidos: request ? { valores: request.valores, apagados: request.apagados } : null,

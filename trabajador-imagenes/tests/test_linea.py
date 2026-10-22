@@ -25,7 +25,7 @@ def _segmentador(rgb):
     return m
 
 
-def test_los_8_pasos_sin_tocar_el_original(tmp_path):
+def test_los_9_pasos_sin_tocar_el_original(tmp_path):
     ruta = tmp_path / "foto.jpg"
     arr = (foto_de_prueba(inclinacion=2).rgb * 255).astype(np.uint8)
     im = Image.fromarray(arr)
@@ -48,7 +48,7 @@ def test_los_8_pasos_sin_tocar_el_original(tmp_path):
         archivos.update(corrida.resultado.archivos)
         foto = corrida.resultado.foto
 
-    assert [c for c, _ in claves] == ["lente", "perspectiva", "blancos", "luces", "color", "fondo", "recorte", "exportar"]
+    assert [c for c, _ in claves] == ["lente", "perspectiva", "blancos", "luces", "color", "fondo", "recorte", "sombra", "exportar"]
     assert dict(claves)["lente"] is True  # sin datos de lente
     assert hashlib.sha256(ruta.read_bytes()).hexdigest() == huella
     jpg = Image.open(io.BytesIO(archivos["final.jpg"]))

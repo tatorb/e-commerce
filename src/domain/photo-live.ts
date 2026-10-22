@@ -1,10 +1,11 @@
 import { z } from 'zod';
 
 // Editar la foto en vivo: las mismas cuentas que hace la Mac en los ajustes de
-// lente, perspectiva, blancos, luces y color, sobre una copia chica que la Mac
-// sube con cada foto (trabajador-imagenes/mrb_imagenes/vivo.py). Quitar fondo
-// y recorte no se rehacen: se usa la silueta que hizo la Mac, movida si cambió
-// el encuadre. Es una vista previa: la foto final la hace siempre la Mac.
+// lente, perspectiva, blancos, luces, color y sombra, sobre una copia chica
+// que la Mac sube con cada foto (trabajador-imagenes/mrb_imagenes/vivo.py).
+// Quitar fondo y recorte no se rehacen: se usa la silueta que hizo la Mac,
+// movida si cambió el encuadre. Es una vista previa: la foto final la hace
+// siempre la Mac.
 //
 // Cada cuenta copia la de su paso en trabajador-imagenes/mrb_imagenes/pasos/,
 // con el mismo nombre en el comentario, y las pruebas la comparan con números
@@ -737,8 +738,195 @@ export function hexColor(hex: string): [number, number, number] {
   return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255) as [number, number, number];
 }
 
-/** La foto como el JPG final: sobre el color de fondo y, si hay margen, en el cuadrado del recorte. */
-export function compose(img: Rgb, alpha: Gray | null, margin: number | null, background: [number, number, number]): Rgb {
+// ───────────────────────────── Sombra ─────────────────────────────
+
+// Como trabajador-imagenes/mrb_imagenes/pasos/sombra.py: se dibuja sobre una
+// copia de la silueta de a lo sumo 512 px, porque es borrosa.
+const SHADOW_SIDE = 512;
+const SHADOW_EDGE = 0.04;
+const SHADOW_AROUND = 0.1;
+
+/** cv2.INTER_AREA al achicar: cada píxel nuevo es el promedio del área que cubre. */
+function shrinkArea(src: Gray, w: number, h: number): Gray {
+  const weights = (from: number, to: number) => {
+    const scale = from / to;
+    return Array.from({ length: to }, (_, i) => {
+      const a = i * scale;
+      const b = Math.min(from, (i + 1) * scale);
+      const out: [number, number][] = [];
+      for (let k = Math.floor(a); k < b; k++) {
+        const cover = Math.min(b, k + 1) - Math.max(a, k);
+        if (cover > 1e-9) out.push([k, cover / scale]);
+      }
+      return out;
+    });
+  };
+  const wx = weights(src.w, w);
+  const wy = weights(src.h, h);
+  const rows = new Float32Array(src.h * w);
+  for (let y = 0; y < src.h; y++) {
+    for (let x = 0; x < w; x++) {
+      let v = 0;
+      for (const [k, f] of wx[x]) v += src.d[y * src.w + k] * f;
+      rows[y * w + x] = v;
+    }
+  }
+  const d = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let v = 0;
+      for (const [k, f] of wy[y]) v += rows[k * w + x] * f;
+      d[y * w + x] = v;
+    }
+  }
+  return { w, h, d };
+}
+
+/** cv2.INTER_LINEAR al agrandar. */
+function growLinear(src: Gray, w: number, h: number): Gray {
+  const axis = (from: number, to: number) =>
+    Array.from({ length: to }, (_, i) => {
+      const p = Math.max(0, (i + 0.5) * (from / to) - 0.5);
+      const a = Math.min(Math.floor(p), from - 1);
+      return [a, Math.min(a + 1, from - 1), p - a] as const;
+    });
+  const ax = axis(src.w, w);
+  const ay = axis(src.h, h);
+  const d = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const [y0, y1, fy] = ay[y];
+    for (let x = 0; x < w; x++) {
+      const [x0, x1, fx] = ax[x];
+      const top = src.d[y0 * src.w + x0] * (1 - fx) + src.d[y0 * src.w + x1] * fx;
+      const bottom = src.d[y1 * src.w + x0] * (1 - fx) + src.d[y1 * src.w + x1] * fx;
+      d[y * w + x] = top * (1 - fy) + bottom * fy;
+    }
+  }
+  return { w, h, d };
+}
+
+/** _promedio: el promedio en una ventana de 2 × radio + 1, en filas o columnas; lo de afuera cuenta como 0. */
+function boxAverage(a: Float32Array, w: number, h: number, radius: number, alongX: boolean): Float32Array {
+  if (radius <= 0) return a;
+  const out = new Float32Array(a.length);
+  const n = alongX ? w : h;
+  const lines = alongX ? h : w;
+  const at = (line: number, k: number) => (alongX ? line * w + k : k * w + line);
+  const size = 2 * radius + 1;
+  for (let line = 0; line < lines; line++) {
+    let sum = 0;
+    for (let k = 0; k <= Math.min(radius, n - 1); k++) sum += a[at(line, k)];
+    for (let k = 0; k < n; k++) {
+      out[at(line, k)] = sum / size;
+      const enter = k + radius + 1;
+      const leave = k - radius;
+      if (enter < n) sum += a[at(line, enter)];
+      if (leave >= 0) sum -= a[at(line, leave)];
+    }
+  }
+  return out;
+}
+
+/** difuminar: casi un desenfoque gaussiano, tres promedios seguidos en cada eje. */
+function blur(a: Float32Array, w: number, h: number, sigma: number): Float32Array {
+  const radius = Math.max(0, roundHalfEven((Math.sqrt((12 * sigma * sigma) / 3 + 1) - 1) / 2));
+  for (let i = 0; i < 3; i++) a = boxAverage(a, w, h, radius, true);
+  for (let i = 0; i < 3; i++) a = boxAverage(a, w, h, radius, false);
+  return a;
+}
+
+/**
+ * dibujar_sombra: cuánto oscurece la sombra cada píxel, de 0 a 1. Un
+ * degradado que nace del lado de la pieza que da hacia donde cae y se
+ * desvanece con la distancia.
+ */
+export function shadowLayer(alpha: Gray, values: Record<string, number>): Gray {
+  const scale = Math.min(1, SHADOW_SIDE / Math.max(alpha.w, alpha.h));
+  const a = scale < 1 ? shrinkArea(alpha, Math.max(1, roundHalfEven(alpha.w * scale)), Math.max(1, roundHalfEven(alpha.h * scale))) : alpha;
+  const { w, h } = a;
+  const box = pieceBox(a);
+  if (!box || (values.intensidad ?? 0) <= 0) return { w: alpha.w, h: alpha.h, d: new Float32Array(alpha.w * alpha.h) };
+  const piece = Math.max(box.x1 - box.x0, box.y1 - box.y0);
+  const length = ((values.distancia ?? 0) / 100) * piece;
+  const angle = ((values.direccion ?? 0) * Math.PI) / 180;
+  const dx = Math.sin(angle);
+  const dy = Math.cos(angle);
+  let total = 0;
+  let cx = 0;
+  let cy = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const v = a.d[y * w + x];
+      total += v;
+      cx += v * x;
+      cy += v * y;
+    }
+  }
+  total = Math.max(total, 1e-6);
+  cx /= total;
+  cy /= total;
+  let reach = 1;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) if (a.d[y * w + x] >= 0.5) reach = Math.max(reach, Math.abs((x - cx) * dx + (y - cy) * dy));
+  }
+  // El lado que da hacia donde cae pesa entero; el opuesto, casi nada.
+  const base = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const side = clip01(((((x - cx) * dx + (y - cy) * dy) / reach + 1) / 2));
+      base[y * w + x] = a.d[y * w + x] * (SHADOW_AROUND + (1 - SHADOW_AROUND) * side * side);
+    }
+  }
+  let s: Float32Array = base.slice();
+  const steps = Math.max(1, Math.min(48, Math.ceil(length)));
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const weight = Math.pow(1 - t, 1.5);
+    const sx = t * length * dx;
+    const sy = t * length * dy;
+    // desplazar: la base corrida (sx, sy), mezclando vecinos; lo de afuera es 0.
+    const ix = Math.floor(sx);
+    const iy = Math.floor(sy);
+    const fx = sx - ix;
+    const fy = sy - iy;
+    const at = (x: number, y: number) => (x >= 0 && y >= 0 && x < w && y < h ? base[y * w + x] : 0);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const v =
+          (1 - fx) * (1 - fy) * at(x - ix, y - iy) +
+          fx * (1 - fy) * at(x - ix - 1, y - iy) +
+          (1 - fx) * fy * at(x - ix, y - iy - 1) +
+          fx * fy * at(x - ix - 1, y - iy - 1);
+        const k = y * w + x;
+        if (weight * v > s[k]) s[k] = weight * v;
+      }
+    }
+  }
+  s = blur(s, w, h, 0.5 + ((values.suavidad ?? 0) / 100) * (0.08 * piece + 0.5 * length));
+  // Se desvanece contra el borde del cuadro: nunca queda cortada.
+  const edge = Math.max(1, SHADOW_EDGE * Math.max(w, h));
+  const fade = (k: number, n: number) => clip01(Math.min(k + 0.5, n - k - 0.5) / edge);
+  const strength = (values.intensidad ?? 0) / 100;
+  for (let y = 0; y < h; y++) {
+    const fy = fade(y, h);
+    for (let x = 0; x < w; x++) s[y * w + x] *= fy * fade(x, w) * strength;
+  }
+  const out = scale < 1 ? growLinear({ w, h, d: s }, alpha.w, alpha.h) : { w, h, d: s };
+  for (let i = 0; i < out.d.length; i++) out.d[i] = clip01(out.d[i]);
+  return out;
+}
+
+/**
+ * La foto como el JPG final: sobre el color de fondo y, si hay margen, en el
+ * cuadrado del recorte. La sombra oscurece el fondo, nunca la pieza.
+ */
+export function compose(
+  img: Rgb,
+  alpha: Gray | null,
+  margin: number | null,
+  background: [number, number, number],
+  shadow: Record<string, number> | null = null,
+): Rgb {
   if (!alpha) return img;
   const frame = margin === null ? null : (() => {
     const b = pieceBox(alpha);
@@ -748,16 +936,26 @@ export function compose(img: Rgb, alpha: Gray | null, margin: number | null, bac
   const h = frame ? frame.side : img.h;
   const ox = frame ? frame.x0 : 0;
   const oy = frame ? frame.y0 : 0;
+  // La silueta en el cuadro: lo que cae afuera de la foto es lienzo vacío.
+  const a = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const sy = y + oy;
+    if (sy < 0 || sy >= img.h) continue;
+    for (let x = 0; x < w; x++) {
+      const sx = x + ox;
+      if (sx >= 0 && sx < img.w) a[y * w + x] = alpha.d[sy * img.w + sx];
+    }
+  }
+  const s = shadow ? shadowLayer({ w, h, d: a }, shadow).d : null;
   const d = new Float32Array(w * h * 3);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      const i = (y * w + x) * 3;
-      const sx = x + ox;
-      const sy = y + oy;
-      // Lo que cae afuera de la foto es lienzo vacío.
-      const a = sx >= 0 && sy >= 0 && sx < img.w && sy < img.h ? alpha.d[sy * img.w + sx] : 0;
-      const j = (sy * img.w + sx) * 3;
-      for (let c = 0; c < 3; c++) d[i + c] = (a > 0 ? img.d[j + c] * a : 0) + background[c] * (1 - a);
+      const k = y * w + x;
+      const i = k * 3;
+      const av = a[k];
+      const under = (1 - av) * (s ? 1 - s[k] : 1);
+      const j = ((y + oy) * img.w + x + ox) * 3;
+      for (let c = 0; c < 3; c++) d[i + c] = (av > 0 ? img.d[j + c] * av : 0) + background[c] * under;
     }
   }
   return { w, h, d };
@@ -811,7 +1009,7 @@ export function halfSource(src: LiveSource): LiveSource {
 
 // ───────────────────────────── Todo junto ─────────────────────────────
 
-export type LivePartKey = 'lente' | 'perspectiva' | 'blancos' | 'luces' | 'color';
+export type LivePartKey = 'lente' | 'perspectiva' | 'blancos' | 'luces' | 'color' | 'sombra';
 export type LiveEdits = Partial<Record<LivePartKey, { on: boolean; values: Record<string, number> }>>;
 // Lo que hizo la Mac en cada ajuste.
 export type MacPart = { paso: string; aplicado: boolean; valores: Record<string, number>; medidas: Record<string, unknown> };
@@ -882,6 +1080,6 @@ export function liveRenderer(src: LiveSource, mac: { parts: MacPart[]; backgroun
       lights: lights ? { values: lights, cells: cellsFor(img.h / scale, img.w / scale) } : null,
       color: on('color'),
     });
-    return { image: compose(toned, last.alpha, margin, background), notes };
+    return { image: compose(toned, last.alpha, margin, background, on('sombra')), notes };
   };
 }

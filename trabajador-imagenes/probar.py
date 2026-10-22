@@ -1,4 +1,4 @@
-"""Prueba en la terminal: pasa una foto por los 8 pasos y deja todo en una carpeta.
+"""Prueba en la terminal: pasa una foto por los 9 pasos y deja todo en una carpeta.
 
 Uso:
     ./probar.sh FOTO [--simulado] [--preguntar] [--producto "Kit de embrague Sachs"] [--salida CARPETA]
@@ -65,7 +65,7 @@ def mostrar(n: int, corrida: Corrida) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Pasa una foto por los 8 pasos de la línea de corrección.")
+    parser = argparse.ArgumentParser(description="Pasa una foto por los 9 pasos de la línea de corrección.")
     parser.add_argument("foto", type=Path, nargs="?")
     parser.add_argument("--salida", type=Path, help="Carpeta de resultados. Por defecto, al lado de la foto.")
     parser.add_argument("--simulado", action="store_true", help="Sin Claude: usa los valores que mide el código.")

@@ -21,6 +21,7 @@ import {
   pieceBox,
   readLivePackage,
   roundHalfEven,
+  shadowLayer,
   whiteGains,
   type Gray,
   type LiveHeader,
@@ -93,6 +94,26 @@ describe('editar en vivo: las mismas cuentas que la Mac', () => {
     expect([box!.x0, box!.y0, box!.x1, box!.y1]).toEqual(caja);
     expect(framing(box!, margen)).toEqual({ side: lado, x0, y0 });
     expect(pieceBox({ w: 2, h: 2, d: new Float32Array(4) })).toBeNull();
+  });
+
+  it('sombra: el mismo degradado que dibuja la Mac', () => {
+    for (const { ancho, alto, alfa, valores, resultado } of ref.sombra) {
+      const s = shadowLayer({ w: ancho, h: alto, d: Float32Array.from(alfa) }, valores);
+      expect(maxDiff(s.d, resultado)).toBeLessThan(1e-4);
+    }
+    // Más grande que 512 px: se dibuja achicada y se agranda, como en la Mac.
+    const { valores, paso, resultado } = ref.sombra_grande;
+    const grande = { w: 600, h: 450, d: new Float32Array(600 * 450) };
+    for (let y = 0; y < 450; y++) {
+      for (let x = 0; x < 600; x++) {
+        const inside = ((x - 300) / 160) ** 2 + ((y - 200) / 110) ** 2 <= 1 || (y >= 300 && y < 340 && x >= 120 && x < 480);
+        grande.d[y * 600 + x] = inside ? 1 : 0;
+      }
+    }
+    const s = shadowLayer(grande, valores);
+    const sampled: number[] = [];
+    for (let y = 0; y < 450; y += paso) for (let x = 0; x < 600; x += paso) sampled.push(s.d[y * 600 + x]);
+    expect(maxDiff(sampled, resultado)).toBeLessThan(5e-3);
   });
 
   it('redondea como Python', () => {
@@ -235,6 +256,18 @@ describe('la vista en vivo armada', () => {
     const half = liveRenderer(halfSource(src), mac())({}).image;
     expect([half.w, half.h]).toEqual([25, 25]);
     expect(half.d[(12 * 25 + 12) * 3]).toBeCloseTo(full.d[(25 * 50 + 25) * 3], 5);
+  });
+
+  it('la sombra oscurece el fondo debajo de la pieza y no la pieza', () => {
+    const render = liveRenderer(src, mac());
+    const sin = render({}).image;
+    const con = render({ sombra: { on: true, values: { intensidad: 30, direccion: 0, distancia: 15, suavidad: 40 } } }).image;
+    expect([con.w, con.h]).toEqual([sin.w, sin.h]);
+    // Justo debajo de la pieza, más oscuro; la pieza y lo de arriba, igual.
+    const at = (img: Rgb, x: number, y: number) => img.d[(y * img.w + x) * 3];
+    expect(at(con, 25, 41)).toBeLessThan(at(sin, 25, 41) - 0.02);
+    expect(at(con, 25, 25)).toBeCloseTo(at(sin, 25, 25), 6);
+    expect(at(con, 25, 1)).toBeCloseTo(1, 2);
   });
 
   it('sin quitar el fondo, se ve la foto entera', () => {

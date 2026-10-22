@@ -1,6 +1,6 @@
 import type { PhotoRunStatus } from '@/generated/prisma/enums';
 
-// La línea de imágenes tiene 8 ajustes, en el orden del trabajador
+// La línea de imágenes tiene 9 ajustes, en el orden del trabajador
 // (trabajador-imagenes/mrb_imagenes/pasos/). La Mac los hace de corrido, en un
 // solo paso, y frena para que una persona apruebe; si algo no convence, se
 // cambian los valores de los ajustes que haga falta y se rehace todo junto.
@@ -16,12 +16,13 @@ export const PHOTO_ADJUSTMENT_LABEL: Record<string, string> = {
   color: 'Color',
   fondo: 'Quitar fondo',
   recorte: 'Recorte',
+  sombra: 'Sombra',
   exportar: 'Exportar',
 };
 
 // Los ajustes que se pueden probar en vivo en la pantalla, sin esperar a la
 // Mac. Quitar fondo y recorte no: dependen del modelo que corre en la Mac.
-export const LIVE_PARTS: readonly string[] = ['lente', 'perspectiva', 'blancos', 'luces', 'color'];
+export const LIVE_PARTS: readonly string[] = ['lente', 'perspectiva', 'blancos', 'luces', 'color', 'sombra'];
 
 export type PhotoStep = {
   key: string;
@@ -36,7 +37,7 @@ export const PHOTO_STEPS: readonly PhotoStep[] = [
   {
     key: 'corregir',
     label: 'Corrección de la foto',
-    parts: ['lente', 'perspectiva', 'blancos', 'luces', 'color', 'fondo', 'recorte', 'exportar'],
+    parts: ['lente', 'perspectiva', 'blancos', 'luces', 'color', 'fondo', 'recorte', 'sombra', 'exportar'],
     reframes: true,
   },
 ];

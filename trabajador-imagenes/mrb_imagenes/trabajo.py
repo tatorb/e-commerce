@@ -216,7 +216,9 @@ def procesar(
         paso = por_clave[clave]
         comienzo = time.monotonic()
         parametros = _parametros(paso, ajustes)
-        if pedidos and clave in pedidos.apagados:
+        # La sombra arranca apagada si la cuenta lo pide; al rehacer manda lo que se eligió.
+        apagado_por_ajustes = pedidos is None and clave == "sombra" and not ajustes["con_sombra"]
+        if (pedidos and clave in pedidos.apagados) or apagado_por_ajustes:
             partes.append(
                 Parte(paso=clave, aplicado=False, no_aplica=None, propuesta=None, valores={}, medidas={}, parametros=parametros, nota=None, uso_claude=None, segundos=0)
             )

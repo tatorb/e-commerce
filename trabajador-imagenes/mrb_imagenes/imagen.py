@@ -35,6 +35,8 @@ class Foto:
     alfa: np.ndarray | None = None
     # Cámara, lente, perfil de color y otros datos del original.
     datos: dict = field(default_factory=dict)
+    # Alto x ancho, cuánto oscurece la sombra el fondo, de 0 a 1. Solo después del paso Sombra.
+    sombra: np.ndarray | None = None
 
     @property
     def alto(self) -> int:
@@ -275,7 +277,10 @@ def vista_jpeg(foto: Foto, lado: int = 1600, calidad: int = 85) -> bytes:
     rgb = chica.rgb
     if chica.alfa is not None:
         a = chica.alfa[..., None]
-        rgb = rgb * a + _cuadros(chica.alto, chica.ancho) * (1 - a)
+        fondo = _cuadros(chica.alto, chica.ancho)
+        if foto.sombra is not None:
+            fondo = fondo * (1 - cv2.resize(foto.sombra, (chica.ancho, chica.alto), interpolation=cv2.INTER_AREA)[..., None])
+        rgb = rgb * a + fondo * (1 - a)
     return a_jpeg(rgb, calidad)
 
 

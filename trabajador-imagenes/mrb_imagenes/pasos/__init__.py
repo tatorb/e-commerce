@@ -1,4 +1,4 @@
-"""Los 8 pasos de la línea, en orden."""
+"""Los 9 pasos de la línea, en orden."""
 
 from __future__ import annotations
 
@@ -11,11 +11,12 @@ from .lente import Lente
 from .luces import Luces
 from .perspectiva import Perspectiva
 from .recorte import Recorte
+from .sombra import Sombra
 
 
 def armar_pasos(segmentador: Segmentador | None = None, modelo_fondo: str | None = None) -> list[Paso]:
     fondo = Fondo(segmentador or segmentador_rembg(modelo_fondo))
-    return [Lente(), Perspectiva(), Blancos(), Luces(), Color(), fondo, Recorte(), Exportar()]
+    return [Lente(), Perspectiva(), Blancos(), Luces(), Color(), fondo, Recorte(), Sombra(), Exportar()]
 
 
 CLAVES = [p.clave for p in armar_pasos(lambda rgb: rgb[..., 0])]

@@ -28,7 +28,8 @@ import { BrandMark } from '@/components/ui/brand-loader';
 // valores que haga falta y rehacer todo junto. Con más de un paso, los pasos
 // van arriba. Con varias fotos abiertas (compact), los ajustes arrancan
 // plegados para ver más fotos de una vez. Si la Mac subió el paquete, los
-// ajustes de lente a color se pueden mover en vivo y después aplicar en la Mac.
+// ajustes de lente a color y la sombra se pueden mover en vivo y después
+// aplicar en la Mac.
 
 const ORIGIN_LABEL: Record<string, string> = {
   claude: 'Claude',
@@ -292,7 +293,7 @@ function RunPanel({ accountSlug, run, photo, compact }: { accountSlug: string; r
                 {liveOn ? 'Dejar de editar en vivo' : 'Editar en vivo'}
               </Button>
               {!liveOn ? (
-                <span className="text-xs text-muted-foreground">Mové lente, perspectiva, blancos, luces y color y mirá el cambio al instante.</span>
+                <span className="text-xs text-muted-foreground">Mové lente, perspectiva, blancos, luces, color y sombra, y mirá el cambio al instante.</span>
               ) : null}
             </div>
           ) : run.status === 'REVIEW' && step.parts.some(isLive) ? (

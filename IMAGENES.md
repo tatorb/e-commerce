@@ -1,6 +1,6 @@
 # Trabajador de imágenes
 
-El trabajador es el programa que corrige las fotos de producto. Corre en la Mac del estudio y le hace a cada foto 8 ajustes, en orden:
+El trabajador es el programa que corrige las fotos de producto. Corre en la Mac del estudio y le hace a cada foto 9 ajustes, en orden:
 1. Lente
 2. Perspectiva y enderezado
 3. Balance de blancos
@@ -8,11 +8,12 @@ El trabajador es el programa que corrige las fotos de producto. Corre en la Mac 
 5. Color
 6. Quitar fondo
 7. Recorte
-8. Exportar
+8. Sombra
+9. Exportar
 
-La Mac hace los 8 de corrido y frena una sola vez, al final, para que lo apruebes. En cada ajuste Claude mira la foto y propone los valores, y el programa los aplica.
+La Mac hace los 9 de corrido y frena una sola vez, al final, para que lo apruebes. En cada ajuste Claude mira la foto y propone los valores, y el programa los aplica.
 
-**Regla de oro:** solo se corrige la foto original. Nada se genera, rellena ni inventa, y el original nunca se toca.
+**Regla de oro:** solo se corrige la foto original. Nada se genera, rellena ni inventa, y el original nunca se toca. La única excepción es la sombra, que se agrega solo sobre el fondo y nunca toca la pieza.
 
 El trabajador se conecta con la app y arranca solo cada vez que iniciás sesión en la Mac. Él le pregunta a la app si hay algo para hacer, así que en la Mac no hay que abrir nada.
 
@@ -75,9 +76,9 @@ El trabajador se conecta con la app y arranca solo cada vez que iniciás sesión
 3. Tocá las fotos que quieras revisar. Cada una que tocás se abre abajo, una debajo de otra, y se marca con un tilde en la lista. Tocala de nuevo para cerrarla.
    - **Abrir las que esperan tu aprobación** abre de una todas las que la Mac ya terminó.
    - **Abrir todas** y **Cerrar todas** hacen lo que dicen.
-   - Cada foto muestra el antes y el después, y abajo los 8 ajustes, cada uno con lo que dijo Claude y sus valores. Con varias abiertas, los ajustes arrancan plegados: tocá **Ver los 8 ajustes** en la foto que quieras cambiar.
+   - Cada foto muestra el antes y el después, y abajo los 9 ajustes, cada uno con lo que dijo Claude y sus valores. Con varias abiertas, los ajustes arrancan plegados: tocá **Ver los 9 ajustes** en la foto que quieras cambiar.
 4. Si querés cambiar algo, cambiá los valores de todos los ajustes que quieras y tocá **Rehacer con estos valores** una sola vez:
-   - la Mac vuelve a hacer los 8 desde el original
+   - la Mac vuelve a hacer los 9 desde el original
    - los ajustes que cambiaste usan tus valores
    - los que no tocaste quedan como estaban, sin volver a preguntarle a Claude
    - **Aplicar**, en cada ajuste, lo prende o lo apaga. Un ajuste apagado deja la foto como estaba en ese punto. Exportar no se apaga, porque es el que arma la foto final.
@@ -89,9 +90,22 @@ Todo se guarda en el Google Drive del estudio, en la carpeta de cada producto. S
 
 Una foto ya aprobada también se puede rehacer. Las fotos del iPhone saltean solas el ajuste del lente, porque el teléfono ya lo corrige.
 
+### La sombra
+
+Con el fondo quitado, la pieza queda flotando sobre blanco. El ajuste **Sombra** le devuelve una sombra suave, copiada de la que tenía la foto:
+- La Mac mide la sombra real alrededor de la pieza: hacia dónde cae, hasta dónde llega, qué tan blanda es y qué tan oscura.
+- Claude la mira con el fondo original y propone los valores.
+- El programa dibuja un degradado sutil con la forma de la pieza: más denso del lado donde cae y desvaneciéndose. No es la silueta copiada y corrida de un programa de diseño.
+
+Los valores son **Intensidad**, **Dirección** (0 hacia abajo, 90 a la derecha, -90 a la izquierda, 180 hacia arriba), **Distancia** y **Suavidad**. Se pueden mover en vivo.
+- **Aplicar**, en la tarjeta Sombra, la saca de esa foto.
+- El JPG la lleva sobre el fondo. El PNG transparente también, como transparencia gris; para sacarla solo del PNG, apagá **Sombra en el PNG** en Exportar.
+- En **Ajustes, Imágenes** elegís si las fotos nuevas arrancan con sombra o sin ella, y el tope de intensidad.
+- Algunas guías de Mercado Libre piden la foto principal sin sombras. Por eso arranca sutil y se puede apagar en cada foto.
+
 ### Editar en vivo
 
-Con **Editar en vivo**, la foto queda arriba y cada valor de lente, perspectiva, blancos, luces y color tiene una barra. Al moverla, la foto cambia al instante, sin esperar a la Mac.
+Con **Editar en vivo**, la foto queda arriba y cada valor de lente, perspectiva, blancos, luces, color y sombra tiene una barra. Al moverla, la foto cambia al instante, sin esperar a la Mac.
 - **Lo de la Mac**, arriba de la foto, muestra lo que hizo la Mac para comparar.
 - **Quitar fondo, Recorte y Exportar** no se ven en vivo: se usa la silueta que hizo la Mac. Si cambiás el giro o la lente, la silueta se acomoda sola.
 - **Volver a lo de la Mac** deja los valores como estaban.
@@ -150,8 +164,8 @@ Todo va **en una sola línea**, y recién al final se aprieta Enter:
 - **`receta.json`:** todos los valores de cada ajuste, para rehacerla igual.
 
 **Tiempos y costo:**
-- En una Mac de 8 GB, cada foto tarda alrededor de un minuto y medio con los 8 ajustes. El más pesado es quitar el fondo.
-- Claude cuesta unos US$ 0,12 por foto. Al final se muestra el costo de esa foto.
+- En una Mac de 8 GB, cada foto tarda alrededor de un minuto y medio con los 9 ajustes. El más pesado es quitar el fondo.
+- Claude cuesta unos US$ 0,13 por foto. Al final se muestra el costo de esa foto.
 - Rehacer con valores que pediste cuesta menos, porque Claude solo mira los ajustes que no tienen valores pedidos.
 
 ## Si algo no anda
@@ -180,10 +194,11 @@ Todo va **en una sola línea**, y recién al final se aprieta Enter:
   - aplica
 - **El inspector de Claude** está en `mrb_imagenes/inspector.py`.
 - **Los archivos:** el trabajador baja el original a través de la app y sube lo que hace directo al Drive del estudio, con una subida que sirve para un solo archivo. No tiene la llave del Drive.
-- **La conexión con la app** está en `mrb_imagenes/app.py`, y lo que pide la app se hace en `mrb_imagenes/trabajo.py`, ajuste por ajuste. La app hoy pide los 8 en un solo paso, pero el trabajador también sabe hacerlos repartidos en varios pasos. El programa que corre siempre es `principal.py`.
-- **La prueba en la Terminal**, `probar.sh`, sigue mostrando los 8 ajustes uno por uno.
+- **La conexión con la app** está en `mrb_imagenes/app.py`, y lo que pide la app se hace en `mrb_imagenes/trabajo.py`, ajuste por ajuste. La app hoy pide los 9 en un solo paso, pero el trabajador también sabe hacerlos repartidos en varios pasos. El programa que corre siempre es `principal.py`.
+- **La prueba en la Terminal**, `probar.sh`, sigue mostrando los 9 ajustes uno por uno.
 - **Los mensajes con la app** tienen ejemplos en `contrato/`, que prueban los dos lados.
-- **Editar en vivo:** con cada foto, `mrb_imagenes/vivo.py` sube un paquete con la foto preparada en tamaño de pantalla, una copia por cada combinación de correcciones de lente y la silueta. La app repite en el navegador las cuentas de lente, perspectiva, blancos, luces y color (`src/domain/photo-live.ts`). `tests/armar_referencia_vivo.py` saca números de referencia de las cuentas de la Mac, que la app compara con las suyas; si se cambia una cuenta, hay que volver a correrlo.
+- **Editar en vivo:** con cada foto, `mrb_imagenes/vivo.py` sube un paquete con la foto preparada en tamaño de pantalla, una copia por cada combinación de correcciones de lente y la silueta. La app repite en el navegador las cuentas de lente, perspectiva, blancos, luces, color y sombra (`src/domain/photo-live.ts`). `tests/armar_referencia_vivo.py` saca números de referencia de las cuentas de la Mac, que la app compara con las suyas; si se cambia una cuenta, hay que volver a correrlo.
+- **La sombra** está en `mrb_imagenes/pasos/sombra.py`. Se dibuja sobre una copia de la silueta de a lo sumo 512 px, porque es borrosa, y se guarda en la foto aparte de la transparencia: Exportar la pone en el JPG y, si se pide, en el PNG. Desde el protocolo 4; a un trabajador anterior la app no se la pide.
 - **La claridad** mide cada zona de la foto en tamaño de pantalla, 1200 px, y aplica la curva a la foto entera. Así da lo mismo en la Mac y en la vista en vivo.
 - **El arranque automático** es un servicio de usuario de macOS, `com.studiomrb.imagenes`, que arma `prender.sh` en `~/Library/LaunchAgents/`.
 - **Dónde vive:** el entorno de Python, el modelo, la dirección de la app y las fotos de trabajo quedan fuera del proyecto, en `~/Library/Application Support/MRB Imagenes/`. Las fotos de trabajo se borran solas a los 7 días sin uso; si faltan, se rearman desde el original.
