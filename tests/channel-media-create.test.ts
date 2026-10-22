@@ -13,6 +13,7 @@ import {
   photoKey,
   variantKey,
   variantPhotos,
+  withMarks,
   withVariants,
   type PhotoRef,
 } from '@/domain/media';
@@ -90,14 +91,38 @@ describe('las fotos elegidas', () => {
       { sku: null, measure: '0.50', photoIds: ['P2', 'P3'] },
     ];
     expect(channelPhotos(['u1', 'u2', 'u3'], ['P1', 'P2', 'P3'], variations)).toEqual([
-      { kind: 'channel', id: 'P1', url: 'u1', variants: ['sku:A medida:std'] },
-      { kind: 'channel', id: 'P2', url: 'u2', variants: ['medida:0.50'] },
-      { kind: 'channel', id: 'P3', url: 'u3' },
+      // Y su lugar en cada medida, como lo tiene el canal.
+      { kind: 'channel', id: 'P1', url: 'u1', variants: ['sku:A medida:std'], positions: { 'sku:A medida:std': 0 } },
+      { kind: 'channel', id: 'P2', url: 'u2', variants: ['medida:0.50'], positions: { 'medida:0.50': 0 } },
+      { kind: 'channel', id: 'P3', url: 'u3', positions: { 'sku:A medida:std': 1, 'medida:0.50': 1 } },
     ]);
     // Sin medidas marcadas, la huella es la de siempre; con marcas, cambia.
     const plain = channelPhotos(['u1'], ['P1']);
     expect(fingerprint('photos', plain)).toBe(fingerprint('photos', [{ kind: 'channel', id: 'P1', url: 'otro' }]));
     expect(fingerprint('photos', [withVariants(plain[0], ['sku:A'])])).not.toBe(fingerprint('photos', plain));
+  });
+
+  it('cada medida puede tener su propio orden, y cambiarlo es un cambio para subir', () => {
+    const a = { kind: 'asset' as const, url: 'https://f/a.jpg' };
+    const b = withVariants({ kind: 'asset' as const, url: 'https://f/b.jpg' }, ['sku:B']);
+    const c = { kind: 'asset' as const, url: 'https://f/c.jpg' };
+    const name = (list: PhotoRef[]) => list.map((r) => (r.kind === 'asset' ? r.url.slice(-5) : ''));
+    // Sin orden propio: primero las de la medida y después las de todas.
+    expect(name(variantPhotos([a, b, c], 'sku:B'))).toEqual(['b.jpg', 'a.jpg', 'c.jpg']);
+    // Con orden propio en la medida B: c, a, b. La medida A sigue con el suyo.
+    const ordered: PhotoRef[] = [
+      { ...a, positions: { 'sku:B': 1, 'sku:A': 0 } },
+      { ...b, positions: { 'sku:B': 2 } },
+      { ...c, positions: { 'sku:B': 0, 'sku:A': 1 } },
+    ];
+    expect(name(variantPhotos(ordered, 'sku:B'))).toEqual(['c.jpg', 'a.jpg', 'b.jpg']);
+    expect(name(variantPhotos(ordered, 'sku:A'))).toEqual(['a.jpg', 'c.jpg']);
+    // Cambiar el orden de una medida cambia la huella; la misma lista con los mismos lugares, no.
+    const swapped: PhotoRef[] = [{ ...ordered[0], positions: { 'sku:B': 0, 'sku:A': 0 } }, ordered[1], { ...ordered[2], positions: { 'sku:B': 1, 'sku:A': 1 } }];
+    expect(fingerprint('photos', swapped)).not.toBe(fingerprint('photos', ordered));
+    expect(fingerprint('photos', ordered.map((r) => withMarks(r, r)))).toBe(fingerprint('photos', ordered));
+    // Con una sola variante en el canal no hay orden propio: compara como siempre.
+    expect(channelPhotos(['u1'], ['P1'], [{ sku: 'A', measure: null, photoIds: ['P1'] }])).toEqual([{ kind: 'channel', id: 'P1', url: 'u1' }]);
   });
 
   it('la garantía, si la ficha la tiene en la forma que pide el canal', () => {
@@ -384,9 +409,9 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
       let sources = await loadMediaSources(db, accountId, pub.id);
       expect(sources.measures.map((m) => m.label)).toEqual(['A-00', '0.50']);
       expect(sources.current.map((m) => m.ref)).toEqual([
-        { kind: 'channel', id: 'P1', url: 'https://ml/P1.jpg', variants: ['sku:A-00'] },
-        { kind: 'channel', id: 'P2', url: 'https://ml/P2.jpg', variants: ['sku:A-50 medida:0.50'] },
-        { kind: 'channel', id: 'P3', url: 'https://ml/P3.jpg' },
+        { kind: 'channel', id: 'P1', url: 'https://ml/P1.jpg', variants: ['sku:A-00'], positions: { 'sku:A-00': 0 } },
+        { kind: 'channel', id: 'P2', url: 'https://ml/P2.jpg', variants: ['sku:A-50 medida:0.50'], positions: { 'sku:A-50 medida:0.50': 0 } },
+        { kind: 'channel', id: 'P3', url: 'https://ml/P3.jpg', positions: { 'sku:A-00': 1, 'sku:A-50 medida:0.50': 1 } },
       ]);
       expect(sources.channelWithoutVariants).toBe(false);
       expect(await state(pub.id)).toEqual({ draft: [], choose: [], rejected: [] });
@@ -416,6 +441,38 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
       sources = await loadMediaSources(db, accountId, pub.id);
       expect(sources.following).toBe(true);
       expect(sources.current.map((m) => m.ref.variants ?? [])).toEqual([['sku:A-50 medida:0.50'], ['sku:A-50 medida:0.50'], []]);
+    });
+
+    it('cada medida sube con su propio orden', async () => {
+      const pub = await db.publication.create({ data: { productId, storeId, externalId: 'MLA2', title: 'Aros Ford Sigma' } });
+      await readAll();
+      const std = 'sku:A-00';
+      const half = 'sku:A-50 medida:0.50';
+      // P3 es de todas: en la 0.50 va primera, en la A-00 va segunda.
+      await saveMedia(db, {
+        accountId,
+        publicationId: pub.id,
+        refs: [
+          { kind: 'channel', id: 'P1', url: '', variants: [std], positions: { [std]: 0 } },
+          { kind: 'channel', id: 'P3', url: '', positions: { [std]: 1, [half]: 0 } },
+          { kind: 'channel', id: 'P2', url: '', variants: [half], positions: { [half]: 1 } },
+        ],
+      });
+      expect((await state(pub.id)).draft).toEqual(['photos']);
+      await pushDrafts(db, { accountId, publicationId: pub.id, userId: null });
+      expect(calls[0].body).toEqual({
+        pictures: [{ id: 'P1' }, { id: 'P3' }, { id: 'P2' }],
+        variations: [
+          { id: 11, picture_ids: ['P1', 'P3'] },
+          { id: 12, picture_ids: ['P3', 'P2'] },
+        ],
+      });
+      // Al volver a leer, el canal tiene lo mismo: no queda nada para subir.
+      await db.channelSync.updateMany({ data: { startedAt: new Date(Date.now() - 3 * 3600_000) } });
+      await readAll();
+      expect(await state(pub.id)).toEqual({ draft: [], choose: [], rejected: [] });
+      const sources = await loadMediaSources(db, accountId, pub.id);
+      expect(sources.current.map((m) => m.key)).toEqual(['canal:P1', 'canal:P3', 'canal:P2']);
     });
 
     it('con el mismo SKU en todas las medidas, las distingue por la medida', async () => {

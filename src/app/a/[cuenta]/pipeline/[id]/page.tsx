@@ -260,8 +260,8 @@ export default async function PipelineStepPage({
           />
         ) : media && viewing === 'MEDIA' ? (
           <SectionCard
-            title="Fotos de la publicación"
-            description={`Elegí qué fotos lleva esta publicación y en qué orden: la primera es la portada.${media.measures.length > 0 ? ' Como el producto tiene varias medidas, marcá de cuál es cada foto y cada video.' : ''} Lo que guardes queda en el borrador hasta que lo subas a ${media.channelName}.${media.clip ? ` Abajo podés mirar los videos y elegir los ${media.clip.name}s.` : ''}`}
+            title="Fotos y videos de la publicación"
+            description={`Arriba marcás qué fotos y videos van${media.measures.length > 0 ? ' y en qué medidas' : ''}; abajo los ordenás. La primera foto es la portada. Lo que guardes queda en el borrador hasta que lo subas a ${media.channelName}.${media.clip ? ` Los videos que van son los ${media.clip.name}s, y se suben a mano desde el paso Videos.` : ''}`}
           >
             <SectionBody>
               <MediaOrganizer accountSlug={account.slug} publicationId={pub.id} sources={media} />

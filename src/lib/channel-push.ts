@@ -25,7 +25,7 @@ import {
   type FaceField,
   type FaceValues,
 } from '@/domain/channel-sync';
-import { channelPhotos, photoVariants, withVariants, type PhotoRef } from '@/domain/media';
+import { channelPhotos, withMarks, type PhotoRef } from '@/domain/media';
 import type { NameValue } from '@/domain/name-value';
 import { writeContentField } from '@/domain/content';
 import { LATEST_MEASUREMENTS, latestMetrics } from '@/domain/measurements';
@@ -371,7 +371,7 @@ async function pushPhotos(
       // Con las medidas con que se subió cada una; la lectura de confirmación trae las del canal.
       const print = fingerprint(
         'photos',
-        channelPhotos(urls, ids).map((ref, i) => withVariants(ref, photoVariants(sent[i]))),
+        channelPhotos(urls, ids).map((ref, i) => withMarks(ref, sent[i])),
       );
       const added = Object.fromEntries(ids.flatMap((id, i) => (origins[i] ? [[id, origins[i]]] : [])));
       Object.assign(data, {

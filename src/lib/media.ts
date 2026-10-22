@@ -13,13 +13,13 @@ import {
   photoVariants,
   variantKey,
   variantPhotos,
-  withVariants,
+  withMarks,
   type PhotoRef,
   type VariantLike,
 } from '@/domain/media';
 import { LAST_PHOTO_STEP } from '@/domain/photo-steps';
 import { checkClip } from '@/domain/videos';
-import { BY_BROWSER } from '@/lib/videos';
+import { BY_BROWSER, setClips } from '@/lib/videos';
 import { photoFileHref } from '@/lib/photo-rules';
 import { readStored } from '@/lib/stored-files';
 
@@ -62,6 +62,13 @@ function knownVariants(keys: string[], measures: Measure[]): string[] {
   if (measures.length < 2) return [];
   const known = keys.filter((k) => measures.some((m) => m.key === k));
   return new Set(known).size >= measures.length ? [] : known;
+}
+
+/** La foto con las marcas que valen: medidas y orden de medidas de la ficha. */
+function knownMarks<T extends PhotoRef>(ref: T, measures: Measure[]): T {
+  const positions =
+    measures.length >= 2 ? Object.fromEntries(Object.entries(ref.positions ?? {}).filter(([k]) => measures.some((m) => m.key === k))) : {};
+  return withMarks(ref, { ...ref, variants: knownVariants(photoVariants(ref), measures), positions });
 }
 
 const viewUrl = (runId: string) => `/api/imagenes/ver?tipo=vista&paso=${encodeURIComponent(runId)}`;
@@ -208,10 +215,10 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
     // Con las medidas que tiene en esta publicación; las que ya no están en la ficha se caen.
     const kept = marks(photoVariants(ref));
     const lost = measures.length >= 2 && photoVariants(ref).some((k) => !kept.includes(k)) && kept.length === 0;
-    return { ...found, ref: withVariants(found.ref, kept), note: lost ? 'Su medida ya no está en la ficha: quedó en Todas' : found.note };
+    return { ...found, ref: withMarks(found.ref, knownMarks(ref, measures)), note: lost ? 'Su medida ya no está en la ficha: quedó en Todas' : found.note };
   });
   // Las que se pueden elegir, sin marcas: al agregarlas son de todas.
-  const plain = (list: MediaItem[]) => list.map((m) => ({ ...m, ref: withVariants(m.ref, []) }));
+  const plain = (list: MediaItem[]) => list.map((m) => ({ ...m, ref: withMarks(m.ref, { ...m.ref, variants: [], positions: {} }) }));
   const videoMarks = parseVideoVariants(p.videoVariants);
   const clipRules = adapter.clips;
   const variations = parseVariations(copy?.variations);
@@ -255,7 +262,15 @@ export type MediaSources = Awaited<ReturnType<typeof loadMediaSources>>;
  */
 export async function saveMedia(
   db: Db,
-  args: { accountId: string; publicationId: string; refs?: PhotoRef[] | null; videos?: Record<string, string[]> },
+  args: {
+    accountId: string;
+    publicationId: string;
+    refs?: PhotoRef[] | null;
+    videos?: Record<string, string[]>;
+    // Los videos que van como clip, en orden. Sin mandar, quedan como están.
+    clips?: string[];
+    userId?: string | null;
+  },
 ): Promise<void> {
   const sources = await loadMediaSources(db, args.accountId, args.publicationId);
   const keys = (list: string[]) => knownVariants(list, sources.measures);
@@ -268,7 +283,7 @@ export async function saveMedia(
   }
   if (args.refs === null) data.media = Prisma.DbNull;
   else if (args.refs) {
-    const refs = cleanMedia(args.refs).map((r) => withVariants(r, keys(photoVariants(r))));
+    const refs = cleanMedia(args.refs).map((r) => knownMarks(r, sources.measures));
     if (refs.length === 0) throw new MediaError('Elegí al menos una foto.');
     const allowed = new Set([...sources.available.channel, ...sources.available.corrected, ...sources.available.assets].map((m) => m.key));
     if (refs.some((r) => !allowed.has(photoKey(r)))) throw new MediaError('Una de las fotos ya no está disponible. Recargá la página.');
@@ -276,9 +291,10 @@ export async function saveMedia(
     if (blocked) throw new MediaError(`${blocked.label}: ${blocked.blocked}`);
     // Las del canal se guardan con su link, para verlas aunque cambie la lectura.
     const byKey = new Map(sources.available.channel.map((m) => [m.key, m.ref]));
-    data.media = refs.map((r) => withVariants(byKey.get(photoKey(r)) ?? r, photoVariants(r))) as Prisma.InputJsonValue;
+    data.media = refs.map((r) => withMarks(byKey.get(photoKey(r)) ?? r, r)) as Prisma.InputJsonValue;
   }
   if (Object.keys(data).length > 0) await db.publication.update({ where: { id: args.publicationId }, data });
+  if (args.clips) await setClips(db, { accountId: args.accountId, publicationId: args.publicationId, videoIds: args.clips, userId: args.userId ?? null });
 }
 
 /**
@@ -319,7 +335,7 @@ export async function picturesFor(db: PrismaClient, productId: string, refs: Pho
   const variants = await db.productVariant.findMany({ where: { productId }, orderBy: { position: 'asc' }, select: { sku: true, measure: true } });
   const measures = measuresOf(variants);
   // Cada foto con las medidas que valen, y su lugar en la lista.
-  const marked = sent.map((ref) => withVariants(ref, knownVariants(photoVariants(ref), measures)));
+  const marked = sent.map((ref) => knownMarks(ref, measures));
   const placed = marked.map((ref, at) => ({ ...ref, at }));
   const layout: ChannelPictureLayout = {
     variants: measures.length >= 2 ? measures.map((m) => ({ sku: m.sku, measure: m.measure, pictures: variantPhotos(placed, m.key).map((r) => r.at) })) : [],

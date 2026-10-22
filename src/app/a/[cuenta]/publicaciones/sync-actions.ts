@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { prisma } from '@/lib/db';
+import { VideoError } from '@/lib/videos';
 import { requireUser } from '@/lib/auth/session';
 import { getAccountBySlug } from '@/lib/queries/accounts';
 import { ConnectError } from '@/channels/connect';
@@ -100,13 +101,17 @@ export async function readOneAction(accountSlug: string, publicationId: string):
   }
 }
 
-/** Guarda las fotos elegidas, en orden. Null vuelve a usar las del canal. */
 /**
- * Guarda las fotos elegidas y las medidas de cada foto y cada video. refs null
- * vuelve a las del canal; sin refs, las fotos quedan como están.
+ * Guarda lo elegido en Organización de multimedia: las fotos, con sus medidas
+ * y su orden en cada una, las medidas de cada video y los clips, en orden.
+ * refs null vuelve a las del canal; lo que no se manda queda como está.
  */
-export async function saveMediaAction(accountSlug: string, publicationId: string, input: { refs?: unknown; videos?: unknown }): Promise<Result> {
-  await requireUser();
+export async function saveMediaAction(
+  accountSlug: string,
+  publicationId: string,
+  input: { refs?: unknown; videos?: unknown; clips?: unknown },
+): Promise<Result> {
+  const user = await requireUser();
   const account = await getAccountBySlug(accountSlug);
   if (!account) return { ok: false, error: 'La cuenta no existe.' };
   const parsed = z
@@ -114,13 +119,14 @@ export async function saveMediaAction(accountSlug: string, publicationId: string
       id: idSchema,
       refs: z.array(photoRefSchema).max(1200).nullable().optional(),
       videos: z.record(z.string().max(40), z.array(z.string().min(1).max(200)).max(100)).optional(),
+      clips: z.array(z.string().min(1).max(40)).max(200).optional(),
     })
-    .safeParse({ id: publicationId, refs: input?.refs, videos: input?.videos });
+    .safeParse({ id: publicationId, refs: input?.refs, videos: input?.videos, clips: input?.clips });
   if (!parsed.success) return { ok: false, error: 'Las fotos que llegaron no tienen la forma esperada.' };
   try {
-    await saveMedia(prisma, { accountId: account.id, publicationId: parsed.data.id, refs: parsed.data.refs, videos: parsed.data.videos });
+    await saveMedia(prisma, { accountId: account.id, publicationId: parsed.data.id, ...parsed.data, userId: user.id });
   } catch (e) {
-    if (e instanceof MediaError) return { ok: false, error: e.message };
+    if (e instanceof MediaError || e instanceof VideoError) return { ok: false, error: e.message };
     throw e;
   }
   refresh(accountSlug, parsed.data.id);

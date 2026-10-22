@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@/generated/prisma/client';
+import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { videoUploadType } from '@/domain/videos';
 import {
   DriveError,
@@ -241,7 +241,7 @@ export async function trashVideo(db: PrismaClient, args: { accountId: string; vi
   await db.productVideo.update({ where: { id: video.id }, data: { goneAt: args.now ?? new Date() } });
 }
 
-async function publicationFor(db: PrismaClient, accountId: string, publicationId: string) {
+async function publicationFor(db: PrismaClient | Prisma.TransactionClient, accountId: string, publicationId: string) {
   const pub = await db.publication.findFirst({ where: { id: publicationId, product: { accountId } }, select: { id: true, productId: true } });
   if (!pub) throw new VideoError('La publicación no es de esta cuenta.');
   return pub;
@@ -264,6 +264,35 @@ export async function chooseClip(
   await db.publicationClip.create({
     data: { publicationId: pub.id, videoId: video.id, position: (last._max.position ?? -1) + 1, chosenById: args.userId, chosenAt: args.now ?? new Date() },
   });
+}
+
+/**
+ * Deja como clips de la publicación esos videos, en ese orden. Los que ya
+ * estaban conservan su marca de subido; los nuevos tienen que estar en el Drive.
+ */
+export async function setClips(
+  db: PrismaClient | Prisma.TransactionClient,
+  args: { accountId: string; publicationId: string; videoIds: string[]; userId: string | null; now?: Date },
+): Promise<void> {
+  const pub = await publicationFor(db, args.accountId, args.publicationId);
+  const ids = [...new Set(args.videoIds)];
+  const [videos, current] = await Promise.all([
+    db.productVideo.findMany({ where: { id: { in: ids }, productId: pub.productId }, select: { id: true, goneAt: true } }),
+    db.publicationClip.findMany({ where: { publicationId: pub.id }, select: { videoId: true } }),
+  ]);
+  const had = new Set(current.map((c) => c.videoId));
+  for (const id of ids) {
+    const video = videos.find((v) => v.id === id);
+    if (!video || (video.goneAt && !had.has(id))) throw new VideoError('Uno de los videos ya no está entre los del producto. Recargá la página.');
+  }
+  await db.publicationClip.deleteMany({ where: { publicationId: pub.id, videoId: { notIn: ids } } });
+  for (const [position, videoId] of ids.entries()) {
+    await db.publicationClip.upsert({
+      where: { publicationId_videoId: { publicationId: pub.id, videoId } },
+      create: { publicationId: pub.id, videoId, position, chosenById: args.userId, chosenAt: args.now ?? new Date() },
+      update: { position },
+    });
+  }
 }
 
 /** Saca un clip de la publicación. El video sigue entre los del producto. */

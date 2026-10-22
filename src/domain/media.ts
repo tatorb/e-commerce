@@ -5,14 +5,18 @@ import { z } from 'zod';
 // Imágenes, o una foto del producto por su link. Sin elegir (null), la
 // publicación usa las que tiene en el canal. Este módulo no sabe nada de canales.
 //
-// Si el producto tiene varias medidas, cada foto puede ser de algunas: el
-// comprador que elige una medida ve primero las suyas y después las de todas.
-// Sin medidas marcadas, la foto es de todas.
+// Si el producto tiene varias medidas, cada foto puede ser de algunas, y cada
+// medida tiene su propio orden. Sin medidas marcadas, la foto es de todas; sin
+// orden propio, el comprador ve primero las de su medida y después las de todas.
 
 // Sin tope de fotos: si el canal no acepta tantas, lo dice al subir.
 
-// Las medidas de la foto, por su clave (variantKey). Vacío: todas.
-const variants = { variants: z.array(z.string().min(1).max(200)).max(100).optional() };
+// Las medidas de la foto, por su clave (variantKey). Vacío: todas. Y su lugar
+// en cada medida: { "<clave>": 0 } es la portada de esa medida.
+const variants = {
+  variants: z.array(z.string().min(1).max(200)).max(100).optional(),
+  positions: z.record(z.string().min(1).max(200), z.number().int().min(0).max(100000)).optional(),
+};
 
 export const photoRefSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('channel'), id: z.string().min(1).max(100), url: z.string().max(2000).default(''), ...variants }),
@@ -56,9 +60,28 @@ export function withVariants<T extends PhotoRef>(ref: T, keys: string[]): T {
   return unique.length > 0 ? { ...out, variants: unique } : out;
 }
 
-/** Las fotos que ve el comprador en esa medida: primero las suyas y después las de todas, en el orden de la lista. */
+/** La foto con las medidas y el orden de otra: para llevar lo marcado de una lista a otra. */
+export function withMarks<T extends PhotoRef>(ref: T, from: PhotoRef): T {
+  const out = withVariants(ref, photoVariants(from));
+  delete out.positions;
+  return from.positions && Object.keys(from.positions).length > 0 ? { ...out, positions: { ...from.positions } } : out;
+}
+
+/**
+ * Las fotos que ve el comprador en esa medida. Con orden propio de la medida,
+ * en ese orden; sin, primero las suyas y después las de todas, en el orden de la lista.
+ */
 export function variantPhotos<T extends PhotoRef>(refs: T[], key: string): T[] {
-  return [...refs.filter((r) => photoVariants(r).includes(key)), ...refs.filter((r) => photoVariants(r).length === 0)];
+  const shown = [...refs.filter((r) => photoVariants(r).includes(key)), ...refs.filter((r) => photoVariants(r).length === 0)];
+  if (!shown.some((r) => r.positions?.[key] !== undefined)) return shown;
+  // Las que no tienen lugar en la medida van al final, como estaban.
+  const at = (r: T, i: number) => r.positions?.[key] ?? Number.MAX_SAFE_INTEGER - shown.length + i;
+  return shown.map((r, i) => ({ r, p: at(r, i) })).sort((a, b) => a.p - b.p).map((x) => x.r);
+}
+
+/** Las medidas que tienen orden propio en alguna foto. */
+export function orderedMeasures(refs: PhotoRef[]): string[] {
+  return [...new Set(refs.flatMap((r) => Object.keys(r.positions ?? {})))].sort();
 }
 
 /** Lo que conviene avisar de las medidas: las que se quedan sin fotos. */
@@ -120,8 +143,8 @@ export function parseVariations(raw: unknown): ChannelVariation[] {
 
 /**
  * Las fotos que tiene la publicación en el canal, como se leyeron. Con las
- * medidas del canal, cada foto queda marcada con las suyas; la que está en
- * todas, o en ninguna, es de todas.
+ * medidas del canal, cada foto queda marcada con las suyas, y con su lugar en
+ * cada una; la que está en todas, o en ninguna, es de todas.
  */
 export function channelPhotos(photos: unknown, photoIds: unknown, variations: unknown = []): PhotoRef[] {
   const urls = Array.isArray(photos) ? photos : [];
@@ -129,10 +152,13 @@ export function channelPhotos(photos: unknown, photoIds: unknown, variations: un
   const measures = parseVariations(variations);
   return ids.flatMap((id, i) => {
     if (typeof id !== 'string' || !id) return [];
-    const ref: PhotoRef = { kind: 'channel', id, url: typeof urls[i] === 'string' ? urls[i] : '' };
+    let ref: PhotoRef = { kind: 'channel', id, url: typeof urls[i] === 'string' ? urls[i] : '' };
     const own = measures.filter((m) => m.photoIds.includes(id));
-    if (own.length === 0 || own.length === measures.length) return [ref];
-    return [withVariants(ref, own.flatMap((m) => variantKey(m) ?? []))];
+    if (own.length > 0 && own.length < measures.length) ref = withVariants(ref, own.flatMap((m) => variantKey(m) ?? []));
+    // Con varias medidas, su lugar en cada una, como lo tiene el canal.
+    if (measures.length < 2) return [ref];
+    const positions = Object.fromEntries(own.flatMap((m) => (variantKey(m) ? [[variantKey(m)!, m.photoIds.indexOf(id)]] : [])));
+    return [Object.keys(positions).length > 0 ? { ...ref, positions } : ref];
   });
 }
 
@@ -155,7 +181,7 @@ export function cleanMedia(refs: PhotoRef[]): PhotoRef[] {
     const key = photoKey(r);
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push(withVariants(r, photoVariants(r)));
+    out.push(withMarks(r, r));
   }
   return out;
 }
