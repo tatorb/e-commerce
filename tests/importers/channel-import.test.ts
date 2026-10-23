@@ -22,6 +22,8 @@ function listing(over: Partial<ChannelListing> = {}): ChannelListing {
     discount: 0,
     status: 'ACTIVE',
     sold: 12,
+    quantity: 3,
+    stockInChannel: false,
     visits90d: 340,
     photos: ['https://foto/1.jpg', 'https://foto/2.jpg'],
     hasVideo: false,

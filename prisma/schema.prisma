@@ -377,6 +377,10 @@ model Publication {
   installments      Int?
   // El descuento sobre el precio publicado, en %. 0 sin descuento; null mientras no se leyó.
   discount          Decimal?             @db.Decimal(5, 2)
+  // Las cantidades disponibles que se cambiaron en la app y faltan subir: una
+  // lista de { key, label, quantity }, una por medida o una sola sin medidas.
+  // Null: sigue a las del canal.
+  quantities        Json?
   currency          String               @default("ARS")
   channelStatus     ChannelStatus        @default(ACTIVE)
   // Estado de la propuesta completa con IA.
@@ -1240,6 +1244,10 @@ model ChannelCopy {
   discountUntil     DateTime?
   // Cuándo lo subió: un rato después, si el canal todavía no lo muestra, se espera.
   discountSentAt    DateTime?
+  // La cantidad disponible en total; la de cada medida va en variations.
+  quantity          Int?
+  // El canal maneja el stock, como en Full: la cantidad no se cambia desde la app.
+  stockInChannel    Boolean       @default(false)
   status            ChannelStatus
   url               String?
   photos            Json          @default("[]")

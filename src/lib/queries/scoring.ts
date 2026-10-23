@@ -3,6 +3,8 @@ import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
 import { faceSummary, faceValues, fingerprintsOf } from '@/domain/channel-sync';
 import { LATEST_MEASUREMENTS, latestMetrics } from '@/domain/measurements';
+import { parseVariations } from '@/domain/media';
+import { channelQuantities, totalQuantity } from '@/domain/quantities';
 import { resolveTitleLock } from '@/domain/title-lock';
 import { scorePublication, type RuleConfig, type ScoreResult } from '@/domain/standard';
 import { toScoreInput } from './score-input';
@@ -46,6 +48,7 @@ export async function listScoredPublications(
         price: true,
         installments: true,
         discount: true,
+        quantities: true,
         externalId: true,
         url: true,
         channelStatus: true,
@@ -57,7 +60,20 @@ export async function listScoredPublications(
         updatedAt: true,
         store: { select: { name: true, channelId: true, channel: { select: { kind: true, name: true } } } },
         measurements: { orderBy: { takenAt: 'desc' }, take: LATEST_MEASUREMENTS, select: { takenAt: true, metrics: true } },
-        channelCopy: { select: { fingerprints: true, agreed: true, rejections: true, missingSince: true, price: true, installments: true, discount: true } },
+        channelCopy: {
+          select: {
+            fingerprints: true,
+            agreed: true,
+            rejections: true,
+            missingSince: true,
+            price: true,
+            installments: true,
+            discount: true,
+            quantity: true,
+            variations: true,
+            stockInChannel: true,
+          },
+        },
         product: {
           select: {
             id: true,
@@ -82,7 +98,9 @@ export async function listScoredPublications(
     const metrics = latestMetrics(p.measurements);
     const channel = getChannelAdapter(p.store.channel.kind, p.store.channel.name);
     const copy = p.channelCopy && !p.channelCopy.missingSince ? p.channelCopy : null;
-    const faces = faceSummary(fingerprintsOf(faceValues(p)), copy);
+    const app = faceValues(p);
+    const faces = faceSummary(fingerprintsOf(app), copy);
+    const lines = copy ? channelQuantities(copy.quantity, parseVariations(copy.variations)) : null;
     return {
       id: p.id,
       title: p.title,
@@ -108,6 +126,14 @@ export async function listScoredPublications(
       missing: result.missing,
       // Cómo está frente a lo que se leyó del canal.
       sync: { read: copy !== null, draft: faces.draft.length > 0, choose: faces.choose.length > 0, rejected: faces.rejected.length > 0 },
+      stock: copy?.quantity ?? null,
+      // La cantidad: la del canal, la que falta subir y en cuántas medidas.
+      quantity: {
+        channel: copy?.quantity ?? null,
+        draft: app.quantity ? totalQuantity(app.quantity) : null,
+        measures: lines?.length ?? 0,
+        inChannel: copy?.stockInChannel ?? false,
+      },
     };
   });
 }

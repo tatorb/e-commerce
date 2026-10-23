@@ -18,12 +18,13 @@ import { KindBadge } from '@/components/products/KindBadge';
 import { plural } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
 import { addToPipelineAction } from '@/app/a/[cuenta]/publicaciones/pipeline-actions';
-import { changeStatusAction, pushDraftsAction } from '@/app/a/[cuenta]/publicaciones/sync-actions';
+import { changeStatusAction, pushDraftsAction, saveQuantitiesAction } from '@/app/a/[cuenta]/publicaciones/sync-actions';
+import { Input } from '@/components/ui/input';
 import { useAddToPipeline } from './useAddToPipeline';
 import { titleOrUntitled } from '@/domain/publication-title';
 import type { SyncState } from '@/lib/queries/catalog-filters';
 
-// La lista del Catálogo, con casillas para elegir publicaciones y agregarlas
+// La lista de Publicaciones, con casillas para elegir publicaciones y agregarlas
 // al pipeline. Entran también las que todavía no están publicadas.
 
 export type CatalogRow = PipelineState & {
@@ -40,6 +41,8 @@ export type CatalogRow = PipelineState & {
   titleLock: TitleLock;
   missing: string[];
   sync: SyncState;
+  // La cantidad: la del canal, la que falta subir, en cuántas medidas y si la maneja el canal.
+  quantity: { channel: number | null; draft: number | null; measures: number; inChannel: boolean };
 };
 
 /** Si tiene cambios de la app sin subir, o datos distintos en los dos lados para elegir. */
@@ -83,6 +86,29 @@ function LockIcon({ lock }: { lock: TitleLock }) {
   return (
     <span title={text} aria-label={text} className="inline-flex shrink-0 text-amber-700">
       <Lock className="h-3.5 w-3.5" />
+    </span>
+  );
+}
+
+/** La cantidad disponible: la del canal y, si se cambió en la app, la que falta subir. */
+function QuantityCell({ q }: { q: CatalogRow['quantity'] }) {
+  if (q.channel === null) return <span className="text-muted-foreground">—</span>;
+  return (
+    <span className="inline-flex flex-col items-end">
+      <span className={cn(q.channel === 0 && 'text-destructive')}>
+        {q.channel}
+        {q.draft !== null && q.draft !== q.channel ? (
+          <span className="text-amber-700" title="Cambiada en la app: falta subirla">
+            {' '}
+            → {q.draft}
+          </span>
+        ) : null}
+      </span>
+      {q.inChannel ? (
+        <span className="text-[11px] text-muted-foreground">Full</span>
+      ) : q.measures > 1 ? (
+        <span className="whitespace-nowrap text-[11px] text-muted-foreground">en {q.measures} medidas</span>
+      ) : null}
     </span>
   );
 }
@@ -171,6 +197,29 @@ function useBulkPush(accountSlug: string, onDone: () => void) {
   return { run, progress, outcomes, clear: () => setOutcomes([]) };
 }
 
+/** Pone la misma cantidad a varias publicaciones; con medidas, a cada medida. Queda para subir. */
+function useBulkQuantity(accountSlug: string, onDone: () => void) {
+  const router = useRouter();
+  const [pending, setPending] = useState(false);
+  const [outcome, setOutcome] = useState<{ saved: number; skipped: PushOutcome[]; error?: string } | null>(null);
+  async function run(rows: CatalogRow[], quantity: number) {
+    setPending(true);
+    setOutcome(null);
+    const r = await saveQuantitiesAction(
+      accountSlug,
+      rows.map((x) => x.id),
+      { all: quantity },
+    ).catch(() => null);
+    setPending(false);
+    if (!r) return setOutcome({ saved: 0, skipped: [], error: 'Se cortó la conexión con la app.' });
+    if (!r.ok) return setOutcome({ saved: 0, skipped: [], error: r.error });
+    setOutcome({ saved: r.saved.length, skipped: r.skipped.map((x) => ({ title: x.title, kind: 'error', text: x.reason })) });
+    onDone();
+    router.refresh();
+  }
+  return { run, pending, outcome, clear: () => setOutcome(null) };
+}
+
 type BulkStatus = Exclude<StatusAction, 'relist'>;
 const BULK_STATUS: BulkStatus[] = ['pause', 'activate', 'close', 'delete'];
 
@@ -213,6 +262,8 @@ export function CatalogTable({ accountSlug, rows, channelName }: { accountSlug: 
   const add = useAddToPipeline(() => setSelected(new Set()));
   const push = useBulkPush(accountSlug, () => setSelected(new Set()));
   const status = useBulkStatus(accountSlug, () => setSelected(new Set()));
+  const quantity = useBulkQuantity(accountSlug, () => setSelected(new Set()));
+  const [quantityText, setQuantityText] = useState('');
 
   // Solo cuentan las que se ven ahora: si un filtro esconde una elegida, no se toca.
   const eligible = rows;
@@ -220,7 +271,8 @@ export function CatalogTable({ accountSlug, rows, channelName }: { accountSlug: 
   const allChosen = eligible.length > 0 && chosen.length === eligible.length;
   const toPipeline = chosen.filter(canEnter);
   const toPush = chosen.filter(canPush);
-  const busy = add.pending || push.progress !== null || status.progress !== null;
+  const busy = add.pending || push.progress !== null || status.progress !== null || quantity.pending;
+  const toQuantity = chosen.filter((r) => Boolean(r.externalId) && !r.quantity.inChannel && r.quantity.channel !== null);
 
   function toggle(id: string, on: boolean) {
     setSelected((prev) => {
@@ -232,6 +284,7 @@ export function CatalogTable({ accountSlug, rows, channelName }: { accountSlug: 
     add.clearMessage();
     push.clear();
     status.clear();
+    quantity.clear();
   }
 
   function toggleAll(on: boolean) {
@@ -239,6 +292,14 @@ export function CatalogTable({ accountSlug, rows, channelName }: { accountSlug: 
     add.clearMessage();
     push.clear();
     status.clear();
+    quantity.clear();
+  }
+
+  function setQuantity() {
+    const raw = quantityText.trim();
+    if (!/^\d+$/.test(raw) || toQuantity.length === 0) return;
+    quantity.run(toQuantity, Number(raw));
+    setQuantityText('');
   }
 
   function changeStatus(action: BulkStatus) {
@@ -257,7 +318,7 @@ export function CatalogTable({ accountSlug, rows, channelName }: { accountSlug: 
 
   return (
     <>
-      {chosen.length > 0 || add.message || push.progress || push.outcomes.length > 0 || status.progress || status.outcomes ? (
+      {chosen.length > 0 || add.message || push.progress || push.outcomes.length > 0 || status.progress || status.outcomes || quantity.outcome ? (
         <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
           {chosen.length > 0 ? (
             <>
@@ -294,6 +355,33 @@ export function CatalogTable({ accountSlug, rows, channelName }: { accountSlug: 
                   );
                 })}
               </select>
+              <form
+                className="flex items-center gap-1.5"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  setQuantity();
+                }}
+              >
+                <Input
+                  aria-label="Cantidad disponible para las elegidas"
+                  inputMode="numeric"
+                  placeholder="Cantidad"
+                  value={quantityText}
+                  onChange={(e) => setQuantityText(e.target.value)}
+                  className="h-8 w-24 tabular-nums"
+                  disabled={busy || toQuantity.length === 0}
+                />
+                <Button
+                  type="submit"
+                  size="sm"
+                  variant="outline"
+                  pending={quantity.pending}
+                  disabled={busy || toQuantity.length === 0 || !/^\d+$/.test(quantityText.trim())}
+                  title={toQuantity.length === 0 ? 'Ninguna de las elegidas tiene la cantidad leída del canal, o el canal la maneja solo.' : 'Con medidas, cada medida queda con esa cantidad.'}
+                >
+                  Poner cantidad{toQuantity.length > 0 && toQuantity.length !== chosen.length ? ` (${toQuantity.length})` : ''}
+                </Button>
+              </form>
               <Button size="sm" variant="ghost" onClick={() => toggleAll(false)} disabled={busy}>
                 <X className="h-4 w-4" />
                 Quitar selección
@@ -321,6 +409,26 @@ export function CatalogTable({ accountSlug, rows, channelName }: { accountSlug: 
               {statusFailed.length > 0 ? (
                 <ul className="list-disc space-y-0.5 pl-5 text-destructive">
                   {statusFailed.slice(0, 10).map((o, i) => (
+                    <li key={i}>
+                      <span className="font-medium">{o.title}:</span> {o.text}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
+          {quantity.outcome ? (
+            <div className="basis-full space-y-1" role="status">
+              <p className={quantity.outcome.error ? 'text-destructive' : undefined}>
+                {quantity.outcome.error ??
+                  (quantity.outcome.saved > 0
+                    ? `Listo: la cantidad quedó en ${plural(quantity.outcome.saved, 'publicación', 'publicaciones')}, para subir. Elegilas y tocá Subir los cambios, o subilas desde Por subir.`
+                    : 'No cambió ninguna.')}
+                {quantity.outcome.skipped.length > 0 ? ` ${plural(quantity.outcome.skipped.length, 'no se cambió', 'no se cambiaron')}:` : ''}
+              </p>
+              {quantity.outcome.skipped.length > 0 ? (
+                <ul className="list-disc space-y-0.5 pl-5 text-destructive">
+                  {quantity.outcome.skipped.slice(0, 10).map((o, i) => (
                     <li key={i}>
                       <span className="font-medium">{o.title}:</span> {o.text}
                     </li>
@@ -399,6 +507,8 @@ export function CatalogTable({ accountSlug, rows, channelName }: { accountSlug: 
                   {[codeOrUnpublished(p.externalId), p.skus.join(' / ')].filter(Boolean).join(' · ')}
                   {p.visits !== null ? ` · ${plural(p.visits, 'visita')}` : ''}
                   {p.sales !== null ? ` · ${plural(p.sales, 'venta')}` : ''}
+                  {p.quantity.channel !== null ? ` · ${plural(p.quantity.channel, 'disponible', 'disponibles')}` : ''}
+                  {p.quantity.draft !== null && p.quantity.draft !== p.quantity.channel ? ` → ${p.quantity.draft} por subir` : ''}
                 </div>
                 <div className="text-xs">
                   <MissingList missing={p.missing} />
@@ -426,7 +536,7 @@ export function CatalogTable({ accountSlug, rows, channelName }: { accountSlug: 
                 <TableHead>Pipeline</TableHead>
                 <TableHead className="text-right">Visitas 90 días</TableHead>
                 <TableHead className="text-right">Ventas 90 días</TableHead>
-                <TableHead>Le falta</TableHead>
+                <TableHead className="text-right">Cantidad</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -443,7 +553,7 @@ export function CatalogTable({ accountSlug, rows, channelName }: { accountSlug: 
                   <TableCell>
                     <ScoreBadge score={p.score} />
                   </TableCell>
-                  <TableCell className="max-w-[22rem]">
+                  <TableCell className="max-w-[16rem] min-[1400px]:max-w-[22rem]">
                     <div className="flex items-start gap-1.5">
                       <Link href={`/a/${accountSlug}/publicaciones/${p.id}`} className="font-medium hover:underline line-clamp-2">
                         {titleOrUntitled(p.title)}
@@ -456,6 +566,12 @@ export function CatalogTable({ accountSlug, rows, channelName }: { accountSlug: 
                     <div className="text-xs text-muted-foreground truncate">
                       {[codeOrUnpublished(p.externalId), p.skus.join(' / ')].filter(Boolean).join(' · ')}
                     </div>
+                    {p.missing.length > 0 ? (
+                      <div className="text-xs truncate">
+                        <span className="text-muted-foreground">Le falta: </span>
+                        <MissingList missing={p.missing} />
+                      </div>
+                    ) : null}
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
@@ -472,8 +588,8 @@ export function CatalogTable({ accountSlug, rows, channelName }: { accountSlug: 
                   <TableCell className="text-right tabular-nums">
                     <Count value={p.sales} />
                   </TableCell>
-                  <TableCell className="max-w-[16rem] text-sm">
-                    <MissingList missing={p.missing} />
+                  <TableCell className="text-right tabular-nums">
+                    <QuantityCell q={p.quantity} />
                   </TableCell>
                 </TableRow>
               ))}

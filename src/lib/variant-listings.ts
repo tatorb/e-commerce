@@ -68,7 +68,10 @@ export function familyListing(head: ChannelListing, family: VariantListing[], re
     hasVideo: found.some((l) => l.hasVideo),
     sold: sum((l) => l.sold),
     visits90d: sum((l) => l.visits90d),
+    // La cantidad es la de cada medida: el total, solo si se leyeron todas.
+    quantity: members.every((m) => m.l?.quantity !== null && m.l?.quantity !== undefined) ? sum((l) => l.quantity) : null,
+    stockInChannel: found.some((l) => l.stockInChannel),
     skus: [...new Set(found.flatMap((l) => l.skus))],
-    variations: members.map(({ v, l }) => ({ externalId: v.externalId, sku: v.sku, measure: v.measure, photoIds: [...(l?.photoIds ?? [])] })),
+    variations: members.map(({ v, l }) => ({ externalId: v.externalId, sku: v.sku, measure: v.measure, photoIds: [...(l?.photoIds ?? [])], quantity: l?.quantity ?? null })),
   };
 }

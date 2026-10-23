@@ -27,6 +27,8 @@ const ITEM_FIELDS = [
   'sub_status',
   'permalink',
   'sold_quantity',
+  'available_quantity',
+  'shipping',
   'category_id',
   'pictures',
   'video_id',
@@ -70,7 +72,7 @@ function statusOf(raw: unknown, sub: unknown): ChannelStatus {
 }
 
 /** Las variantes de una publicación: su código, su SKU, su medida y el código de sus fotos. */
-export function variationsOf(item: Obj): { id: number | string; sku: string | null; measure: string | null; photoIds: string[] }[] {
+export function variationsOf(item: Obj): { id: number | string; sku: string | null; measure: string | null; photoIds: string[]; quantity: number | null }[] {
   return arr(item.variations).flatMap((v) => {
     if (!isObj(v) || (typeof v.id !== 'number' && typeof v.id !== 'string')) return [];
     const skuAttr = arr(v.attributes).find((a) => isObj(a) && a.id === SELLER_SKU);
@@ -80,7 +82,7 @@ export function variationsOf(item: Obj): { id: number | string; sku: string | nu
       .filter((c): c is string => c !== null)
       .join(' / ');
     const photoIds = arr(v.picture_ids).flatMap((id) => (typeof id === 'string' && id ? [id] : typeof id === 'number' ? [String(id)] : []));
-    return [{ id: v.id, sku, measure: measure || null, photoIds }];
+    return [{ id: v.id, sku, measure: measure || null, photoIds, quantity: num(v.available_quantity) }];
   });
 }
 
@@ -124,6 +126,9 @@ function discountOf(item: Obj): number | null {
   if (price === null) return null;
   return original !== null && original > price ? Math.round((1 - price / original) * 10_000) / 100 : 0;
 }
+
+/** Si está en Full: el stock lo maneja Mercado Libre en su depósito. */
+export const inFull = (item: Obj): boolean => isObj(item.shipping) && item.shipping.logistic_type === 'fulfillment';
 
 /** Una publicación de Mercado Libre en el formato neutro. Sin la descripción ni las visitas, que se piden aparte. */
 export function parseItem(item: Obj): ChannelListing {
@@ -174,6 +179,8 @@ export function parseItem(item: Obj): ChannelListing {
     discount: discountOf(item),
     status: statusOf(item.status, item.sub_status),
     sold: num(item.sold_quantity),
+    quantity: num(item.available_quantity),
+    stockInChannel: inFull(item),
     visits90d: null,
     photos,
     photoIds: pictures.map((p) => p.id),
@@ -186,7 +193,7 @@ export function parseItem(item: Obj): ChannelListing {
     origin,
     skus,
     measures,
-    variations: variations.map((v) => ({ sku: v.sku, measure: v.measure, photoIds: v.photoIds })),
+    variations: variations.map((v) => ({ sku: v.sku, measure: v.measure, photoIds: v.photoIds, quantity: v.quantity })),
     attributes,
     attributeCount: attributes.length + [brand, partNumber, origin].filter(Boolean).length + (skuAttr ? 1 : 0),
     updatedAt: str(item.last_updated),

@@ -166,13 +166,13 @@ const listAccounts = defineTool({
   },
 });
 
-// ───────────────────────────── Catálogo ─────────────────────────────
+// ───────────────────────────── Publicaciones ─────────────────────────────
 
 const searchCatalog = defineTool({
   name: 'search_catalog',
-  title: 'Buscar en el Catálogo',
+  title: 'Buscar en Publicaciones',
   description:
-    'Busca publicaciones en el Catálogo de una cuenta, con los mismos filtros de la pantalla. Devuelve título, código, si es individual o combo, familia, puntaje, visitas y ventas de 90 días, si el título está bloqueado y el estado en el pipeline. Los filtros con varios valores aceptan cualquiera de ellos.',
+    'Busca en la lista de Publicaciones de una cuenta, con los mismos filtros de la pantalla. Devuelve título, código, si es individual o combo, familia, puntaje, visitas y ventas de 90 días, si el título está bloqueado y el estado en el pipeline. Los filtros con varios valores aceptan cualquiera de ellos.',
   input: z.object({
     cuenta: accountArg,
     texto: z.string().optional().describe('Busca en el título, el código del canal y los SKU.'),

@@ -2,7 +2,7 @@ import { prisma } from '@/lib/db';
 import { PRODUCT_CONTENT_SELECT, toContentSnapshot } from '@/domain/content';
 import type { ContentSheetRow } from '@/importers/content-sheet';
 
-// Los filtros y el orden del Catálogo viven en catalog-filters.ts.
+// Los filtros y el orden de Publicaciones viven en catalog-filters.ts.
 export * from './catalog-filters';
 
 /** El contenido de esas publicaciones, en el mismo orden, para la planilla. */

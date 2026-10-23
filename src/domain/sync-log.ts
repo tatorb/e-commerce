@@ -4,6 +4,7 @@ import { CHANNEL_STATUS_LABEL } from './channel-status';
 import { attributeDiff, FACE_FIELD_LABEL, isFaceField, priceFaceText, RENEWAL_FAILED, SYNC_CHANGE_LABEL } from './channel-sync';
 import { parseMedia, photoVariants, type PhotoRef } from './media';
 import { parseNameValueList, type NameValue } from './name-value';
+import { parseQuantities, quantityText } from './quantities';
 
 // El Registro: todo lo que pasó entre la app y el canal, publicación por
 // publicación y dato por dato, con el antes y el después y, si no se pudo, el
@@ -209,6 +210,7 @@ export function changeSides(field: string, before: unknown, after: unknown): { b
     const label = (v: unknown) => (typeof v === 'string' || typeof v === 'number' ? priceFaceText(field, v) : '');
     return { before: label(before), after: label(after) };
   }
+  if (field === 'quantity') return { before: quantityText(parseQuantities(before)), after: quantityText(parseQuantities(after)) };
   if (field === 'status') {
     const label = (v: unknown) => (typeof v === 'string' && v in CHANNEL_STATUS_LABEL ? CHANNEL_STATUS_LABEL[v as ChannelStatus] : '');
     return { before: label(before), after: label(after) };

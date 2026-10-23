@@ -255,7 +255,7 @@ describe.skipIf(!url)('agregar por link o código', () => {
     await db.$disconnect();
   });
 
-  it('encuentra las publicaciones del Catálogo por link o código, y separa las que no están', async () => {
+  it('encuentra las publicaciones de la lista por link o código, y separa las que no están', async () => {
     await db.$executeRawUnsafe('TRUNCATE pipeline_movements, publications, products, stores, channels, accounts CASCADE');
     const channel = await db.channel.create({ data: { kind: 'MERCADOLIBRE', name: 'Mercado Libre' } });
     const account = await db.account.create({ data: { slug: 'prueba', name: 'Cuenta de prueba' } });

@@ -23,6 +23,7 @@ import {
   BANDS,
   CHANNEL_STATUSES,
   LOCK_OPTIONS,
+  STOCK_OPTIONS,
   SYNC_OPTIONS,
   PROPOSAL_SHORTCUTS,
   SALES_OPTIONS,
@@ -51,7 +52,7 @@ const BULK_LIMIT = 50;
 export async function generateMetadata({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
   const account = await accountForTitle(cuenta);
-  return { title: account ? `Catálogo · ${account.name}` : 'Catálogo' };
+  return { title: account ? `Publicaciones · ${account.name}` : 'Publicaciones' };
 }
 
 function chipClass(active: boolean): string {
@@ -103,6 +104,7 @@ export default async function PublicationsPage({
     titleLock: p.titleLock,
     missing: p.missing.map((m) => m.name),
     sync: p.sync,
+    quantity: p.quantity,
   }));
   const ready = items.filter((p) => needsProposal(p.stage));
   const toReview = all.filter((p) => p.stage === 'PROPOSAL_GENERATED' || p.stage === 'IN_REVIEW').length;
@@ -130,7 +132,7 @@ export default async function PublicationsPage({
       <PageHeader>
         <div className="flex items-start justify-between gap-3">
           <div className="space-y-1">
-            <h1 className="text-2xl font-semibold tracking-tight">Catálogo</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">Publicaciones</h1>
             <p className="text-sm text-muted-foreground">
               Todas las publicaciones de <strong>{account.name}</strong>, con su puntaje según el estándar. Elegí las
               que querés corregir y agregalas al pipeline.
@@ -231,6 +233,12 @@ export default async function PublicationsPage({
             paramKey="sincro"
             options={SYNC_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
             selected={filters.sync}
+          />
+          <UrlFilterDropdown
+            label="Cantidad"
+            paramKey="stock"
+            options={STOCK_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+            selected={filters.stock}
           />
           <UrlFilterDropdown
             label="Estado"

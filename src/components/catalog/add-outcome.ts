@@ -29,7 +29,7 @@ export function addOutcomeText(r: Extract<AddOutcome, { ok: true }>): string {
     const rest = r.related.length - MAX_RELATED;
     if (rest > 0) parts.push(rest === 1 ? 'Y 1 más.' : `Y ${rest} más.`);
   }
-  if (r.notFound.length > 0) parts.push(`No están en el Catálogo: ${r.notFound.join(', ')}.`);
+  if (r.notFound.length > 0) parts.push(`No están en Publicaciones: ${r.notFound.join(', ')}.`);
   if (r.invalid.length > 0) parts.push(`No se entiende: ${r.invalid.join(', ')}.`);
   return parts.join(' ') || 'No se agregó ninguna.';
 }

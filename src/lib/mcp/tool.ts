@@ -75,7 +75,7 @@ export async function resolvePublication(db: PrismaClient, accountId: string, re
   if (byId) return byId.id;
   const r = await resolveExternalIds(db, accountId, text);
   if (r.ids.length > 0) return r.ids[0];
-  if (r.notFound.length > 0) throw new McpToolError(`La publicación ${r.notFound[0]} no está en el Catálogo de la cuenta.`);
+  if (r.notFound.length > 0) throw new McpToolError(`La publicación ${r.notFound[0]} no está en las Publicaciones de la cuenta.`);
   throw new McpToolError(`"${text}" no parece un id, un código ni un link de publicación.`);
 }
 

@@ -5,8 +5,8 @@
 import type { ChannelVariation, VariantLike } from '@/domain/media';
 
 /** Los datos que hoy se pueden subir. */
-export type PublishField = 'title' | 'description' | 'attributes' | 'photos' | 'price' | 'installments' | 'discount';
-export const PUBLISH_FIELDS: PublishField[] = ['title', 'description', 'attributes', 'photos', 'price', 'installments', 'discount'];
+export type PublishField = 'title' | 'description' | 'attributes' | 'photos' | 'price' | 'installments' | 'discount' | 'quantity';
+export const PUBLISH_FIELDS: PublishField[] = ['title', 'description', 'attributes', 'photos', 'price', 'installments', 'discount', 'quantity'];
 
 /** Un dato de catálogo para subir: el código del campo en el canal y su valor; con multiple, varios separados por coma. */
 export type ChannelAttributeUpdate = { id: string; value: string; multiple: boolean };
@@ -113,6 +113,13 @@ export interface ChannelPublisher {
    * Lanza PublishError si el canal no lo acepta.
    */
   setDiscount(accessToken: string, externalId: string, discount: { pct: number; listPrice: number }, now: Date): Promise<{ until: Date | null }>;
+  /**
+   * Deja la cantidad disponible. Sin medidas, una sola con la clave vacía; con
+   * medidas en la misma publicación, la de cada una por su clave (quantityKey).
+   * Las medidas que no vienen quedan como están. Lanza PublishError si el canal
+   * no lo acepta, por ejemplo si el stock lo maneja el canal.
+   */
+  setQuantity(accessToken: string, externalId: string, lines: { key: string; quantity: number }[]): Promise<void>;
   /** Cambia esos datos de catálogo; los demás quedan como están. Lanza PublishError si el canal no lo acepta. */
   updateAttributes(accessToken: string, externalId: string, attributes: ChannelAttributeUpdate[]): Promise<void>;
   /** Pausa, reactiva, finaliza o elimina. Lanza PublishError si el canal no lo acepta. */

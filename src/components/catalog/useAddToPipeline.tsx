@@ -8,7 +8,7 @@ import { addOutcomeText } from './add-outcome';
 export type AddMessage = { kind: 'ok' | 'error'; text: string };
 
 // El ida y vuelta de agregar al pipeline, con el mensaje de cómo salió. Lo
-// usan la selección del Catálogo, "Agregar por link o código" y el botón de
+// usan la selección de Publicaciones, "Agregar por link o código" y el botón de
 // la ficha y del paso.
 export function useAddToPipeline(onAdded?: () => void) {
   const router = useRouter();

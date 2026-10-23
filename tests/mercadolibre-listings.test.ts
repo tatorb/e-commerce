@@ -102,13 +102,32 @@ describe('de Mercado Libre al formato neutro', () => {
     ]);
     // Cada variante con sus fotos, aunque le falte el SKU o la medida.
     expect(l.variations).toEqual([
-      { sku: 'AROS-STD', measure: 'STD', photoIds: ['F1', 'F3'] },
-      { sku: 'AROS-050', measure: '0.50', photoIds: ['F2', 'F3'] },
-      { sku: null, measure: null, photoIds: [] },
+      { sku: 'AROS-STD', measure: 'STD', photoIds: ['F1', 'F3'], quantity: null },
+      { sku: 'AROS-050', measure: '0.50', photoIds: ['F2', 'F3'], quantity: null },
+      { sku: null, measure: null, photoIds: [], quantity: null },
     ]);
     expect(parseItem({ id: 'MLA9', status: 'closed' }).status).toBe('CLOSED');
     expect(parseItem({ id: 'MLA9', status: 'under_review' }).status).toBe('UNDER_REVIEW');
     expect(parseItem({ id: 'MLA9', status: 'inactive' }).status).toBe('INACTIVE');
+  });
+
+  it('la cantidad disponible, la de cada medida y si está en Full', () => {
+    const l = parseItem({
+      id: 'MLA9',
+      available_quantity: 5,
+      shipping: { logistic_type: 'cross_docking' },
+      variations: [
+        { id: 1, available_quantity: 3, attribute_combinations: [{ id: 'SIZE', value_name: 'STD' }], attributes: [{ id: 'SELLER_SKU', value_name: 'A-STD' }] },
+        { id: 2, available_quantity: 2, attribute_combinations: [{ id: 'SIZE', value_name: '0.50' }] },
+      ],
+    });
+    expect(l.quantity).toBe(5);
+    expect(l.stockInChannel).toBe(false);
+    expect(l.variations.map((v) => [v.sku, v.measure, v.quantity])).toEqual([
+      ['A-STD', 'STD', 3],
+      [null, '0.50', 2],
+    ]);
+    expect(parseItem({ id: 'MLA9', available_quantity: 0, shipping: { logistic_type: 'fulfillment' } })).toMatchObject({ quantity: 0, stockInChannel: true });
   });
 
   it('las cuotas salen del tipo de publicación y sus etiquetas, y el descuento del precio de antes', () => {

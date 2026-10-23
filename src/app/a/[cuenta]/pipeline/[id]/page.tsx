@@ -52,6 +52,7 @@ import { loadDescriptionStep } from '@/lib/descriptions';
 import { PriceStep } from '@/components/pipeline/price/PriceStep';
 import { latestPriceDecision, loadPriceStep, productPricing } from '@/lib/pricing';
 import { PriceDecisionCard } from '@/components/pipeline/price/PriceDecisionCard';
+import { QuantityCard } from '@/components/pipeline/QuantityCard';
 import { todayIn } from '@/domain/applications';
 
 export const dynamic = 'force-dynamic';
@@ -334,6 +335,14 @@ export default async function PipelineStepPage({
               published={Boolean(pub.externalId)}
               priceHref={`${pageHref}?paso=${PIPELINE_STEP_SLUG.PRICE}`}
               timeZone={account.timezone}
+            />
+            <QuantityCard
+              accountSlug={account.slug}
+              publicationId={pub.id}
+              channelName={pub.channelName}
+              published={Boolean(pub.externalId)}
+              sides={faces ? { app: faces.app, channel: faces.channel, states: faces.states, rejected: faces.summary.rejected } : null}
+              stockInChannel={faces?.copy?.stockInChannel ?? false}
             />
             {create ? <CreateInChannelCard accountSlug={account.slug} publicationId={pub.id} info={create} /> : null}
             <PublicationCodeCard

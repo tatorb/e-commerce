@@ -69,6 +69,8 @@ export function PriceDecisionCard({
     const rejected = sides.rejected.find((r) => r.field === field);
     if (rejected) return `No se pudo subir: ${rejected.message}`;
     if (state === 'choose') return `Cambió también en ${channelName}: elegí cuál queda en Por subir, abajo.`;
+    // Ya se subió y el canal todavía no lo muestra, o cambió allá y la app lo toma en la próxima lectura.
+    if (state === 'incoming') return field === 'discount' ? `Ya se subió: ${channelName} todavía no lo muestra.` : `Cambió en ${channelName}: la app lo toma en la próxima lectura.`;
     return `Se sube a ${channelName} desde Por subir, abajo.`;
   }
 

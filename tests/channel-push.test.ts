@@ -9,6 +9,7 @@ import { DraftError, pushDrafts, PushError, renewDiscounts, saveDraft } from '@/
 import { discardDrafts, readOne, runSyncStep, startSync } from '@/lib/channel-sync';
 import { encrypt } from '@/lib/crypto';
 import { savePriceDecision } from '@/lib/pricing';
+import { saveQuantities } from '@/lib/quantities';
 import { advanceStep } from '@/domain/pipeline';
 import { resetVisitsTogether } from '@/channels/mercadolibre/listings';
 
@@ -57,7 +58,11 @@ type Item = {
   attributes?: Attribute[];
   category_id?: string;
   price?: number;
-  variations?: { id: number; price: number }[];
+  variations?: { id: number; price: number; quantity?: number; measure?: string }[];
+  // La cantidad disponible; sin cargar, 5.
+  quantity?: number;
+  // En Full: el stock lo maneja Mercado Libre.
+  full?: boolean;
   listing_type_id?: string;
   tags?: string[];
   // El descuento puesto: el precio con descuento.
@@ -67,6 +72,13 @@ type Item = {
   // El canal no acepta descuentos: el motivo.
   dealRejected?: string;
 };
+
+const variationBody = (v: NonNullable<Item['variations']>[number]) => ({
+  id: v.id,
+  price: v.price,
+  available_quantity: v.quantity,
+  attribute_combinations: v.measure ? [{ id: 'SIZE', value_name: v.measure }] : [],
+});
 
 describe.skipIf(!url)('subir al canal en la base', () => {
   const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: url! }) });
@@ -91,11 +103,27 @@ describe.skipIf(!url)('subir al canal en la base', () => {
       const item = u.pathname.match(/^\/items\/(\w+)$/);
       if (item && req.method === 'GET' && items[item[1]]) {
         const it = items[item[1]];
-        return json(200, { id: item[1], variations: it.variations ?? [], listing_type_id: it.listing_type_id ?? 'gold_special', tags: it.tags ?? [] });
+        return json(200, {
+          id: item[1],
+          variations: (it.variations ?? []).map(variationBody),
+          listing_type_id: it.listing_type_id ?? 'gold_special',
+          tags: it.tags ?? [],
+          shipping: { logistic_type: it.full ? 'fulfillment' : 'cross_docking' },
+        });
       }
       if (item && req.method === 'PUT') {
         const it = items[item[1]];
         if (!it) return json(404, {});
+        // La cantidad: sin medidas, la de la publicación; con medidas, la de cada una.
+        if (body.available_quantity !== undefined || (body.variations && !body.variations.some((v: { price?: number }) => v.price !== undefined))) {
+          if (body.available_quantity !== undefined) it.quantity = body.available_quantity;
+          for (const v of body.variations ?? []) {
+            const mine = it.variations?.find((x) => x.id === v.id);
+            if (mine && v.available_quantity !== undefined) mine.quantity = v.available_quantity;
+          }
+          it.last_updated = new Date().toISOString();
+          return json(200, { id: item[1] });
+        }
         if (body.price !== undefined || body.variations) {
           if (body.price !== undefined && it.variations?.length) return json(400, { message: 'Validation error', cause: [{ code: 'item.price.invalid', message: 'Use variations price' }] });
           if (body.price !== undefined) it.price = body.price;
@@ -185,6 +213,9 @@ describe.skipIf(!url)('subir al canal en la base', () => {
                 original_price: it.deal ? (it.price ?? 100) : null,
                 listing_type_id: it.listing_type_id ?? 'gold_special',
                 tags: it.tags ?? [],
+                available_quantity: it.variations?.some((v) => v.quantity !== undefined) ? it.variations.reduce((sum, v) => sum + (v.quantity ?? 0), 0) : (it.quantity ?? 5),
+                shipping: { logistic_type: it.full ? 'fulfillment' : 'cross_docking' },
+                ...(it.variations?.some((v) => v.quantity !== undefined) ? { variations: it.variations.map(variationBody) } : {}),
                 sold_quantity: it.sold,
                 last_updated: it.last_updated,
                 category_id: it.category_id ?? 'MLA999',
@@ -606,6 +637,73 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     const after = await pub('MLA1');
     expect(Number(after.discount)).toBe(0);
     expect(after.channelCopy!.discountUntil).toBeNull();
+  });
+
+  // ───────────────────────────── Cantidad ─────────────────────────────
+
+  const clean = { draft: [], choose: [], rejected: [] };
+
+  it('la cantidad sigue a la del canal; cambiada en la app queda para subir y se sube', async () => {
+    const p = await pub('MLA1');
+    expect(p.channelCopy!.quantity).toBe(5);
+    expect(p.quantities).toBeNull();
+    // Una venta en el canal: la app la sigue, sin nada para subir ni anotar.
+    items.MLA1.quantity = 4;
+    items.MLA1.last_updated = new Date().toISOString();
+    await readOne(db, { accountId, publicationId: p.id });
+    expect(await state('MLA1')).toEqual(clean);
+    expect(await db.channelSyncChange.count({ where: { publicationId: p.id, field: 'quantity' } })).toBe(0);
+
+    expect(await saveQuantities(db, { accountId, publicationIds: [p.id], change: { all: 9 } })).toEqual({ saved: [p.id], skipped: [] });
+    expect((await state('MLA1')).draft).toEqual(['quantity']);
+    const result = await pushDrafts(db, { accountId, publicationId: p.id, userId: null });
+    expect(result).toEqual({ sent: ['quantity'], rejected: [], confirmed: true });
+    expect(writes.map((w) => w.body)).toEqual([{ available_quantity: 9 }]);
+    expect(await state('MLA1')).toEqual(clean);
+    const after = await pub('MLA1');
+    // Ya está en el canal: la app vuelve a seguirlo.
+    expect(after.quantities).toBeNull();
+    expect(after.channelCopy!.quantity).toBe(9);
+    expect(await db.channelSyncChange.findFirst({ where: { publicationId: p.id, kind: 'SENT', field: 'quantity' } })).toMatchObject({
+      before: [{ key: '', label: '', quantity: 4 }],
+      after: [{ key: '', label: '', quantity: 9 }],
+    });
+    // Poner lo mismo que ya está en el canal no deja nada para subir.
+    await saveQuantities(db, { accountId, publicationIds: [p.id], change: { all: 9 } });
+    expect(await state('MLA1')).toEqual(clean);
+  });
+
+  it('con medidas, cada una lleva la suya; si se vende mientras tanto, hay que elegir', async () => {
+    items.MLA2.variations = [
+      { id: 11, price: 100, quantity: 3, measure: 'STD' },
+      { id: 12, price: 100, quantity: 2, measure: '0.50' },
+    ];
+    items.MLA2.last_updated = new Date().toISOString();
+    const p = await pub('MLA2');
+    await readOne(db, { accountId, publicationId: p.id });
+    expect((await pub('MLA2')).channelCopy!.quantity).toBe(5);
+    await saveQuantities(db, { accountId, publicationIds: [p.id], change: { byKey: { 'medida:std': 6 } } });
+    writes.length = 0;
+    expect((await pushDrafts(db, { accountId, publicationId: p.id, userId: null })).sent).toEqual(['quantity']);
+    // Van todas las medidas, porque Mercado Libre borra las que faltan: la otra, con la que ya tenía.
+    expect(writes.map((w) => w.body)).toEqual([{ variations: [{ id: 11, available_quantity: 6 }, { id: 12, available_quantity: 2 }] }]);
+    expect(items.MLA2.variations.map((v) => v.quantity)).toEqual([6, 2]);
+
+    await saveQuantities(db, { accountId, publicationIds: [p.id], change: { byKey: { 'medida:0.50': 0 } } });
+    items.MLA2.variations[0].quantity = 5;
+    items.MLA2.last_updated = new Date().toISOString();
+    await readOne(db, { accountId, publicationId: p.id });
+    expect((await state('MLA2')).choose).toEqual(['quantity']);
+  });
+
+  it('si el canal maneja el stock, como en Full, no se cambia desde la app', async () => {
+    items.MLA3.full = true;
+    items.MLA3.last_updated = new Date().toISOString();
+    const p = await pub('MLA3');
+    await readOne(db, { accountId, publicationId: p.id });
+    const r = await saveQuantities(db, { accountId, publicationIds: [p.id], change: { all: 3 } });
+    expect(r.saved).toEqual([]);
+    expect(r.skipped[0].reason).toContain('Full');
   });
 
   it('debajo del margen mínimo hay que confirmarlo, y sin precio guardado no se avanza a Publicación', async () => {

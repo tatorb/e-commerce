@@ -136,7 +136,7 @@ const addToPipelineTool = defineTool({
       ...(notFound.length > 0 ? { no_estan_en_el_catalogo: notFound } : {}),
       ...(invalid.length > 0 ? { no_se_entienden: invalid } : {}),
     };
-    if (ids.length === 0) throw new McpToolError(`No encontré ninguna de esas publicaciones en el Catálogo. ${JSON.stringify(extra)}`);
+    if (ids.length === 0) throw new McpToolError(`No encontré ninguna de esas publicaciones en la cuenta. ${JSON.stringify(extra)}`);
     const r = await ctx.db.$transaction((tx) => addToPipeline(tx, { accountId: account.id, publicationIds: ids, userId: ctx.userId }));
     return {
       listo: true,

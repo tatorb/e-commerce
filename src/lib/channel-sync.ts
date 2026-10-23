@@ -21,6 +21,7 @@ import {
   type Fingerprints,
 } from '@/domain/channel-sync';
 import { channelPhotos, parseVariantListings } from '@/domain/media';
+import { channelQuantities } from '@/domain/quantities';
 import { parseMetrics, type Metrics } from '@/domain/measurements';
 import type { NameValue } from '@/domain/name-value';
 import { isUniqueViolation } from '@/domain/publications';
@@ -132,6 +133,8 @@ function needsDescription(copy: CopyRow | null | undefined, listing: ChannelList
 function writeFace(field: FaceField, value: FaceValues[FaceField]): Prisma.PublicationUpdateInput {
   // Las fotos que se toman del canal: la publicación vuelve a seguir a las del canal.
   if (field === 'photos') return { media: Prisma.DbNull };
+  // Las cantidades también: vuelven a seguir a las del canal.
+  if (field === 'quantity') return { quantities: Prisma.DbNull };
   if (field === 'attributes') return { attributes: value as NameValue[] };
   if (field === 'installments') return { installments: value === null ? null : Number(value) };
   return { [field]: (value as string | null) ?? null };
@@ -168,6 +171,7 @@ async function applyListing(
       price: true,
       installments: true,
       discount: true,
+      quantities: true,
       channelCopy: {
         select: {
           description: true,
@@ -192,6 +196,7 @@ async function applyListing(
     price: priceText(listing.price),
     installments: installmentsText(listing.installments),
     discount: discountText(listing.discount),
+    quantity: channelQuantities(listing.quantity, listing.variations),
   };
   const appPrints = fingerprintsOf(app);
   const channelPrints = fingerprintsOf(channel);
@@ -251,6 +256,8 @@ async function applyListing(
     price: listing.price,
     installments: listing.installments,
     discount: listing.discount,
+    quantity: listing.quantity,
+    stockInChannel: listing.stockInChannel,
     // Un descuento que llegó del canal no es de la app: no se renueva.
     ...(taken.includes('discount') ? { discountUntil: null, discountSentAt: null } : {}),
     status: listing.status,
@@ -436,7 +443,7 @@ export async function runSyncStep(
 async function countToChoose(db: Db, storeId: string): Promise<number> {
   const publications = await db.publication.findMany({
     where: { storeId, channelCopy: { isNot: null } },
-    select: { title: true, description: true, attributes: true, media: true, price: true, installments: true, discount: true, channelCopy: { select: { fingerprints: true, agreed: true, missingSince: true, price: true, installments: true, discount: true } } },
+    select: { title: true, description: true, attributes: true, media: true, price: true, installments: true, discount: true, quantities: true, channelCopy: { select: { fingerprints: true, agreed: true, missingSince: true, price: true, installments: true, discount: true } } },
   });
   return publications.filter((p) => !p.channelCopy?.missingSince && faceSummary(fingerprintsOf(faceValues(p)), p.channelCopy).choose.length > 0)
     .length;
@@ -543,8 +550,9 @@ export async function chooseFaces(
           price: true,
           installments: true,
           discount: true,
+          quantities: true,
           channelCopy: {
-            select: { title: true, description: true, attributes: true, photos: true, photoIds: true, variations: true, price: true, installments: true, discount: true, fingerprints: true, agreed: true, missingSince: true },
+            select: { title: true, description: true, attributes: true, photos: true, photoIds: true, variations: true, price: true, installments: true, discount: true, quantity: true, fingerprints: true, agreed: true, missingSince: true },
           },
         },
       });
@@ -598,8 +606,9 @@ export async function discardDrafts(
         price: true,
         installments: true,
         discount: true,
+        quantities: true,
         channelCopy: {
-          select: { title: true, description: true, attributes: true, photos: true, photoIds: true, variations: true, price: true, installments: true, discount: true, fingerprints: true, agreed: true, missingSince: true },
+          select: { title: true, description: true, attributes: true, photos: true, photoIds: true, variations: true, price: true, installments: true, discount: true, quantity: true, fingerprints: true, agreed: true, missingSince: true },
         },
       },
     });

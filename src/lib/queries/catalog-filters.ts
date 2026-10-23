@@ -4,7 +4,7 @@ import { scoreBand } from '@/domain/standard';
 import type { TitleLock } from '@/domain/title-lock';
 import type { ChannelStatus, PipelineStatus, ProductKind, Stage } from '@/generated/prisma/enums';
 
-// Filtros y orden del Catálogo (la lista de publicaciones). Los usan la
+// Filtros y orden de Publicaciones (la lista de publicaciones). Los usan la
 // pantalla y la descarga de la planilla de contenido, así bajás exactamente
 // lo que ves. Sin la base de datos, para poder probarlos solos.
 
@@ -20,6 +20,7 @@ export type PublicationSearch = {
   bloqueado?: string;
   propuesta?: string;
   sincro?: string;
+  stock?: string;
   orden?: string;
 };
 
@@ -36,6 +37,7 @@ export const SORTS = [
   { value: 'puntaje-desc', label: 'Mayor puntaje primero' },
   { value: 'visitas', label: 'Más visitas primero' },
   { value: 'ventas', label: 'Más ventas primero' },
+  { value: 'cantidad', label: 'Menos cantidad primero' },
   { value: 'titulo', label: 'Título' },
 ];
 
@@ -65,6 +67,13 @@ export function parseKinds(raw: string | undefined): ProductKind[] {
 export const SALES_OPTIONS = [
   { value: 'con', label: 'Con ventas en 90 días' },
   { value: 'sin', label: 'Sin ventas en 90 días' },
+  { value: 'sin-dato', label: 'Sin dato' },
+] as const;
+
+// La cantidad disponible en el canal. "Sin dato" es que todavía no se leyó.
+export const STOCK_OPTIONS = [
+  { value: 'sin', label: 'Sin stock' },
+  { value: 'con', label: 'Con stock' },
   { value: 'sin-dato', label: 'Sin dato' },
 ] as const;
 
@@ -122,6 +131,7 @@ export type CatalogFilters = {
   locked: string[];
   proposal: keyof typeof PROPOSAL_SHORTCUTS | '';
   sync: string[];
+  stock: string[];
   sort: string;
   q: string;
 };
@@ -146,6 +156,7 @@ export function parsePublicationSearch(search: PublicationSearch): CatalogFilter
     locked: list(search.bloqueado, LOCK_OPTIONS.map((o) => o.value)),
     proposal: search.propuesta && search.propuesta in PROPOSAL_SHORTCUTS ? (search.propuesta as 'revisar' | 'aplicar') : '',
     sync: list(search.sincro, SYNC_OPTIONS.map((o) => o.value)),
+    stock: list(search.stock, STOCK_OPTIONS.map((o) => o.value)),
     sort: SORTS.some((s) => s.value === search.orden) ? search.orden! : 'puntaje',
     q: search.q?.trim().toLowerCase() ?? '',
   };
@@ -163,6 +174,7 @@ export function isFiltered(f: CatalogFilters): boolean {
       f.locked.length ||
       f.proposal ||
       f.sync.length ||
+      f.stock.length ||
       f.q,
   );
 }
@@ -182,6 +194,8 @@ export type Filterable = {
   sales: number | null;
   titleLock: TitleLock;
   sync: SyncState;
+  // La cantidad disponible en el canal, en total.
+  stock: number | null;
 };
 
 function visitRange(visits: number | null): string {
@@ -193,12 +207,16 @@ function salesOption(sales: number | null): string {
   return sales === null ? 'sin-dato' : sales > 0 ? 'con' : 'sin';
 }
 
+function stockOption(stock: number | null): string {
+  return stock === null ? 'sin-dato' : stock > 0 ? 'con' : 'sin';
+}
+
 function lockOption(lock: TitleLock): string {
   return lock.locked === null ? 'sin-dato' : lock.locked ? 'si' : 'no';
 }
 
 export function filterPublications<T extends Filterable>(all: T[], f: CatalogFilters): T[] {
-  const { band, statuses, pipeline, families, kinds, visits, sales, locked, proposal, sync, sort, q } = f;
+  const { band, statuses, pipeline, families, kinds, visits, sales, locked, proposal, sync, stock, sort, q } = f;
   const proposalStages = proposal ? PROPOSAL_SHORTCUTS[proposal].stages : null;
   const familySet = new Set(families.map((x) => x.toLowerCase()));
   return all
@@ -213,6 +231,7 @@ export function filterPublications<T extends Filterable>(all: T[], f: CatalogFil
     .filter((p) => locked.length === 0 || locked.includes(lockOption(p.titleLock)))
     .filter((p) => !proposalStages || proposalStages.includes(p.stage))
     .filter((p) => sync.length === 0 || syncOptions(p.sync).some((o) => sync.includes(o)))
+    .filter((p) => stock.length === 0 || stock.includes(stockOption(p.stock)))
     .filter(
       (p) =>
         !q ||
@@ -228,6 +247,8 @@ export function filterPublications<T extends Filterable>(all: T[], f: CatalogFil
       if (sort === 'puntaje-desc') return sb - sa || (b.visits ?? 0) - (a.visits ?? 0);
       if (sort === 'visitas') return (b.visits ?? -1) - (a.visits ?? -1) || sa - sb;
       if (sort === 'ventas') return (b.sales ?? -1) - (a.sales ?? -1) || (b.visits ?? -1) - (a.visits ?? -1);
+      // Sin dato, al final.
+      if (sort === 'cantidad') return (a.stock ?? Infinity) - (b.stock ?? Infinity) || (b.sales ?? -1) - (a.sales ?? -1);
       // Las que no tienen título, al final.
       if (!a.title || !b.title) return Number(!a.title) - Number(!b.title);
       return a.title.localeCompare(b.title, 'es');

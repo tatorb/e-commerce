@@ -1,7 +1,8 @@
 import { MercadoLibreRequestError, mlGet, mlSend } from './http';
-import { CAMPAIGN_TAG, CLASSIC, INSTALLMENT_TAGS, LOW_INTEREST_TAG, PREMIUM, tagsOf, variationsOf } from './listings';
+import { CAMPAIGN_TAG, CLASSIC, inFull, INSTALLMENT_TAGS, LOW_INTEREST_TAG, PREMIUM, tagsOf, variationsOf } from './listings';
 import { measureText, variantKey, type ChannelVariation, type VariantLike } from '@/domain/media';
 import { isInstallmentPlan, LOW_INTEREST_PLAN } from '@/domain/pricing';
+import { MAX_QUANTITY, quantityKey } from '@/domain/quantities';
 import {
   PublishError,
   type ChannelAttributeUpdate,
@@ -22,6 +23,7 @@ const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.i
 const KNOWN: [RegExp, string][] = [
   [/attributes? \[[^\]]*\] (is|are) (all )?required|missing_required/i, 'Mercado Libre pide datos de catálogo que faltan.'],
   [/item\.variations|field variations/i, 'Mercado Libre no aceptó las medidas.'],
+  [/available_quantity|quantity|stock/i, 'Mercado Libre no aceptó la cantidad.'],
   [/item\.price|price/i, 'Mercado Libre no aceptó el precio.'],
   [/attribute/i, 'Mercado Libre no aceptó un dato de catálogo.'],
   [/title.*not_modifiable|title.*modif/i, 'Mercado Libre no deja cambiar el título de una publicación con ventas.'],
@@ -51,7 +53,7 @@ export function rejectionMessage(status: number, body: unknown): string {
   for (const [pattern, message] of KNOWN) {
     if (!pattern.test(codes)) continue;
     // En las medidas, los datos de catálogo y las fotos, el detalle dice cuál fue.
-    return /variation|attribute|picture|price/i.test(pattern.source) && detail ? `${message.slice(0, -1)}: ${detail}` : message;
+    return /variation|attribute|picture|price|quantity/i.test(pattern.source) && detail ? `${message.slice(0, -1)}: ${detail}` : message;
   }
   return detail ? `Mercado Libre no lo aceptó: ${detail}` : `Mercado Libre no lo aceptó (código ${status}).`;
 }
@@ -488,6 +490,30 @@ export const mercadolibrePublisher: ChannelPublisher = {
     } catch (e) {
       throw rejectedAs('las cuotas', e);
     }
+  },
+
+  async setQuantity(accessToken, externalId, lines) {
+    if (lines.some((l) => !Number.isInteger(l.quantity) || l.quantity < 0 || l.quantity > MAX_QUANTITY)) {
+      throw new PublishError(`La cantidad tiene que ser un número entero de 0 a ${MAX_QUANTITY}.`);
+    }
+    const id = encodeURIComponent(externalId);
+    const item = await get(`/items/${id}?attributes=variations,shipping`, accessToken);
+    const current = isObj(item) ? item : {};
+    if (inFull(current)) throw new PublishError('La publicación está en Full: la cantidad la maneja Mercado Libre.');
+    const variations = variationsOf(current);
+    const changed = new PublishError('Las medidas cambiaron en Mercado Libre: volvé a leer la publicación.');
+    if (variations.length === 0) {
+      if (lines.length !== 1) throw changed;
+      await send('PUT', `/items/${id}`, accessToken, { available_quantity: lines[0].quantity });
+      return;
+    }
+    const keys = variations.map((v, i) => quantityKey(v, i));
+    if (lines.some((l) => !keys.includes(l.key))) throw changed;
+    const wanted = new Map(lines.map((l) => [l.key, l.quantity]));
+    // Mercado Libre borra las medidas que no van: van todas, las demás sin cambios.
+    await send('PUT', `/items/${id}`, accessToken, {
+      variations: variations.map((v, i) => (wanted.has(keys[i]) ? { id: v.id, available_quantity: wanted.get(keys[i]) } : { id: v.id })),
+    });
   },
 
   discountRange: DISCOUNT_RANGE,

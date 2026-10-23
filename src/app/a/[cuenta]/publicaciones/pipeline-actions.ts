@@ -34,7 +34,7 @@ async function add(accountSlug: string, ids: string[], extra: { notFound: string
   }
 }
 
-/** Agrega al pipeline las publicaciones elegidas en el Catálogo. */
+/** Agrega al pipeline las publicaciones elegidas en Publicaciones. */
 export async function addToPipelineAction(accountSlug: string, publicationIds: string[]): Promise<AddOutcome> {
   const ids = Array.isArray(publicationIds) ? publicationIds.filter((x) => typeof x === 'string').slice(0, 1000) : [];
   return add(accountSlug, ids, { notFound: [], invalid: [] });

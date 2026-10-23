@@ -25,19 +25,20 @@ const base: Filterable & { id: string } = {
   sales: null,
   titleLock: { locked: null, source: null },
   sync: { read: true, draft: false, choose: false, rejected: false },
+  stock: null,
 };
 
 const items = [
-  { ...base, id: 'a', title: 'Kit embrague', family: 'Kit de embrague', visits: 0, sales: 0, titleLock: { locked: false, source: 'data' as const } },
-  { ...base, id: 'b', title: 'Pistones', family: 'Subconjunto (pistones + aros)', visits: 30, sales: 2, titleLock: { locked: true, source: 'data' as const }, pipelineStatus: 'IN_PIPELINE' as const, sync: { read: true, draft: true, choose: true, rejected: true } },
-  { ...base, id: 'c', title: 'Juntas', family: 'Juntas, varias', visits: 120, sales: null, stage: 'APPROVED' as const, kind: 'COMBO' as const, sync: { read: true, draft: true, choose: false, rejected: false } },
+  { ...base, id: 'a', title: 'Kit embrague', family: 'Kit de embrague', visits: 0, sales: 0, stock: 0, titleLock: { locked: false, source: 'data' as const } },
+  { ...base, id: 'b', title: 'Pistones', family: 'Subconjunto (pistones + aros)', visits: 30, sales: 2, stock: 12, titleLock: { locked: true, source: 'data' as const }, pipelineStatus: 'IN_PIPELINE' as const, sync: { read: true, draft: true, choose: true, rejected: true } },
+  { ...base, id: 'c', title: 'Juntas', family: 'Juntas, varias', visits: 120, sales: null, stock: 3, stage: 'APPROVED' as const, kind: 'COMBO' as const, sync: { read: true, draft: true, choose: false, rejected: false } },
   { ...base, id: 'd', title: 'Sin datos', sync: { read: false, draft: false, choose: false, rejected: false } },
 ];
 
 const ids = (search: Parameters<typeof parsePublicationSearch>[0]) =>
   filterPublications(items, parsePublicationSearch(search)).map((p) => p.id);
 
-describe('filtros del Catálogo', () => {
+describe('filtros de Publicaciones', () => {
   it('por estado en el pipeline', () => {
     expect(ids({ pipeline: 'IN_PIPELINE' })).toEqual(['b']);
     expect(ids({ pipeline: 'UNTOUCHED,DISCARDED' }).sort()).toEqual(['a', 'c', 'd']);
@@ -93,6 +94,14 @@ describe('filtros del Catálogo', () => {
 
   it('ordena por ventas', () => {
     expect(ids({ orden: 'ventas' })).toEqual(['b', 'a', 'c', 'd']);
+  });
+
+  it('por cantidad disponible, y de la que tiene menos a la que tiene más', () => {
+    expect(ids({ stock: 'sin' })).toEqual(['a']);
+    expect(ids({ stock: 'con' }).sort()).toEqual(['b', 'c']);
+    expect(ids({ stock: 'sin-dato' })).toEqual(['d']);
+    expect(ids({ orden: 'cantidad' })).toEqual(['a', 'c', 'b', 'd']);
+    expect(isFiltered(parsePublicationSearch({ stock: 'sin' }))).toBe(true);
   });
 
   it('las familias, de la más común a la menos', () => {

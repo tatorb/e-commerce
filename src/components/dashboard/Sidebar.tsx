@@ -70,7 +70,7 @@ export async function Sidebar({
           <NavLink href={`${accountHome}/productos`} label="Productos">
             <Package className="h-4 w-4" />
           </NavLink>
-          <NavLink href={`${accountHome}/publicaciones`} label="Catálogo">
+          <NavLink href={`${accountHome}/publicaciones`} label="Publicaciones">
             <ListChecks className="h-4 w-4" />
           </NavLink>
           <NavLink href={`${accountHome}/preguntas`} label="Preguntas" badge={questions}>

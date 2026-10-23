@@ -62,7 +62,7 @@ export default async function PipelinePage({
             <Button size="sm" variant="outline" asChild>
               <Link href={catalogHref}>
                 <ListChecks className="h-4 w-4" />
-                Agregar desde el Catálogo
+                Agregar desde Publicaciones
               </Link>
             </Button>
             <NewPipelinePublicationDialog
@@ -114,9 +114,9 @@ export default async function PipelinePage({
           </>
         ) : all.length === 0 ? (
           <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">
-            Todavía no hay publicaciones en el pipeline. Elegilas en el{' '}
+            Todavía no hay publicaciones en el pipeline. Elegilas en{' '}
             <Link href={catalogHref} className="text-primary underline-offset-4 hover:underline">
-              Catálogo
+              Publicaciones
             </Link>{' '}
             y tocá Agregar al pipeline, o creá una con Nueva publicación.
           </div>

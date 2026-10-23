@@ -1,7 +1,7 @@
 import type { PrismaClient } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
 
-// Encuentra publicaciones del Catálogo a partir de links o códigos pegados.
+// Encuentra publicaciones de la lista de Publicaciones a partir de links o códigos pegados.
 // Cada canal limpia lo suyo (src/channels/): acá solo se busca.
 
 const MAX_CODES = 200;
@@ -9,7 +9,7 @@ const MAX_CODES = 200;
 export type ResolvedCodes = {
   // Publicaciones encontradas, en el orden en que se pegaron.
   ids: string[];
-  // Códigos que se entienden pero no están en el Catálogo.
+  // Códigos que se entienden pero no están en Publicaciones.
   notFound: string[];
   // Lo que no parece un link ni un código de ningún canal.
   invalid: string[];

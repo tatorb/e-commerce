@@ -14,6 +14,8 @@ import { photoRefSchema } from '@/domain/media';
 import { MediaError, saveMedia } from '@/lib/media';
 import { CreateError, createInChannel } from '@/lib/channel-create';
 import { changeStatus, relistInChannel, StatusError, type StatusResult } from '@/lib/channel-status';
+import { MAX_QUANTITY } from '@/domain/quantities';
+import { saveQuantities, type QuantitiesResult } from '@/lib/quantities';
 
 // Lo que se hace desde la página de una publicación y desde Por subir: cambiar
 // el borrador, subirlo al canal, descartarlo y volver a leer del canal.
@@ -52,6 +54,32 @@ export async function saveDraftAction(
     const { warnings } = await saveDraft(prisma, { accountId: account.id, publicationId: parsed.data.id, field: parsed.data.field, value: parsed.data.value });
     refresh(accountSlug, parsed.data.id);
     return { ok: true, warnings };
+  } catch (e) {
+    return failure(e);
+  }
+}
+
+const quantityValue = z.coerce.number().int('La cantidad tiene que ser un número entero.').min(0, 'La cantidad no puede ser negativa.').max(MAX_QUANTITY);
+const quantityChangeSchema = z.union([
+  z.object({ all: quantityValue }),
+  z.object({ byKey: z.record(z.string().max(300), quantityValue) }),
+]);
+
+/** Cambia las cantidades de una o varias publicaciones: quedan como borrador, para subir. */
+export async function saveQuantitiesAction(accountSlug: string, publicationIds: string[], change: unknown): Promise<Result<QuantitiesResult>> {
+  await requireUser();
+  const account = await getAccountBySlug(accountSlug);
+  if (!account) return { ok: false, error: 'La cuenta no existe.' };
+  const ids = z.array(idSchema).min(1).max(500).safeParse(publicationIds);
+  const parsed = quantityChangeSchema.safeParse(change);
+  if (!ids.success) return { ok: false, error: 'Elegí al menos una publicación.' };
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Revisá la cantidad.' };
+  try {
+    const result = await saveQuantities(prisma, { accountId: account.id, publicationIds: ids.data, change: parsed.data });
+    for (const id of result.saved) revalidatePath(`/a/${accountSlug}/publicaciones/${id}`);
+    revalidatePath(`/a/${accountSlug}/publicaciones`);
+    revalidatePath(`/a/${accountSlug}/pipeline`, 'layout');
+    return { ok: true, ...result };
   } catch (e) {
     return failure(e);
   }

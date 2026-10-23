@@ -27,6 +27,10 @@ export type ChannelListing = {
   status: ChannelStatus;
   // Vendidos desde que se publicó.
   sold: number | null;
+  // La cantidad disponible, en total; la de cada medida va en variations.
+  quantity: number | null;
+  // El canal maneja el stock, como en Full: la cantidad no se puede cambiar desde la app.
+  stockInChannel: boolean;
   visits90d: number | null;
   photos: string[];
   // El código de cada foto en el canal, en el mismo orden, si lo informa.

@@ -41,7 +41,7 @@ export function AddByCodeDialog({ accountSlug, example }: { accountSlug: string;
           <DialogTitle>Agregar al pipeline por link o código</DialogTitle>
           <DialogDescription>
             Pegá uno o varios, uno por línea. Sirve el link entero o el código, por ejemplo {example}. Tienen que estar
-            en el Catálogo.
+            en Publicaciones.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-1.5">

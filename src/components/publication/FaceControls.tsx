@@ -35,7 +35,7 @@ function useBusy() {
 
 /** Cuenta lo que pasó al subir, en una línea. */
 export function pushMessage(r: PushResult, channelName: string): Message {
-  const article: Record<FaceField, string> = { title: 'el', description: 'la', attributes: 'los', photos: 'las', price: 'el', installments: 'las', discount: 'el' };
+  const article: Record<FaceField, string> = { title: 'el', description: 'la', attributes: 'los', photos: 'las', price: 'el', installments: 'las', discount: 'el', quantity: 'la' };
   const sent = r.sent.map((f) => `${article[f]} ${FACE_FIELD_LABEL[f].toLowerCase()}`);
   const rejected = r.rejected.map((x) => `${FACE_FIELD_LABEL[x.field]}: ${x.message}`);
   if (sent.length === 0) return { kind: 'error', text: rejected.join(' ') || 'No había nada para subir.' };

@@ -133,7 +133,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
           <CardHeader>
             <CardTitle>Conexión con Claude</CardTitle>
             <CardDescription>
-              Conectá tu Claude con la app para consultar y trabajar el Catálogo y el Pipeline desde una conversación.
+              Conectá tu Claude con la app para consultar y trabajar las Publicaciones y el Pipeline desde una conversación.
               Usa tu usuario: lo que haga queda a tu nombre.
             </CardDescription>
           </CardHeader>

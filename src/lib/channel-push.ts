@@ -28,7 +28,8 @@ import {
   type FaceField,
   type FaceValues,
 } from '@/domain/channel-sync';
-import { channelPhotos, parseVariantListings, variantKey, withMarks, type ChannelVariation, type PhotoRef } from '@/domain/media';
+import { channelPhotos, parseVariantListings, parseVariations, variantKey, withMarks, type ChannelVariation, type PhotoRef } from '@/domain/media';
+import { quantityKey, totalQuantity, type QuantityLine } from '@/domain/quantities';
 import type { NameValue } from '@/domain/name-value';
 import { writeContentField } from '@/domain/content';
 import { LATEST_MEASUREMENTS, latestMetrics } from '@/domain/measurements';
@@ -73,6 +74,7 @@ async function loadForPush(db: Db, accountId: string, publicationId: string) {
       price: true,
       installments: true,
       discount: true,
+      quantities: true,
       titleLockedManual: true,
       store: { select: { id: true, channel: { select: { id: true, kind: true, name: true } }, connection: { select: { status: true } } } },
       measurements: { orderBy: { takenAt: 'desc' }, take: LATEST_MEASUREMENTS, select: { metrics: true } },
@@ -95,6 +97,8 @@ async function loadForPush(db: Db, accountId: string, publicationId: string) {
           installments: true,
           discount: true,
           discountUntil: true,
+          quantity: true,
+          stockInChannel: true,
         },
       },
     },
@@ -247,7 +251,7 @@ export async function pushDrafts(
 
   // Ya está en el canal: la cara del canal y lo acordado pasan a ser lo que se subió.
   // Si el canal lo guardó un poco distinto, la lectura de confirmación lo trae.
-  const accept = async (field: FaceField, value: string | NameValue[], extra: Prisma.ChannelCopyUpdateInput = {}) => {
+  const accept = async (field: FaceField, value: string | NameValue[] | QuantityLine[], extra: Prisma.ChannelCopyUpdateInput = {}) => {
     const print = fingerprint(field, value);
     await db.$transaction(async (tx) => {
       const current = await tx.channelCopy.findUniqueOrThrow({ where: { publicationId: p.id }, select: { fingerprints: true, agreed: true, rejections: true } });
@@ -256,7 +260,8 @@ export async function pushDrafts(
       await tx.channelCopy.update({
         where: { publicationId: p.id },
         data: {
-          [field]: field === 'installments' ? Number(value) : value,
+          // Las cantidades van en extra: el total y la de cada medida.
+          ...(field === 'quantity' ? {} : { [field]: field === 'installments' ? Number(value) : value }),
           ...extra,
           fingerprints: { ...parseFingerprints(current.fingerprints), [field]: print },
           agreed: { ...parseFingerprints(current.agreed), [field]: print },
@@ -273,6 +278,8 @@ export async function pushDrafts(
           userId: args.userId,
         },
       });
+      // Las cantidades vuelven a seguir a las del canal, que ya son esas.
+      if (field === 'quantity') await tx.publication.update({ where: { id: p.id }, data: { quantities: Prisma.DbNull } });
     });
     copy.rejections = parseRejections(copy.rejections);
     delete (copy.rejections as Record<string, unknown>)[field];
@@ -317,7 +324,7 @@ export async function pushDrafts(
         continue;
       }
       let send: () => Promise<void>;
-      let value: string | NameValue[];
+      let value: string | NameValue[] | QuantityLine[];
       let problems: string[] = [];
       let extra: Prisma.ChannelCopyUpdateInput = {};
       if (field === 'attributes') {
@@ -357,6 +364,30 @@ export async function pushDrafts(
         send = async () => {
           extra = discountDates(pct, await setDiscounts(db, p, publisher, { pct, listPrice }, now), now);
         };
+      } else if (field === 'quantity') {
+        const lines = app.quantity;
+        if (!lines) continue;
+        if (copy.stockInChannel) {
+          result.rejected.push({ field, message: `El stock lo maneja ${channelName}, por ejemplo porque está en Full: la cantidad no se cambia desde la app.` });
+          continue;
+        }
+        value = lines;
+        const family = parseVariantListings(p.variantListings);
+        send = () =>
+          withAccessToken(db, p.store.id, async (token) => {
+            // Si el canal guarda cada medida aparte, cada una lleva la suya.
+            if (family.length >= 2) {
+              for (const [i, v] of family.entries()) {
+                const line = lines.find((l) => l.key === quantityKey(v, i));
+                if (line) await publisher.setQuantity(token, v.externalId, [{ key: '', quantity: line.quantity }]);
+              }
+            } else await publisher.setQuantity(token, p.externalId!, lines.map((l) => ({ key: l.key, quantity: l.quantity })));
+          });
+        // La cara del canal: el total y la de cada medida.
+        const byKey = new Map(lines.map((l) => [l.key, l.quantity]));
+        const variations = parseVariations(copy.variations).map((v, i) => ({ ...v, quantity: byKey.get(quantityKey(v, i)) ?? v.quantity ?? null }));
+        const known = variations.every((v) => v.quantity !== null);
+        extra = variations.length > 0 ? { variations, quantity: known ? variations.reduce((sum, v) => sum + (v.quantity ?? 0), 0) : null } : { quantity: totalQuantity(lines) };
       } else {
         if (field === 'title' && titleLocked(p)) {
           result.rejected.push({ field, message: LOCKED_TITLE });

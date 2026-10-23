@@ -72,8 +72,8 @@ describe('de qué lado cambió cada dato', () => {
 
   it('el plan toma lo del canal, guarda el borrador y no toca lo que hay que elegir', () => {
     const plans = planFaces(
-      { title: 'a', description: 'x', attributes: 'm', photos: 'f', price: 'p', installments: 'c', discount: 'd' },
-      { title: 'b', description: 'y', attributes: 'n', photos: 'f', price: 'p', installments: 'c', discount: 'd' },
+      { title: 'a', description: 'x', attributes: 'm', photos: 'f', price: 'p', installments: 'c', discount: 'd', quantity: 'q' },
+      { title: 'b', description: 'y', attributes: 'n', photos: 'f', price: 'p', installments: 'c', discount: 'd', quantity: 'q' },
       { title: 'a', description: 'y' },
     );
     expect(plans).toEqual([
@@ -84,6 +84,7 @@ describe('de qué lado cambió cada dato', () => {
       { field: 'price', state: 'same', take: false, agreed: 'p' },
       { field: 'installments', state: 'same', take: false, agreed: 'c' },
       { field: 'discount', state: 'same', take: false, agreed: 'd' },
+      { field: 'quantity', state: 'same', take: false, agreed: 'q' },
     ]);
   });
 });

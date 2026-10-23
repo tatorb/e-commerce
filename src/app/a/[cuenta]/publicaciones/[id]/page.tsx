@@ -25,6 +25,8 @@ import { CreateInChannelCard } from '@/components/publication/CreateInChannelCar
 import { ChannelStatusCard } from '@/components/publication/ChannelStatusCard';
 import { relistInfo } from '@/lib/channel-status';
 import { FACE_FIELDS, FACE_FIELD_LABEL, priceFaceText, SYNC_CHANGE_LABEL, type FaceField, type FaceValues } from '@/domain/channel-sync';
+import { quantityText, type QuantityLine } from '@/domain/quantities';
+import { QuantityEditor } from '@/components/publication/QuantityEditor';
 import { titleOrUntitled } from '@/domain/publication-title';
 import { fieldLabel } from '@/domain/sync-log';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
@@ -53,11 +55,20 @@ const STATE: Record<State, { label: string; variant: 'secondary' | 'destructive'
   unread: { label: 'Sin leer del canal', variant: 'outline' },
 };
 
+/** Si la cantidad se puede cambiar acá, o por qué no. */
+function quantityReason(externalId: string | null, stockInChannel: boolean, lines: QuantityLine[] | null, channelName: string): true | string {
+  if (!externalId) return `La cantidad se carga al crear la publicación en ${channelName}.`;
+  if (stockInChannel) return `El stock lo maneja ${channelName}, por ejemplo porque está en Full: no se cambia desde la app.`;
+  if (!lines) return `Todavía no se leyó la cantidad de ${channelName}.`;
+  return true;
+}
+
 /** Un dato como texto: los datos de catálogo, uno por línea. */
 function asText(values: FaceValues, field: FaceField): string {
   if (field === 'attributes') return values.attributes.map((a) => `${a.name}: ${a.value}`).join('\n');
   if (field === 'photos') return '';
   if (field === 'price' || field === 'installments' || field === 'discount') return priceFaceText(field, values[field]);
+  if (field === 'quantity') return quantityText(values.quantity);
   return values[field] ?? '';
 }
 
@@ -262,6 +273,8 @@ export default async function PublicationPage({
 
             {FACE_FIELDS.map((field) => {
               const state = states[field];
+              // La cantidad que no se cambió en la app es la del canal.
+              const quantities = app.quantity ?? channel?.quantity ?? null;
               const editable =
                 field === 'attributes' && !data.catalog
                   ? `${channelName} todavía no tiene datos de catálogo en la app.`
@@ -273,7 +286,9 @@ export default async function PublicationPage({
                         ? 'Las cuotas se deciden en el paso Precio.'
                         : field === 'discount'
                           ? 'El descuento se decide en el paso Precio.'
-                          : (true as const);
+                          : field === 'quantity'
+                            ? quantityReason(p.externalId, copy?.stockInChannel ?? false, quantities, channelName)
+                            : (true as const);
               return (
                 <SectionCard
                   key={field}
@@ -292,7 +307,7 @@ export default async function PublicationPage({
                       publicationId={p.id}
                       field={field}
                       state={state}
-                      value={asText(app, field)}
+                      value={field === 'quantity' ? quantityText(quantities) : asText(app, field)}
                       channelValue={channel ? asText(channel, field) : null}
                       channelName={channelName}
                       editable={editable}
@@ -303,6 +318,14 @@ export default async function PublicationPage({
                           <CatalogCard accountSlug={account.slug} publicationId={p.id} data={data.catalog} bare />
                         ) : field === 'photos' && media ? (
                           <MediaOrganizer accountSlug={account.slug} publicationId={p.id} sources={media} />
+                        ) : field === 'quantity' && quantities ? (
+                          <QuantityEditor
+                            accountSlug={account.slug}
+                            publicationId={p.id}
+                            lines={quantities}
+                            channelLines={channel?.quantity ?? null}
+                            channelName={channelName}
+                          />
                         ) : undefined
                       }
                       diff={field === 'attributes' ? data.attributeDiff : null}
