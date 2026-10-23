@@ -43,6 +43,12 @@ describe('comparación con la competencia', () => {
     expect(compare({ mine: { listPrice: 200_000, discountPct: 0, plan: 0 }, competitors, cost: COST, params: P }).match).toBeNull();
   });
 
+  it('con la cuota promocionada no hay valor de cuota', () => {
+    const c = compare({ mine: { listPrice: 240_000, discountPct: 0, plan: 1 }, competitors, cost: COST, params: P });
+    expect(c.rows[0]).toMatchObject({ installments: 1, installmentValue: null });
+    expect(c.summary.join(' ')).not.toContain('cuotas apagadas');
+  });
+
   it('copiar sus cuotas solo si ese plan tiene el costo cargado', () => {
     const c = compare({ mine: { listPrice: 260_000, discountPct: 0, plan: 0 }, competitors: [competitor('Doce', 200_000, 0, 12, true)], cost: COST, params: P });
     expect(copyablePlan(c.cheapest, P)).toEqual({ plan: 12, available: true });

@@ -7,6 +7,7 @@ import {
   installmentCostPct,
   isInstallmentPlan,
   parsePricingValues,
+  planLabel,
   resolvePricing,
   simulate,
   type InstallmentPlan,
@@ -156,7 +157,7 @@ export async function savePriceDecision(
   if (!(args.cost > 0)) throw new PricingError('Cargá el costo de reposición sin IVA.');
   if (!(args.listPrice > 0)) throw new PricingError('Cargá el precio publicado.');
   if (!(args.discountPct >= 0 && args.discountPct < 100)) throw new PricingError('El descuento va de 0 a 99 %.');
-  if (!isInstallmentPlan(args.plan)) throw new PricingError('Las cuotas sin interés son 3, 6, 9 o 12.');
+  if (!isInstallmentPlan(args.plan)) throw new PricingError('Las cuotas son sin cuotas, la cuota promocionada, 3, 6, 9 o 12.');
   const plan: InstallmentPlan = args.plan;
   const listPrice = Math.round(args.listPrice);
 
@@ -168,7 +169,7 @@ export async function savePriceDecision(
     if (!p) throw new PricingError('La publicación no existe en esta cuenta.');
     const settings = await tx.pricingSettings.findUnique({ where: { accountId: args.accountId }, select: { values: true } });
     const params = resolvePricing(settings?.values, args.overrides);
-    if (installmentCostPct(params, plan) === null) throw new PricingError(`Cargá el costo de ${plan} cuotas en Ajustes > Precios para usarlas.`);
+    if (installmentCostPct(params, plan) === null) throw new PricingError(`Cargá el costo de ${planLabel(plan).toLowerCase()} en Ajustes > Precios para usarla.`);
     const s = simulate({ listPrice, discountPct: args.discountPct, plan, cost: args.cost, params });
     const below = s.marginPct < params.minMarginPct - 1e-9;
     if (below && !args.confirmBelowMin) {

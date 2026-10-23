@@ -5,6 +5,9 @@ import {
   BREAKDOWN_PARTS,
   cushionListPrice,
   finalPriceFor,
+  fixedInstallments,
+  LOW_INTEREST_PLAN,
+  planLabel,
   listPriceForMargin,
   marginLevel,
   marginOf,
@@ -85,8 +88,15 @@ describe('precio', () => {
   });
 
   it('los planes de cuotas que se pueden usar', () => {
-    expect(availablePlans(P)).toEqual([0, 3, 6, 9, 12]);
-    expect(availablePlans({ ...P, installments9Pct: null, installments12Pct: null })).toEqual([0, 3, 6]);
+    expect(availablePlans(P)).toEqual([0, 1, 3, 6, 9, 12]);
+    expect(availablePlans({ ...P, installmentsLowPct: null, installments9Pct: null, installments12Pct: null })).toEqual([0, 3, 6]);
+  });
+
+  it('la cuota promocionada cuesta su % pero no tiene una cantidad fija de cuotas', () => {
+    expect(breakdown(200_000, COST, P, LOW_INTEREST_PLAN).installments).toBeCloseTo(10_000, 6);
+    expect(fixedInstallments(LOW_INTEREST_PLAN)).toBeNull();
+    expect(fixedInstallments(6)).toBe(6);
+    expect([0, LOW_INTEREST_PLAN, 6].map(planLabel)).toEqual(['Sin cuotas', 'Cuota promocionada', '6 cuotas']);
   });
 
   it('cuenta, producto y valores de partida', () => {

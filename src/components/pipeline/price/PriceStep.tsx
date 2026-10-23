@@ -16,6 +16,8 @@ import {
   cushionListPrice,
   INSTALLMENT_PLANS,
   listPriceForMargin,
+  LOW_INTEREST_PLAN,
+  planLabel,
   maxDiscount,
   parsePricingText,
   PRICING_KEYS,
@@ -47,7 +49,8 @@ const MAX_DISCOUNT = 50;
 
 type Overrides = Partial<Record<PricingKey, string>>;
 
-const planLabel = (p: InstallmentPlan) => (p === 0 ? 'Apagadas' : `${p} cuotas`);
+// En el selector: la cuota promocionada con su nombre corto.
+const planButton = (p: InstallmentPlan) => (p === 0 ? 'Apagadas' : p === LOW_INTEREST_PLAN ? 'Promocionada' : `${p} cuotas`);
 
 // Un monto como se escribe: "99.627,5" o "221.304".
 const amountText = (n: number | null) => (n === null ? '' : new Intl.NumberFormat('es-AR', { maximumFractionDigits: 2 }).format(n));
@@ -192,8 +195,8 @@ export function PriceStep({
             </div>
 
             <div className="space-y-1.5">
-              <p className="text-sm font-medium">Cuotas sin interés</p>
-              <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Cuotas sin interés">
+              <p className="text-sm font-medium">Cuotas</p>
+              <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Cuotas">
                 {INSTALLMENT_PLANS.map((p) => {
                   const enabled = plans.includes(p);
                   return (
@@ -203,7 +206,13 @@ export function PriceStep({
                       role="radio"
                       aria-checked={plan === p}
                       disabled={!enabled}
-                      title={enabled ? undefined : `Cargá el costo de ${p} cuotas en Ajustes > Precios`}
+                      title={
+                        !enabled
+                          ? `Cargá el costo de ${planLabel(p).toLowerCase()} en Ajustes > Precios`
+                          : p === LOW_INTEREST_PLAN
+                            ? 'De 3 a 12 cuotas con interés bajo: el comprador paga parte del interés'
+                            : undefined
+                      }
                       onClick={() => change(() => setPlan(p))}
                       className={cn(
                         'rounded-full border px-3 py-1 text-sm transition-colors',
@@ -211,7 +220,7 @@ export function PriceStep({
                         !enabled && 'cursor-not-allowed opacity-40 hover:text-muted-foreground',
                       )}
                     >
-                      {planLabel(p)}
+                      {planButton(p)}
                     </button>
                   );
                 })}
@@ -286,7 +295,11 @@ export function PriceStep({
               <p className="text-3xl font-semibold tabular-nums">{listPrice > 0 ? formatPrice(Math.round(sim.finalPrice)) : '—'}</p>
               <p className="text-sm text-muted-foreground">
                 {discount > 0 ? `Publicado a ${formatPrice(Math.round(listPrice))} con ${formatPercent(discount)} de descuento. ` : ''}
-                {plan > 0 && listPrice > 0 ? `${plan} cuotas sin interés de ${formatPrice(Math.round(sim.finalPrice / plan))}.` : 'Sin cuotas.'}
+                {plan === LOW_INTEREST_PLAN
+                  ? 'Cuota promocionada: de 3 a 12 cuotas con interés bajo.'
+                  : plan > 0 && listPrice > 0
+                    ? `${plan} cuotas sin interés de ${formatPrice(Math.round(sim.finalPrice / plan))}.`
+                    : 'Sin cuotas.'}
               </p>
             </div>
             {ready && levelBox ? (
@@ -401,7 +414,7 @@ export function PriceStep({
                   const d = maxDiscount(listPrice, cost!, params, p);
                   return (
                     <div key={p} className="flex justify-between gap-3">
-                      <dt>{p === 0 ? 'Sin cuotas' : `${p} cuotas`}</dt>
+                      <dt>{planLabel(p)}</dt>
                       <dd className={cn('font-medium tabular-nums', d === null && 'text-red-700')}>{d === null ? 'No entra' : formatPercent(d)}</dd>
                     </div>
                   );
@@ -433,7 +446,7 @@ export function PriceStep({
           {start ? (
             <p className="text-sm text-muted-foreground">
               Último guardado: {formatPrice(start.listPrice)}
-              {start.discountPct > 0 ? ` con ${formatPercent(start.discountPct)} de descuento` : ''}, {start.installments === 0 ? 'sin cuotas' : `${start.installments} cuotas`},
+              {start.discountPct > 0 ? ` con ${formatPercent(start.discountPct)} de descuento` : ''}, {planLabel(start.installments).toLowerCase()},
               margen {formatPercent(start.marginPct)}. El {formatDateTime(start.decidedAt, timeZone)}
               {start.decidedBy ? ` por ${start.decidedBy}` : ''}.
               {start.belowMinConfirmed ? ' Se confirmó debajo del mínimo.' : ''}

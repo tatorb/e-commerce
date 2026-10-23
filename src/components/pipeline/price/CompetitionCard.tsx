@@ -7,7 +7,7 @@ import { SectionBody, SectionCard } from '@/components/ui/section-card';
 import { daysSince } from '@/domain/competitors';
 import { formatPercent, formatPrice } from '@/domain/money';
 import { copyablePlan, type ComparedRow, type Comparison } from '@/domain/price-comparison';
-import type { InstallmentPlan, PricingParams } from '@/domain/pricing';
+import { planLabel, type InstallmentPlan, type PricingParams } from '@/domain/pricing';
 import { cn } from '@/lib/utils/cn';
 
 // Mi precio frente al de la competencia que se cargó en el paso Información:
@@ -16,7 +16,7 @@ import { cn } from '@/lib/utils/cn';
 
 const MAX_DISCOUNT = 50;
 
-const cuotas = (r: ComparedRow) => (r.installments === 0 ? 'Sin cuotas' : `${r.installments} cuotas`);
+const cuotas = (r: ComparedRow) => planLabel(r.installments);
 
 function Diff({ value }: { value: number | null }) {
   if (value === null) return <span className="text-muted-foreground">—</span>;

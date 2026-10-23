@@ -3,7 +3,7 @@
 import { RotateCcw } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { formatPercent, formatPrice } from '@/domain/money';
-import { installmentCostPct, pricingText, vatShare, type InstallmentPlan, type PricingKey, type PricingParams } from '@/domain/pricing';
+import { installmentCostPct, LOW_INTEREST_PLAN, pricingText, vatShare, type InstallmentPlan, type PricingKey, type PricingParams } from '@/domain/pricing';
 import { cn } from '@/lib/utils/cn';
 
 // La lista de costos del precio final: concepto, % del precio y monto. En
@@ -41,6 +41,7 @@ export function costRows(args: { params: PricingParams; plan: InstallmentPlan; f
     { key: 'vatRatePct', label: 'IVA', edit: 'pct', pct: vat * 100, amount: f * vat, counts: true, suffix: 'de tasa' },
     pctRow('channelFeePct', 'Cargo del canal'),
     pctRow('taxesPct', 'Impuestos (IIBB, débitos y créditos, SIRTAC)'),
+    pctRow('installmentsLowPct', 'Cuota promocionada (3 a 12 cuotas con interés bajo)', plan === LOW_INTEREST_PLAN && installmentCostPct(params, LOW_INTEREST_PLAN) !== null),
     ...([3, 6, 9, 12] as const).map((n) =>
       pctRow(`installments${n}Pct` as PricingKey, `${n} cuotas sin interés`, plan === n && installmentCostPct(params, n) !== null),
     ),

@@ -14,7 +14,7 @@ import { savePricingSettingsAction } from '@/app/a/[cuenta]/pipeline/price-actio
 
 const GROUPS: { title: string; keys: PricingKey[] }[] = [
   { title: 'Cargos e impuestos', keys: ['channelFeePct', 'taxesPct', 'vatRatePct'] },
-  { title: 'Cuotas sin interés', keys: ['installments3Pct', 'installments6Pct', 'installments9Pct', 'installments12Pct'] },
+  { title: 'Cuotas', keys: ['installmentsLowPct', 'installments3Pct', 'installments6Pct', 'installments9Pct', 'installments12Pct'] },
   { title: 'Otros costos por venta', keys: ['adsPct', 'returnsPct', 'shipping', 'packaging'] },
   { title: 'Márgenes sobre el costo', keys: ['minMarginPct', 'targetMarginPct'] },
 ];
@@ -22,6 +22,7 @@ const GROUPS: { title: string; keys: PricingKey[] }[] = [
 const HINT: Partial<Record<PricingKey, string>> = {
   channelFeePct: 'Lo que cobra el canal por cada venta, en % del precio.',
   vatRatePct: 'La tasa. El precio publicado la incluye; el costo, no.',
+  installmentsLowPct: 'El comprador paga parte del interés.',
   shipping: 'En pesos, por venta.',
   packaging: 'En pesos, por venta.',
 };

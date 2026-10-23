@@ -9,7 +9,10 @@ import { parsePercent, parsePrice } from './money';
 // porcentajes de los parámetros van como número, por ejemplo 14.3 para 14,3 %;
 // las cuentas de adentro usan fracciones (0,143).
 
-export const INSTALLMENT_PLANS = [0, 3, 6, 9, 12] as const;
+// La cuota promocionada: de 3 a 12 cuotas con interés bajo, que el comprador
+// paga en parte. No tiene una cantidad fija de cuotas: se guarda como 1.
+export const LOW_INTEREST_PLAN = 1 as const;
+export const INSTALLMENT_PLANS = [0, LOW_INTEREST_PLAN, 3, 6, 9, 12] as const;
 export type InstallmentPlan = (typeof INSTALLMENT_PLANS)[number];
 
 export type PricingParams = {
@@ -19,7 +22,8 @@ export type PricingParams = {
   taxesPct: number;
   // La tasa del IVA, por ejemplo 21.
   vatRatePct: number;
-  // Lo que cuesta ofrecer cada plan de cuotas sin interés, en % del precio. Null si no está cargado.
+  // Lo que cuesta ofrecer cada plan de cuotas, en % del precio. Null si no está cargado.
+  installmentsLowPct: number | null;
   installments3Pct: number | null;
   installments6Pct: number | null;
   installments9Pct: number | null;
@@ -41,6 +45,7 @@ export const PRICING_DEFAULTS: PricingParams = {
   channelFeePct: 14.3,
   taxesPct: 4.9,
   vatRatePct: 21,
+  installmentsLowPct: 5,
   installments3Pct: 8.5,
   installments6Pct: 12.9,
   installments9Pct: 17.3,
@@ -58,12 +63,13 @@ export const PRICING_KEYS = Object.keys(PRICING_DEFAULTS) as PricingKey[];
 // Los que son montos en pesos; el resto son porcentajes.
 export const AMOUNT_KEYS: PricingKey[] = ['shipping', 'packaging'];
 // Los que pueden quedar sin cargar.
-const OPTIONAL_KEYS: PricingKey[] = ['installments3Pct', 'installments6Pct', 'installments9Pct', 'installments12Pct'];
+const OPTIONAL_KEYS: PricingKey[] = ['installmentsLowPct', 'installments3Pct', 'installments6Pct', 'installments9Pct', 'installments12Pct'];
 
 export const PRICING_LABEL: Record<PricingKey, string> = {
   channelFeePct: 'Cargo del canal',
   taxesPct: 'Impuestos (IIBB, débitos y créditos, SIRTAC)',
   vatRatePct: 'IVA',
+  installmentsLowPct: 'Costo de la cuota promocionada (3 a 12 cuotas con interés bajo)',
   installments3Pct: 'Costo de 3 cuotas sin interés',
   installments6Pct: 'Costo de 6 cuotas sin interés',
   installments9Pct: 'Costo de 9 cuotas sin interés',
@@ -77,6 +83,7 @@ export const PRICING_LABEL: Record<PricingKey, string> = {
 };
 
 const PLAN_KEY: Record<Exclude<InstallmentPlan, 0>, PricingKey> = {
+  [LOW_INTEREST_PLAN]: 'installmentsLowPct',
   3: 'installments3Pct',
   6: 'installments6Pct',
   9: 'installments9Pct',
@@ -85,6 +92,16 @@ const PLAN_KEY: Record<Exclude<InstallmentPlan, 0>, PricingKey> = {
 
 export function isInstallmentPlan(n: number): n is InstallmentPlan {
   return (INSTALLMENT_PLANS as readonly number[]).includes(n);
+}
+
+/** Cuántas cuotas sin interés tiene el plan. Null sin cuotas o con la cuota promocionada, que no tiene una cantidad fija. */
+export function fixedInstallments(plan: number): number | null {
+  return plan >= 3 ? plan : null;
+}
+
+/** El plan en palabras: "Sin cuotas", "Cuota promocionada" o "6 cuotas". */
+export function planLabel(plan: number): string {
+  return plan === 0 ? 'Sin cuotas' : plan === LOW_INTEREST_PLAN ? 'Cuota promocionada' : `${plan} cuotas`;
 }
 
 /** El costo del plan de cuotas en %: 0 sin cuotas; null si ese plan no tiene el costo cargado. */

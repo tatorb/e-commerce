@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { SectionBody, SectionCard } from '@/components/ui/section-card';
 import { formatPercent, formatPrice } from '@/domain/money';
+import { LOW_INTEREST_PLAN } from '@/domain/pricing';
 import type { LatestPriceDecision } from '@/lib/pricing';
 import { formatDateTime } from '@/lib/format';
 
@@ -42,7 +43,11 @@ export function PriceDecisionCard({
     decision.discountPct > 0
       ? `Un descuento de ${formatPercent(decision.discountPct)}: el comprador paga ${formatPrice(Math.round(decision.finalPrice))}.`
       : null,
-    decision.installments > 0 ? `${decision.installments} cuotas sin interés de ${formatPrice(Math.round(decision.finalPrice / decision.installments))}.` : null,
+    decision.installments === LOW_INTEREST_PLAN
+      ? 'La cuota promocionada: de 3 a 12 cuotas con interés bajo.'
+      : decision.installments > 0
+        ? `${decision.installments} cuotas sin interés de ${formatPrice(Math.round(decision.finalPrice / decision.installments))}.`
+        : null,
   ].filter((line): line is string => line !== null);
 
   return (

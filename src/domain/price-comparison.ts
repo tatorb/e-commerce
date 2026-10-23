@@ -1,6 +1,6 @@
 import { offerPrices, type CompetitorOffer } from './competitors';
 import { formatPercent, formatPrice } from './money';
-import { finalPriceOf, isInstallmentPlan, installmentCostPct, marginOf, type InstallmentPlan, type PricingParams } from './pricing';
+import { finalPriceOf, fixedInstallments, isInstallmentPlan, installmentCostPct, marginOf, type InstallmentPlan, type PricingParams } from './pricing';
 
 // Mi precio frente al de la competencia que se cargó en el paso Información.
 // Se compara el precio efectivo, lo que paga el comprador en total: el mío va
@@ -68,7 +68,7 @@ export function compare(args: {
     freeShipping: true,
     finalPrice: myFinal,
     effectivePrice: myFinal,
-    installmentValue: mine.plan > 0 ? myFinal / mine.plan : null,
+    installmentValue: fixedInstallments(mine.plan) ? myFinal / mine.plan : null,
     diffPct: null,
   };
   const others: ComparedRow[] = args.competitors.map((c) => {
