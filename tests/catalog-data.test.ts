@@ -56,8 +56,12 @@ describe('categorías de Mercado Libre', () => {
       const c = mercadolibreCatalog.category(id)!;
       const ids = c.fields.map((f) => f.id);
       expect(ids).toEqual(expect.arrayContaining(['BRAND', 'PART_NUMBER']));
-      for (const hidden of ['VALUE_ADDED_TAX', 'IMPORT_DUTY', 'ITEM_CONDITION', 'VEHICLE_TYPE', 'GTIN', 'SELLER_SKU', 'PACKAGE_WEIGHT']) {
+      for (const hidden of ['ITEM_CONDITION', 'VEHICLE_TYPE', 'GTIN', 'SELLER_SKU', 'PACKAGE_WEIGHT']) {
         expect(ids, `${c.name} ${hidden}`).not.toContain(hidden);
+      }
+      // Los impuestos los pide Mercado Libre y suelen ser los mismos en toda la tienda.
+      for (const tax of ['VALUE_ADDED_TAX', 'IMPORT_DUTY']) {
+        expect(c.fields.find((f) => f.id === tax), `${c.name} ${tax}`).toMatchObject({ type: 'list', required: true, sameInStore: true });
       }
       expect(c.fields.find((f) => f.id === 'BRAND')?.fromProduct).toBe('brand');
       expect(new Set(c.fields.map((f) => f.label.toLowerCase())).size, c.name).toBe(c.fields.length);

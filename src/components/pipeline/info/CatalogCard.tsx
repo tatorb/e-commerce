@@ -130,6 +130,7 @@ export function CatalogCard({
             key={`${category.id}:${JSON.stringify(data.values)}`}
             fields={data.fields}
             saved={data.values}
+            fromStore={data.fromStore}
             pending={action.pending}
             onDirty={(d) => {
               setDirty(d);
@@ -162,12 +163,14 @@ export function CatalogCard({
 function CatalogFields({
   fields,
   saved,
+  fromStore,
   pending,
   onDirty,
   onSave,
 }: {
   fields: CatalogField[];
   saved: Record<string, string>;
+  fromStore: CatalogData['fromStore'];
   pending: boolean;
   onDirty: (dirty: boolean) => void;
   onSave: (values: Record<string, string>) => void;
@@ -202,6 +205,7 @@ function CatalogFields({
             field={f}
             value={draft.values[f.id] ?? ''}
             unit={draft.units[f.id] ?? ''}
+            fallback={fromStore[f.id] ?? null}
             disabled={pending}
             onChange={(v) => set('values', f.id, v)}
             onUnit={(u) => set('units', f.id, u)}
@@ -224,6 +228,7 @@ function FieldInput({
   field,
   value,
   unit,
+  fallback,
   disabled,
   onChange,
   onUnit,
@@ -231,6 +236,8 @@ function FieldInput({
   field: CatalogField;
   value: string;
   unit: string;
+  // Lo que va si queda vacío: lo que tiene la mayoría de las publicaciones de la tienda.
+  fallback: CatalogData['fromStore'][string] | null;
   disabled: boolean;
   onChange: (value: string) => void;
   onUnit: (unit: string) => void;
@@ -242,6 +249,14 @@ function FieldInput({
       {field.required ? <span className="ml-1 text-xs font-normal text-muted-foreground">obligatorio</span> : null}
     </Label>
   );
+
+  const hint =
+    fallback && !value.trim() ? (
+      <p className="text-xs text-muted-foreground">
+        Si queda vacío, va «{fallback.value}», como en {fallback.count === fallback.total ? 'todas las' : `${fallback.count} de ${fallback.total}`}{' '}
+        publicaciones de la tienda.
+      </p>
+    ) : null;
 
   if (field.type === 'list' || field.type === 'boolean') {
     const options: readonly string[] = field.type === 'boolean' ? BOOLEAN_OPTIONS : (field.options ?? []);
@@ -258,6 +273,7 @@ function FieldInput({
             </option>
           ))}
         </select>
+        {hint}
       </div>
     );
   }

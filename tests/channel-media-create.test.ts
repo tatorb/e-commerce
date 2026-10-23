@@ -23,6 +23,7 @@ import { runSyncStep, startSync } from '@/lib/channel-sync';
 import { encrypt } from '@/lib/crypto';
 import { loadMediaSources, measuresOf, MediaError, saveMedia } from '@/lib/media';
 import { saveQuestions } from '@/lib/buyer-questions';
+import { loadCatalogData, saveCatalogData } from '@/lib/catalog-data';
 import { resetVisitsTogether } from '@/channels/mercadolibre/listings';
 
 // Las fotos de cada publicación y crear publicaciones nuevas en el canal,
@@ -360,6 +361,14 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     return edit.id;
   }
 
+  // Otra publicación de la tienda, con los impuestos como los leyó el canal.
+  async function taxesInStore(iva = '21 %') {
+    const other = await db.publication.create({ data: { productId, storeId, title: 'Otra de la tienda' } });
+    await db.channelCopy.create({
+      data: { publicationId: other.id, readAt: new Date(), status: 'ACTIVE', attributes: [{ name: 'IVA', value: iva }, { name: 'Impuesto interno', value: '0 %' }] },
+    });
+  }
+
   async function readAll() {
     const run = (await startSync(db, { storeId, trigger: 'MANUAL' }))!;
     await runSyncStep(db, run.id, { budgetMs: 30_000 });
@@ -695,7 +704,26 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     expect(info.checks.find((c) => c.label === 'Descripción')).toMatchObject({ ok: false, blocking: false });
     await saveMedia(db, { accountId, publicationId: pub.id, refs: [{ kind: 'asset', url: 'https://otra/foto.jpg' }] });
     info = await createChecks(db, { accountId, publicationId: pub.id });
+    // Los impuestos: sin cargar y sin otras publicaciones en la tienda, faltan.
+    expect(info.ready).toBe(false);
+    expect(info.checks.find((c) => c.label === 'Datos obligatorios')).toMatchObject({ ok: false, detail: 'Faltan IVA y Impuesto interno.' });
+    // Van los que tiene la mayoría de las publicaciones de la tienda.
+    await taxesInStore();
+    await taxesInStore();
+    await taxesInStore('10.5 %');
+    info = await createChecks(db, { accountId, publicationId: pub.id });
     expect(info.ready).toBe(true);
+    expect(info.checks.find((c) => c.label === 'Datos obligatorios')).toMatchObject({
+      ok: true,
+      detail: 'Están todos. IVA 21 % y Impuesto interno 0 % van como en la mayoría de las publicaciones de la tienda; se cambian en Datos de catálogo.',
+    });
+    expect((await loadCatalogData(db, pub.id))!.fromStore).toEqual({
+      VALUE_ADDED_TAX: { value: '21 %', count: 2, total: 3 },
+      IMPORT_DUTY: { value: '0 %', count: 3, total: 3 },
+    });
+    // Lo cargado en la publicación manda.
+    await saveCatalogData(db, { publicationId: pub.id, values: { VALUE_ADDED_TAX: '10.5 %' } });
+    expect((await loadCatalogData(db, pub.id))!.fromStore).toEqual({ IMPORT_DUTY: { value: '0 %', count: 3, total: 3 } });
     expect(info.listingTypes.map((t) => t.value)).toEqual(['clasica', 'premium']);
 
     expect(info.measures).toEqual([]);
@@ -741,6 +769,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     });
     const std = 'sku:SP-413 medida:std';
     const half = 'sku:SP-413 medida:0.50';
+    await taxesInStore();
     const pub = await db.publication.create({ data: { productId, storeId, title: 'Subconjunto Peugeot 1.6 SP-413', channelStatus: 'UNPUBLISHED' } });
     const general = await correctedPhoto('general.jpg');
     const box = await correctedPhoto('caja-050.jpg');
@@ -813,6 +842,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     });
     const editId = await correctedPhoto('frente.jpg');
     await saveMedia(db, { accountId, publicationId: pub.id, refs: [{ kind: 'edit', editId }, { kind: 'asset', url: 'https://otra/foto.jpg' }] });
+    await taxesInStore();
 
     const created = await createInChannel(db, { accountId, publicationId: pub.id, price: 45000, quantity: 3, listingType: 'premium', userId: null });
     expect(created).toEqual({ externalId: 'MLA900', url: 'https://articulo.mercadolibre.com.ar/MLA-900', warnings: [], confirmed: true });
@@ -831,10 +861,18 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
         { id: 'WARRANTY_TIME', value_name: '6 meses' },
       ],
     });
+    // Los impuestos van como en la tienda y quedan en la publicación.
     expect(post.attributes).toEqual([
       { id: 'BRAND', value_name: 'Sachs' },
       { id: 'PART_NUMBER', value_name: 'PD-1' },
       { id: 'CLUTCH_TYPE', value_name: 'Monodisco' },
+      { id: 'VALUE_ADDED_TAX', value_name: '21 %' },
+      { id: 'IMPORT_DUTY', value_name: '0 %' },
+    ]);
+    expect((await db.publication.findUniqueOrThrow({ where: { id: pub.id } })).attributes).toEqual([
+      { name: 'Tipo de embrague', value: 'Monodisco' },
+      { name: 'IVA', value: '21 %' },
+      { name: 'Impuesto interno', value: '0 %' },
     ]);
     expect(descriptions.MLA900).toBe('Kit completo con disco y placa.');
 
@@ -850,6 +888,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
   it('si el canal no la acepta, no queda nada a medias y se ve el motivo', async () => {
     const pub = await db.publication.create({ data: { productId, storeId, title: 'Kit Embrague RECHAZAR', channelStatus: 'UNPUBLISHED' } });
     await saveMedia(db, { accountId, publicationId: pub.id, refs: [{ kind: 'asset', url: 'https://otra/foto.jpg' }] });
+    await taxesInStore();
     const attempt = createInChannel(db, { accountId, publicationId: pub.id, price: 1, quantity: 1, listingType: 'clasica', userId: null });
     await expect(attempt).rejects.toThrow(CreateError);
     await expect(createInChannel(db, { accountId, publicationId: pub.id, price: 1, quantity: 1, listingType: 'clasica', userId: null })).rejects.toThrow(
@@ -869,6 +908,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
 
     beforeEach(async () => {
       separate = true;
+      await taxesInStore();
       await db.productVariant.createMany({
         data: [
           { productId, sku: 'SP-413', measure: 'STD', position: 0 },

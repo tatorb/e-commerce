@@ -14,8 +14,9 @@ type Db = PrismaClient | Prisma.TransactionClient;
 export async function variantListingOwners(db: Db, storeId: string): Promise<Map<string, string>> {
   const rows = await db.$queryRaw<{ id: string; externalId: string }[]>`
     SELECT p.id, m->>'externalId' AS "externalId"
-    FROM publications p, jsonb_array_elements(p."variantListings") m
-    WHERE p."storeId" = ${storeId} AND jsonb_typeof(p."variantListings") = 'array' AND m->>'externalId' IS NOT NULL`;
+    FROM publications p,
+    jsonb_array_elements(CASE WHEN jsonb_typeof(p."variantListings") = 'array' THEN p."variantListings" ELSE '[]'::jsonb END) m
+    WHERE p."storeId" = ${storeId} AND m->>'externalId' IS NOT NULL`;
   return new Map(rows.map((r) => [r.externalId, r.id]));
 }
 

@@ -24,6 +24,16 @@ describe('por qué Mercado Libre no aceptó un cambio', () => {
     expect(rejectionMessage(400, { cause: [{ code: 'item.variations.attribute_combinations.invalid', message: 'Medida no válida' }] })).toBe(
       'Mercado Libre no aceptó las medidas: Medida no válida',
     );
+    expect(
+      rejectionMessage(400, {
+        cause: [
+          {
+            code: 'item.attributes.missing_required',
+            message: "The attributes [VALUE_ADDED_TAX,IMPORT_DUTY] are required for category [MLA373289]. Check the attribute is present in the attributes list or in all variation's attributes_combination or attributes",
+          },
+        ],
+      }),
+    ).toMatch(/^Mercado Libre pide datos de catálogo que faltan: The attributes \[VALUE_ADDED_TAX,IMPORT_DUTY\]/);
     expect(rejectionMessage(400, { message: 'Algo raro' })).toBe('Mercado Libre no lo aceptó: Algo raro');
     expect(rejectionMessage(500, null)).toBe('Mercado Libre no lo aceptó (código 500).');
   });

@@ -3,9 +3,10 @@ import { Prisma } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
 import { ConnectError } from '@/channels/connect';
 import { getChannelPublisher, PublishError, type ChannelAttributeUpdate, type ChannelNewVariant } from '@/channels/publish';
-import { normalizeText } from '@/domain/catalog-data';
+import { mergeCatalogAttributes, normalizeText } from '@/domain/catalog-data';
 import { faceValues, fingerprint, fingerprintsOf } from '@/domain/channel-sync';
 import { channelPhotos, measureText, parseMedia, variantKey, type PhotoRef } from '@/domain/media';
+import { parseNameValueList } from '@/domain/name-value';
 import { checkTitle } from '@/domain/titles';
 import { loadCatalogData } from '@/lib/catalog-data';
 import { readOne } from '@/lib/channel-sync';
@@ -117,13 +118,18 @@ export async function createChecks(db: Db, args: { accountId: string; publicatio
   });
   const missing = [
     ...(catalog?.fromProduct.filter((f) => f.field.required && !f.value).map((f) => `${f.field.label} (de la ficha)`) ?? []),
-    ...(catalog?.fields.filter((f) => f.required && !catalog.values[f.id]).map((f) => f.label) ?? []),
+    ...(catalog?.fields.filter((f) => f.required && !catalog.values[f.id] && !catalog.fromStore[f.id]).map((f) => f.label) ?? []),
   ];
+  // Los que la publicación no tiene y van como en la mayoría de la tienda, por ejemplo los impuestos.
+  const fromStore = (catalog?.fields ?? []).flatMap((f) => (!catalog!.values[f.id] && catalog!.fromStore[f.id] ? [`${f.label} ${catalog!.fromStore[f.id].value}`] : []));
   if (category) {
     checks.push({
       label: 'Datos obligatorios',
       ok: missing.length === 0,
-      detail: missing.length === 0 ? 'Están todos.' : `Faltan ${names(missing)}.`,
+      detail: [
+        missing.length === 0 ? 'Están todos.' : `Faltan ${names(missing)}.`,
+        ...(fromStore.length > 0 ? [`${names(fromStore)} van como en la mayoría de las publicaciones de la tienda; se cambian en Datos de catálogo.`] : []),
+      ].join(' '),
       blocking: true,
     });
   }
@@ -217,11 +223,15 @@ async function create(db: Db, args: CreateArgs, info: CreateInfo): Promise<Creat
   const category = catalog.category!;
 
   // Los datos de catálogo de la categoría y los que salen de la ficha, con el código de cada campo.
+  // Lo que la publicación no tiene y suele ser igual en toda la tienda va como en la mayoría, y queda en la publicación.
+  const fromStore = Object.fromEntries(catalog.fields.flatMap((f) => (!catalog.values[f.id] && catalog.fromStore[f.id] ? [[f.id, catalog.fromStore[f.id].value]] : [])));
+  const values: Record<string, string> = { ...catalog.values, ...fromStore };
   const attributes: ChannelAttributeUpdate[] = [
     ...catalog.fromProduct.filter((f) => f.value).map((f) => ({ id: f.field.id, value: f.value!, multiple: false })),
-    ...catalog.fields.filter((f) => catalog.values[f.id]).map((f) => ({ id: f.id, value: catalog.values[f.id], multiple: Boolean(f.multiple) })),
+    ...catalog.fields.filter((f) => values[f.id]).map((f) => ({ id: f.id, value: values[f.id], multiple: Boolean(f.multiple) })),
   ];
-  const app = faceValues(p);
+  const ownAttributes = Object.keys(fromStore).length > 0 ? mergeCatalogAttributes(parseNameValueList(p.attributes), catalog.fields, fromStore) : null;
+  const app = faceValues(ownAttributes ? { ...p, attributes: ownAttributes } : p);
   const known = new Set(catalog.fields.map((f) => normalizeText(f.label)));
   const left = app.attributes.filter((a) => !known.has(normalizeText(a.name))).map((a) => `«${a.name}»`);
   const warnings: string[] = left.length > 0 ? [`No se mandaron ${names(left)}: no son campos de la categoría.`] : [];
@@ -270,7 +280,7 @@ async function create(db: Db, args: CreateArgs, info: CreateInfo): Promise<Creat
   // La cara del canal, con lo que se mandó: la lectura de confirmación trae lo que guardó el canal.
   const ids = created.pictureIds && created.pictureIds.length === pictures.length ? created.pictureIds : [];
   const sentAttributes = [
-    ...catalog.fields.filter((f) => catalog.values[f.id]).map((f) => ({ name: f.label, value: catalog.values[f.id] })),
+    ...catalog.fields.filter((f) => values[f.id]).map((f) => ({ name: f.label, value: values[f.id] })),
   ];
   const channelPrints = {
     ...fingerprintsOf({ ...app, description: descriptionSent ? app.description : null, attributes: sentAttributes, photos: null }),
@@ -285,6 +295,7 @@ async function create(db: Db, args: CreateArgs, info: CreateInfo): Promise<Creat
         channelStatus: 'ACTIVE',
         price: args.price,
         media: Prisma.DbNull,
+        ...(ownAttributes ? { attributes: ownAttributes } : {}),
         // Si el canal guardó cada medida como una publicación aparte, la app las sigue juntas.
         variantListings: family.map((v) => ({ externalId: v.externalId, sku: v.sku, measure: v.measure })),
       },

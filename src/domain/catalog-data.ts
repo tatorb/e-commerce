@@ -24,6 +24,11 @@ export type CatalogField = {
   required?: boolean;
   /** Sale de la ficha: se muestra y no se carga dos veces. */
   fromProduct?: ProductSourceField;
+  /**
+   * Suele ser el mismo en toda la tienda, como los impuestos: si la
+   * publicación no lo tiene, va el de la mayoría de las publicaciones de la tienda.
+   */
+  sameInStore?: boolean;
 };
 
 export type CatalogCategory = { id: string; name: string; fields: CatalogField[] };

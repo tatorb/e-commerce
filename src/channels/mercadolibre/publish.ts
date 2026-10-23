@@ -19,7 +19,8 @@ const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.i
 
 // Los motivos que más aparecen, por el código que manda Mercado Libre.
 const KNOWN: [RegExp, string][] = [
-  [/variation/i, 'Mercado Libre no aceptó las medidas.'],
+  [/attributes? \[[^\]]*\] (is|are) required|missing_required/i, 'Mercado Libre pide datos de catálogo que faltan.'],
+  [/item\.variations|field variations/i, 'Mercado Libre no aceptó las medidas.'],
   [/attribute/i, 'Mercado Libre no aceptó un dato de catálogo.'],
   [/title.*not_modifiable|title.*modif/i, 'Mercado Libre no deja cambiar el título de una publicación con ventas.'],
   [/title.*(length|max|long)/i, 'El título es más largo de lo que acepta la categoría en Mercado Libre.'],
