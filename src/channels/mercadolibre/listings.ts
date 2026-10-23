@@ -2,6 +2,7 @@ import type { ChannelStatus } from '@/generated/prisma/enums';
 import { BULK_MAX, MercadoLibreRequestError, mlGet, readItems } from './http';
 import { mercadolibreCatalog } from './catalog';
 import type { ChannelListing, ChannelListings, ListingStatus } from '../listings-types';
+import { LOW_INTEREST_PLAN } from '@/domain/pricing';
 
 // Leer las publicaciones propias de la cuenta conectada. Solo lo público de
 // cada publicación: no se leen órdenes, compradores ni mensajes.
@@ -20,6 +21,8 @@ const ITEM_FIELDS = [
   'title',
   'price',
   'original_price',
+  'listing_type_id',
+  'tags',
   'status',
   'sub_status',
   'permalink',
@@ -91,6 +94,37 @@ function listPriceOf(item: Obj): number | null {
   return original !== null && price !== null && original > price ? original : price;
 }
 
+// Las cuotas salen del tipo de publicación y de sus etiquetas. La Clásica no
+// tiene, salvo la cuota promocionada, con interés bajo. La Premium tiene 6 sin
+// interés, o 3, 9 o 12 con la etiqueta de su campaña.
+export const PREMIUM = 'gold_pro';
+export const CLASSIC = 'gold_special';
+export const LOW_INTEREST_TAG = 'pcj-co-funded';
+export const CAMPAIGN_TAG: Partial<Record<number, string>> = { 3: '3x_campaign', 9: '9x_campaign', 12: '12x_campaign' };
+export const INSTALLMENT_TAGS = [LOW_INTEREST_TAG, ...Object.values(CAMPAIGN_TAG)] as string[];
+
+export const tagsOf = (item: Obj): string[] => arr(item.tags).filter((t): t is string => typeof t === 'string');
+
+/** Las cuotas de la publicación: 0 sin cuotas, 1 la cuota promocionada, o 3, 6, 9 o 12. */
+export function installmentsOf(item: Obj): number | null {
+  const type = str(item.listing_type_id);
+  if (!type) return null;
+  const tags = tagsOf(item);
+  if (type === PREMIUM || type === 'gold_premium') {
+    const campaign = Object.entries(CAMPAIGN_TAG).find(([, tag]) => tags.includes(tag!));
+    return campaign ? Number(campaign[0]) : 6;
+  }
+  return tags.includes(LOW_INTEREST_TAG) ? LOW_INTEREST_PLAN : 0;
+}
+
+/** El descuento que ve el comprador, en %: con uno activo, el precio de antes queda en original_price. */
+function discountOf(item: Obj): number | null {
+  const price = num(item.price);
+  const original = num(item.original_price);
+  if (price === null) return null;
+  return original !== null && original > price ? Math.round((1 - price / original) * 10_000) / 100 : 0;
+}
+
 /** Una publicación de Mercado Libre en el formato neutro. Sin la descripción ni las visitas, que se piden aparte. */
 export function parseItem(item: Obj): ChannelListing {
   const attributes: ChannelListing['attributes'] = [];
@@ -136,6 +170,8 @@ export function parseItem(item: Obj): ChannelListing {
     title: str(item.title),
     description: null,
     price: listPriceOf(item),
+    installments: installmentsOf(item),
+    discount: discountOf(item),
     status: statusOf(item.status, item.sub_status),
     sold: num(item.sold_quantity),
     visits90d: null,

@@ -86,6 +86,8 @@ describe('el antes y el después', () => {
     });
     expect(changeSides('photos', channel, null).after).toBe('Las del canal');
     expect(changeSides('publication', null, { externalId: 'MLA9' })).toEqual({ before: '', after: 'MLA9' });
+    expect(changeSides('installments', '0', '3')).toEqual({ before: 'Sin cuotas', after: '3 cuotas' });
+    expect(changeSides('discount', '0', '27.3')).toEqual({ before: 'Sin descuento', after: '27,3 %' });
     // Republicar: el código anterior y el nuevo. El estado, con su nombre.
     expect(changeSides('publication', { externalId: 'MLA1' }, { externalId: 'MLA9' })).toEqual({ before: 'MLA1', after: 'MLA9' });
     expect(changeSides('status', 'ACTIVE', 'PAUSED')).toEqual({ before: 'Activa', after: 'Pausada' });
@@ -137,6 +139,9 @@ describe('el antes y el después', () => {
     ]);
     expect(rows[2]).toEqual(['2026-10-21 10:17', 'Lectura que no terminó', '', '', 'TIENDA', 'Leyó 20 de 40, con cambios en 1.', 'Automático', 'Mercado Libre no respondió.', '', '']);
     expect(personOf({ ...change, user: null, kind: 'TAKEN' })).toBe('Automático');
+    expect(personOf({ ...change, user: null, kind: 'RENEWED' })).toBe('Automático');
+    expect(personOf({ ...change, user: null, kind: 'REJECTED', message: 'Al renovarlo solo: no' })).toBe('Automático');
+    expect(personOf({ ...change, user: null, kind: 'SENT' })).toBe('Alguien del equipo');
   });
 });
 

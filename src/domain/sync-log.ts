@@ -1,9 +1,8 @@
 import Papa from 'papaparse';
 import type { ChannelStatus, SyncChangeKind, SyncStatus, SyncTrigger } from '@/generated/prisma/enums';
 import { CHANNEL_STATUS_LABEL } from './channel-status';
-import { attributeDiff, FACE_FIELD_LABEL, isFaceField, SYNC_CHANGE_LABEL } from './channel-sync';
+import { attributeDiff, FACE_FIELD_LABEL, isFaceField, priceFaceText, RENEWAL_FAILED, SYNC_CHANGE_LABEL } from './channel-sync';
 import { parseMedia, photoVariants, type PhotoRef } from './media';
-import { formatPrice } from './money';
 import { parseNameValueList, type NameValue } from './name-value';
 
 // El Registro: todo lo que pasó entre la app y el canal, publicación por
@@ -23,7 +22,7 @@ export type LogSearch = {
 
 export const LOG_TYPES = [
   { value: 'bajadas', label: 'Llegó del canal', kinds: ['TAKEN'] },
-  { value: 'subidas', label: 'Se subió', kinds: ['SENT'] },
+  { value: 'subidas', label: 'Se subió', kinds: ['SENT', 'RENEWED'] },
   { value: 'creadas', label: 'Se creó en el canal', kinds: ['CREATED'] },
   { value: 'respuestas', label: 'Respuestas a preguntas', kinds: ['ANSWERED'] },
   { value: 'estados', label: 'Cambios de estado', kinds: ['STATUS_CHANGED', 'RELISTED'] },
@@ -164,6 +163,7 @@ export const SIDE_LABELS: Record<SyncChangeKind, [string, string]> = {
   STATUS_CHANGED: ['Estaba', 'Quedó'],
   STATUS_FAILED: ['Estaba', 'Se quiso'],
   RELISTED: ['Código anterior', 'Código nuevo'],
+  RENEWED: ['Estaba en el canal', 'Se volvió a subir'],
 };
 
 function photoSummary(refs: PhotoRef[]): string {
@@ -205,9 +205,9 @@ export function changeSides(field: string, before: unknown, after: unknown): { b
     const code = (v: unknown) => (v && typeof v === 'object' && 'externalId' in v ? String((v as { externalId: unknown }).externalId) : '');
     return { before: code(before), after: code(after) };
   }
-  if (field === 'price') {
-    const money = (v: unknown) => (typeof v === 'string' || typeof v === 'number' ? formatPrice(v) : '');
-    return { before: money(before), after: money(after) };
+  if (field === 'price' || field === 'installments' || field === 'discount') {
+    const label = (v: unknown) => (typeof v === 'string' || typeof v === 'number' ? priceFaceText(field, v) : '');
+    return { before: label(before), after: label(after) };
   }
   if (field === 'status') {
     const label = (v: unknown) => (typeof v === 'string' && v in CHANNEL_STATUS_LABEL ? CHANNEL_STATUS_LABEL[v as ChannelStatus] : '');
@@ -268,7 +268,9 @@ export function readSummary(r: LogRead): string {
 export function personOf(e: LogEntry): string {
   if (e.user) return e.user;
   if (e.type === 'read') return e.trigger === 'SCHEDULE' ? 'Automático' : 'Alguien del equipo';
-  return e.kind === 'TAKEN' ? 'Automático' : 'Alguien del equipo';
+  // Lo que llegó del canal y el descuento que la app renovó sola.
+  const automatic = e.kind === 'TAKEN' || e.kind === 'RENEWED' || (e.kind === 'REJECTED' && e.message?.startsWith(RENEWAL_FAILED));
+  return automatic ? 'Automático' : 'Alguien del equipo';
 }
 
 // ───────────────────────────── Planilla ─────────────────────────────

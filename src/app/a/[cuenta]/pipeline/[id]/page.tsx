@@ -329,7 +329,8 @@ export default async function PipelineStepPage({
             <PriceDecisionCard
               decision={decision}
               channelName={pub.channelName}
-              channelPrice={faces?.channel?.price ? Number(faces.channel.price) : null}
+              sides={faces ? { app: faces.app, channel: faces.channel, states: faces.states, rejected: faces.summary.rejected } : null}
+              discountUntil={faces?.copy?.discountUntil ?? null}
               published={Boolean(pub.externalId)}
               priceHref={`${pageHref}?paso=${PIPELINE_STEP_SLUG.PRICE}`}
               timeZone={account.timezone}

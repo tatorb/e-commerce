@@ -5,7 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@/generated/prisma/client';
 import { rejectionMessage } from '@/channels/mercadolibre/publish';
 import { faceSummary, faceValues, fingerprintsOf } from '@/domain/channel-sync';
-import { DraftError, pushDrafts, PushError, saveDraft } from '@/lib/channel-push';
+import { DraftError, pushDrafts, PushError, renewDiscounts, saveDraft } from '@/lib/channel-push';
 import { discardDrafts, readOne, runSyncStep, startSync } from '@/lib/channel-sync';
 import { encrypt } from '@/lib/crypto';
 import { savePriceDecision } from '@/lib/pricing';
@@ -58,6 +58,14 @@ type Item = {
   category_id?: string;
   price?: number;
   variations?: { id: number; price: number }[];
+  listing_type_id?: string;
+  tags?: string[];
+  // El descuento puesto: el precio con descuento.
+  deal?: { price: number; finish: string } | null;
+  // El canal acepta el descuento pero todavía no lo muestra.
+  dealLater?: boolean;
+  // El canal no acepta descuentos: el motivo.
+  dealRejected?: string;
 };
 
 describe.skipIf(!url)('subir al canal en la base', () => {
@@ -78,10 +86,13 @@ describe.skipIf(!url)('subir al canal en la base', () => {
       let raw = '';
       for await (const chunk of req) raw += chunk;
       const body = raw ? JSON.parse(raw) : null;
-      if (req.method === 'PUT' || req.method === 'POST') writes.push({ method: req.method, path: u.pathname, body });
+      if (req.method === 'PUT' || req.method === 'POST' || req.method === 'DELETE') writes.push({ method: req.method, path: u.pathname, body });
 
       const item = u.pathname.match(/^\/items\/(\w+)$/);
-      if (item && req.method === 'GET' && items[item[1]]) return json(200, { id: item[1], variations: items[item[1]].variations ?? [] });
+      if (item && req.method === 'GET' && items[item[1]]) {
+        const it = items[item[1]];
+        return json(200, { id: item[1], variations: it.variations ?? [], listing_type_id: it.listing_type_id ?? 'gold_special', tags: it.tags ?? [] });
+      }
       if (item && req.method === 'PUT') {
         const it = items[item[1]];
         if (!it) return json(404, {});
@@ -93,7 +104,13 @@ describe.skipIf(!url)('subir al canal en la base', () => {
             if (mine) mine.price = v.price;
           }
           it.price = it.variations?.[0]?.price ?? it.price;
+          // Al cambiar el precio, Mercado Libre saca el descuento.
+          it.deal = null;
           it.last_updated = new Date().toISOString();
+          return json(200, { id: item[1] });
+        }
+        if (body.tags) {
+          it.tags = body.tags;
           return json(200, { id: item[1] });
         }
         if (body.attributes) {
@@ -114,6 +131,26 @@ describe.skipIf(!url)('subir al canal en la base', () => {
         it.title = String(body.title).replace('Sachs', 'SACHS');
         it.last_updated = new Date().toISOString();
         return json(200, { id: item[1] });
+      }
+      const type = u.pathname.match(/^\/items\/(\w+)\/listing_type$/);
+      if (type && req.method === 'POST') {
+        items[type[1]].listing_type_id = body.id;
+        return json(200, {});
+      }
+      const promo = u.pathname.match(/^\/seller-promotions\/items\/(\w+)$/);
+      if (promo) {
+        const it = items[promo[1]];
+        if (!it) return json(404, {});
+        if (req.method === 'GET') return json(200, it.deal ? [{ id: 'P1', type: 'PRICE_DISCOUNT', status: 'started' }] : []);
+        if (req.method === 'DELETE') {
+          it.deal = null;
+          return json(200, {});
+        }
+        if (it.dealRejected) return json(400, { message: it.dealRejected, cause: [] });
+        if (it.deal) return json(400, { message: 'Item already has a PRICE_DISCOUNT' });
+        if (!(body.deal_price < (it.price ?? 100))) return json(400, { message: 'deal_price must be lower than price' });
+        if (!it.dealLater) it.deal = { price: body.deal_price, finish: body.finish_date };
+        return json(201, {});
       }
       const desc = u.pathname.match(/^\/items\/(\w+)\/description$/);
       if (desc && req.method === 'PUT') {
@@ -144,7 +181,10 @@ describe.skipIf(!url)('subir al canal en la base', () => {
                 seller_id: 7,
                 title: it.title,
                 status: 'active',
-                price: it.price ?? 100,
+                price: it.deal?.price ?? it.price ?? 100,
+                original_price: it.deal ? (it.price ?? 100) : null,
+                listing_type_id: it.listing_type_id ?? 'gold_special',
+                tags: it.tags ?? [],
                 sold_quantity: it.sold,
                 last_updated: it.last_updated,
                 category_id: it.category_id ?? 'MLA999',
@@ -412,18 +452,19 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     expect(Number((await pub('MLA1')).price)).toBe(100);
     const p = await pub('MLA1');
     // Una copia leída antes de que el precio se comparara: sin su huella.
-    const strip = (raw: unknown) => Object.fromEntries(Object.entries(raw as Record<string, string>).filter(([k]) => k !== 'price'));
+    const strip = (raw: unknown) => Object.fromEntries(Object.entries(raw as Record<string, string>).filter(([k]) => !['price', 'installments', 'discount'].includes(k)));
     await db.channelCopy.update({ where: { publicationId: p.id }, data: { fingerprints: strip(p.channelCopy!.fingerprints), agreed: strip(p.channelCopy!.agreed) } });
     expect(await state('MLA1')).toEqual({ draft: [], choose: [], rejected: [] });
   });
 
   it('el precio decidido queda para subir y se sube; con medidas, en cada una', async () => {
     const p = await pub('MLA1');
-    const saved = await decide(p.id, 260_000, { discountPct: 10, plan: 3 });
-    expect(saved.simulation.finalPrice).toBe(234_000);
+    const saved = await decide(p.id, 260_000);
+    expect(saved.simulation.finalPrice).toBe(260_000);
     expect(Number((await pub('MLA1')).price)).toBe(260_000);
+    // Sin cuotas ni descuento, como ya estaba en el canal: solo cambia el precio.
     expect((await state('MLA1')).draft).toEqual(['price']);
-    expect(await db.priceDecision.findFirst({ where: { publicationId: p.id } })).toMatchObject({ installments: 3, belowMinConfirmed: false });
+    expect(await db.priceDecision.findFirst({ where: { publicationId: p.id } })).toMatchObject({ installments: 0, belowMinConfirmed: false });
     expect(Number((await db.product.findUniqueOrThrow({ where: { id: productId } })).replacementCost)).toBe(100_000);
 
     const result = await pushDrafts(db, { accountId, publicationId: p.id, userId: null });
@@ -442,6 +483,129 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     writes.length = 0;
     expect((await pushDrafts(db, { accountId, publicationId: p2.id, userId: null })).sent).toEqual(['price']);
     expect(writes.map((w) => w.body)).toEqual([{ variations: [{ id: 11, price: 260_000 }, { id: 12, price: 260_000 }] }]);
+  });
+
+  // ───────────────────────────── Cuotas y descuento ─────────────────────────────
+
+  const promoWrites = () => writes.filter((w) => w.path.startsWith('/seller-promotions')).map((w) => `${w.method} ${(w.body as { deal_price?: number } | null)?.deal_price ?? ''}`.trim());
+
+  /** Decide 260.000 con 3 cuotas y 10 % de descuento, y lo sube. */
+  async function uploadDiscount() {
+    const p = await pub('MLA1');
+    await decide(p.id, 260_000, { discountPct: 10, plan: 3 });
+    const result = await pushDrafts(db, { accountId, publicationId: p.id, userId: null });
+    writes.length = 0;
+    return { p, result };
+  }
+
+  it('las cuotas y el descuento decididos quedan para subir y se suben después del precio', async () => {
+    const p = await pub('MLA1');
+    // Lo que se leyó del canal: Clásica, sin cuotas ni descuento.
+    expect(p).toMatchObject({ installments: 0 });
+    expect(Number(p.discount)).toBe(0);
+    await decide(p.id, 260_000, { discountPct: 10, plan: 3 });
+    expect((await state('MLA1')).draft).toEqual(['price', 'installments', 'discount']);
+
+    const started = Date.now();
+    const result = await pushDrafts(db, { accountId, publicationId: p.id, userId: null });
+    expect(result).toEqual({ sent: ['price', 'installments', 'discount'], rejected: [], confirmed: true });
+    expect(writes.map((w) => `${w.method} ${w.path}`)).toEqual([
+      'PUT /items/MLA1',
+      'POST /items/MLA1/listing_type',
+      'PUT /items/MLA1',
+      'POST /seller-promotions/items/MLA1',
+    ]);
+    expect(writes[1].body).toEqual({ id: 'gold_pro' });
+    expect(writes[2].body).toEqual({ tags: ['3x_campaign'] });
+    expect(writes[3].body).toMatchObject({ promotion_type: 'PRICE_DISCOUNT', deal_price: 234_000 });
+    // La lectura de confirmación ya ve las 3 cuotas y el descuento.
+    expect(await state('MLA1')).toEqual({ draft: [], choose: [], rejected: [] });
+    const after = await pub('MLA1');
+    expect(Number(after.channelCopy!.discount)).toBe(10);
+    expect(after.channelCopy!.installments).toBe(3);
+    // Dura unos 14 días, y queda anotado cuándo se subió.
+    const days = (after.channelCopy!.discountUntil!.getTime() - started) / 86_400_000;
+    expect(days).toBeGreaterThan(12.9);
+    expect(days).toBeLessThan(14.01);
+    expect(after.channelCopy!.discountSentAt).not.toBeNull();
+    const sent = await db.channelSyncChange.findMany({ where: { publicationId: p.id, kind: 'SENT' }, orderBy: { createdAt: 'asc' } });
+    expect(sent.map((c) => [c.field, c.after])).toEqual([
+      ['price', '260000'],
+      ['installments', '3'],
+      ['discount', '10'],
+    ]);
+  });
+
+  it('si cambia el precio, el descuento que ya estaba se vuelve a subir sobre el precio nuevo', async () => {
+    const { p } = await uploadDiscount();
+    await decide(p.id, 280_000, { discountPct: 10, plan: 3 });
+    expect((await state('MLA1')).draft).toEqual(['price']);
+    const result = await pushDrafts(db, { accountId, publicationId: p.id, userId: null });
+    expect(result.sent).toEqual(['price', 'discount']);
+    expect(promoWrites()).toEqual(['POST 252000']);
+    expect(await state('MLA1')).toEqual({ draft: [], choose: [], rejected: [] });
+  });
+
+  it('un descuento que el canal no acepta queda con su motivo, y uno fuera de lo que acepta no se guarda', async () => {
+    const p = await pub('MLA1');
+    await expect(decide(p.id, 260_000, { discountPct: 3 })).rejects.toThrow('Mercado Libre acepta descuentos de 5 a 80 %, o sin descuento.');
+    items.MLA1.dealRejected = 'The seller reputation is not green';
+    await decide(p.id, 260_000, { discountPct: 10 });
+    const result = await pushDrafts(db, { accountId, publicationId: p.id, userId: null });
+    expect(result.sent).toEqual(['price']);
+    expect(result.rejected).toEqual([{ field: 'discount', message: 'Mercado Libre no aceptó el descuento: The seller reputation is not green' }]);
+    expect((await state('MLA1')).rejected).toHaveLength(1);
+  });
+
+  it('antes de que venza, el descuento se renueva solo y queda en el Registro', async () => {
+    const { p } = await uploadDiscount();
+    const soon = new Date(Date.now() + 12 * 3600_000);
+    await db.channelCopy.update({ where: { publicationId: p.id }, data: { discountUntil: soon } });
+    expect(await renewDiscounts(db, { budgetMs: 10_000 })).toEqual({ renewed: 1, failed: 0, pending: false });
+    // El que estaba se saca y se vuelve a poner.
+    expect(promoWrites()).toEqual(['DELETE', 'POST 234000']);
+    const copy = (await pub('MLA1')).channelCopy!;
+    expect(copy.discountUntil!.getTime()).toBeGreaterThan(soon.getTime() + 10 * 86_400_000);
+    expect(await db.channelSyncChange.findFirst({ where: { publicationId: p.id, kind: 'RENEWED' } })).toMatchObject({ field: 'discount', before: '10', after: '10', userId: null });
+    // Lo que no está por vencer no se toca.
+    writes.length = 0;
+    expect(await renewDiscounts(db, { budgetMs: 10_000 })).toEqual({ renewed: 0, failed: 0, pending: false });
+    expect(writes).toEqual([]);
+  });
+
+  it('no se renueva solo un descuento que se cambió en la app después de subirlo', async () => {
+    const { p } = await uploadDiscount();
+    await decide(p.id, 260_000, { discountPct: 11, plan: 3 });
+    await db.channelCopy.update({ where: { publicationId: p.id }, data: { discountUntil: new Date(Date.now() + 3600_000) } });
+    expect(await renewDiscounts(db, { budgetMs: 10_000 })).toEqual({ renewed: 0, failed: 0, pending: false });
+    expect(writes).toEqual([]);
+    expect((await state('MLA1')).draft).toEqual(['discount']);
+  });
+
+  it('un descuento vencido no se pierde: queda para subir y se renueva solo', async () => {
+    const { p } = await uploadDiscount();
+    items.MLA1.deal = null;
+    await db.channelCopy.update({ where: { publicationId: p.id }, data: { discountUntil: new Date(Date.now() - 3600_000) } });
+    expect(await readOne(db, { accountId, publicationId: p.id })).not.toContain('discount');
+    expect(Number((await pub('MLA1')).discount)).toBe(10);
+    expect((await state('MLA1')).draft).toEqual(['discount']);
+    expect((await renewDiscounts(db, { budgetMs: 10_000 })).renewed).toBe(1);
+    expect(promoWrites()).toEqual(['POST 234000']);
+    expect(await state('MLA1')).toEqual({ draft: [], choose: [], rejected: [] });
+  });
+
+  it('recién subido, si el canal todavía no lo muestra se espera; si después lo sacan allá, la app lo toma', async () => {
+    items.MLA1.dealLater = true;
+    const { p, result } = await uploadDiscount();
+    expect(result.sent).toEqual(['price', 'installments', 'discount']);
+    expect(Number((await pub('MLA1')).discount)).toBe(10);
+    expect(await state('MLA1')).toEqual({ draft: [], choose: [], rejected: [] });
+    // Pasó más de una hora y el canal sigue sin descuento: alguien lo sacó allá.
+    await db.channelCopy.update({ where: { publicationId: p.id }, data: { discountSentAt: new Date(Date.now() - 2 * 3600_000) } });
+    expect(await readOne(db, { accountId, publicationId: p.id })).toContain('discount');
+    const after = await pub('MLA1');
+    expect(Number(after.discount)).toBe(0);
+    expect(after.channelCopy!.discountUntil).toBeNull();
   });
 
   it('debajo del margen mínimo hay que confirmarlo, y sin precio guardado no se avanza a Publicación', async () => {

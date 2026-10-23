@@ -75,6 +75,8 @@ async function load(db: Db, accountId: string, publicationId: string) {
       media: true,
       externalId: true,
       price: true,
+      installments: true,
+      discount: true,
       currency: true,
       product: { select: { id: true, warranty: true, variants: { select: { sku: true, measure: true }, orderBy: { position: 'asc' } } } },
       store: { select: { id: true, channel: { select: { id: true, kind: true, name: true } }, connection: { select: { status: true } } } },
@@ -286,6 +288,9 @@ async function create(db: Db, args: CreateArgs, info: CreateInfo): Promise<Creat
     ...fingerprintsOf({ ...app, description: descriptionSent ? app.description : null, attributes: sentAttributes, photos: null }),
     photos: fingerprint('photos', channelPhotos(ids.map(() => ''), ids, created.variations)),
     price: fingerprint('price', priceText(args.price)),
+    // Las cuotas y el descuento salen de la lectura de confirmación: si la app tiene otros, quedan para subir.
+    installments: fingerprint('installments', null),
+    discount: fingerprint('discount', null),
   };
   await db.$transaction(async (tx) => {
     await tx.publication.update({

@@ -370,8 +370,13 @@ model Publication {
   // Las preguntas de los compradores en esta publicación, pegadas tal cual.
   // Las de la competencia son del producto (ProductResearch).
   ownQuestions      String?
-  // Precio público del canal. Nunca costos ni listas de proveedor.
+  // El precio publicado, como lo decide el paso Precio o lo trae el canal.
   price             Decimal?             @db.Decimal(14, 2)
+  // Las cuotas: 0 sin cuotas, 1 la cuota promocionada, o 3, 6, 9 o 12 sin
+  // interés. Null mientras no se leyó del canal.
+  installments      Int?
+  // El descuento sobre el precio publicado, en %. 0 sin descuento; null mientras no se leyó.
+  discount          Decimal?             @db.Decimal(5, 2)
   currency          String               @default("ARS")
   channelStatus     ChannelStatus        @default(ACTIVE)
   // Estado de la propuesta completa con IA.
@@ -1229,6 +1234,12 @@ model ChannelCopy {
   // Los datos de catálogo como los guarda la app: lista de { name, value }.
   attributes        Json          @default("[]")
   price             Decimal?      @db.Decimal(14, 2)
+  installments      Int?
+  discount          Decimal?      @db.Decimal(5, 2)
+  // Hasta cuándo dura el descuento que subió la app: antes de que venza se renueva solo.
+  discountUntil     DateTime?
+  // Cuándo lo subió: un rato después, si el canal todavía no lo muestra, se espera.
+  discountSentAt    DateTime?
   status            ChannelStatus
   url               String?
   photos            Json          @default("[]")
@@ -1329,6 +1340,8 @@ enum SyncChangeKind {
   STATUS_FAILED
   // Se republicó una finalizada: quedó con otro código en el canal.
   RELISTED
+  // El descuento que había subido la app estaba por vencer y se volvió a subir solo.
+  RENEWED
 }
 
 // Un dato que cambió por la sincronización: lo que llegó del canal, lo que se

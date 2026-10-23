@@ -36,6 +36,8 @@ export async function loadPublicationFaces(accountId: string, publicationId: str
       externalId: true,
       url: true,
       price: true,
+      installments: true,
+      discount: true,
       channelStatus: true,
       pipelineStatus: true,
       pipelineStep: true,

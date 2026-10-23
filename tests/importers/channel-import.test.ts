@@ -18,6 +18,8 @@ function listing(over: Partial<ChannelListing> = {}): ChannelListing {
     title: 'Kit Embrague Ford Ka 1.6 Sachs',
     description: 'Kit completo.',
     price: 100,
+    installments: 0,
+    discount: 0,
     status: 'ACTIVE',
     sold: 12,
     visits90d: 340,

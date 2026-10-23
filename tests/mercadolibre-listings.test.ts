@@ -110,6 +110,23 @@ describe('de Mercado Libre al formato neutro', () => {
     expect(parseItem({ id: 'MLA9', status: 'under_review' }).status).toBe('UNDER_REVIEW');
     expect(parseItem({ id: 'MLA9', status: 'inactive' }).status).toBe('INACTIVE');
   });
+
+  it('las cuotas salen del tipo de publicación y sus etiquetas, y el descuento del precio de antes', () => {
+    const cuotas = (listing_type_id: string | undefined, tags: string[] = []) => parseItem({ id: 'MLA9', listing_type_id, tags }).installments;
+    expect(cuotas('gold_special')).toBe(0);
+    expect(cuotas('gold_special', ['good_quality_thumbnail', 'pcj-co-funded'])).toBe(1);
+    expect(cuotas('gold_pro')).toBe(6);
+    expect(cuotas('gold_pro', ['3x_campaign'])).toBe(3);
+    expect(cuotas('gold_pro', ['9x_campaign'])).toBe(9);
+    expect(cuotas('gold_pro', ['12x_campaign'])).toBe(12);
+    expect(cuotas(undefined)).toBeNull();
+    // Con descuento, el precio publicado es el de antes.
+    const l = parseItem({ id: 'MLA9', price: 223_097, original_price: 306_873 });
+    expect(l.price).toBe(306_873);
+    expect(l.discount).toBeCloseTo(27.3, 2);
+    expect(parseItem({ id: 'MLA9', price: 100 }).discount).toBe(0);
+    expect(parseItem({ id: 'MLA9' }).discount).toBeNull();
+  });
 });
 
 describe('con la cuenta conectada', () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { mercadolibre } from '@/channels/mercadolibre';
+import { discountDates } from '@/channels/mercadolibre/publish';
 
 describe('ID de publicación de Mercado Libre', () => {
   it.each([
@@ -23,5 +24,14 @@ describe('ID de publicación de Mercado Libre', () => {
     expect(mercadolibre.publicationUrl('MLA1234567890')).toBe(
       'https://articulo.mercadolibre.com.ar/MLA-1234567890',
     );
+  });
+});
+
+describe('las fechas del descuento', () => {
+  it('van en la hora de Argentina, desde hoy y por 14 días', () => {
+    // Las 1 de la mañana en UTC son las 10 de la noche del día anterior en Argentina.
+    const d = discountDates('MLA123', new Date('2026-10-24T01:00:00Z'));
+    expect(d).toMatchObject({ start: '2026-10-23T00:00:00', finish: '2026-11-05T23:59:59' });
+    expect(d.until.toISOString()).toBe('2026-11-06T02:59:59.000Z');
   });
 });

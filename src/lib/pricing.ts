@@ -1,7 +1,8 @@
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
+import { getChannelPublisher } from '@/channels/publish';
 import { dayOf, offerOf } from '@/domain/competitors';
-import { fingerprint, priceText, storedPrints } from '@/domain/channel-sync';
+import { discountText, fingerprint, installmentsText, priceText, storedPrints } from '@/domain/channel-sync';
 import type { CompetitorPrice } from '@/domain/price-comparison';
 import {
   installmentCostPct,
@@ -50,9 +51,11 @@ export async function loadPriceStep(db: Db, accountId: string, publicationId: st
     select: {
       id: true,
       price: true,
+      installments: true,
+      discount: true,
       externalId: true,
       store: { select: { channel: { select: { kind: true, name: true } } } },
-      channelCopy: { select: { price: true, missingSince: true } },
+      channelCopy: { select: { price: true, installments: true, discount: true, discountUntil: true, missingSince: true } },
       competitors: {
         orderBy: { position: 'asc' },
         select: { title: true, sellerName: true, url: true, surveyedAt: true, listPrice: true, discountPct: true, installments: true, freeShipping: true },
@@ -77,6 +80,7 @@ export async function loadPriceStep(db: Db, accountId: string, publicationId: st
     return offer ? [{ title: c.title, sellerName: c.sellerName, url: c.url, surveyedAt: dayOf(c.surveyedAt), offer }] : [];
   });
   const decision = p.priceDecisions[0] ?? null;
+  const copy = p.channelCopy && !p.channelCopy.missingSince ? p.channelCopy : null;
   return {
     publicationId: p.id,
     productId: p.product.id,
@@ -84,7 +88,16 @@ export async function loadPriceStep(db: Db, accountId: string, publicationId: st
     channelName: getChannelAdapter(p.store.channel.kind, p.store.channel.name).name,
     // El precio publicado: el de la app y el que se leyó del canal.
     price: p.price === null ? null : Number(p.price),
-    channelPrice: p.channelCopy && !p.channelCopy.missingSince && p.channelCopy.price !== null ? Number(p.channelCopy.price) : null,
+    channelPrice: copy && copy.price !== null ? Number(copy.price) : null,
+    // Las cuotas y el descuento de la app, y los que se leyeron del canal.
+    installments: p.installments,
+    discount: p.discount === null ? null : Number(p.discount),
+    channelInstallments: copy?.installments ?? null,
+    channelDiscount: copy && copy.discount !== null ? Number(copy.discount) : null,
+    // Hasta cuándo dura el descuento que subió la app. Se renueva solo antes de que venza.
+    discountUntil: copy?.discountUntil ?? null,
+    // El descuento que acepta el canal, en %.
+    discountRange: getChannelPublisher(p.store.channel.kind)?.discountRange ?? null,
     cost: p.product.replacementCost === null ? null : Number(p.product.replacementCost),
     // Las otras publicaciones del producto, que comparten el costo y los parámetros propios.
     sharedWith: p.product._count.publications - 1,
@@ -160,17 +173,27 @@ export async function savePriceDecision(
   if (!isInstallmentPlan(args.plan)) throw new PricingError('Las cuotas son sin cuotas, la cuota promocionada, 3, 6, 9 o 12.');
   const plan: InstallmentPlan = args.plan;
   const listPrice = Math.round(args.listPrice);
+  const discountPct = Math.round(args.discountPct * 100) / 100;
 
   return db.$transaction(async (tx) => {
     const p = await tx.publication.findFirst({
       where: { id: args.publicationId, product: { accountId: args.accountId } },
-      select: { id: true, productId: true, channelCopy: { select: { fingerprints: true, agreed: true, price: true } } },
+      select: {
+        id: true,
+        productId: true,
+        store: { select: { channel: { select: { kind: true, name: true } } } },
+        channelCopy: { select: { fingerprints: true, agreed: true, price: true, installments: true, discount: true } },
+      },
     });
     if (!p) throw new PricingError('La publicación no existe en esta cuenta.');
+    const range = getChannelPublisher(p.store.channel.kind)?.discountRange;
+    if (range && discountPct > 0 && (discountPct < range.min || discountPct > range.max)) {
+      throw new PricingError(`${getChannelAdapter(p.store.channel.kind, p.store.channel.name).name} acepta descuentos de ${range.min} a ${range.max} %, o sin descuento.`);
+    }
     const settings = await tx.pricingSettings.findUnique({ where: { accountId: args.accountId }, select: { values: true } });
     const params = resolvePricing(settings?.values, args.overrides);
     if (installmentCostPct(params, plan) === null) throw new PricingError(`Cargá el costo de ${planLabel(plan).toLowerCase()} en Ajustes > Precios para usarla.`);
-    const s = simulate({ listPrice, discountPct: args.discountPct, plan, cost: args.cost, params });
+    const s = simulate({ listPrice, discountPct, plan, cost: args.cost, params });
     const below = s.marginPct < params.minMarginPct - 1e-9;
     if (below && !args.confirmBelowMin) {
       throw new PricingError(
@@ -186,7 +209,7 @@ export async function savePriceDecision(
       data: {
         publicationId: p.id,
         listPrice,
-        discountPct: args.discountPct,
+        discountPct,
         installments: plan,
         finalPrice: Math.round(s.finalPrice * 100) / 100,
         cost: args.cost,
@@ -199,17 +222,26 @@ export async function savePriceDecision(
       },
       select: { id: true, decidedAt: true },
     });
-    // El precio pasa al borrador. Si la copia del canal todavía no tenía la
-    // huella del precio, se guarda la de antes como acordada: así queda como
-    // cambio de la app para subir, y no como algo para elegir.
+    // El precio, las cuotas y el descuento pasan al borrador. Si lo acordado
+    // con el canal no tenía su huella, se guarda la de lo leído: así quedan
+    // como cambios de la app para subir, y no como algo para elegir.
     if (p.channelCopy) {
-      const { channel, agreed } = storedPrints(p.channelCopy);
+      const c = p.channelCopy;
+      const { channel, agreed } = storedPrints(c);
       await tx.channelCopy.update({
         where: { publicationId: p.id },
-        data: { fingerprints: { ...channel }, agreed: { ...agreed, price: agreed.price ?? fingerprint('price', priceText(p.channelCopy.price)) } },
+        data: {
+          fingerprints: { ...channel },
+          agreed: {
+            ...agreed,
+            price: agreed.price ?? fingerprint('price', priceText(c.price)),
+            installments: agreed.installments ?? fingerprint('installments', installmentsText(c.installments)),
+            discount: agreed.discount ?? fingerprint('discount', discountText(c.discount)),
+          },
+        },
       });
     }
-    await tx.publication.update({ where: { id: p.id }, data: { price: listPrice } });
+    await tx.publication.update({ where: { id: p.id }, data: { price: listPrice, installments: plan, discount: discountPct } });
     return { id: decision.id, decidedAt: decision.decidedAt, simulation: s, belowMin: below };
   });
 }

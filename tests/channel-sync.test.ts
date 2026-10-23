@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@/generated/prisma/client';
-import { faceSummary, faceValues, fieldState, fingerprint, fingerprintsOf, planFaces } from '@/domain/channel-sync';
+import { DISCOUNT_GRACE_MS, discountText, faceSummary, faceValues, fieldState, fingerprint, fingerprintsOf, heldDiscount, installmentsText, planFaces, storedPrints } from '@/domain/channel-sync';
 import { chooseFaces, runSyncStep, startSync, syncAllStores } from '@/lib/channel-sync';
 import { encrypt } from '@/lib/crypto';
 import { resetVisitsTogether } from '@/channels/mercadolibre/listings';
@@ -43,10 +43,37 @@ describe('de qué lado cambió cada dato', () => {
     expect(fieldState('b', '', undefined)).toBe('draft');
   });
 
+  it('las cuotas y el descuento se comparan como texto corto', () => {
+    expect(installmentsText(6)).toBe('6');
+    expect(installmentsText(null)).toBeNull();
+    expect(discountText('27.30')).toBe('27.3');
+    // Un descuento calculado por el canal sobre un precio redondeado da lo mismo.
+    expect(discountText((1 - 223_097 / 306_873) * 100)).toBe('27.3');
+    expect(discountText(0)).toBe('0');
+    expect(fingerprint('discount', '0')).not.toBe(fingerprint('discount', null));
+    // Una copia leída antes de comparar las cuotas y el descuento: lo leído queda como acordado.
+    const { channel, agreed } = storedPrints({ fingerprints: {}, agreed: {}, price: 100, installments: 6, discount: 0 });
+    expect(channel.installments).toBe(fingerprint('installments', '6'));
+    expect(agreed.discount).toBe(fingerprint('discount', '0'));
+  });
+
+  it('el descuento que subió la app: se espera si recién se subió y no se pierde si venció', () => {
+    const now = new Date('2026-10-23T12:00:00Z');
+    const until = new Date('2026-11-05T12:00:00Z');
+    const justSent = { discountUntil: until, discountSentAt: new Date(now.getTime() - 60_000) };
+    expect(heldDiscount('10', '0', justSent, now)).toBe('pending');
+    expect(heldDiscount('10', '0', { ...justSent, discountSentAt: new Date(now.getTime() - DISCOUNT_GRACE_MS - 1) }, now)).toBeNull();
+    expect(heldDiscount('10', '0', { ...justSent, discountUntil: new Date(now.getTime() - 1) }, now)).toBe('expired');
+    // El canal lo muestra, la app no tiene, o no lo subió la app: vale lo de siempre.
+    expect(heldDiscount('10', '10', justSent, now)).toBeNull();
+    expect(heldDiscount('0', '0', justSent, now)).toBeNull();
+    expect(heldDiscount('10', '0', { discountUntil: null, discountSentAt: null }, now)).toBeNull();
+  });
+
   it('el plan toma lo del canal, guarda el borrador y no toca lo que hay que elegir', () => {
     const plans = planFaces(
-      { title: 'a', description: 'x', attributes: 'm', photos: 'f', price: 'p' },
-      { title: 'b', description: 'y', attributes: 'n', photos: 'f', price: 'p' },
+      { title: 'a', description: 'x', attributes: 'm', photos: 'f', price: 'p', installments: 'c', discount: 'd' },
+      { title: 'b', description: 'y', attributes: 'n', photos: 'f', price: 'p', installments: 'c', discount: 'd' },
       { title: 'a', description: 'y' },
     );
     expect(plans).toEqual([
@@ -55,6 +82,8 @@ describe('de qué lado cambió cada dato', () => {
       { field: 'attributes', state: 'choose', take: false, agreed: undefined },
       { field: 'photos', state: 'same', take: false, agreed: 'f' },
       { field: 'price', state: 'same', take: false, agreed: 'p' },
+      { field: 'installments', state: 'same', take: false, agreed: 'c' },
+      { field: 'discount', state: 'same', take: false, agreed: 'd' },
     ]);
   });
 });
@@ -209,6 +238,7 @@ describe.skipIf(!url)('la lectura automática en la base', () => {
     expect(changes.map((c) => [c.field, c.kind])).toEqual([
       ['attributes', 'TAKEN'],
       ['description', 'TAKEN'],
+      ['discount', 'TAKEN'],
       ['price', 'TAKEN'],
       ['title', 'TAKEN'],
     ]);

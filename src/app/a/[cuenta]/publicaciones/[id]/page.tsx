@@ -24,8 +24,7 @@ import { createChecks } from '@/lib/channel-create';
 import { CreateInChannelCard } from '@/components/publication/CreateInChannelCard';
 import { ChannelStatusCard } from '@/components/publication/ChannelStatusCard';
 import { relistInfo } from '@/lib/channel-status';
-import { formatPrice } from '@/domain/money';
-import { FACE_FIELDS, FACE_FIELD_LABEL, SYNC_CHANGE_LABEL, type FaceField, type FaceValues } from '@/domain/channel-sync';
+import { FACE_FIELDS, FACE_FIELD_LABEL, priceFaceText, SYNC_CHANGE_LABEL, type FaceField, type FaceValues } from '@/domain/channel-sync';
 import { titleOrUntitled } from '@/domain/publication-title';
 import { fieldLabel } from '@/domain/sync-log';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
@@ -58,7 +57,7 @@ const STATE: Record<State, { label: string; variant: 'secondary' | 'destructive'
 function asText(values: FaceValues, field: FaceField): string {
   if (field === 'attributes') return values.attributes.map((a) => `${a.name}: ${a.value}`).join('\n');
   if (field === 'photos') return '';
-  if (field === 'price') return values.price ? formatPrice(values.price) : '';
+  if (field === 'price' || field === 'installments' || field === 'discount') return priceFaceText(field, values[field]);
   return values[field] ?? '';
 }
 
@@ -270,7 +269,11 @@ export default async function PublicationPage({
                     ? 'El título está bloqueado porque la publicación tiene ventas: se decide en el paso Título.'
                     : field === 'price'
                       ? 'El precio se decide en el paso Precio.'
-                      : (true as const);
+                      : field === 'installments'
+                        ? 'Las cuotas se deciden en el paso Precio.'
+                        : field === 'discount'
+                          ? 'El descuento se decide en el paso Precio.'
+                          : (true as const);
               return (
                 <SectionCard
                   key={field}

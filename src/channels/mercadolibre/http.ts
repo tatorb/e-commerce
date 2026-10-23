@@ -64,12 +64,13 @@ export async function mlGet(path: string, accessToken: string): Promise<unknown>
 }
 
 /**
- * PUT o POST con la llave y un cuerpo JSON. Reintenta igual que mlGet; si
- * Mercado Libre no acepta el cambio, el error trae su respuesta.
+ * PUT, POST o DELETE con la llave y un cuerpo JSON. Reintenta igual que mlGet;
+ * si Mercado Libre no acepta el cambio, el error trae su respuesta.
  */
-export async function mlSend(method: 'PUT' | 'POST', path: string, accessToken: string, body: unknown): Promise<unknown> {
-  // Un formulario (para subir un archivo) va tal cual; lo demás, como JSON.
+export async function mlSend(method: 'PUT' | 'POST' | 'DELETE', path: string, accessToken: string, body?: unknown): Promise<unknown> {
+  // Un formulario (para subir un archivo) va tal cual; lo demás, como JSON. DELETE va sin cuerpo.
   const form = body instanceof FormData;
+  const json = body !== undefined && !form;
   for (let attempt = 0; ; attempt++) {
     let res: Response;
     try {
@@ -77,10 +78,10 @@ export async function mlSend(method: 'PUT' | 'POST', path: string, accessToken: 
         method,
         headers: {
           Accept: 'application/json',
-          ...(form ? {} : { 'Content-Type': 'application/json' }),
+          ...(json ? { 'Content-Type': 'application/json' } : {}),
           Authorization: `Bearer ${accessToken}`,
         },
-        body: form ? body : JSON.stringify(body),
+        body: form ? body : json ? JSON.stringify(body) : undefined,
         signal: AbortSignal.timeout(20_000),
         cache: 'no-store',
       });

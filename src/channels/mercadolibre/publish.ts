@@ -1,6 +1,7 @@
 import { MercadoLibreRequestError, mlGet, mlSend } from './http';
-import { variationsOf } from './listings';
+import { CAMPAIGN_TAG, CLASSIC, INSTALLMENT_TAGS, LOW_INTEREST_TAG, PREMIUM, tagsOf, variationsOf } from './listings';
 import { measureText, variantKey, type ChannelVariation, type VariantLike } from '@/domain/media';
+import { isInstallmentPlan, LOW_INTEREST_PLAN } from '@/domain/pricing';
 import {
   PublishError,
   type ChannelAttributeUpdate,
@@ -34,13 +35,19 @@ const KNOWN: [RegExp, string][] = [
   [/closed|inactive|status/i, 'La publicación está finalizada en Mercado Libre: no se puede cambiar.'],
 ];
 
+/** Lo que explica Mercado Libre del rechazo, tal cual lo manda. */
+function detailOf(body: unknown): string | null {
+  const causes = isObj(body) && Array.isArray(body.cause) ? body.cause.filter(isObj) : [];
+  return causes.map((c) => (typeof c.message === 'string' ? c.message : null)).find(Boolean) ?? (isObj(body) && typeof body.message === 'string' ? body.message : null);
+}
+
 /** El motivo, en castellano, de por qué Mercado Libre no aceptó el cambio. */
 export function rejectionMessage(status: number, body: unknown): string {
   if (status === 403) return 'La aplicación de Mercado Libre no tiene permiso para modificar publicaciones. Revisá que tenga el permiso de escritura y volvé a conectar la tienda.';
   if (status === 404) return 'Mercado Libre no encontró la publicación.';
   const causes = isObj(body) && Array.isArray(body.cause) ? body.cause.filter(isObj) : [];
   const codes = [...causes.map((c) => `${c.code ?? ''} ${c.message ?? ''}`), isObj(body) ? `${body.error ?? ''} ${body.message ?? ''}` : ''].join(' ');
-  const detail = causes.map((c) => (typeof c.message === 'string' ? c.message : null)).find(Boolean) ?? (isObj(body) && typeof body.message === 'string' ? body.message : null);
+  const detail = detailOf(body);
   for (const [pattern, message] of KNOWN) {
     if (!pattern.test(codes)) continue;
     // En las medidas, los datos de catálogo y las fotos, el detalle dice cuál fue.
@@ -52,6 +59,18 @@ export function rejectionMessage(status: number, body: unknown): string {
 // Una llave vencida o "demasiados pedidos" siguen como error de conexión.
 function translated(e: unknown): unknown {
   return e instanceof MercadoLibreRequestError && e.status !== 401 && e.status !== 429 ? new PublishError(rejectionMessage(e.status, e.body)) : e;
+}
+
+/**
+ * El rechazo de algo puntual, como las cuotas o el descuento: lo que no
+ * aceptó y el detalle que manda Mercado Libre.
+ */
+function rejectedAs(what: string, e: unknown): unknown {
+  if (!(e instanceof MercadoLibreRequestError) || e.status === 401 || e.status === 429) return e;
+  if (e.status === 404) return new PublishError('Mercado Libre no encontró la publicación.');
+  const detail = detailOf(e.body);
+  if (detail) return new PublishError(`Mercado Libre no aceptó ${what}: ${detail}`);
+  return new PublishError(e.status === 403 ? `Mercado Libre no deja cambiar ${what} con esta cuenta.` : `Mercado Libre no aceptó ${what} (código ${e.status}).`);
 }
 
 async function send(method: 'PUT' | 'POST', path: string, token: string, body: unknown): Promise<unknown> {
@@ -143,7 +162,69 @@ function pictureIdsOf(body: unknown): string[] | null {
   return ids.every((id): id is string => id !== null) ? ids : null;
 }
 
-const LISTING_TYPE_ID: Record<string, string> = { clasica: 'gold_special', premium: 'gold_pro' };
+const LISTING_TYPE_ID: Record<string, string> = { clasica: CLASSIC, premium: PREMIUM };
+
+// ───────────────────────────── El descuento ─────────────────────────────
+
+// Lo que acepta Mercado Libre en un descuento propio, en %, y cuántos días puede durar.
+const DISCOUNT_RANGE = { min: 5, max: 80 };
+const DISCOUNT_DAYS = 14;
+
+// La hora de cada sitio, para las fechas del descuento. Mercado Libre las pide sin zona.
+const SITE_TIME_ZONE: Record<string, string> = {
+  MLA: 'America/Argentina/Buenos_Aires',
+  MLB: 'America/Sao_Paulo',
+  MLM: 'America/Mexico_City',
+  MLC: 'America/Santiago',
+  MCO: 'America/Bogota',
+  MLU: 'America/Montevideo',
+  MPE: 'America/Lima',
+};
+
+/** La fecha y hora en esa zona, como la pide Mercado Libre: 2026-10-23T00:00:00. */
+function wallClock(d: Date, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(d);
+  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? '00';
+  return `${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}:${part('second')}`;
+}
+
+/** El momento de una fecha y hora de esa zona. */
+function fromWallClock(text: string, timeZone: string): Date {
+  const guess = new Date(`${text}Z`);
+  const offset = Date.parse(`${wallClock(guess, timeZone)}Z`) - guess.getTime();
+  return new Date(guess.getTime() - offset);
+}
+
+/** Desde hoy a la mañana hasta el último minuto del día 14, en la hora del sitio. */
+export function discountDates(externalId: string, now: Date): { start: string; finish: string; until: Date } {
+  const timeZone = SITE_TIME_ZONE[externalId.slice(0, 3).toUpperCase()] ?? SITE_TIME_ZONE.MLA;
+  const today = wallClock(now, timeZone).slice(0, 10);
+  const last = new Date(`${today}T00:00:00Z`);
+  last.setUTCDate(last.getUTCDate() + DISCOUNT_DAYS - 1);
+  const finish = `${last.toISOString().slice(0, 10)}T23:59:59`;
+  return { start: `${today}T00:00:00`, finish, until: fromWallClock(finish, timeZone) };
+}
+
+/** Si la publicación tiene un descuento propio puesto o por empezar. */
+async function hasDiscount(id: string, token: string): Promise<boolean> {
+  let list: unknown;
+  try {
+    list = await mlGet(`/seller-promotions/items/${id}?app_version=v2`, token);
+  } catch (e) {
+    if (e instanceof MercadoLibreRequestError && e.status === 404) return false;
+    throw rejectedAs('el descuento', e);
+  }
+  return Array.isArray(list) && list.some((p) => isObj(p) && p.type === 'PRICE_DISCOUNT' && p.status !== 'finished');
+}
 
 /**
  * Si la cuenta está en el modelo de "precio por variación": cada medida es una
@@ -388,6 +469,51 @@ export const mercadolibrePublisher: ChannelPublisher = {
     const item = await get(`/items/${id}?attributes=variations`, accessToken);
     const variations = isObj(item) ? variationsOf(item) : [];
     await send('PUT', `/items/${id}`, accessToken, variations.length > 0 ? { variations: variations.map((v) => ({ id: v.id, price })) } : { price });
+  },
+
+  async setInstallments(accessToken, externalId, plan) {
+    if (!isInstallmentPlan(plan)) throw new PublishError('Mercado Libre no ofrece ese plan de cuotas.');
+    const id = encodeURIComponent(externalId);
+    const item = await get(`/items/${id}?attributes=listing_type_id,tags`, accessToken);
+    const current = isObj(item) ? item : {};
+    // Las cuotas sin interés son de la Premium; sin cuotas o la cuota promocionada, de la Clásica.
+    const type = plan >= 3 ? PREMIUM : CLASSIC;
+    const tag = plan >= 3 ? CAMPAIGN_TAG[plan] : plan === LOW_INTEREST_PLAN ? LOW_INTEREST_TAG : undefined;
+    const tags = tagsOf(current);
+    // Mercado Libre reemplaza la lista entera de etiquetas: van las demás como estaban.
+    const next = [...tags.filter((t) => !INSTALLMENT_TAGS.includes(t)), ...(tag ? [tag] : [])];
+    try {
+      if (current.listing_type_id !== type) await mlSend('POST', `/items/${id}/listing_type`, accessToken, { id: type });
+      if (next.length !== tags.length || next.some((t, i) => t !== tags[i])) await mlSend('PUT', `/items/${id}`, accessToken, { tags: next });
+    } catch (e) {
+      throw rejectedAs('las cuotas', e);
+    }
+  },
+
+  discountRange: DISCOUNT_RANGE,
+
+  async setDiscount(accessToken, externalId, { pct, listPrice }, now) {
+    if (pct !== 0 && !(pct >= DISCOUNT_RANGE.min && pct <= DISCOUNT_RANGE.max)) {
+      throw new PublishError(`Mercado Libre acepta descuentos de ${DISCOUNT_RANGE.min} a ${DISCOUNT_RANGE.max} %.`);
+    }
+    const deal = Math.round(listPrice * (1 - pct / 100));
+    if (pct !== 0 && !(deal > 0 && deal < listPrice)) throw new PublishError('Falta el precio publicado para calcular el descuento.');
+    const id = encodeURIComponent(externalId);
+    try {
+      // Mercado Libre no deja dos a la vez: el que había se saca antes.
+      if (await hasDiscount(id, accessToken)) await mlSend('DELETE', `/seller-promotions/items/${id}?promotion_type=PRICE_DISCOUNT&app_version=v2`, accessToken);
+      if (pct === 0) return { until: null };
+      const dates = discountDates(externalId, now);
+      await mlSend('POST', `/seller-promotions/items/${id}?app_version=v2`, accessToken, {
+        promotion_type: 'PRICE_DISCOUNT',
+        deal_price: deal,
+        start_date: dates.start,
+        finish_date: dates.finish,
+      });
+      return { until: dates.until };
+    } catch (e) {
+      throw rejectedAs('el descuento', e);
+    }
   },
 
   async updateAttributes(accessToken, externalId, attributes) {

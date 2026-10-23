@@ -35,11 +35,11 @@ function useBusy() {
 
 /** Cuenta lo que pasó al subir, en una línea. */
 export function pushMessage(r: PushResult, channelName: string): Message {
-  const article: Record<FaceField, string> = { title: 'el', description: 'la', attributes: 'los', photos: 'las', price: 'el' };
+  const article: Record<FaceField, string> = { title: 'el', description: 'la', attributes: 'los', photos: 'las', price: 'el', installments: 'las', discount: 'el' };
   const sent = r.sent.map((f) => `${article[f]} ${FACE_FIELD_LABEL[f].toLowerCase()}`);
   const rejected = r.rejected.map((x) => `${FACE_FIELD_LABEL[x.field]}: ${x.message}`);
   if (sent.length === 0) return { kind: 'error', text: rejected.join(' ') || 'No había nada para subir.' };
-  const text = `Listo: ${sent.join(' y ')} ya ${sent.length > 1 || r.sent.includes('attributes') || r.sent.includes('photos') ? 'están' : 'está'} en ${channelName}.${r.confirmed ? '' : ' No se pudo volver a leer para confirmar: se confirma en la próxima lectura.'}`;
+  const text = `Listo: ${sent.join(' y ')} ya ${sent.length > 1 || r.sent.some((f) => article[f] === 'los' || article[f] === 'las') ? 'están' : 'está'} en ${channelName}.${r.confirmed ? '' : ' No se pudo volver a leer para confirmar: se confirma en la próxima lectura.'}`;
   return rejected.length > 0 ? { kind: 'error', text: `${text} ${rejected.join(' ')}` } : { kind: 'ok', text };
 }
 

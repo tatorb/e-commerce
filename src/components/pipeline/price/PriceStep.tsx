@@ -15,6 +15,7 @@ import {
   CUSHION,
   cushionListPrice,
   INSTALLMENT_PLANS,
+  isInstallmentPlan,
   listPriceForMargin,
   LOW_INTEREST_PLAN,
   planLabel,
@@ -42,8 +43,8 @@ import { CompositionBar, LEVEL, MarginBadge, ProfitKnob } from './parts';
 // los propios del producto), el simulador muestra el precio final, el margen y
 // de qué se compone el precio; la perilla mueve el precio hasta la ganancia
 // que se quiere, y la competencia que se cargó en Información sirve para
-// comparar. Al guardar, el precio queda para subir desde Por subir; el
-// descuento y las cuotas se cargan a mano en el canal.
+// comparar. Al guardar, el precio, las cuotas y el descuento quedan para
+// subir desde Por subir. Arranca con lo que tiene hoy la publicación.
 
 const MAX_DISCOUNT = 50;
 
@@ -107,10 +108,12 @@ export function PriceStep({
   const costParsed = parsePrice(costText);
   const cost = typeof costParsed === 'number' && costParsed > 0 ? costParsed : null;
 
+  // Lo que tiene hoy la publicación, que puede haber llegado del canal; si no, lo último que se guardó.
   const start = data.decision ?? null;
-  const [plan, setPlan] = useState<InstallmentPlan>((start?.installments as InstallmentPlan) ?? 0);
-  const [discount, setDiscount] = useState(start?.discountPct ?? 0);
-  const firstPrice = start?.listPrice ?? data.price ?? (cost ? targetListPrice(cost, params, 0, 0) : null) ?? 0;
+  const firstPlan = data.installments !== null && isInstallmentPlan(data.installments) ? data.installments : (start?.installments ?? 0);
+  const [plan, setPlan] = useState<InstallmentPlan>(isInstallmentPlan(firstPlan) ? firstPlan : 0);
+  const [discount, setDiscount] = useState(data.discount ?? start?.discountPct ?? 0);
+  const firstPrice = data.price ?? start?.listPrice ?? (cost ? targetListPrice(cost, params, 0, 0) : null) ?? 0;
   const [listText, setListText] = useState(firstPrice ? amountText(firstPrice) : '');
   const listParsed = parsePrice(listText);
   const listPrice = typeof listParsed === 'number' ? listParsed : 0;
@@ -129,6 +132,8 @@ export function PriceStep({
     data.competitors.length > 0 && listPrice > 0 ? compare({ mine: { listPrice, discountPct: discount, plan }, competitors: data.competitors, cost: cost ?? 0, params }) : null;
   const ready = cost !== null && listPrice > 0;
   const below = ready && sim.level === 'below';
+  const range = data.discountRange;
+  const outOfRange = range !== null && discount > 0 && (discount < range.min || discount > range.max);
   const own = ownValues(account, overrides);
   const saved = start ? start.listPrice === Math.round(listPrice) && start.discountPct === discount && start.installments === plan : false;
   const dirty =
@@ -156,7 +161,10 @@ export function PriceStep({
     if (!r.ok) return setMessage({ kind: 'error', text: r.error });
     setMessage({
       kind: 'ok',
-      text: data.channelPrice !== null ? `Precio guardado. Queda en Por subir para mandarlo a ${data.channelName}.` : 'Precio guardado. Va con la publicación cuando la crees en el canal.',
+      text:
+        data.channelPrice !== null
+          ? `Guardado. El precio, las cuotas y el descuento quedan en Por subir para mandarlos a ${data.channelName}.`
+          : 'Guardado. El precio va con la publicación cuando la crees en el canal; las cuotas y el descuento, después, desde Por subir.',
     });
     setConfirm(false);
     router.refresh();
@@ -225,6 +233,11 @@ export function PriceStep({
                   );
                 })}
               </div>
+              {data.channelInstallments !== null ? (
+                <p className="text-xs text-muted-foreground">
+                  En {data.channelName}: {planLabel(data.channelInstallments).toLowerCase()}.
+                </p>
+              ) : null}
               {plans.length < INSTALLMENT_PLANS.length ? (
                 <p className="text-xs text-muted-foreground">
                   Los planes sin costo cargado no se pueden elegir: se cargan en{' '}
@@ -255,6 +268,16 @@ export function PriceStep({
                 <span>0 %</span>
                 <span>{MAX_DISCOUNT} %</span>
               </div>
+              {data.channelDiscount !== null ? (
+                <p className="text-xs text-muted-foreground">
+                  En {data.channelName}: {data.channelDiscount > 0 ? `${formatPercent(data.channelDiscount)} de descuento` : 'sin descuento'}.
+                </p>
+              ) : null}
+              {outOfRange ? (
+                <p className="text-xs text-destructive" role="alert">
+                  {data.channelName} acepta descuentos de {range.min} a {range.max} %, o sin descuento.
+                </p>
+              ) : null}
             </div>
 
             <div className="flex flex-wrap gap-2">
@@ -440,7 +463,7 @@ export function PriceStep({
 
       <SectionCard
         title="Guardar el precio"
-        description={`El precio publicado pasa a Por subir y se manda a ${data.channelName} desde ahí. El descuento y las cuotas se cargan a mano allá: el paso Publicación te dice qué poner.`}
+        description={`El precio, las cuotas y el descuento pasan a Por subir y se mandan a ${data.channelName} desde ahí. ${data.channelName} pone fin a los descuentos: antes de que venza, la app lo vuelve a subir sola.`}
       >
         <SectionBody>
           {start ? (
@@ -461,7 +484,7 @@ export function PriceStep({
             </label>
           ) : null}
           <div className="hidden flex-wrap items-center gap-3 md:flex">
-            <Button onClick={save} pending={pending} disabled={pending || !ready || (below && !confirm) || !dirty}>
+            <Button onClick={save} pending={pending} disabled={pending || !ready || (below && !confirm) || !dirty || outOfRange}>
               Guardar precio
             </Button>
             {message ? (
@@ -489,7 +512,7 @@ export function PriceStep({
               <p className="text-xs text-muted-foreground">Falta el costo</p>
             )}
           </div>
-          <Button size="sm" onClick={save} pending={pending} disabled={pending || !ready || (below && !confirm) || !dirty}>
+          <Button size="sm" onClick={save} pending={pending} disabled={pending || !ready || (below && !confirm) || !dirty || outOfRange}>
             Guardar precio
           </Button>
         </div>

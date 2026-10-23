@@ -75,7 +75,7 @@ function ChangeItem({ e, accountSlug, timeZone, showStore }: { e: LogChange; acc
     <li className="space-y-2 px-4 py-3 text-sm">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span className="tabular-nums text-xs text-muted-foreground">{formatDateTime(e.at, timeZone)}</span>
-        <Badge variant={failed ? 'destructive' : e.kind === 'SENT' || e.kind === 'CREATED' ? 'default' : e.kind === 'TAKEN' ? 'secondary' : 'outline'}>
+        <Badge variant={failed ? 'destructive' : e.kind === 'SENT' || e.kind === 'CREATED' || e.kind === 'RENEWED' ? 'default' : e.kind === 'TAKEN' ? 'secondary' : 'outline'}>
           {kindLabel(e.kind)}
         </Badge>
         <span className="font-medium">{fieldLabel(e.field)}</span>

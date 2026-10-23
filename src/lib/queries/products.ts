@@ -72,7 +72,7 @@ export async function getProduct(accountId: string, productId: string) {
             include: { createdBy: { select: { name: true } } },
           },
           // Para saber si tiene cambios sin subir o datos para elegir.
-          channelCopy: { select: { fingerprints: true, agreed: true, rejections: true, missingSince: true, price: true } },
+          channelCopy: { select: { fingerprints: true, agreed: true, rejections: true, missingSince: true, price: true, installments: true, discount: true } },
         },
       },
     },

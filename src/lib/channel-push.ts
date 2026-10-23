@@ -15,6 +15,8 @@ import { CatalogError, cleanCatalogValue, findField, normalizeText } from '@/dom
 import {
   attributeDiff,
   channelFaceValues,
+  discountText,
+  FACE_FIELDS,
   faceSummary,
   faceValues,
   fingerprint,
@@ -22,6 +24,7 @@ import {
   mergeAttributes,
   parseFingerprints,
   parseRejections,
+  RENEWAL_FAILED,
   type FaceField,
   type FaceValues,
 } from '@/domain/channel-sync';
@@ -30,6 +33,7 @@ import type { NameValue } from '@/domain/name-value';
 import { writeContentField } from '@/domain/content';
 import { LATEST_MEASUREMENTS, latestMetrics } from '@/domain/measurements';
 import { resolveTitleLock } from '@/domain/title-lock';
+import { isInstallmentPlan } from '@/domain/pricing';
 import { checkTitle } from '@/domain/titles';
 import { readOne } from '@/lib/channel-sync';
 import { photoOriginsOf, picturesFor } from '@/lib/media';
@@ -67,6 +71,8 @@ async function loadForPush(db: Db, accountId: string, publicationId: string) {
       attributes: true,
       media: true,
       price: true,
+      installments: true,
+      discount: true,
       titleLockedManual: true,
       store: { select: { id: true, channel: { select: { id: true, kind: true, name: true } }, connection: { select: { status: true } } } },
       measurements: { orderBy: { takenAt: 'desc' }, take: LATEST_MEASUREMENTS, select: { metrics: true } },
@@ -86,6 +92,9 @@ async function loadForPush(db: Db, accountId: string, publicationId: string) {
           photoOrigins: true,
           variations: true,
           price: true,
+          installments: true,
+          discount: true,
+          discountUntil: true,
         },
       },
     },
@@ -102,9 +111,34 @@ function titleLocked(p: Loaded): boolean {
 }
 
 /** Hace lo mismo en cada publicación del canal, en orden. Si una no lo acepta, se corta ahí. */
-async function eachTarget(p: Loaded, run: (externalId: string) => Promise<void>): Promise<void> {
+async function eachTarget(p: Pick<Loaded, 'externalId' | 'variantListings'>, run: (externalId: string) => Promise<void>): Promise<void> {
   for (const id of listingTargets(p)) await run(id);
 }
+
+/**
+ * Pone el descuento en cada publicación del canal. Devuelve hasta cuándo dura:
+ * si cada una tiene su fin, el primero.
+ */
+async function setDiscounts(
+  db: Db,
+  p: Pick<Loaded, 'externalId' | 'variantListings'> & { store: { id: string } },
+  publisher: ChannelPublisher,
+  discount: { pct: number; listPrice: number },
+  now: Date,
+): Promise<Date | null> {
+  let until: Date | null = null;
+  await withAccessToken(db, p.store.id, (token) =>
+    eachTarget(p, async (id) => {
+      const end = (await publisher.setDiscount(token, id, discount, now)).until;
+      if (end && (!until || end < until)) until = end;
+    }),
+  );
+  return until;
+}
+
+/** Lo que guarda la copia del canal del descuento que subió la app: con 0 no hay nada que renovar. */
+const discountDates = (pct: number, until: Date | null, now: Date) =>
+  pct > 0 && until ? { discountUntil: until, discountSentAt: now } : { discountUntil: null, discountSentAt: null };
 
 const names = (list: string[]) => (list.length <= 1 ? list.join('') : `${list.slice(0, -1).join(', ')} y ${list[list.length - 1]}`);
 
@@ -213,7 +247,7 @@ export async function pushDrafts(
 
   // Ya está en el canal: la cara del canal y lo acordado pasan a ser lo que se subió.
   // Si el canal lo guardó un poco distinto, la lectura de confirmación lo trae.
-  const accept = async (field: FaceField, value: string | NameValue[]) => {
+  const accept = async (field: FaceField, value: string | NameValue[], extra: Prisma.ChannelCopyUpdateInput = {}) => {
     const print = fingerprint(field, value);
     await db.$transaction(async (tx) => {
       const current = await tx.channelCopy.findUniqueOrThrow({ where: { publicationId: p.id }, select: { fingerprints: true, agreed: true, rejections: true } });
@@ -222,7 +256,8 @@ export async function pushDrafts(
       await tx.channelCopy.update({
         where: { publicationId: p.id },
         data: {
-          [field]: value,
+          [field]: field === 'installments' ? Number(value) : value,
+          ...extra,
           fingerprints: { ...parseFingerprints(current.fingerprints), [field]: print },
           agreed: { ...parseFingerprints(current.agreed), [field]: print },
           rejections,
@@ -260,15 +295,22 @@ export async function pushDrafts(
     });
   };
 
+  // En el orden de las caras: el precio antes que las cuotas y el descuento. El
+  // canal calcula el descuento sobre el precio: si el precio cambia, el
+  // descuento que ya estaba se vuelve a subir.
+  const fields = FACE_FIELDS.filter((f) => wanted.includes(f) || (f === 'discount' && wanted.includes('price')));
+  let resendDiscount = false;
   let current: FaceField | null = null;
   try {
-    for (const field of wanted) {
+    for (const field of fields) {
       current = field;
+      const resend = field === 'discount' && resendDiscount && (app.discount === channel.discount || summary.draft.includes(field));
+      if (!wanted.includes(field) && !resend) continue;
       if (summary.choose.includes(field)) {
         result.rejected.push({ field, message: `Cambió también en ${channelName}: primero elegí cuál queda.` });
         continue;
       }
-      if (!summary.draft.includes(field) || !isPublishable(field)) continue;
+      if ((!summary.draft.includes(field) && !resend) || !isPublishable(field)) continue;
       if (field === 'photos') {
         await pushPhotos(db, { p, publisher, refs: app.photos ?? [], before: channel.photos ?? [], userId: args.userId, reject });
         if (!result.rejected.some((r) => r.field === 'photos')) result.sent.push('photos');
@@ -277,6 +319,7 @@ export async function pushDrafts(
       let send: () => Promise<void>;
       let value: string | NameValue[];
       let problems: string[] = [];
+      let extra: Prisma.ChannelCopyUpdateInput = {};
       if (field === 'attributes') {
         const plan = planAttributes(app, channel, copy, adapter);
         problems = plan.problems;
@@ -294,6 +337,26 @@ export async function pushDrafts(
         }
         value = app.price;
         send = () => withAccessToken(db, p.store.id, (token) => eachTarget(p, (id) => publisher.updatePrice(token, id, price)));
+      } else if (field === 'installments') {
+        const plan = Number(app.installments);
+        if (app.installments === null || !isInstallmentPlan(plan)) {
+          result.rejected.push({ field, message: 'Faltan las cuotas: decidilas en el paso Precio.' });
+          continue;
+        }
+        value = app.installments;
+        send = () => withAccessToken(db, p.store.id, (token) => eachTarget(p, (id) => publisher.setInstallments(token, id, plan)));
+      } else if (field === 'discount') {
+        const pct = Number(app.discount);
+        if (app.discount === null || !(pct >= 0)) {
+          result.rejected.push({ field, message: 'Falta el descuento: decidilo en el paso Precio.' });
+          continue;
+        }
+        // Sobre el precio que quedó en el canal.
+        const listPrice = Number((result.sent.includes('price') ? app.price : channel.price) ?? 0);
+        value = app.discount;
+        send = async () => {
+          extra = discountDates(pct, await setDiscounts(db, p, publisher, { pct, listPrice }, now), now);
+        };
       } else {
         if (field === 'title' && titleLocked(p)) {
           result.rejected.push({ field, message: LOCKED_TITLE });
@@ -321,7 +384,8 @@ export async function pushDrafts(
         await reject(field, [e.message, ...problems].join(' '));
         continue;
       }
-      await accept(field, value);
+      await accept(field, value, extra);
+      if (field === 'price' && Number(app.discount) > 0) resendDiscount = true;
       // Lo que quedó sin subir de los datos de catálogo, con su motivo.
       if (problems.length > 0) await reject(field, problems.join(' '));
     }
@@ -432,6 +496,110 @@ async function pushPhotos(
       },
     });
   });
+}
+
+// ───────────────────────────── Renovar el descuento ─────────────────────────────
+
+// Cuánto antes de que venza se vuelve a subir, para que no se corte.
+const RENEW_BEFORE_MS = 24 * 60 * 60 * 1000;
+
+export type RenewResult = { renewed: number; failed: number; pending: boolean };
+
+/**
+ * Lo que corre cada hora con la lectura del canal: el descuento que subió la
+ * app y está por vencer, o ya venció, se vuelve a subir solo por otros días.
+ * Es lo único que la app sube sin que nadie toque Subir, y queda en el
+ * Registro. Si el canal no lo acepta, queda el motivo en Por subir y no se
+ * insiste hasta que se suba a mano.
+ */
+export async function renewDiscounts(db: Db, opts: { budgetMs: number; now?: () => Date }): Promise<RenewResult> {
+  const clock = opts.now ?? (() => new Date());
+  const started = clock().getTime();
+  const due = await db.channelCopy.findMany({
+    where: {
+      discountUntil: { lt: new Date(started + RENEW_BEFORE_MS) },
+      missingSince: null,
+      publication: { externalId: { not: null }, store: { connection: { status: 'ACTIVE' } } },
+    },
+    orderBy: { discountUntil: 'asc' },
+    select: { publicationId: true, publication: { select: { product: { select: { accountId: true } } } } },
+  });
+  const out: RenewResult = { renewed: 0, failed: 0, pending: false };
+  for (const row of due) {
+    if (clock().getTime() - started > opts.budgetMs) return { ...out, pending: true };
+    try {
+      const r = await renewOne(db, row.publication.product.accountId, row.publicationId, clock());
+      if (r === 'renewed') out.renewed++;
+      else if (r === 'failed') out.failed++;
+    } catch (e) {
+      console.error('No se pudo renovar el descuento', row.publicationId, e instanceof Error ? e.message : e);
+      // Demasiados pedidos: se sigue en la próxima pasada.
+      if (e instanceof ConnectError && e.busy) return { ...out, pending: true };
+    }
+  }
+  return out;
+}
+
+async function renewOne(db: Db, accountId: string, publicationId: string, now: Date): Promise<'renewed' | 'failed' | 'skipped'> {
+  const p = await loadForPush(db, accountId, publicationId);
+  const copy = p.channelCopy;
+  const publisher = getChannelPublisher(p.store.channel.kind);
+  if (!copy?.discountUntil || copy.missingSince || !p.externalId || !publisher) return 'skipped';
+  const app = faceValues(p);
+  const channel = channelFaceValues(copy);
+  const appPrints = fingerprintsOf(app);
+  const pct = Number(app.discount);
+  // La app ya no tiene descuento: no hay nada que renovar.
+  if (!(pct > 0)) {
+    await db.channelCopy.update({ where: { publicationId }, data: { discountUntil: null, discountSentAt: null } });
+    return 'skipped';
+  }
+  // Se renueva el mismo que se subió. Si en la app se cambió después, o
+  // también cambió en el canal, lo decide la persona desde Por subir.
+  if (faceSummary(appPrints, copy).choose.includes('discount')) return 'skipped';
+  const last = await db.channelSyncChange.findFirst({
+    where: { publicationId, field: 'discount', kind: { in: ['SENT', 'RENEWED'] } },
+    orderBy: { createdAt: 'desc' },
+    select: { after: true },
+  });
+  if (discountText(typeof last?.after === 'string' ? last.after : null) !== app.discount) return 'skipped';
+  const rejections = parseRejections(copy.rejections);
+  if (rejections.discount?.fingerprint === appPrints.discount) return 'skipped';
+
+  const listPrice = Number(channel.price ?? 0);
+  let until: Date | null;
+  try {
+    until = await setDiscounts(db, p, publisher, { pct, listPrice }, now);
+  } catch (e) {
+    if (!(e instanceof PublishError)) throw e;
+    rejections.discount = { message: e.message, at: now.toISOString(), fingerprint: appPrints.discount };
+    await db.$transaction([
+      db.channelCopy.update({ where: { publicationId }, data: { rejections } }),
+      db.channelSyncChange.create({
+        data: { publicationId, field: 'discount', kind: 'REJECTED', before: asJson(channel.discount), after: asJson(app.discount), message: `${RENEWAL_FAILED}${e.message}` },
+      }),
+    ]);
+    return 'failed';
+  }
+  await db.$transaction(async (tx) => {
+    const current = await tx.channelCopy.findUniqueOrThrow({ where: { publicationId }, select: { fingerprints: true, agreed: true, rejections: true } });
+    const left = parseRejections(current.rejections);
+    delete left.discount;
+    await tx.channelCopy.update({
+      where: { publicationId },
+      data: {
+        discount: app.discount,
+        ...discountDates(pct, until, now),
+        fingerprints: { ...parseFingerprints(current.fingerprints), discount: appPrints.discount },
+        agreed: { ...parseFingerprints(current.agreed), discount: appPrints.discount },
+        rejections: left,
+      },
+    });
+    await tx.channelSyncChange.create({
+      data: { publicationId, field: 'discount', kind: 'RENEWED', before: asJson(channel.discount), after: asJson(app.discount) },
+    });
+  });
+  return 'renewed';
 }
 
 export class DraftError extends Error {}

@@ -10,6 +10,9 @@ import {
   faceSummary,
   faceValues,
   fingerprintsOf,
+  discountText,
+  heldDiscount,
+  installmentsText,
   planFaces,
   priceText,
   storedPrints,
@@ -130,7 +133,7 @@ function writeFace(field: FaceField, value: FaceValues[FaceField]): Prisma.Publi
   // Las fotos que se toman del canal: la publicación vuelve a seguir a las del canal.
   if (field === 'photos') return { media: Prisma.DbNull };
   if (field === 'attributes') return { attributes: value as NameValue[] };
-  if (field === 'price') return { price: (value as string | null) ?? null };
+  if (field === 'installments') return { installments: value === null ? null : Number(value) };
   return { [field]: (value as string | null) ?? null };
 }
 
@@ -163,7 +166,21 @@ async function applyListing(
       attributes: true,
       media: true,
       price: true,
-      channelCopy: { select: { description: true, descriptionReadAt: true, agreed: true, fingerprints: true, price: true } },
+      installments: true,
+      discount: true,
+      channelCopy: {
+        select: {
+          description: true,
+          descriptionReadAt: true,
+          agreed: true,
+          fingerprints: true,
+          price: true,
+          installments: true,
+          discount: true,
+          discountUntil: true,
+          discountSentAt: true,
+        },
+      },
     },
   });
   const app = faceValues(p);
@@ -173,17 +190,30 @@ async function applyListing(
     attributes: listingAttributes(listing, ctx.adapter),
     photos: channelPhotos(listing.photos, listing.photoIds, listing.variations),
     price: priceText(listing.price),
+    installments: installmentsText(listing.installments),
+    discount: discountText(listing.discount),
   };
   const appPrints = fingerprintsOf(app);
   const channelPrints = fingerprintsOf(channel);
   // La primera vez, el precio del canal gana: el que tenía la app venía de una planilla.
-  const lastAgreed = p.channelCopy ? storedPrints(p.channelCopy).agreed : { price: appPrints.price };
+  const lastAgreed: Fingerprints = p.channelCopy ? storedPrints(p.channelCopy).agreed : { price: appPrints.price };
+  // Las cuotas y el descuento que se decidieron en la app antes de conocer los del canal quedan para subir.
+  for (const field of ['installments', 'discount'] as const) {
+    if (!lastAgreed[field] && app[field] !== null) lastAgreed[field] = channelPrints[field];
+  }
   const plans = planFaces(appPrints, channelPrints, lastAgreed);
+  const hold = heldDiscount(app.discount, channel.discount, p.channelCopy, ctx.now);
 
   const agreed: Fingerprints = {};
   let update: Prisma.PublicationUpdateInput = {};
   const taken: FaceField[] = [];
   for (const plan of plans) {
+    if (plan.field === 'discount' && hold) {
+      // Todavía no se ve: queda como estaba. Venció: queda para volver a subir, como un cambio de la app.
+      const keep = hold === 'expired' ? channelPrints.discount : lastAgreed.discount;
+      if (keep !== undefined) agreed.discount = keep;
+      continue;
+    }
     if (plan.agreed !== undefined) agreed[plan.field] = plan.agreed;
     if (!plan.take) continue;
     update = { ...update, ...writeFace(plan.field, channel[plan.field]) };
@@ -219,6 +249,10 @@ async function applyListing(
     description: channel.description,
     attributes: channel.attributes,
     price: listing.price,
+    installments: listing.installments,
+    discount: listing.discount,
+    // Un descuento que llegó del canal no es de la app: no se renueva.
+    ...(taken.includes('discount') ? { discountUntil: null, discountSentAt: null } : {}),
     status: listing.status,
     url: listing.url,
     photos: listing.photos,
@@ -402,7 +436,7 @@ export async function runSyncStep(
 async function countToChoose(db: Db, storeId: string): Promise<number> {
   const publications = await db.publication.findMany({
     where: { storeId, channelCopy: { isNot: null } },
-    select: { title: true, description: true, attributes: true, media: true, price: true, channelCopy: { select: { fingerprints: true, agreed: true, missingSince: true, price: true } } },
+    select: { title: true, description: true, attributes: true, media: true, price: true, installments: true, discount: true, channelCopy: { select: { fingerprints: true, agreed: true, missingSince: true, price: true, installments: true, discount: true } } },
   });
   return publications.filter((p) => !p.channelCopy?.missingSince && faceSummary(fingerprintsOf(faceValues(p)), p.channelCopy).choose.length > 0)
     .length;
@@ -507,8 +541,10 @@ export async function chooseFaces(
           attributes: true,
           media: true,
           price: true,
+          installments: true,
+          discount: true,
           channelCopy: {
-            select: { title: true, description: true, attributes: true, photos: true, photoIds: true, variations: true, price: true, fingerprints: true, agreed: true, missingSince: true },
+            select: { title: true, description: true, attributes: true, photos: true, photoIds: true, variations: true, price: true, installments: true, discount: true, fingerprints: true, agreed: true, missingSince: true },
           },
         },
       });
@@ -560,8 +596,10 @@ export async function discardDrafts(
         attributes: true,
         media: true,
         price: true,
+        installments: true,
+        discount: true,
         channelCopy: {
-          select: { title: true, description: true, attributes: true, photos: true, photoIds: true, variations: true, price: true, fingerprints: true, agreed: true, missingSince: true },
+          select: { title: true, description: true, attributes: true, photos: true, photoIds: true, variations: true, price: true, installments: true, discount: true, fingerprints: true, agreed: true, missingSince: true },
         },
       },
     });

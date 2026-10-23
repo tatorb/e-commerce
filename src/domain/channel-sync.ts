@@ -1,12 +1,14 @@
 import { cleanText } from './content';
 import { channelPhotos, orderedMeasures, parseMedia, photoKey, photoVariants, variantPhotos, type PhotoRef } from './media';
+import { formatPercent, formatPrice } from './money';
 import { parseNameValueList, type NameValue } from './name-value';
+import { planLabel } from './pricing';
 
 // Las caras de una publicación: lo que tiene la app y lo que está en el canal.
 // Para saber de qué lado cambió cada dato se guarda, además, la huella de lo
 // último en que las dos coincidieron. Este módulo no sabe nada de canales.
 
-export const FACE_FIELDS = ['title', 'description', 'attributes', 'photos', 'price'] as const;
+export const FACE_FIELDS = ['title', 'description', 'attributes', 'photos', 'price', 'installments', 'discount'] as const;
 export type FaceField = (typeof FACE_FIELDS)[number];
 
 export const FACE_FIELD_LABEL: Record<FaceField, string> = {
@@ -15,6 +17,8 @@ export const FACE_FIELD_LABEL: Record<FaceField, string> = {
   attributes: 'Datos de catálogo',
   photos: 'Fotos',
   price: 'Precio',
+  installments: 'Cuotas',
+  discount: 'Descuento',
 };
 
 // Cómo se cuenta cada cambio en el historial.
@@ -32,6 +36,7 @@ export const SYNC_CHANGE_LABEL = {
   STATUS_CHANGED: 'se cambió el estado',
   STATUS_FAILED: 'no se pudo cambiar el estado',
   RELISTED: 'se republicó',
+  RENEWED: 'se renovó el descuento',
 } as const;
 
 export function isFaceField(value: string): value is FaceField {
@@ -40,7 +45,17 @@ export function isFaceField(value: string): value is FaceField {
 
 // photos null: la app no eligió fotos, sigue a las del canal. price: el
 // precio publicado, como texto con punto decimal, por ejemplo "125000.5".
-export type FaceValues = { title: string | null; description: string | null; attributes: NameValue[]; photos: PhotoRef[] | null; price: string | null };
+// installments: el plan de cuotas, por ejemplo "6". discount: el descuento en
+// %, por ejemplo "27.3", o "0" sin descuento. Null mientras no se sabe.
+export type FaceValues = {
+  title: string | null;
+  description: string | null;
+  attributes: NameValue[];
+  photos: PhotoRef[] | null;
+  price: string | null;
+  installments: string | null;
+  discount: string | null;
+};
 export type Fingerprints = Partial<Record<FaceField, string>>;
 
 type Numeric = number | string | { toString(): string };
@@ -52,33 +67,60 @@ export function priceText(value: Numeric | null | undefined): string | null {
   return Number.isFinite(n) && n > 0 ? String(Math.round(n * 100) / 100) : null;
 }
 
+/** Las cuotas como las compara la cara. */
+export function installmentsText(value: number | null | undefined): string | null {
+  return value === null || value === undefined || !Number.isInteger(value) || value < 0 ? null : String(value);
+}
+
+/** El descuento como lo compara la cara, con un decimal: "0" sin descuento. */
+export function discountText(value: Numeric | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const n = Number(value.toString());
+  return Number.isFinite(n) && n >= 0 && n < 100 ? String(Math.round(n * 10) / 10) : null;
+}
+
+/** El precio, las cuotas o el descuento en palabras, para mostrar. */
+export function priceFaceText(field: 'price' | 'installments' | 'discount', value: string | number | null): string {
+  if (value === null || value === '') return '';
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '';
+  if (field === 'price') return formatPrice(n);
+  if (field === 'installments') return planLabel(n);
+  return n === 0 ? 'Sin descuento' : formatPercent(n);
+}
+
+type PriceValues = { price: Numeric | null; installments: number | null; discount: Numeric | null };
+
+const priceFaces = (v: PriceValues) => ({ price: priceText(v.price), installments: installmentsText(v.installments), discount: discountText(v.discount) });
+
 /** Los datos de la cara de la app, como los guarda la publicación. */
-export function faceValues(p: { title: string | null; description: string | null; attributes: unknown; media?: unknown; price: Numeric | null }): FaceValues {
+export function faceValues(p: { title: string | null; description: string | null; attributes: unknown; media?: unknown } & PriceValues): FaceValues {
   return {
     title: p.title,
     description: p.description,
     attributes: parseNameValueList(p.attributes),
     photos: parseMedia(p.media),
-    price: priceText(p.price),
+    ...priceFaces(p),
   };
 }
 
 /** Los datos de la cara del canal, como los guarda la copia de lo que se leyó. */
-export function channelFaceValues(c: {
-  title: string | null;
-  description: string | null;
-  attributes: unknown;
-  photos: unknown;
-  photoIds: unknown;
-  variations: unknown;
-  price: Numeric | null;
-}): FaceValues {
+export function channelFaceValues(
+  c: {
+    title: string | null;
+    description: string | null;
+    attributes: unknown;
+    photos: unknown;
+    photoIds: unknown;
+    variations: unknown;
+  } & PriceValues,
+): FaceValues {
   return {
     title: c.title,
     description: c.description,
     attributes: parseNameValueList(c.attributes),
     photos: channelPhotos(c.photos, c.photoIds, c.variations),
-    price: priceText(c.price),
+    ...priceFaces(c),
   };
 }
 
@@ -103,7 +145,7 @@ function normalized(field: FaceField, value: FaceValues[FaceField]): string {
       .sort()
       .join('\n');
   }
-  if (field === 'price') return (value as string | null) ?? '';
+  if (field === 'price' || field === 'installments' || field === 'discount') return (value as string | null) ?? '';
   const text = cleanText(value as string | null);
   if (!text) return '';
   if (field === 'title') return oneSpace(text);
@@ -146,6 +188,8 @@ export function fingerprintsOf(values: FaceValues): Record<FaceField, string> {
     attributes: fingerprint('attributes', values.attributes),
     photos: fingerprint('photos', values.photos),
     price: fingerprint('price', values.price),
+    installments: fingerprint('installments', values.installments),
+    discount: fingerprint('discount', values.discount),
   };
 }
 
@@ -160,19 +204,43 @@ export function parseFingerprints(raw: unknown): Fingerprints {
 }
 
 /**
- * Las huellas guardadas de la copia del canal y lo acordado. El precio se sumó
- * después: una copia leída antes no tiene su huella, así que se calcula del
- * precio leído y se da por acordado, porque hasta entonces la app tomaba
- * siempre el precio del canal.
+ * Las huellas guardadas de la copia del canal y lo acordado. El precio, las
+ * cuotas y el descuento se sumaron después: una copia leída antes no tiene su
+ * huella, así que se calcula de lo leído y se da por acordado, porque hasta
+ * entonces la app tomaba siempre el precio del canal.
  */
-export function storedPrints(copy: { fingerprints: unknown; agreed: unknown; price: Numeric | null }): { channel: Fingerprints; agreed: Fingerprints } {
+export function storedPrints(copy: { fingerprints: unknown; agreed: unknown } & PriceValues): { channel: Fingerprints; agreed: Fingerprints } {
   const channel = parseFingerprints(copy.fingerprints);
   const agreed = parseFingerprints(copy.agreed);
-  if (channel.price === undefined) {
-    channel.price = fingerprint('price', priceText(copy.price));
-    agreed.price ??= channel.price;
+  const read = priceFaces(copy);
+  for (const field of ['price', 'installments', 'discount'] as const) {
+    if (channel[field] !== undefined) continue;
+    channel[field] = fingerprint(field, read[field]);
+    agreed[field] ??= channel[field];
   }
   return { channel, agreed };
+}
+
+// Cómo empieza el motivo de una renovación sola que el canal no aceptó.
+export const RENEWAL_FAILED = 'Al renovarlo solo: ';
+
+// Un rato después de subir el descuento, el canal puede no mostrarlo todavía.
+export const DISCOUNT_GRACE_MS = 60 * 60 * 1000;
+
+/**
+ * El descuento que subió la app y el canal no muestra. pending: lo subió hace
+ * poco y todavía no se ve. expired: venció, y queda para volver a subir. En
+ * los dos casos la app no lo pierde. Null: vale lo de siempre.
+ */
+export function heldDiscount(
+  app: string | null,
+  channel: string | null,
+  copy: { discountUntil: Date | null; discountSentAt: Date | null } | null,
+  now: Date,
+): 'pending' | 'expired' | null {
+  if (!copy?.discountUntil || !(Number(app) > 0) || channel !== '0') return null;
+  if (now.getTime() >= copy.discountUntil.getTime()) return 'expired';
+  return copy.discountSentAt && now.getTime() - copy.discountSentAt.getTime() < DISCOUNT_GRACE_MS ? 'pending' : null;
 }
 
 /**
@@ -245,7 +313,7 @@ export type FaceSummary = {
 /** En qué está la publicación: los datos del borrador y los que hay que elegir. */
 export function faceSummary(
   app: Record<FaceField, string>,
-  copy: { fingerprints: unknown; agreed: unknown; rejections?: unknown; price: Numeric | null } | null,
+  copy: ({ fingerprints: unknown; agreed: unknown; rejections?: unknown } & PriceValues) | null,
 ): FaceSummary {
   const summary: FaceSummary = { draft: [], choose: [], rejected: [] };
   if (!copy) return summary;

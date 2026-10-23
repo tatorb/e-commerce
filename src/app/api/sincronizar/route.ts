@@ -2,10 +2,12 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { syncAllStores } from '@/lib/channel-sync';
+import { renewDiscounts } from '@/lib/channel-push';
 import { readAllQuestions } from '@/lib/buyer-questions';
 
 // La tarea programada: lee las preguntas de los compradores y las
-// publicaciones de las tiendas conectadas. La llaman Vercel una vez por día
+// publicaciones de las tiendas conectadas, y renueva los descuentos que subió
+// la app antes de que venzan. La llaman Vercel una vez por día
 // (vercel.json) y GitHub cada hora (.github/workflows/leer-canales.yml), con
 // la clave CRON_SECRET. Cada pedido lee lo que alcanza en su tiempo; pending
 // dice si conviene llamar otra vez.
@@ -18,6 +20,8 @@ export const maxDuration = 60;
 const BUDGET_MS = 35_000;
 // Primero las preguntas, que esperan respuesta. La primera vez traen las anteriores por tandas.
 const QUESTIONS_BUDGET_MS = 10_000;
+// Después, los descuentos por vencer: cada uno son unos pocos pedidos.
+const RENEW_BUDGET_MS = 6_000;
 
 const digest = (s: string) => createHash('sha256').update(s).digest();
 
@@ -31,9 +35,11 @@ export async function GET(request: Request) {
   if (!authorized(request, secret)) return NextResponse.json({ error: 'No autorizado.' }, { status: 401 });
   const started = Date.now();
   const questions = await readAllQuestions(prisma, { budgetMs: QUESTIONS_BUDGET_MS });
+  const renewals = await renewDiscounts(prisma, { budgetMs: RENEW_BUDGET_MS });
   const result = await syncAllStores(prisma, { budgetMs: BUDGET_MS - (Date.now() - started) });
   return NextResponse.json({
-    pending: result.pending || questions.pending,
+    pending: result.pending || questions.pending || renewals.pending,
     stores: result.stores.map((s) => ({ status: s.status, read: s.position, total: s.total })),
+    renewed: renewals.renewed,
   });
 }

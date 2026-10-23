@@ -18,8 +18,12 @@ export type ChannelListing = {
   url: string | null;
   title: string | null;
   description: string | null;
-  // Precio público.
+  // Precio público, sin el descuento.
   price: number | null;
+  // Las cuotas: 0 sin cuotas, 1 la cuota promocionada, o la cantidad sin interés. Null si el canal no lo informa.
+  installments: number | null;
+  // El descuento sobre el precio público, en %. 0 sin descuento; null si no se sabe.
+  discount: number | null;
   status: ChannelStatus;
   // Vendidos desde que se publicó.
   sold: number | null;
