@@ -59,6 +59,11 @@ describe('categorías de Mercado Libre', () => {
       for (const hidden of ['ITEM_CONDITION', 'VEHICLE_TYPE', 'GTIN', 'SELLER_SKU', 'PACKAGE_WEIGHT']) {
         expect(ids, `${c.name} ${hidden}`).not.toContain(hidden);
       }
+      // El paquete lo pide Mercado Libre para el envío, en cm y g.
+      for (const size of ['SELLER_PACKAGE_HEIGHT', 'SELLER_PACKAGE_WIDTH', 'SELLER_PACKAGE_LENGTH']) {
+        expect(c.fields.find((f) => f.id === size), `${c.name} ${size}`).toMatchObject({ type: 'number_unit', units: ['cm'], required: true });
+      }
+      expect(c.fields.find((f) => f.id === 'SELLER_PACKAGE_WEIGHT')).toMatchObject({ type: 'number_unit', units: ['g'], required: true });
       // Los impuestos los pide Mercado Libre y suelen ser los mismos en toda la tienda.
       for (const tax of ['VALUE_ADDED_TAX', 'IMPORT_DUTY']) {
         expect(c.fields.find((f) => f.id === tax), `${c.name} ${tax}`).toMatchObject({ type: 'list', required: true, sameInStore: true });

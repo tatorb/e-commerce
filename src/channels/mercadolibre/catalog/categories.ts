@@ -5,10 +5,20 @@ import type { CatalogCategory, CatalogField } from '@/domain/catalog-data';
 // (/categories/{id}/attributes), bajada con Apify el 19/10/2026. Quedan solo
 // los campos que el formulario de Mercado Libre muestra para cargar a mano:
 // sin los ocultos, los de solo lectura, los fijos (tipo de vehículo) ni la
-// condición del ítem. Marca, número de pieza y origen salen de la ficha. Los
-// impuestos, IVA e impuesto interno, son iguales en todas las categorías: los
-// pide Mercado Libre según la situación fiscal de la cuenta. Para actualizarlos,
-// se vuelven a bajar y se regenera este archivo.
+// condición del ítem. Marca, número de pieza y origen salen de la ficha. Las
+// medidas y el peso del paquete, y los impuestos (IVA e impuesto interno), son
+// iguales en todas las categorías: Mercado Libre los pide al crear aunque su
+// formulario los oculte. Para actualizarlos, se vuelven a bajar y se regenera
+// este archivo.
+
+// El paquete con que se despacha: Mercado Libre lo pide para calcular el envío.
+// Con sus nombres en Mercado Libre, que son los que trae cada publicación.
+const PACKAGE: CatalogField[] = [
+  { id: 'SELLER_PACKAGE_HEIGHT', label: 'Altura del paquete del seller', type: 'number_unit', units: ['cm'], defaultUnit: 'cm', required: true },
+  { id: 'SELLER_PACKAGE_WIDTH', label: 'Ancho del paquete del seller', type: 'number_unit', units: ['cm'], defaultUnit: 'cm', required: true },
+  { id: 'SELLER_PACKAGE_LENGTH', label: 'Largo del paquete del seller', type: 'number_unit', units: ['cm'], defaultUnit: 'cm', required: true },
+  { id: 'SELLER_PACKAGE_WEIGHT', label: 'Peso del paquete del seller', type: 'number_unit', units: ['g'], defaultUnit: 'g', required: true },
+];
 
 // Mercado Libre los pide en estas categorías y casi siempre son los mismos en
 // toda la tienda.
@@ -40,6 +50,7 @@ export const ML_CATEGORIES: CatalogCategory[] = [
       { id: 'OEM', label: 'Código OEM', type: 'text', multiple: true },
       { id: 'MOUNTING_HARDWARE_INCLUDED', label: 'Incluye herrajes de montaje', type: 'boolean' },
       { id: 'MATERIAL', label: 'Material', type: 'text', options: ['Acero inoxidable', 'Aluminio'] },
+      ...PACKAGE,
       ...TAXES,
     ],
   },
@@ -55,6 +66,7 @@ export const ML_CATEGORIES: CatalogCategory[] = [
       { id: 'INCLUDES_DRIVE_SPROCKET', label: 'Incluye engranaje conducido', type: 'boolean' },
       { id: 'INCLUDES_SOLENOID', label: 'Incluye válvula solenoide', type: 'boolean' },
       { id: 'OEM', label: 'Código OEM', type: 'text', multiple: true },
+      ...PACKAGE,
       ...TAXES,
     ],
   },
@@ -73,6 +85,7 @@ export const ML_CATEGORIES: CatalogCategory[] = [
       { id: 'INCLUDES_BACK_HOUSING', label: 'Incluye carcasa trasera', type: 'boolean' },
       { id: 'INCLUDES_INSTALLATION_MANUAL', label: 'Incluye manual de instalación', type: 'boolean' },
       { id: 'OEM', label: 'Código OEM', type: 'text', multiple: true },
+      ...PACKAGE,
       ...TAXES,
     ],
   },
@@ -89,6 +102,7 @@ export const ML_CATEGORIES: CatalogCategory[] = [
       { id: 'INSIDE_DIAMETER', label: 'Diámetro interior', type: 'number_unit', units: ['"', 'mm'], defaultUnit: 'mm' },
       { id: 'OUTSIDE_DIAMETER', label: 'Diámetro externo', type: 'number_unit', units: ['"', 'mm'], defaultUnit: 'mm' },
       { id: 'OEM', label: 'Código OEM', type: 'text', multiple: true },
+      ...PACKAGE,
       ...TAXES,
     ],
   },
@@ -105,6 +119,7 @@ export const ML_CATEGORIES: CatalogCategory[] = [
       { id: 'CRANKSHAFT_LENGTH', label: 'Largo del cigüeñal', type: 'number_unit', units: ['"', 'cm', 'm', 'mm'], defaultUnit: 'cm' },
       { id: 'ROD_DIAMETER', label: 'Diámetro de la biela', type: 'number_unit', units: ['"', 'mm'], defaultUnit: 'mm' },
       { id: 'OEM', label: 'Código OEM', type: 'text', multiple: true },
+      ...PACKAGE,
       ...TAXES,
     ],
   },
@@ -121,6 +136,7 @@ export const ML_CATEGORIES: CatalogCategory[] = [
       { id: 'INNER_RING_WIDTH', label: 'Ancho del aro interno', type: 'number_unit', units: ['"', 'cm', 'mm'], defaultUnit: 'mm' },
       { id: 'USE_TYPE', label: 'Tipo de uso', type: 'list', options: ['Regular', 'Competencia'] },
       { id: 'OEM', label: 'Código OEM', type: 'text', multiple: true },
+      ...PACKAGE,
       ...TAXES,
     ],
   },
@@ -136,6 +152,7 @@ export const ML_CATEGORIES: CatalogCategory[] = [
       { id: 'OEM', label: 'Código OEM', type: 'text', multiple: true },
       { id: 'BORE_DIAMETER', label: 'Diámetro del agujero', type: 'number_unit', units: ['"', 'cm', 'm', 'mm'], defaultUnit: 'mm' },
       { id: 'OUTSIDE_DIAMETER', label: 'Diámetro externo', type: 'number_unit', units: ['"', 'cm', 'm', 'mm'], defaultUnit: 'mm' },
+      ...PACKAGE,
       ...TAXES,
     ],
   },
@@ -149,6 +166,7 @@ export const ML_CATEGORIES: CatalogCategory[] = [
       { id: 'HEAD_BOLTS_INCLUDED', label: 'Tornillos de tapa incluidos', type: 'boolean' },
       { id: 'USE_TYPE', label: 'Tipo de uso', type: 'list', options: ['Regular', 'Competencia'] },
       { id: 'OEM', label: 'Código OEM', type: 'text', multiple: true },
+      ...PACKAGE,
       ...TAXES,
     ],
   },
@@ -161,6 +179,7 @@ export const ML_CATEGORIES: CatalogCategory[] = [
       { id: 'OEM', label: 'Código OEM', type: 'text', multiple: true },
       { id: 'MATERIAL', label: 'Material', type: 'text', options: ['Acero inoxidable', 'Aluminio'] },
       { id: 'THICKNESS', label: 'Espesor', type: 'number_unit', units: ['"', 'cm', 'mm'], defaultUnit: 'mm' },
+      ...PACKAGE,
       ...TAXES,
     ],
   },
@@ -178,6 +197,7 @@ export const ML_CATEGORIES: CatalogCategory[] = [
       { id: 'BELT_TENSIONER_INCLUDED', label: 'Incluye rodillo', type: 'boolean' },
       { id: 'WATER_PUMP_INCLUDED', label: 'Incluye bomba de agua', type: 'boolean' },
       { id: 'TIMING_BELTS_BRAND', label: 'Marca de correa', type: 'text' },
+      ...PACKAGE,
       ...TAXES,
     ],
   },
@@ -195,6 +215,7 @@ export const ML_CATEGORIES: CatalogCategory[] = [
       { id: 'INCLUDES_THROW_OUT_BEARING', label: 'Incluye rulemán de empuje', type: 'boolean' },
       { id: 'INCLUDES_ALIGNMENT_TOOL', label: 'Incluye centrador', type: 'boolean' },
       { id: 'OEM', label: 'Código OEM', type: 'text', multiple: true },
+      ...PACKAGE,
       ...TAXES,
     ],
   },
@@ -206,6 +227,7 @@ export const ML_CATEGORIES: CatalogCategory[] = [
       { id: 'PART_NUMBER', label: 'Número de pieza', type: 'text', fromProduct: 'partNumber', required: true },
       { id: 'OEM', label: 'Código OEM', type: 'text', multiple: true },
       { id: 'HEAD_BOLTS_INCLUDED', label: 'Tornillos de tapa incluidos', type: 'boolean' },
+      ...PACKAGE,
       ...TAXES,
     ],
   },
@@ -224,6 +246,7 @@ export const ML_CATEGORIES: CatalogCategory[] = [
       { id: 'OEM', label: 'Código OEM', type: 'text', multiple: true },
       { id: 'SKIRT_TYPE', label: 'Tipo de pollera', type: 'text', options: ['Completa', 'Media', 'Corta', 'Tipo caja', 'Con recortes', 'Asimétrica', 'Cónica', 'Con revestimiento antifricción'] },
       { id: 'COMPRESSION_RATIO', label: 'Relación de compresión', type: 'text' },
+      ...PACKAGE,
       ...TAXES,
     ],
   },
@@ -235,6 +258,7 @@ export const ML_CATEGORIES: CatalogCategory[] = [
       { id: 'PART_NUMBER', label: 'Número de pieza', type: 'text', fromProduct: 'partNumber', required: true },
       { id: 'ORIGIN', label: 'Origen', type: 'text', fromProduct: 'origin' },
       { id: 'OEM', label: 'Código OEM', type: 'text', multiple: true },
+      ...PACKAGE,
       ...TAXES,
     ],
   },
@@ -257,6 +281,7 @@ export const ML_CATEGORIES: CatalogCategory[] = [
       { id: 'MOUNTING_HARDWARE_INCLUDED', label: 'Incluye herrajes de montaje', type: 'boolean' },
       { id: 'MATERIAL', label: 'Material', type: 'text', options: ['Acero inoxidable', 'Aluminio'] },
       { id: 'WATTAGE', label: 'Watts', type: 'number_unit', units: ['W'], defaultUnit: 'W' },
+      ...PACKAGE,
       ...TAXES,
     ],
   },
@@ -273,6 +298,7 @@ export const ML_CATEGORIES: CatalogCategory[] = [
       { id: 'STEM_DIAMETER', label: 'Diámetro del vástago', type: 'number_unit', units: ['"', 'mm'], defaultUnit: 'mm' },
       { id: 'USE_TYPE', label: 'Tipo de uso', type: 'list', options: ['Regular', 'Competencia'] },
       { id: 'OEM', label: 'Código OEM', type: 'text', multiple: true },
+      ...PACKAGE,
       ...TAXES,
     ],
   },

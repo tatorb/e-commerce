@@ -369,6 +369,13 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     });
   }
 
+  // Las medidas y el peso del paquete de la publicación, que pide el canal.
+  const withPackage = (publicationId: string) =>
+    saveCatalogData(db, {
+      publicationId,
+      values: { SELLER_PACKAGE_HEIGHT: '10', SELLER_PACKAGE_WIDTH: '20', SELLER_PACKAGE_LENGTH: '30', SELLER_PACKAGE_WEIGHT: '1500' },
+    });
+
   async function readAll() {
     const run = (await startSync(db, { storeId, trigger: 'MANUAL' }))!;
     await runSyncStep(db, run.id, { budgetMs: 30_000 });
@@ -702,6 +709,11 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     expect(info.checks.find((c) => c.label === 'Fotos')).toMatchObject({ ok: false, blocking: true });
     expect(info.checks.find((c) => c.label === 'Categoría')).toMatchObject({ ok: true, detail: 'Kits de Embrague' });
     expect(info.checks.find((c) => c.label === 'Descripción')).toMatchObject({ ok: false, blocking: false });
+    expect(info.checks.find((c) => c.label === 'Datos obligatorios')).toMatchObject({
+      ok: false,
+      detail: 'Faltan Altura del paquete del seller, Ancho del paquete del seller, Largo del paquete del seller, Peso del paquete del seller, IVA y Impuesto interno.',
+    });
+    await withPackage(pub.id);
     await saveMedia(db, { accountId, publicationId: pub.id, refs: [{ kind: 'asset', url: 'https://otra/foto.jpg' }] });
     info = await createChecks(db, { accountId, publicationId: pub.id });
     // Los impuestos: sin cargar y sin otras publicaciones en la tienda, faltan.
@@ -771,6 +783,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     const half = 'sku:SP-413 medida:0.50';
     await taxesInStore();
     const pub = await db.publication.create({ data: { productId, storeId, title: 'Subconjunto Peugeot 1.6 SP-413', channelStatus: 'UNPUBLISHED' } });
+    await withPackage(pub.id);
     const general = await correctedPhoto('general.jpg');
     const box = await correctedPhoto('caja-050.jpg');
     // La general es de todas; la del producto, de STD; la de la caja, de 0,50, que la ve primero.
@@ -843,6 +856,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     const editId = await correctedPhoto('frente.jpg');
     await saveMedia(db, { accountId, publicationId: pub.id, refs: [{ kind: 'edit', editId }, { kind: 'asset', url: 'https://otra/foto.jpg' }] });
     await taxesInStore();
+    await withPackage(pub.id);
 
     const created = await createInChannel(db, { accountId, publicationId: pub.id, price: 45000, quantity: 3, listingType: 'premium', userId: null });
     expect(created).toEqual({ externalId: 'MLA900', url: 'https://articulo.mercadolibre.com.ar/MLA-900', warnings: [], confirmed: true });
@@ -866,11 +880,19 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
       { id: 'BRAND', value_name: 'Sachs' },
       { id: 'PART_NUMBER', value_name: 'PD-1' },
       { id: 'CLUTCH_TYPE', value_name: 'Monodisco' },
+      { id: 'SELLER_PACKAGE_HEIGHT', value_name: '10 cm' },
+      { id: 'SELLER_PACKAGE_WIDTH', value_name: '20 cm' },
+      { id: 'SELLER_PACKAGE_LENGTH', value_name: '30 cm' },
+      { id: 'SELLER_PACKAGE_WEIGHT', value_name: '1500 g' },
       { id: 'VALUE_ADDED_TAX', value_name: '21 %' },
       { id: 'IMPORT_DUTY', value_name: '0 %' },
     ]);
     expect((await db.publication.findUniqueOrThrow({ where: { id: pub.id } })).attributes).toEqual([
       { name: 'Tipo de embrague', value: 'Monodisco' },
+      { name: 'Altura del paquete del seller', value: '10 cm' },
+      { name: 'Ancho del paquete del seller', value: '20 cm' },
+      { name: 'Largo del paquete del seller', value: '30 cm' },
+      { name: 'Peso del paquete del seller', value: '1500 g' },
       { name: 'IVA', value: '21 %' },
       { name: 'Impuesto interno', value: '0 %' },
     ]);
@@ -889,6 +911,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     const pub = await db.publication.create({ data: { productId, storeId, title: 'Kit Embrague RECHAZAR', channelStatus: 'UNPUBLISHED' } });
     await saveMedia(db, { accountId, publicationId: pub.id, refs: [{ kind: 'asset', url: 'https://otra/foto.jpg' }] });
     await taxesInStore();
+    await withPackage(pub.id);
     const attempt = createInChannel(db, { accountId, publicationId: pub.id, price: 1, quantity: 1, listingType: 'clasica', userId: null });
     await expect(attempt).rejects.toThrow(CreateError);
     await expect(createInChannel(db, { accountId, publicationId: pub.id, price: 1, quantity: 1, listingType: 'clasica', userId: null })).rejects.toThrow(
@@ -921,6 +944,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
       const pub = await db.publication.create({
         data: { productId, storeId, title: 'Subconjunto Peugeot 1.6 SP-413', description: 'Pistones y aros.', channelStatus: 'UNPUBLISHED' },
       });
+      await withPackage(pub.id);
       const general = await correctedPhoto('general.jpg');
       await saveMedia(db, {
         accountId,
@@ -1007,6 +1031,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     it('una sola medida se crea con nombre de familia y sin título', async () => {
       await db.productVariant.deleteMany({ where: { productId, measure: '0,50' } });
       const pub = await db.publication.create({ data: { productId, storeId, title: 'Subconjunto Peugeot 1.6 SP-413', channelStatus: 'UNPUBLISHED' } });
+      await withPackage(pub.id);
       await saveMedia(db, { accountId, publicationId: pub.id, refs: [{ kind: 'asset', url: 'https://otra/foto.jpg' }] });
       const result = await createInChannel(db, { accountId, publicationId: pub.id, price: 80000, quantity: 3, listingType: 'clasica', userId: null });
       expect(result).toMatchObject({ externalId: 'MLA900', confirmed: true });

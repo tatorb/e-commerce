@@ -34,6 +34,11 @@ describe('por qué Mercado Libre no aceptó un cambio', () => {
         ],
       }),
     ).toMatch(/^Mercado Libre pide datos de catálogo que faltan: The attributes \[VALUE_ADDED_TAX,IMPORT_DUTY\]/);
+    expect(
+      rejectionMessage(400, {
+        cause: [{ code: 'item.attributes.invalid', message: 'The attributes [seller_package_height, seller_package_weight] are all required' }],
+      }),
+    ).toBe('Mercado Libre pide datos de catálogo que faltan: The attributes [seller_package_height, seller_package_weight] are all required');
     expect(rejectionMessage(400, { message: 'Algo raro' })).toBe('Mercado Libre no lo aceptó: Algo raro');
     expect(rejectionMessage(500, null)).toBe('Mercado Libre no lo aceptó (código 500).');
   });
