@@ -714,7 +714,8 @@ model PipelineMovement {
 // ───────────────────────────── Paso Información ─────────────────────────────
 
 // Publicación de la competencia que vende mucho, cargada a mano. Sus títulos
-// suman palabras al mapa del paso Título.
+// suman palabras al mapa del paso Título, y su precio, descuento, cuotas y
+// envío sirven para comparar precios.
 model CompetitorListing {
   id            String      @id @default(cuid())
   publicationId String
@@ -722,6 +723,17 @@ model CompetitorListing {
   url           String?
   title         String
   soldQuantity  Int?
+  sellerName    String?
+  // El precio antes de cualquier descuento.
+  listPrice     Decimal?    @db.Decimal(14, 2)
+  // El descuento activo en %, por ejemplo 15 para 15 %.
+  discountPct   Decimal     @default(0) @db.Decimal(5, 2)
+  // Cuotas sin interés: 0 es sin cuotas; si no, 3, 6, 9 o 12.
+  installments  Int         @default(0)
+  freeShipping  Boolean     @default(false)
+  // El día en que se miró el precio: cambia seguido.
+  surveyedAt    DateTime?   @db.Date
+  notes         String?
   position      Int         @default(0)
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt

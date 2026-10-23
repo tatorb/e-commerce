@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { competitorsSchema, MAX_COMPETITORS, saveCompetitors } from '@/domain/competitors';
+import { todayIn } from '@/domain/applications';
+import { COMPETITOR_SELECT, competitorsSchema, INSTALLMENT_OPTIONS, MAX_COMPETITORS, saveCompetitors, storedCompetitor } from '@/domain/competitors';
 import {
   addToPipeline,
   advanceStep,
@@ -498,7 +499,7 @@ const updateProductInfoTool = defineTool({
 const saveCompetitorsTool = defineTool({
   name: 'save_competitors',
   title: 'Cargar la competencia',
-  description: `Guarda las publicaciones de la competencia que más venden; conviene al menos 3 y no hay un tope práctico. Sus títulos suman palabras al mapa del paso Título. Reemplaza la lista entera; una lista vacía la borra. Solo publicaciones reales que te pasó la persona o que vio en el canal.`,
+  description: `Guarda las publicaciones de la competencia que más venden; conviene al menos 3 y no hay un tope práctico. Sus títulos suman palabras al mapa del paso Título, y su precio, descuento, cuotas y envío sirven para comparar precios. Reemplaza la lista entera; una lista vacía la borra, y lo que no mandes de una publicación queda vacío. Solo publicaciones y precios reales que te pasó la persona o que viste en el canal. Si mandás el precio sin la fecha, queda con la fecha de hoy.`,
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg,
@@ -508,6 +509,17 @@ const saveCompetitorsTool = defineTool({
           titulo: z.string().min(1),
           link: z.string().optional(),
           vendidos: z.number().int().min(0).nullable().optional(),
+          vendedor: z.string().optional().describe('El nombre del vendedor.'),
+          precio_de_lista: z.number().positive().nullable().optional().describe('El precio antes de cualquier descuento, en pesos.'),
+          descuento_pct: z.number().min(0).max(99).optional().describe('El descuento activo en %, por ejemplo 15. 0 si no tiene.'),
+          cuotas_sin_interes: z
+            .number()
+            .int()
+            .optional()
+            .describe(`Cuántas cuotas sin interés ofrece: ${INSTALLMENT_OPTIONS.join(', ')}. 0 es sin cuotas.`),
+          envio_gratis: z.boolean().optional(),
+          relevado: z.string().optional().describe('El día en que se miró el precio, como 2026-10-23.'),
+          notas: z.string().optional().describe('Otras promociones, combos u observaciones.'),
         }),
       )
       .max(MAX_COMPETITORS),
@@ -517,10 +529,21 @@ const saveCompetitorsTool = defineTool({
   async run(ctx, args) {
     const { account, id } = await target(ctx, args);
     const parsed = competitorsSchema.safeParse(
-      args.competencia.map((c) => ({ title: c.titulo, url: c.link ?? '', soldQuantity: c.vendidos ?? null })),
+      args.competencia.map((c) => ({
+        title: c.titulo,
+        url: c.link ?? '',
+        soldQuantity: c.vendidos ?? null,
+        sellerName: c.vendedor,
+        listPrice: c.precio_de_lista,
+        discountPct: c.descuento_pct,
+        installments: c.cuotas_sin_interes,
+        freeShipping: c.envio_gratis,
+        surveyedAt: c.relevado,
+        notes: c.notas,
+      })),
     );
     if (!parsed.success) throw new McpToolError(parsed.error.issues[0]?.message ?? 'Revisá los datos.');
-    await ctx.db.$transaction((tx) => saveCompetitors(tx, id, parsed.data));
+    await ctx.db.$transaction((tx) => saveCompetitors(tx, id, parsed.data, todayIn(account.timezone)));
     return { listo: true, guardadas: parsed.data.length, link_app: appLink(ctx, account, id) };
   },
 });
@@ -1029,7 +1052,7 @@ const copyResearchTool = defineTool({
       title: true,
       externalId: true,
       ownQuestions: true,
-      competitors: { orderBy: { position: 'asc' as const }, select: { title: true, url: true, soldQuantity: true } },
+      competitors: { orderBy: { position: 'asc' as const }, select: COMPETITOR_SELECT },
       titleWork: { select: { seeds: true, mainSearches: true } },
     };
     const [from, to] = await Promise.all([
@@ -1048,7 +1071,7 @@ const copyResearchTool = defineTool({
         if (what === 'competencia') {
           if (from.competitors.length === 0) skipped.push(COPYABLE[what]);
           else {
-            await saveCompetitors(tx, id, from.competitors.map((c) => ({ title: c.title, url: c.url, soldQuantity: c.soldQuantity })));
+            await saveCompetitors(tx, id, from.competitors.map(storedCompetitor));
             copied.competencia = from.competitors.length;
           }
         } else if (what === 'preguntas_propias') {

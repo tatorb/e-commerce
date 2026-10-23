@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { CHANNEL_STATUS_LABEL } from '@/domain/channel-status';
+import { COMPETITOR_SELECT, offerOf, offerPrices, storedCompetitor } from '@/domain/competitors';
 import { LATEST_MEASUREMENTS, METRICS, formatMetric, isMetricKey, latestMetrics, type Metrics } from '@/domain/measurements';
 import { parseNameValueList, type NameValue } from '@/domain/name-value';
 import {
@@ -64,6 +65,27 @@ const CONFIDENTIAL = /precio|costo|price|cost|proveedor|supplier/i;
 const safeList = (list: NameValue[]) => list.filter((nv) => !CONFIDENTIAL.test(nv.name));
 
 const labels = (entries: [string, string][]) => entries.map(([v, l]) => `${v} = ${l}`).join('; ');
+
+// Una publicación de la competencia, con su precio final y el valor de la cuota si tiene precio.
+function competitorOut(c: Parameters<typeof storedCompetitor>[0]) {
+  const row = storedCompetitor(c);
+  const offer = offerOf(c);
+  const prices = offer ? offerPrices(offer, 0) : null;
+  return {
+    titulo: row.title,
+    vendidos: row.soldQuantity,
+    link: row.url,
+    vendedor: row.sellerName,
+    precio_de_lista: row.listPrice,
+    descuento_pct: row.discountPct,
+    cuotas_sin_interes: row.installments,
+    envio_gratis: row.freeShipping,
+    relevado: row.surveyedAt,
+    notas: row.notes,
+    precio_final: prices ? Math.round(prices.finalPrice * 100) / 100 : null,
+    valor_cuota: prices?.installmentValue ? Math.round(prices.installmentValue * 100) / 100 : null,
+  };
+}
 const asEnum = <T extends string>(values: readonly T[]) => z.enum(values as [T, ...T[]]);
 
 function lockValue(lock: TitleLock) {
@@ -327,7 +349,7 @@ const getPublication = defineTool({
             select: { text: true, answer: true, askedAt: true },
           },
           measurements: { orderBy: { takenAt: 'desc' }, take: LATEST_MEASUREMENTS, select: { takenAt: true, metrics: true } },
-          competitors: { orderBy: { position: 'asc' }, select: { title: true, url: true, soldQuantity: true } },
+          competitors: { orderBy: { position: 'asc' }, select: COMPETITOR_SELECT },
           product: {
             select: {
               id: true,
@@ -437,7 +459,7 @@ const getPublication = defineTool({
           salio_por: m.exitedBy?.name ?? null,
         })),
       },
-      competencia: pub.competitors.map((c) => ({ titulo: c.title, vendidos: c.soldQuantity, link: c.url })),
+      competencia: pub.competitors.map(competitorOut),
       investigacion: {
         fabricante: {
           sitio: r?.manufacturerSite ?? null,
@@ -559,7 +581,7 @@ const getTitleWorkspace = defineTool({
       })),
       propuestas: tc.proposals.map((p) => ({ titulo: p.title, motivo: p.reason })),
       propuestas_fecha: when(tc.proposalsAt, account),
-      competencia: tc.competitors.map((c) => ({ titulo: c.title, vendidos: c.soldQuantity, link: c.url })),
+      competencia: tc.competitors.map(competitorOut),
       ultimo_titulo_aprobado: tc.lastApproval
         ? {
             resultado: tc.lastApproval.outcome,

@@ -205,6 +205,32 @@ describe.skipIf(!url)('herramientas de escritura', () => {
     expect((await call('save_competitors', { publicacion: 'MLA1110001', competencia: [{ titulo: 'x', link: 'no-es-link' }] })).isError).toBe(true);
   });
 
+  it('save_competitors: con precio, descuento, cuotas y envío; sin fecha queda la de hoy', async () => {
+    const r = await call('save_competitors', {
+      publicacion: 'MLA1110001',
+      competencia: [
+        { titulo: 'Kit Embrague Gol A', vendedor: 'Repuestos A', precio_de_lista: 100000, descuento_pct: 10, cuotas_sin_interes: 6, envio_gratis: true, notas: 'Lleva regalo' },
+        { titulo: 'Kit Embrague Gol B', precio_de_lista: 80000, relevado: '2026-10-01' },
+        { titulo: 'Kit Embrague Gol C' },
+      ],
+    });
+    expect(r.data).toMatchObject({ listo: true, guardadas: 3 });
+    const rows = await db.competitorListing.findMany({ where: { publicationId: kitId }, orderBy: { position: 'asc' } });
+    expect(rows[0]).toMatchObject({ sellerName: 'Repuestos A', installments: 6, freeShipping: true, notes: 'Lleva regalo' });
+    expect(Number(rows[0].listPrice)).toBe(100000);
+    expect(Number(rows[0].discountPct)).toBe(10);
+    expect(rows[0].surveyedAt).not.toBeNull();
+    expect(rows[1].surveyedAt?.toISOString().slice(0, 10)).toBe('2026-10-01');
+    expect(rows[2]).toMatchObject({ listPrice: null, surveyedAt: null, installments: 0, freeShipping: false });
+
+    const { data } = await call('get_publication', { publicacion: 'MLA1110001' });
+    expect(data.competencia[0]).toMatchObject({ vendedor: 'Repuestos A', precio_de_lista: 100000, precio_final: 90000, valor_cuota: 15000, envio_gratis: true });
+    expect(data.competencia[2]).toMatchObject({ precio_de_lista: null, precio_final: null, valor_cuota: null });
+
+    expect((await call('save_competitors', { publicacion: 'MLA1110001', competencia: [{ titulo: 'x', cuotas_sin_interes: 4 }] })).isError).toBe(true);
+    expect((await call('save_competitors', { publicacion: 'MLA1110001', competencia: [{ titulo: 'x', relevado: '2026-02-30' }] })).isError).toBe(true);
+  });
+
   it('el trabajo del título: semillas, sugerencias, palabras, búsquedas y posiciones', async () => {
     await toTitle('MLA1110001');
     expect((await call('save_title_seeds', { publicacion: 'MLA1110001', semillas: ['Kit Embrague Gol', 'kit embrague gol'] })).data.semillas).toEqual([
@@ -487,7 +513,10 @@ describe.skipIf(!url)('herramientas de escritura', () => {
   });
 
   it('copy_publication_data: copia lo elegido desde otra del mismo producto', async () => {
-    await call('save_competitors', { publicacion: 'MLA1110001', competencia: [{ titulo: 'Kit Embrague Otro', vendidos: 30 }] });
+    await call('save_competitors', {
+      publicacion: 'MLA1110001',
+      competencia: [{ titulo: 'Kit Embrague Otro', vendidos: 30, vendedor: 'Otro', precio_de_lista: 50000, cuotas_sin_interes: 3, relevado: '2026-10-02' }],
+    });
     await call('save_buyer_questions', { publicacion: 'MLA1110001', propia: '¿Sirve para el Gol Trend?' });
     await call('set_main_searches', { publicacion: 'MLA1110001', busquedas: ['kit embrague gol'] });
     await call('save_title_seeds', { publicacion: 'MLA1110001', semillas: ['kit embrague gol'] });
@@ -505,6 +534,9 @@ describe.skipIf(!url)('herramientas de escritura', () => {
     const copy = await db.publication.findUniqueOrThrow({ where: { id: copyId }, include: { competitors: true, titleWork: true } });
     expect(copy.ownQuestions).toBe('¿Sirve para el Gol Trend?');
     expect(copy.competitors.map((c) => c.title)).toEqual(['Kit Embrague Otro']);
+    expect(copy.competitors[0]).toMatchObject({ sellerName: 'Otro', installments: 3 });
+    expect(Number(copy.competitors[0].listPrice)).toBe(50000);
+    expect(copy.competitors[0].surveyedAt?.toISOString().slice(0, 10)).toBe('2026-10-02');
     expect(copy.titleWork).toMatchObject({ seeds: ['kit embrague gol'], mainSearches: ['kit embrague gol'] });
 
     // Lo que la de origen no tiene no se toca.

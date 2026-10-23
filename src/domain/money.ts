@@ -37,3 +37,20 @@ export function formatPrice(value: number | string | null | undefined, currency 
     maximumFractionDigits: n % 1 === 0 ? 0 : 2,
   }).format(n);
 }
+
+/**
+ * Lee un porcentaje escrito a mano: "15", "15,5", "15.5" o "15 %". Devuelve
+ * null si está vacío y "invalid" si no se entiende.
+ */
+export function parsePercent(raw: string): number | null | 'invalid' {
+  const text = raw.replace(/[\s%]/g, '').replace(',', '.');
+  if (text === '') return null;
+  if (!/^\d+(\.\d{1,2})?$/.test(text)) return 'invalid';
+  return Number(text);
+}
+
+/** Muestra un porcentaje con el formato argentino, por ejemplo 17,36 %. */
+export function formatPercent(value: number | null | undefined, digits = 1): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '—';
+  return `${new Intl.NumberFormat('es-AR', { maximumFractionDigits: digits }).format(value)} %`;
+}

@@ -206,8 +206,9 @@ describe.skipIf(!url)('herramientas para Claude', () => {
     expect(data.atributos_en_el_canal).toEqual([{ name: 'Marca', value: 'Marca Uno' }]);
     expect(data.ultima_medicion.metricas).toMatchObject({ 'Visitas (90 días)': '120', 'Ventas (90 días)': '3' });
     expect(data.pipeline.historial.map((m: { paso: string }) => m.paso)).toEqual(['Información', 'Título']);
-    expect(data.competencia).toEqual([{ titulo: 'Kit Embrague Modelo X Original', vendidos: 50, link: null }]);
-    expect(text).not.toMatch(/price|precio|notes|currency/i);
+    expect(data.competencia).toMatchObject([{ titulo: 'Kit Embrague Modelo X Original', vendidos: 50, link: null, precio_de_lista: null }]);
+    // El precio de la publicación no va; el de la competencia sí, porque es público.
+    expect(text.replace(/"competencia":\[.*?\](?=,"investigacion")/s, '')).not.toMatch(/price|precio|notes|currency/i);
     expect((await call('get_publication', { publicacion: 'MLA9990009' })).text).toContain('no está en el Catálogo');
     expect((await call('get_publication', {})).isError).toBe(true);
   });

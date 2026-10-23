@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@/lib/db';
 import { requireUser } from '@/lib/auth/session';
+import { todayIn } from '@/domain/applications';
 import { competitorsSchema, saveCompetitors, type CompetitorsInput } from '@/domain/competitors';
 import { productInfoSchema, updateProductInfo, type ProductInfoInput } from '@/domain/product-info';
 import {
@@ -78,10 +79,12 @@ export async function saveCompetitorsAction(accountSlug: string, publicationId: 
   const t = await target(accountSlug, publicationId);
   if (!t) return NOT_FOUND;
   const parsed = competitorsSchema.safeParse(
-    (rows ?? []).filter((r) => [r.url, r.title, r.soldQuantity].some((v) => v !== null && String(v ?? '').trim() !== '')),
+    (rows ?? []).filter((r) =>
+      [r.url, r.title, r.soldQuantity, r.sellerName, r.listPrice, r.notes].some((v) => v !== null && String(v ?? '').trim() !== ''),
+    ),
   );
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Revisá los datos.' };
-  await prisma.$transaction((tx) => saveCompetitors(tx, publicationId, parsed.data));
+  await prisma.$transaction((tx) => saveCompetitors(tx, publicationId, parsed.data, todayIn(t.account.timezone)));
   return done(accountSlug, 'Competencia guardada.');
 }
 

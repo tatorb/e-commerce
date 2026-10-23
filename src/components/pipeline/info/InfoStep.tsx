@@ -10,9 +10,31 @@ import { CapturedMaterial } from './CapturedMaterial';
 import { CatalogCard } from './CatalogCard';
 import { ClarificationsCard } from './ClarificationsCard';
 import { CompetitorsCard } from './CompetitorsCard';
+import type { CompetitorRow } from './CompetitorsForm';
 import { ManufacturerCard } from './ManufacturerCard';
 import { ProductInfoForm } from './ProductInfoForm';
 import { withSharedNote } from './SharedNote';
+import { todayIn } from '@/domain/applications';
+import { storedCompetitor } from '@/domain/competitors';
+import { PRICING_DEFAULTS } from '@/domain/pricing';
+
+// Una publicación de la competencia como la edita el formulario: punto de miles y coma decimal.
+function competitorRow(c: TitleContext['competitors'][number]): CompetitorRow {
+  const r = storedCompetitor(c);
+  const decimal = (n: number | null) => (n === null ? '' : new Intl.NumberFormat('es-AR', { maximumFractionDigits: 2 }).format(n));
+  return {
+    url: r.url ?? '',
+    title: r.title,
+    soldQuantity: r.soldQuantity?.toString() ?? '',
+    sellerName: r.sellerName ?? '',
+    listPrice: decimal(r.listPrice),
+    discountPct: r.discountPct === 0 ? '' : decimal(r.discountPct),
+    installments: String(r.installments),
+    freeShipping: r.freeShipping,
+    surveyedAt: r.surveyedAt ?? '',
+    notes: r.notes ?? '',
+  };
+}
 
 // Paso Información, en este orden: los datos de la ficha (y los del combo), lo
 // del fabricante, los datos de catálogo del canal, la competencia, los dolores
@@ -98,7 +120,9 @@ export function InfoStep({
       <CompetitorsCard
         accountSlug={accountSlug}
         publicationId={publicationId}
-        initial={ctx.competitors.map((c) => ({ url: c.url ?? '', title: c.title, soldQuantity: c.soldQuantity?.toString() ?? '' }))}
+        initial={ctx.competitors.map(competitorRow)}
+        today={todayIn(timeZone)}
+        shippingCost={PRICING_DEFAULTS.shipping}
       />
       <BuyerPainsCard
         accountSlug={accountSlug}
