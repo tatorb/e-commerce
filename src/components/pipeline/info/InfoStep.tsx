@@ -16,7 +16,6 @@ import { ProductInfoForm } from './ProductInfoForm';
 import { withSharedNote } from './SharedNote';
 import { todayIn } from '@/domain/applications';
 import { storedCompetitor } from '@/domain/competitors';
-import { PRICING_DEFAULTS } from '@/domain/pricing';
 
 // Una publicación de la competencia como la edita el formulario: punto de miles y coma decimal.
 function competitorRow(c: TitleContext['competitors'][number]): CompetitorRow {
@@ -50,6 +49,7 @@ export function InfoStep({
   catalog,
   combo,
   driveReady,
+  shippingCost,
 }: {
   accountSlug: string;
   timeZone: string;
@@ -58,6 +58,8 @@ export function InfoStep({
   catalog: CatalogData | null;
   combo: ComboData | null;
   driveReady: boolean;
+  // El envío de los parámetros de precio, para el precio efectivo de la competencia.
+  shippingCost: number;
 }) {
   const s = (v: string | null | undefined) => v ?? '';
   const p = ctx.product;
@@ -122,7 +124,7 @@ export function InfoStep({
         publicationId={publicationId}
         initial={ctx.competitors.map(competitorRow)}
         today={todayIn(timeZone)}
-        shippingCost={PRICING_DEFAULTS.shipping}
+        shippingCost={shippingCost}
       />
       <BuyerPainsCard
         accountSlug={accountSlug}

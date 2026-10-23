@@ -3,6 +3,7 @@ import type { ChannelStatus, SyncChangeKind, SyncStatus, SyncTrigger } from '@/g
 import { CHANNEL_STATUS_LABEL } from './channel-status';
 import { attributeDiff, FACE_FIELD_LABEL, isFaceField, SYNC_CHANGE_LABEL } from './channel-sync';
 import { parseMedia, photoVariants, type PhotoRef } from './media';
+import { formatPrice } from './money';
 import { parseNameValueList, type NameValue } from './name-value';
 
 // El Registro: todo lo que pasó entre la app y el canal, publicación por
@@ -203,6 +204,10 @@ export function changeSides(field: string, before: unknown, after: unknown): { b
   if (field === 'publication') {
     const code = (v: unknown) => (v && typeof v === 'object' && 'externalId' in v ? String((v as { externalId: unknown }).externalId) : '');
     return { before: code(before), after: code(after) };
+  }
+  if (field === 'price') {
+    const money = (v: unknown) => (typeof v === 'string' || typeof v === 'number' ? formatPrice(v) : '');
+    return { before: money(before), after: money(after) };
   }
   if (field === 'status') {
     const label = (v: unknown) => (typeof v === 'string' && v in CHANNEL_STATUS_LABEL ? CHANNEL_STATUS_LABEL[v as ChannelStatus] : '');

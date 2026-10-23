@@ -19,6 +19,7 @@ const ITEM_FIELDS = [
   'seller_id',
   'title',
   'price',
+  'original_price',
   'status',
   'sub_status',
   'permalink',
@@ -80,6 +81,16 @@ export function variationsOf(item: Obj): { id: number | string; sku: string | nu
   });
 }
 
+/**
+ * El precio publicado. Con un descuento activo, Mercado Libre muestra el
+ * precio con descuento y deja el de antes en original_price.
+ */
+function listPriceOf(item: Obj): number | null {
+  const price = num(item.price);
+  const original = num(item.original_price);
+  return original !== null && price !== null && original > price ? original : price;
+}
+
 /** Una publicación de Mercado Libre en el formato neutro. Sin la descripción ni las visitas, que se piden aparte. */
 export function parseItem(item: Obj): ChannelListing {
   const attributes: ChannelListing['attributes'] = [];
@@ -124,7 +135,7 @@ export function parseItem(item: Obj): ChannelListing {
     url: str(item.permalink),
     title: str(item.title),
     description: null,
-    price: num(item.price),
+    price: listPriceOf(item),
     status: statusOf(item.status, item.sub_status),
     sold: num(item.sold_quantity),
     visits90d: null,

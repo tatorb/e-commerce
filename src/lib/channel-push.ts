@@ -66,6 +66,7 @@ async function loadForPush(db: Db, accountId: string, publicationId: string) {
       description: true,
       attributes: true,
       media: true,
+      price: true,
       titleLockedManual: true,
       store: { select: { id: true, channel: { select: { id: true, kind: true, name: true } }, connection: { select: { status: true } } } },
       measurements: { orderBy: { takenAt: 'desc' }, take: LATEST_MEASUREMENTS, select: { metrics: true } },
@@ -84,6 +85,7 @@ async function loadForPush(db: Db, accountId: string, publicationId: string) {
           photoIds: true,
           photoOrigins: true,
           variations: true,
+          price: true,
         },
       },
     },
@@ -284,6 +286,14 @@ export async function pushDrafts(
         }
         value = mergeAttributes(channel.attributes, plan.sent);
         send = () => withAccessToken(db, p.store.id, (token) => eachTarget(p, (id) => publisher.updateAttributes(token, id, plan.updates)));
+      } else if (field === 'price') {
+        const price = Number(app.price);
+        if (!app.price || !(price > 0)) {
+          result.rejected.push({ field, message: 'Falta el precio: decidilo en el paso Precio.' });
+          continue;
+        }
+        value = app.price;
+        send = () => withAccessToken(db, p.store.id, (token) => eachTarget(p, (id) => publisher.updatePrice(token, id, price)));
       } else {
         if (field === 'title' && titleLocked(p)) {
           result.rejected.push({ field, message: LOCKED_TITLE });

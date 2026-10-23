@@ -45,8 +45,8 @@ describe('de qué lado cambió cada dato', () => {
 
   it('el plan toma lo del canal, guarda el borrador y no toca lo que hay que elegir', () => {
     const plans = planFaces(
-      { title: 'a', description: 'x', attributes: 'm', photos: 'f' },
-      { title: 'b', description: 'y', attributes: 'n', photos: 'f' },
+      { title: 'a', description: 'x', attributes: 'm', photos: 'f', price: 'p' },
+      { title: 'b', description: 'y', attributes: 'n', photos: 'f', price: 'p' },
       { title: 'a', description: 'y' },
     );
     expect(plans).toEqual([
@@ -54,6 +54,7 @@ describe('de qué lado cambió cada dato', () => {
       { field: 'description', state: 'draft', take: false, agreed: 'y' },
       { field: 'attributes', state: 'choose', take: false, agreed: undefined },
       { field: 'photos', state: 'same', take: false, agreed: 'f' },
+      { field: 'price', state: 'same', take: false, agreed: 'p' },
     ]);
   });
 });
@@ -192,7 +193,8 @@ describe.skipIf(!url)('la lectura automática en la base', () => {
     const progress = await pass();
     expect(progress).toMatchObject({ status: 'DONE', position: 3, total: 3 });
     const run = await db.channelSync.findFirstOrThrow();
-    expect(run).toMatchObject({ read: 3, updated: 1, toChoose: 1, newInChannel: 1, missing: 0 });
+    // Las tres toman el precio del canal: la app no tenía ninguno.
+    expect(run).toMatchObject({ read: 3, updated: 3, toChoose: 1, newInChannel: 1, missing: 0 });
 
     expect(await state(same.id)).toEqual({ draft: [], choose: [] });
     const filled = await db.publication.findUniqueOrThrow({ where: { id: empty.id } });
@@ -207,6 +209,7 @@ describe.skipIf(!url)('la lectura automática en la base', () => {
     expect(changes.map((c) => [c.field, c.kind])).toEqual([
       ['attributes', 'TAKEN'],
       ['description', 'TAKEN'],
+      ['price', 'TAKEN'],
       ['title', 'TAKEN'],
     ]);
     // La medición del día con lo que mide el canal.

@@ -5,8 +5,8 @@
 import type { ChannelVariation, VariantLike } from '@/domain/media';
 
 /** Los datos que hoy se pueden subir. */
-export type PublishField = 'title' | 'description' | 'attributes' | 'photos';
-export const PUBLISH_FIELDS: PublishField[] = ['title', 'description', 'attributes', 'photos'];
+export type PublishField = 'title' | 'description' | 'attributes' | 'photos' | 'price';
+export const PUBLISH_FIELDS: PublishField[] = ['title', 'description', 'attributes', 'photos', 'price'];
 
 /** Un dato de catálogo para subir: el código del campo en el canal y su valor; con multiple, varios separados por coma. */
 export type ChannelAttributeUpdate = { id: string; value: string; multiple: boolean };
@@ -98,6 +98,8 @@ export interface ChannelPublisher {
   updateSeparatePictures(accessToken: string, listings: { externalId: string; pictures: number[] }[], pictures: ChannelPicture[]): Promise<(string[] | null)[]>;
   /** Cambia el título o la descripción de una publicación propia. Lanza PublishError si el canal no lo acepta. */
   update(accessToken: string, externalId: string, field: 'title' | 'description', value: string): Promise<void>;
+  /** Cambia el precio publicado; con medidas, el de todas. Lanza PublishError si el canal no lo acepta. */
+  updatePrice(accessToken: string, externalId: string, price: number): Promise<void>;
   /** Cambia esos datos de catálogo; los demás quedan como están. Lanza PublishError si el canal no lo acepta. */
   updateAttributes(accessToken: string, externalId: string, attributes: ChannelAttributeUpdate[]): Promise<void>;
   /** Pausa, reactiva, finaliza o elimina. Lanza PublishError si el canal no lo acepta. */

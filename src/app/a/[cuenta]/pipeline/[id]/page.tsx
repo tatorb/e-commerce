@@ -49,6 +49,10 @@ import { loadVideosStep } from '@/lib/videos';
 import { driveEmail, folderUrl, knownFolderId } from '@/lib/drive';
 import { DescriptionStep } from '@/components/pipeline/description/DescriptionStep';
 import { loadDescriptionStep } from '@/lib/descriptions';
+import { PriceStep } from '@/components/pipeline/price/PriceStep';
+import { latestPriceDecision, loadPriceStep, productPricing } from '@/lib/pricing';
+import { PriceDecisionCard } from '@/components/pipeline/price/PriceDecisionCard';
+import { todayIn } from '@/domain/applications';
 
 export const dynamic = 'force-dynamic';
 // Leer el buscador letra por letra o pedir títulos a la IA puede tardar.
@@ -99,11 +103,17 @@ export default async function PipelineStepPage({
   const lock = pub.titleLock.locked ? titleLockText(pub.titleLock) : null;
   // Lo que usa el paso que se mira, pedido todo junto: con la base lejos, cada
   // consulta en fila suma una ida y vuelta.
-  const [ctx, info, images, channel, faces, media, create, videos, description] = await Promise.all([
+  const [ctx, info, images, channel, faces, media, create, videos, description, price, decision] = await Promise.all([
     // Información y Título usan la ficha, la competencia y lo leído del buscador.
     viewing === 'INFO' || viewing === 'TITLE' ? loadTitleContext(prisma, account.id, pub.id) : null,
     viewing === 'INFO'
-      ? Promise.all([loadResearch(prisma, pub.productId), loadCatalogData(prisma, pub.id), loadCombo(prisma, pub.productId), driveEmail(prisma)])
+      ? Promise.all([
+          loadResearch(prisma, pub.productId),
+          loadCatalogData(prisma, pub.id),
+          loadCombo(prisma, pub.productId),
+          driveEmail(prisma),
+          productPricing(prisma, account.id, pub.productId),
+        ])
       : null,
     viewing === 'IMAGES'
       ? Promise.all([
@@ -133,6 +143,9 @@ export default async function PipelineStepPage({
     viewing === 'PUBLISH' && !pub.externalId ? createChecks(prisma, { accountId: account.id, publicationId: pub.id }) : null,
     viewing === 'VIDEOS' ? loadVideosStep(prisma, { accountId: account.id, publicationId: pub.id }) : null,
     viewing === 'DESCRIPTION' ? loadDescriptionStep(prisma, { accountId: account.id, publicationId: pub.id }) : null,
+    // Precio usa el costo, los parámetros y la competencia; Información, el envío; Publicación, el precio decidido.
+    viewing === 'PRICE' ? loadPriceStep(prisma, account.id, pub.id) : null,
+    viewing === 'PUBLISH' ? latestPriceDecision(prisma, pub.id) : null,
   ]);
   const auto = ctx && viewing === 'TITLE' ? await autoAvailable(prisma, ctx.channel, ctx.storeId) : null;
 
@@ -251,6 +264,7 @@ export default async function PipelineStepPage({
             catalog={info[1]}
             combo={info[2]}
             driveReady={info[3] !== null}
+            shippingCost={info[4].shipping}
           />
         ) : ctx && auto && viewing === 'TITLE' ? (
           <TitleStep
@@ -301,8 +315,25 @@ export default async function PipelineStepPage({
             aiDisabledReason={isAiConfigured() ? null : AI_NOT_CONFIGURED}
             publicationHref={`/a/${account.slug}/publicaciones/${pub.id}`}
           />
+        ) : price && viewing === 'PRICE' ? (
+          <PriceStep
+            accountSlug={account.slug}
+            data={price}
+            today={todayIn(account.timezone)}
+            timeZone={account.timezone}
+            infoHref={`${pageHref}?paso=${PIPELINE_STEP_SLUG.INFO}`}
+            settingsHref={`/a/${account.slug}/precios`}
+          />
         ) : channel && viewing === 'PUBLISH' ? (
           <>
+            <PriceDecisionCard
+              decision={decision}
+              channelName={pub.channelName}
+              channelPrice={faces?.channel?.price ? Number(faces.channel.price) : null}
+              published={Boolean(pub.externalId)}
+              priceHref={`${pageHref}?paso=${PIPELINE_STEP_SLUG.PRICE}`}
+              timeZone={account.timezone}
+            />
             {create ? <CreateInChannelCard accountSlug={account.slug} publicationId={pub.id} info={create} /> : null}
             <PublicationCodeCard
               accountSlug={account.slug}

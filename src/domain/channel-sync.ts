@@ -6,7 +6,7 @@ import { parseNameValueList, type NameValue } from './name-value';
 // Para saber de qué lado cambió cada dato se guarda, además, la huella de lo
 // último en que las dos coincidieron. Este módulo no sabe nada de canales.
 
-export const FACE_FIELDS = ['title', 'description', 'attributes', 'photos'] as const;
+export const FACE_FIELDS = ['title', 'description', 'attributes', 'photos', 'price'] as const;
 export type FaceField = (typeof FACE_FIELDS)[number];
 
 export const FACE_FIELD_LABEL: Record<FaceField, string> = {
@@ -14,6 +14,7 @@ export const FACE_FIELD_LABEL: Record<FaceField, string> = {
   description: 'Descripción',
   attributes: 'Datos de catálogo',
   photos: 'Fotos',
+  price: 'Precio',
 };
 
 // Cómo se cuenta cada cambio en el historial.
@@ -37,13 +38,29 @@ export function isFaceField(value: string): value is FaceField {
   return (FACE_FIELDS as readonly string[]).includes(value);
 }
 
-// photos null: la app no eligió fotos, sigue a las del canal.
-export type FaceValues = { title: string | null; description: string | null; attributes: NameValue[]; photos: PhotoRef[] | null };
+// photos null: la app no eligió fotos, sigue a las del canal. price: el
+// precio publicado, como texto con punto decimal, por ejemplo "125000.5".
+export type FaceValues = { title: string | null; description: string | null; attributes: NameValue[]; photos: PhotoRef[] | null; price: string | null };
 export type Fingerprints = Partial<Record<FaceField, string>>;
 
+type Numeric = number | string | { toString(): string };
+
+/** El precio como lo compara la cara: sin ceros de más; null si no hay o no es un precio. */
+export function priceText(value: Numeric | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const n = Number(value.toString());
+  return Number.isFinite(n) && n > 0 ? String(Math.round(n * 100) / 100) : null;
+}
+
 /** Los datos de la cara de la app, como los guarda la publicación. */
-export function faceValues(p: { title: string | null; description: string | null; attributes: unknown; media?: unknown }): FaceValues {
-  return { title: p.title, description: p.description, attributes: parseNameValueList(p.attributes), photos: parseMedia(p.media) };
+export function faceValues(p: { title: string | null; description: string | null; attributes: unknown; media?: unknown; price: Numeric | null }): FaceValues {
+  return {
+    title: p.title,
+    description: p.description,
+    attributes: parseNameValueList(p.attributes),
+    photos: parseMedia(p.media),
+    price: priceText(p.price),
+  };
 }
 
 /** Los datos de la cara del canal, como los guarda la copia de lo que se leyó. */
@@ -54,8 +71,15 @@ export function channelFaceValues(c: {
   photos: unknown;
   photoIds: unknown;
   variations: unknown;
+  price: Numeric | null;
 }): FaceValues {
-  return { title: c.title, description: c.description, attributes: parseNameValueList(c.attributes), photos: channelPhotos(c.photos, c.photoIds, c.variations) };
+  return {
+    title: c.title,
+    description: c.description,
+    attributes: parseNameValueList(c.attributes),
+    photos: channelPhotos(c.photos, c.photoIds, c.variations),
+    price: priceText(c.price),
+  };
 }
 
 const oneSpace = (s: string) => s.replace(/\s+/g, ' ').trim();
@@ -79,6 +103,7 @@ function normalized(field: FaceField, value: FaceValues[FaceField]): string {
       .sort()
       .join('\n');
   }
+  if (field === 'price') return (value as string | null) ?? '';
   const text = cleanText(value as string | null);
   if (!text) return '';
   if (field === 'title') return oneSpace(text);
@@ -120,6 +145,7 @@ export function fingerprintsOf(values: FaceValues): Record<FaceField, string> {
     description: fingerprint('description', values.description),
     attributes: fingerprint('attributes', values.attributes),
     photos: fingerprint('photos', values.photos),
+    price: fingerprint('price', values.price),
   };
 }
 
@@ -131,6 +157,22 @@ export function parseFingerprints(raw: unknown): Fingerprints {
     if (isFaceField(key) && typeof value === 'string') out[key] = value;
   }
   return out;
+}
+
+/**
+ * Las huellas guardadas de la copia del canal y lo acordado. El precio se sumó
+ * después: una copia leída antes no tiene su huella, así que se calcula del
+ * precio leído y se da por acordado, porque hasta entonces la app tomaba
+ * siempre el precio del canal.
+ */
+export function storedPrints(copy: { fingerprints: unknown; agreed: unknown; price: Numeric | null }): { channel: Fingerprints; agreed: Fingerprints } {
+  const channel = parseFingerprints(copy.fingerprints);
+  const agreed = parseFingerprints(copy.agreed);
+  if (channel.price === undefined) {
+    channel.price = fingerprint('price', priceText(copy.price));
+    agreed.price ??= channel.price;
+  }
+  return { channel, agreed };
 }
 
 /**
@@ -203,12 +245,11 @@ export type FaceSummary = {
 /** En qué está la publicación: los datos del borrador y los que hay que elegir. */
 export function faceSummary(
   app: Record<FaceField, string>,
-  copy: { fingerprints: unknown; agreed: unknown; rejections?: unknown } | null,
+  copy: { fingerprints: unknown; agreed: unknown; rejections?: unknown; price: Numeric | null } | null,
 ): FaceSummary {
   const summary: FaceSummary = { draft: [], choose: [], rejected: [] };
   if (!copy) return summary;
-  const channel = parseFingerprints(copy.fingerprints);
-  const agreed = parseFingerprints(copy.agreed);
+  const { channel, agreed } = storedPrints(copy);
   const rejections = parseRejections(copy.rejections);
   for (const field of FACE_FIELDS) {
     const state = fieldState(app[field], channel[field] ?? EMPTY, agreed[field]);

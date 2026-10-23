@@ -10,9 +10,10 @@ import {
   faceValues,
   fieldState,
   fingerprintsOf,
-  parseFingerprints,
+  storedPrints,
   type FaceField,
   type FieldState,
+  type Fingerprints,
 } from '@/domain/channel-sync';
 import { LATEST_MEASUREMENTS, latestMetrics } from '@/domain/measurements';
 import { resolveTitleLock } from '@/domain/title-lock';
@@ -63,8 +64,8 @@ export async function loadPublicationFaces(accountId: string, publicationId: str
   const channel = copy ? channelFaceValues(copy) : null;
   const appPrints = fingerprintsOf(app);
   const summary = faceSummary(appPrints, copy);
-  const channelPrints = parseFingerprints(copy?.fingerprints);
-  const agreed = parseFingerprints(copy?.agreed);
+  const empty: Fingerprints = {};
+  const { channel: channelPrints, agreed } = copy ? storedPrints(copy) : { channel: empty, agreed: empty };
   const states = Object.fromEntries(
     FACE_FIELDS.map((f) => [f, copy ? fieldState(appPrints[f], channelPrints[f] ?? '', agreed[f]) : 'unread']),
   ) as Record<FaceField, FieldState | 'unread'>;

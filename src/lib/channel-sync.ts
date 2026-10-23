@@ -10,8 +10,9 @@ import {
   faceSummary,
   faceValues,
   fingerprintsOf,
-  parseFingerprints,
   planFaces,
+  priceText,
+  storedPrints,
   type FaceField,
   type FaceValues,
   type Fingerprints,
@@ -129,6 +130,7 @@ function writeFace(field: FaceField, value: FaceValues[FaceField]): Prisma.Publi
   // Las fotos que se toman del canal: la publicación vuelve a seguir a las del canal.
   if (field === 'photos') return { media: Prisma.DbNull };
   if (field === 'attributes') return { attributes: value as NameValue[] };
+  if (field === 'price') return { price: (value as string | null) ?? null };
   return { [field]: (value as string | null) ?? null };
 }
 
@@ -160,7 +162,8 @@ async function applyListing(
       description: true,
       attributes: true,
       media: true,
-      channelCopy: { select: { description: true, descriptionReadAt: true, agreed: true } },
+      price: true,
+      channelCopy: { select: { description: true, descriptionReadAt: true, agreed: true, fingerprints: true, price: true } },
     },
   });
   const app = faceValues(p);
@@ -169,9 +172,13 @@ async function applyListing(
     description: descriptionRead ? listing.description : (p.channelCopy?.description ?? null),
     attributes: listingAttributes(listing, ctx.adapter),
     photos: channelPhotos(listing.photos, listing.photoIds, listing.variations),
+    price: priceText(listing.price),
   };
+  const appPrints = fingerprintsOf(app);
   const channelPrints = fingerprintsOf(channel);
-  const plans = planFaces(fingerprintsOf(app), channelPrints, parseFingerprints(p.channelCopy?.agreed));
+  // La primera vez, el precio del canal gana: el que tenía la app venía de una planilla.
+  const lastAgreed = p.channelCopy ? storedPrints(p.channelCopy).agreed : { price: appPrints.price };
+  const plans = planFaces(appPrints, channelPrints, lastAgreed);
 
   const agreed: Fingerprints = {};
   let update: Prisma.PublicationUpdateInput = {};
@@ -193,14 +200,13 @@ async function applyListing(
     });
   }
 
-  // El estado, el link y el precio los maneja el canal: la app los toma siempre.
+  // El estado y el link los maneja el canal: la app los toma siempre.
   await tx.publication.update({
     where: { id: publicationId },
     data: {
       ...update,
       channelStatus: listing.status,
       ...(listing.url ? { url: listing.url } : {}),
-      ...(listing.price !== null ? { price: listing.price } : {}),
     },
   });
 
@@ -396,7 +402,7 @@ export async function runSyncStep(
 async function countToChoose(db: Db, storeId: string): Promise<number> {
   const publications = await db.publication.findMany({
     where: { storeId, channelCopy: { isNot: null } },
-    select: { title: true, description: true, attributes: true, media: true, channelCopy: { select: { fingerprints: true, agreed: true, missingSince: true } } },
+    select: { title: true, description: true, attributes: true, media: true, price: true, channelCopy: { select: { fingerprints: true, agreed: true, missingSince: true, price: true } } },
   });
   return publications.filter((p) => !p.channelCopy?.missingSince && faceSummary(fingerprintsOf(faceValues(p)), p.channelCopy).choose.length > 0)
     .length;
@@ -500,8 +506,9 @@ export async function chooseFaces(
           description: true,
           attributes: true,
           media: true,
+          price: true,
           channelCopy: {
-            select: { title: true, description: true, attributes: true, photos: true, photoIds: true, variations: true, fingerprints: true, agreed: true, missingSince: true },
+            select: { title: true, description: true, attributes: true, photos: true, photoIds: true, variations: true, price: true, fingerprints: true, agreed: true, missingSince: true },
           },
         },
       });
@@ -509,8 +516,7 @@ export async function chooseFaces(
       if (!p || !copy || copy.missingSince) return 0;
       const app = faceValues(p);
       const channel = channelFaceValues(copy);
-      const prints = parseFingerprints(copy.fingerprints);
-      const agreed = parseFingerprints(copy.agreed);
+      const { channel: prints, agreed } = storedPrints(copy);
       const pending = faceSummary(fingerprintsOf(app), copy).choose.filter((f) => fields.includes(f));
       if (pending.length === 0) return 0;
       let update: Prisma.PublicationUpdateInput = {};
@@ -553,8 +559,9 @@ export async function discardDrafts(
         description: true,
         attributes: true,
         media: true,
+        price: true,
         channelCopy: {
-          select: { title: true, description: true, attributes: true, photos: true, photoIds: true, variations: true, fingerprints: true, agreed: true, missingSince: true },
+          select: { title: true, description: true, attributes: true, photos: true, photoIds: true, variations: true, price: true, fingerprints: true, agreed: true, missingSince: true },
         },
       },
     });

@@ -24,6 +24,7 @@ import { createChecks } from '@/lib/channel-create';
 import { CreateInChannelCard } from '@/components/publication/CreateInChannelCard';
 import { ChannelStatusCard } from '@/components/publication/ChannelStatusCard';
 import { relistInfo } from '@/lib/channel-status';
+import { formatPrice } from '@/domain/money';
 import { FACE_FIELDS, FACE_FIELD_LABEL, SYNC_CHANGE_LABEL, type FaceField, type FaceValues } from '@/domain/channel-sync';
 import { titleOrUntitled } from '@/domain/publication-title';
 import { fieldLabel } from '@/domain/sync-log';
@@ -57,11 +58,9 @@ const STATE: Record<State, { label: string; variant: 'secondary' | 'destructive'
 function asText(values: FaceValues, field: FaceField): string {
   if (field === 'attributes') return values.attributes.map((a) => `${a.name}: ${a.value}`).join('\n');
   if (field === 'photos') return '';
+  if (field === 'price') return values.price ? formatPrice(values.price) : '';
   return values[field] ?? '';
 }
-
-const price = (n: unknown) =>
-  n === null || n === undefined ? '—' : new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 2 }).format(Number(n));
 
 export default async function PublicationPage({
   params,
@@ -269,7 +268,9 @@ export default async function PublicationPage({
                   ? `${channelName} todavía no tiene datos de catálogo en la app.`
                   : field === 'title' && data.titleLock.locked && p.title?.trim()
                     ? 'El título está bloqueado porque la publicación tiene ventas: se decide en el paso Título.'
-                    : (true as const);
+                    : field === 'price'
+                      ? 'El precio se decide en el paso Precio.'
+                      : (true as const);
               return (
                 <SectionCard
                   key={field}
@@ -340,8 +341,6 @@ export default async function PublicationPage({
             <SectionCard title="Lo demás">
               <SectionBody>
                 <dl className="grid gap-x-4 gap-y-1.5 text-sm sm:grid-cols-[10rem_1fr]">
-                  <dt className="text-muted-foreground">Precio</dt>
-                  <dd>{price(copy.price)}</dd>
                   <dt className="text-muted-foreground">Estado</dt>
                   <dd>
                     <ChannelStatusBadge status={copy.status} />

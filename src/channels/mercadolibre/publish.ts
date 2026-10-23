@@ -21,6 +21,7 @@ const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.i
 const KNOWN: [RegExp, string][] = [
   [/attributes? \[[^\]]*\] (is|are) (all )?required|missing_required/i, 'Mercado Libre pide datos de catálogo que faltan.'],
   [/item\.variations|field variations/i, 'Mercado Libre no aceptó las medidas.'],
+  [/item\.price|price/i, 'Mercado Libre no aceptó el precio.'],
   [/attribute/i, 'Mercado Libre no aceptó un dato de catálogo.'],
   [/title.*not_modifiable|title.*modif/i, 'Mercado Libre no deja cambiar el título de una publicación con ventas.'],
   [/title.*(length|max|long)/i, 'El título es más largo de lo que acepta la categoría en Mercado Libre.'],
@@ -43,7 +44,7 @@ export function rejectionMessage(status: number, body: unknown): string {
   for (const [pattern, message] of KNOWN) {
     if (!pattern.test(codes)) continue;
     // En las medidas, los datos de catálogo y las fotos, el detalle dice cuál fue.
-    return /variation|attribute|picture/i.test(pattern.source) && detail ? `${message.slice(0, -1)}: ${detail}` : message;
+    return /variation|attribute|picture|price/i.test(pattern.source) && detail ? `${message.slice(0, -1)}: ${detail}` : message;
   }
   return detail ? `Mercado Libre no lo aceptó: ${detail}` : `Mercado Libre no lo aceptó (código ${status}).`;
 }
@@ -379,6 +380,14 @@ export const mercadolibrePublisher: ChannelPublisher = {
     const newId = isObj(res) && typeof res.id === 'string' ? res.id : null;
     if (!newId) throw new PublishError('Mercado Libre no devolvió el código de la publicación republicada.');
     return { externalId: newId, url: isObj(res) && typeof res.permalink === 'string' ? res.permalink : null };
+  },
+
+  async updatePrice(accessToken, externalId, price) {
+    const id = encodeURIComponent(externalId);
+    // Con medidas, Mercado Libre pide el precio en cada una.
+    const item = await get(`/items/${id}?attributes=variations`, accessToken);
+    const variations = isObj(item) ? variationsOf(item) : [];
+    await send('PUT', `/items/${id}`, accessToken, variations.length > 0 ? { variations: variations.map((v) => ({ id: v.id, price })) } : { price });
   },
 
   async updateAttributes(accessToken, externalId, attributes) {

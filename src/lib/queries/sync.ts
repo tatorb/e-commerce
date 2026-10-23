@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/db';
 import { photoVariants } from '@/domain/media';
+import { formatPrice } from '@/domain/money';
 import { channelFaceValues, faceSummary, faceValues, fingerprintsOf, type FaceField, type FaceValues } from '@/domain/channel-sync';
 import type { NameValue } from '@/domain/name-value';
 import { getChannelListings } from '@/channels/listings';
@@ -29,6 +30,7 @@ function preview(field: FaceField, value: FaceValues[FaceField], other: FaceValu
     const text = refs.length === 1 ? '1 foto' : `${refs.length} fotos`;
     return marked > 0 ? `${text}, ${marked} con medida propia` : text;
   }
+  if (field === 'price') return value ? formatPrice(value as string) : '';
   if (field !== 'attributes') return ((value as string | null) ?? '').trim();
   // De los datos de catálogo, solo los que no coinciden.
   const theirs = new Map((other as NameValue[]).map((a) => [a.name.trim().toLowerCase(), a.value.trim()]));
@@ -61,10 +63,11 @@ export async function loadSyncOverview(accountId: string) {
         description: true,
         attributes: true,
         media: true,
+        price: true,
         pipelineStatus: true,
         store: { select: { name: true, channel: { select: { name: true } } } },
         channelCopy: {
-          select: { title: true, description: true, attributes: true, photos: true, photoIds: true, variations: true, fingerprints: true, agreed: true, missingSince: true },
+          select: { title: true, description: true, attributes: true, photos: true, photoIds: true, variations: true, price: true, fingerprints: true, agreed: true, missingSince: true },
         },
       },
       orderBy: { externalId: 'asc' },
@@ -154,11 +157,12 @@ export async function listToPush(accountId: string): Promise<ToPushRow[]> {
       description: true,
       attributes: true,
       media: true,
+      price: true,
       pipelineStatus: true,
       pipelineStep: true,
       pipelineRemoval: true,
       store: { select: { name: true, channel: { select: { kind: true, name: true } }, connection: { select: { status: true } } } },
-      channelCopy: { select: { fingerprints: true, agreed: true, rejections: true } },
+      channelCopy: { select: { fingerprints: true, agreed: true, rejections: true, price: true } },
     },
     orderBy: { updatedAt: 'desc' },
   });

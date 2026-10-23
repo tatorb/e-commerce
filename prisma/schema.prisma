@@ -63,6 +63,8 @@ model User {
   clipChoices       PublicationClip[]    @relation("ClipChosenBy")
   clipUploads       PublicationClip[]    @relation("ClipUploadedBy")
   descriptionDrafts DescriptionDraft[]
+  pricingSettings   PricingSettings[]    @relation("PricingSettingsUpdatedBy")
+  priceDecisions    PriceDecision[]      @relation("PriceDecidedBy")
 
   @@map("users")
 }
@@ -136,6 +138,7 @@ model Account {
   photoSettings       PhotoSettings?
   questionSettings    QuestionSettings?
   descriptionSettings DescriptionSettings?
+  pricingSettings     PricingSettings?
 
   @@map("accounts")
 }
@@ -209,42 +212,46 @@ enum ProductKind {
 }
 
 model Product {
-  id              String           @id @default(cuid())
-  accountId       String
-  account         Account          @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  name            String
-  kind            ProductKind      @default(INDIVIDUAL)
-  brand           String? // marca del repuesto
-  partNumber      String? // nº de pieza u OEM
-  productType     String? // tipo de producto, por ejemplo "Kit de embrague"
-  engineSystem    String? // sistema del motor, por ejemplo "Distribución"
-  line            String? // línea, por ejemplo "Liviano nafta"
-  origin          String? // país de origen
-  warranty        String?
-  kitContents     String?
+  id               String           @id @default(cuid())
+  accountId        String
+  account          Account          @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  name             String
+  kind             ProductKind      @default(INDIVIDUAL)
+  brand            String? // marca del repuesto
+  partNumber       String? // nº de pieza u OEM
+  productType      String? // tipo de producto, por ejemplo "Kit de embrague"
+  engineSystem     String? // sistema del motor, por ejemplo "Distribución"
+  line             String? // línea, por ejemplo "Liviano nafta"
+  origin           String? // país de origen
+  warranty         String?
+  kitContents      String?
+  // Lo que cuesta reponerlo, sin IVA: la base del precio.
+  replacementCost  Decimal?         @db.Decimal(14, 2)
+  // Los parámetros del precio que cambian solo para este producto; lo demás sigue a la cuenta.
+  pricingOverrides Json             @default("{}")
   // Ficha técnica: lista de { name, value }.
-  specs           Json             @default("[]")
-  notes           String?
-  source          RecordSource     @default(MANUAL)
+  specs            Json             @default("[]")
+  notes            String?
+  source           RecordSource     @default(MANUAL)
   // Importación que lo creó, para poder deshacerla.
-  importRunId     String?
-  importRun       ImportRun?       @relation(fields: [importRunId], references: [id], onDelete: SetNull)
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
-  variants        ProductVariant[]
-  compatibilities Compatibility[]
-  assets          Asset[]
-  publications    Publication[]
-  importChanges   ImportChange[]
-  research        ProductResearch?
-  files           ProductFile[]
-  insights        BuyerInsight[]
+  importRunId      String?
+  importRun        ImportRun?       @relation(fields: [importRunId], references: [id], onDelete: SetNull)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  variants         ProductVariant[]
+  compatibilities  Compatibility[]
+  assets           Asset[]
+  publications     Publication[]
+  importChanges    ImportChange[]
+  research         ProductResearch?
+  files            ProductFile[]
+  insights         BuyerInsight[]
   // Si es combo, los productos que lo forman.
-  comboItems      ComboItem[]      @relation("ComboItems")
+  comboItems       ComboItem[]      @relation("ComboItems")
   // Si es individual, los combos de los que forma parte.
-  inCombos        ComboItem[]      @relation("ComboComponent")
-  photoEdits      PhotoEdit[]
-  videos          ProductVideo[]
+  inCombos         ComboItem[]      @relation("ComboComponent")
+  photoEdits       PhotoEdit[]
+  videos           ProductVideo[]
 
   @@index([accountId])
   @@index([importRunId])
@@ -408,6 +415,7 @@ model Publication {
   channelCopy       ChannelCopy?
   syncChanges       ChannelSyncChange[]
   buyerQuestions    BuyerQuestion[]
+  priceDecisions    PriceDecision[]
   clips             PublicationClip[]
   descriptionDraft  DescriptionDraft?
 
@@ -665,6 +673,7 @@ enum PipelineStep {
   VIDEOS
   MEDIA
   DESCRIPTION
+  PRICE
   PUBLISH
 }
 
@@ -1621,4 +1630,47 @@ model DescriptionSettings {
   updatedAt  DateTime @updatedAt
 
   @@map("description_settings")
+}
+
+// ───────────────────────────── Precio ─────────────────────────────
+
+// Los parámetros para calcular el precio en la cuenta: cargos, impuestos,
+// cuotas, envío y márgenes. Lo que no está guardado toma el valor de partida
+// (src/domain/pricing.ts).
+model PricingSettings {
+  accountId   String   @id
+  account     Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  values      Json     @default("{}")
+  updatedById String?
+  updatedBy   User?    @relation("PricingSettingsUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  updatedAt   DateTime @updatedAt
+
+  @@map("pricing_settings")
+}
+
+// El precio que se decidió en el paso Precio para una publicación: el precio
+// publicado, el descuento, las cuotas y el margen que dejaba con el costo y los
+// parámetros de ese momento. Se guarda cada decisión: la última es la que vale.
+model PriceDecision {
+  id                String      @id @default(cuid())
+  publicationId     String
+  publication       Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  listPrice         Decimal     @db.Decimal(14, 2)
+  discountPct       Decimal     @default(0) @db.Decimal(5, 2)
+  // Cuotas sin interés: 0 es sin cuotas.
+  installments      Int         @default(0)
+  finalPrice        Decimal     @db.Decimal(14, 2)
+  cost              Decimal     @db.Decimal(14, 2)
+  marginPct         Decimal     @db.Decimal(8, 2)
+  minMarginPct      Decimal     @db.Decimal(6, 2)
+  // Los parámetros que se usaron, para saber de dónde salió el margen.
+  params            Json
+  // Quedó debajo del margen mínimo y se confirmó igual.
+  belowMinConfirmed Boolean     @default(false)
+  decidedById       String?
+  decidedBy         User?       @relation("PriceDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+  decidedAt         DateTime    @default(now())
+
+  @@index([publicationId, decidedAt])
+  @@map("price_decisions")
 }

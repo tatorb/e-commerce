@@ -43,6 +43,7 @@ export async function listScoredPublications(
         description: true,
         attributes: true,
         media: true,
+        price: true,
         externalId: true,
         url: true,
         channelStatus: true,
@@ -54,7 +55,7 @@ export async function listScoredPublications(
         updatedAt: true,
         store: { select: { name: true, channelId: true, channel: { select: { kind: true, name: true } } } },
         measurements: { orderBy: { takenAt: 'desc' }, take: LATEST_MEASUREMENTS, select: { takenAt: true, metrics: true } },
-        channelCopy: { select: { fingerprints: true, agreed: true, rejections: true, missingSince: true } },
+        channelCopy: { select: { fingerprints: true, agreed: true, rejections: true, missingSince: true, price: true } },
         product: {
           select: {
             id: true,

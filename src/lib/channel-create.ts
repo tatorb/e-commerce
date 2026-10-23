@@ -4,7 +4,7 @@ import { getChannelAdapter } from '@/channels';
 import { ConnectError } from '@/channels/connect';
 import { getChannelPublisher, PublishError, type ChannelAttributeUpdate, type ChannelNewVariant } from '@/channels/publish';
 import { mergeCatalogAttributes, normalizeText } from '@/domain/catalog-data';
-import { faceValues, fingerprint, fingerprintsOf } from '@/domain/channel-sync';
+import { faceValues, fingerprint, fingerprintsOf, priceText } from '@/domain/channel-sync';
 import { channelPhotos, measureText, parseMedia, variantKey, type PhotoRef } from '@/domain/media';
 import { parseNameValueList } from '@/domain/name-value';
 import { checkTitle } from '@/domain/titles';
@@ -285,6 +285,7 @@ async function create(db: Db, args: CreateArgs, info: CreateInfo): Promise<Creat
   const channelPrints = {
     ...fingerprintsOf({ ...app, description: descriptionSent ? app.description : null, attributes: sentAttributes, photos: null }),
     photos: fingerprint('photos', channelPhotos(ids.map(() => ''), ids, created.variations)),
+    price: fingerprint('price', priceText(args.price)),
   };
   await db.$transaction(async (tx) => {
     await tx.publication.update({
@@ -328,7 +329,7 @@ async function create(db: Db, args: CreateArgs, info: CreateInfo): Promise<Creat
         publicationId: p.id,
         method: 'API',
         appliedAt: now,
-        fields: ['title', ...(descriptionSent ? ['description'] : []), 'attributes', 'photos'],
+        fields: ['title', ...(descriptionSent ? ['description'] : []), 'attributes', 'photos', 'price'],
         createdById: args.userId,
       },
     });

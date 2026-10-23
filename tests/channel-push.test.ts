@@ -8,6 +8,8 @@ import { faceSummary, faceValues, fingerprintsOf } from '@/domain/channel-sync';
 import { DraftError, pushDrafts, PushError, saveDraft } from '@/lib/channel-push';
 import { discardDrafts, readOne, runSyncStep, startSync } from '@/lib/channel-sync';
 import { encrypt } from '@/lib/crypto';
+import { savePriceDecision } from '@/lib/pricing';
+import { advanceStep } from '@/domain/pipeline';
 import { resetVisitsTogether } from '@/channels/mercadolibre/listings';
 
 // Subir al canal el borrador de una publicación, contra un Mercado Libre
@@ -47,7 +49,16 @@ describe('por qué Mercado Libre no aceptó un cambio', () => {
 const url = process.env.TEST_DATABASE_URL;
 
 type Attribute = { id: string; name: string; value_name: string | null; values?: { name: string }[] };
-type Item = { title: string; description: string | null; sold: number; last_updated: string; attributes?: Attribute[]; category_id?: string };
+type Item = {
+  title: string;
+  description: string | null;
+  sold: number;
+  last_updated: string;
+  attributes?: Attribute[];
+  category_id?: string;
+  price?: number;
+  variations?: { id: number; price: number }[];
+};
 
 describe.skipIf(!url)('subir al canal en la base', () => {
   const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: url! }) });
@@ -70,9 +81,21 @@ describe.skipIf(!url)('subir al canal en la base', () => {
       if (req.method === 'PUT' || req.method === 'POST') writes.push({ method: req.method, path: u.pathname, body });
 
       const item = u.pathname.match(/^\/items\/(\w+)$/);
+      if (item && req.method === 'GET' && items[item[1]]) return json(200, { id: item[1], variations: items[item[1]].variations ?? [] });
       if (item && req.method === 'PUT') {
         const it = items[item[1]];
         if (!it) return json(404, {});
+        if (body.price !== undefined || body.variations) {
+          if (body.price !== undefined && it.variations?.length) return json(400, { message: 'Validation error', cause: [{ code: 'item.price.invalid', message: 'Use variations price' }] });
+          if (body.price !== undefined) it.price = body.price;
+          for (const v of body.variations ?? []) {
+            const mine = it.variations?.find((x) => x.id === v.id);
+            if (mine) mine.price = v.price;
+          }
+          it.price = it.variations?.[0]?.price ?? it.price;
+          it.last_updated = new Date().toISOString();
+          return json(200, { id: item[1] });
+        }
         if (body.attributes) {
           const bad = body.attributes.find((a: Attribute) => a.value_name === 'Usado');
           if (bad) return json(400, { message: 'Validation error', cause: [{ code: 'item.attributes.invalid', message: 'Condición del ítem: el valor Usado no es válido' }] });
@@ -121,7 +144,7 @@ describe.skipIf(!url)('subir al canal en la base', () => {
                 seller_id: 7,
                 title: it.title,
                 status: 'active',
-                price: 100,
+                price: it.price ?? 100,
                 sold_quantity: it.sold,
                 last_updated: it.last_updated,
                 category_id: it.category_id ?? 'MLA999',
@@ -379,5 +402,59 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     // Tipo de embrague no se mandó: no es una de las opciones.
     expect(writes.map((w) => w.body)).toEqual([{ attributes: [{ id: 'ITEM_CONDITION', value_name: 'Usado' }] }]);
     expect((await state('MLA1')).rejected).toHaveLength(1);
+  });
+  // ───────────────────────────── Precio ─────────────────────────────
+
+  const decide = (publicationId: string, listPrice: number, extra: Partial<Parameters<typeof savePriceDecision>[1]> = {}) =>
+    savePriceDecision(db, { accountId, publicationId, userId: null, listPrice, discountPct: 0, plan: 0, cost: 100_000, overrides: {}, confirmBelowMin: false, ...extra });
+
+  it('la primera lectura toma el precio del canal, y una copia de antes del precio no muestra cambios', async () => {
+    expect(Number((await pub('MLA1')).price)).toBe(100);
+    const p = await pub('MLA1');
+    // Una copia leída antes de que el precio se comparara: sin su huella.
+    const strip = (raw: unknown) => Object.fromEntries(Object.entries(raw as Record<string, string>).filter(([k]) => k !== 'price'));
+    await db.channelCopy.update({ where: { publicationId: p.id }, data: { fingerprints: strip(p.channelCopy!.fingerprints), agreed: strip(p.channelCopy!.agreed) } });
+    expect(await state('MLA1')).toEqual({ draft: [], choose: [], rejected: [] });
+  });
+
+  it('el precio decidido queda para subir y se sube; con medidas, en cada una', async () => {
+    const p = await pub('MLA1');
+    const saved = await decide(p.id, 250_000, { discountPct: 10, plan: 3 });
+    expect(saved.simulation.finalPrice).toBe(225_000);
+    expect(Number((await pub('MLA1')).price)).toBe(250_000);
+    expect((await state('MLA1')).draft).toEqual(['price']);
+    expect(await db.priceDecision.findFirst({ where: { publicationId: p.id } })).toMatchObject({ installments: 3, belowMinConfirmed: false });
+    expect(Number((await db.product.findUniqueOrThrow({ where: { id: productId } })).replacementCost)).toBe(100_000);
+
+    const result = await pushDrafts(db, { accountId, publicationId: p.id, userId: null });
+    expect(result).toEqual({ sent: ['price'], rejected: [], confirmed: true });
+    expect(writes.map((w) => w.body)).toEqual([{ price: 250_000 }]);
+    expect(await state('MLA1')).toEqual({ draft: [], choose: [], rejected: [] });
+    expect(await db.channelSyncChange.findFirst({ where: { publicationId: p.id, kind: 'SENT' } })).toMatchObject({ field: 'price', after: '250000' });
+
+    // Con medidas, Mercado Libre pide el precio en cada una.
+    items.MLA2.variations = [
+      { id: 11, price: 100 },
+      { id: 12, price: 100 },
+    ];
+    const p2 = await pub('MLA2');
+    await decide(p2.id, 260_000);
+    writes.length = 0;
+    expect((await pushDrafts(db, { accountId, publicationId: p2.id, userId: null })).sent).toEqual(['price']);
+    expect(writes.map((w) => w.body)).toEqual([{ variations: [{ id: 11, price: 260_000 }, { id: 12, price: 260_000 }] }]);
+  });
+
+  it('debajo del margen mínimo hay que confirmarlo, y sin precio guardado no se avanza a Publicación', async () => {
+    const p = await pub('MLA1');
+    await db.publication.update({ where: { id: p.id }, data: { pipelineStatus: 'IN_PIPELINE', pipelineStep: 'PRICE' } });
+    await db.pipelineMovement.create({ data: { publicationId: p.id, step: 'PRICE' } });
+    const advance = () => db.$transaction((tx) => advanceStep(tx, { publicationId: p.id, expected: 'PRICE', userId: null }));
+    await expect(advance()).rejects.toThrow('Guardá el precio');
+
+    await expect(decide(p.id, 150_000)).rejects.toThrow(/debajo del mínimo/);
+    await expect(decide(p.id, 150_000, { plan: 9 })).rejects.toThrow(/costo de 9 cuotas/);
+    await decide(p.id, 150_000, { confirmBelowMin: true });
+    expect(await db.priceDecision.findFirst({ where: { publicationId: p.id } })).toMatchObject({ belowMinConfirmed: true });
+    expect(await advance()).toEqual({ step: 'PUBLISH' });
   });
 });

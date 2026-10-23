@@ -4,7 +4,7 @@ import type { PipelineExit, PipelineRemoval, PipelineStatus, PipelineStep } from
 // Pipeline: el recorrido por pasos para corregir una publicación de punta a
 // punta. Es por publicación y no sabe nada de ningún canal.
 
-export const PIPELINE_STEPS: PipelineStep[] = ['INFO', 'TITLE', 'IMAGES', 'VIDEOS', 'MEDIA', 'DESCRIPTION', 'PUBLISH'];
+export const PIPELINE_STEPS: PipelineStep[] = ['INFO', 'TITLE', 'IMAGES', 'VIDEOS', 'MEDIA', 'DESCRIPTION', 'PRICE', 'PUBLISH'];
 
 export const PIPELINE_STEP_LABEL: Record<PipelineStep, string> = {
   INFO: 'Información',
@@ -13,6 +13,7 @@ export const PIPELINE_STEP_LABEL: Record<PipelineStep, string> = {
   VIDEOS: 'Videos',
   MEDIA: 'Organización de multimedia',
   DESCRIPTION: 'Descripción',
+  PRICE: 'Precio',
   PUBLISH: 'Publicación',
 };
 
@@ -24,6 +25,7 @@ export const PIPELINE_STEP_SLUG: Record<PipelineStep, string> = {
   VIDEOS: 'videos',
   MEDIA: 'multimedia',
   DESCRIPTION: 'descripcion',
+  PRICE: 'precio',
   PUBLISH: 'publicacion',
 };
 
@@ -252,11 +254,26 @@ async function moveTo(tx: Tx, args: MoveArgs, to: PipelineStep, exitKind: 'ADVAN
   return { step: to };
 }
 
-/** Pasa al paso siguiente. En el último paso se termina con completePipeline. */
+/**
+ * Pasa al paso siguiente. En el último paso se termina con completePipeline.
+ * De Precio se pasa con un precio guardado: si deja un margen debajo del
+ * mínimo, tiene que estar confirmado.
+ */
 export async function advanceStep(tx: Tx, args: MoveArgs): Promise<{ step: PipelineStep }> {
   await lockInPipeline(tx, args.publicationId, args.expected);
   const to = nextStep(args.expected);
   if (!to) throw new PipelineError('Es el último paso: marcala como corregida.');
+  if (args.expected === 'PRICE') {
+    const decision = await tx.priceDecision.findFirst({
+      where: { publicationId: args.publicationId },
+      orderBy: { decidedAt: 'desc' },
+      select: { marginPct: true, minMarginPct: true, belowMinConfirmed: true },
+    });
+    if (!decision) throw new PipelineError('Guardá el precio antes de avanzar a Publicación.');
+    if (Number(decision.marginPct) < Number(decision.minMarginPct) && !decision.belowMinConfirmed) {
+      throw new PipelineError('El precio guardado deja un margen debajo del mínimo: confirmalo al guardarlo para avanzar.');
+    }
+  }
   return moveTo(tx, args, to, 'ADVANCED');
 }
 
