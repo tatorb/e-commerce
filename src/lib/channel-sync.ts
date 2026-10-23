@@ -89,8 +89,9 @@ export async function startSync(
     const last = await db.channelSync.findFirst({ where: { storeId: args.storeId }, orderBy: { startedAt: 'desc' }, select: { startedAt: true } });
     if (last && now.getTime() - last.startedAt.getTime() < SCHEDULE_GAP_MS) return null;
   }
+  // Las eliminadas quedan archivadas en la app: ya no se leen.
   const publications = await db.publication.findMany({
-    where: { storeId: args.storeId, externalId: { not: null } },
+    where: { storeId: args.storeId, externalId: { not: null }, channelStatus: { not: 'DELETED' } },
     select: { externalId: true },
     orderBy: { externalId: 'asc' },
   });

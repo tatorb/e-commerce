@@ -13,6 +13,7 @@ import { discardDrafts, readOne, SyncError } from '@/lib/channel-sync';
 import { photoRefSchema } from '@/domain/media';
 import { MediaError, saveMedia } from '@/lib/media';
 import { CreateError, createInChannel } from '@/lib/channel-create';
+import { changeStatus, relistInChannel, StatusError, type StatusResult } from '@/lib/channel-status';
 
 // Lo que se hace desde la página de una publicación y desde Por subir: cambiar
 // el borrador, subirlo al canal, descartarlo y volver a leer del canal.
@@ -164,6 +165,60 @@ export async function createInChannelAction(
     return { ok: true, externalId: created.externalId, warnings: created.warnings };
   } catch (e) {
     if (e instanceof CreateError) return { ok: false, error: e.message };
+    return failure(e);
+  }
+}
+
+const statusActionSchema = z.enum(['pause', 'activate', 'close', 'delete']);
+
+/** Pausa, reactiva, finaliza o elimina esas publicaciones en el canal. Devuelve cuáles se pudieron y cuáles no, con el motivo. */
+export async function changeStatusAction(
+  accountSlug: string,
+  publicationIds: string[],
+  action: z.input<typeof statusActionSchema>,
+): Promise<Result<StatusResult>> {
+  const user = await requireUser();
+  const account = await getAccountBySlug(accountSlug);
+  if (!account) return { ok: false, error: 'La cuenta no existe.' };
+  const ids = z.array(idSchema).min(1).max(200).safeParse(publicationIds);
+  const parsed = statusActionSchema.safeParse(action);
+  if (!ids.success || !parsed.success) return { ok: false, error: 'El pedido no tiene la forma esperada.' };
+  try {
+    const result = await changeStatus(prisma, { accountId: account.id, publicationIds: ids.data, action: parsed.data, userId: user.id });
+    for (const p of result.done) refresh(accountSlug, p.id);
+    return { ok: true, ...result };
+  } catch (e) {
+    return failure(e);
+  }
+}
+
+const relistSchema = z.object({
+  price: z.coerce.number().positive('Cargá el precio.').max(1_000_000_000),
+  quantity: quantitySchema.optional(),
+  quantities: z.record(z.string().min(1).max(200), quantitySchema).optional(),
+  listingType: z.string().min(1, 'Elegí el tipo de publicación.').max(40),
+});
+
+/** Republica una finalizada con ese precio, la cantidad de cada medida y el tipo de publicación. */
+export async function relistAction(
+  accountSlug: string,
+  publicationId: string,
+  input: z.input<typeof relistSchema>,
+): Promise<Result<{ externalId: string; warnings: string[] }>> {
+  const user = await requireUser();
+  const account = await getAccountBySlug(accountSlug);
+  if (!account) return { ok: false, error: 'La cuenta no existe.' };
+  const id = idSchema.safeParse(publicationId);
+  const parsed = relistSchema.safeParse(input);
+  if (!id.success) return { ok: false, error: 'La publicación no existe.' };
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Revisá los datos.' };
+  try {
+    const r = await relistInChannel(prisma, { accountId: account.id, publicationId: id.data, ...parsed.data, userId: user.id });
+    refresh(accountSlug, id.data);
+    revalidatePath(`/a/${accountSlug}/pipeline/${id.data}`);
+    return { ok: true, ...r };
+  } catch (e) {
+    if (e instanceof StatusError) return { ok: false, error: e.message };
     return failure(e);
   }
 }

@@ -14,7 +14,10 @@ import type { Cell } from './spreadsheet';
 const STATUS_WORD: Record<ChannelStatus, string> = {
   ACTIVE: 'active',
   PAUSED: 'paused',
+  CLOSED: 'closed',
+  UNDER_REVIEW: 'under_review',
   INACTIVE: 'inactive',
+  DELETED: 'eliminada',
   UNPUBLISHED: 'sin publicar',
 };
 

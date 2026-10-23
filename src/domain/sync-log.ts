@@ -1,5 +1,6 @@
 import Papa from 'papaparse';
-import type { SyncChangeKind, SyncStatus, SyncTrigger } from '@/generated/prisma/enums';
+import type { ChannelStatus, SyncChangeKind, SyncStatus, SyncTrigger } from '@/generated/prisma/enums';
+import { CHANNEL_STATUS_LABEL } from './channel-status';
 import { attributeDiff, FACE_FIELD_LABEL, isFaceField, SYNC_CHANGE_LABEL } from './channel-sync';
 import { parseMedia, photoVariants, type PhotoRef } from './media';
 import { parseNameValueList, type NameValue } from './name-value';
@@ -24,7 +25,8 @@ export const LOG_TYPES = [
   { value: 'subidas', label: 'Se subió', kinds: ['SENT'] },
   { value: 'creadas', label: 'Se creó en el canal', kinds: ['CREATED'] },
   { value: 'respuestas', label: 'Respuestas a preguntas', kinds: ['ANSWERED'] },
-  { value: 'fallidas', label: 'No se pudo', kinds: ['REJECTED', 'CREATE_FAILED', 'ANSWER_FAILED'] },
+  { value: 'estados', label: 'Cambios de estado', kinds: ['STATUS_CHANGED', 'RELISTED'] },
+  { value: 'fallidas', label: 'No se pudo', kinds: ['REJECTED', 'CREATE_FAILED', 'ANSWER_FAILED', 'STATUS_FAILED'] },
   { value: 'elecciones', label: 'Se eligió', kinds: ['CHOSE_CHANNEL', 'CHOSE_APP'] },
   { value: 'descartes', label: 'Se descartó', kinds: ['DISCARDED'] },
   { value: 'lecturas', label: 'Lecturas del canal', kinds: [] },
@@ -135,6 +137,7 @@ export function dayRange(f: Pick<LogFilters, 'from' | 'to'>, timeZone: string): 
 
 export function fieldLabel(field: string): string {
   if (isFaceField(field)) return FACE_FIELD_LABEL[field];
+  if (field === 'status') return 'Estado';
   return field === 'publication' ? 'Publicación' : field === 'question' ? 'Pregunta de un comprador' : field;
 }
 
@@ -143,7 +146,7 @@ export function kindLabel(kind: SyncChangeKind): string {
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
-export const FAILED_KINDS: readonly SyncChangeKind[] = ['REJECTED', 'CREATE_FAILED', 'ANSWER_FAILED'];
+export const FAILED_KINDS: readonly SyncChangeKind[] = ['REJECTED', 'CREATE_FAILED', 'ANSWER_FAILED', 'STATUS_FAILED'];
 
 // Qué es el antes y qué el después en cada caso.
 export const SIDE_LABELS: Record<SyncChangeKind, [string, string]> = {
@@ -157,6 +160,9 @@ export const SIDE_LABELS: Record<SyncChangeKind, [string, string]> = {
   CREATE_FAILED: ['', ''],
   ANSWERED: ['Pregunta', 'Respuesta'],
   ANSWER_FAILED: ['Pregunta', 'Se quiso responder'],
+  STATUS_CHANGED: ['Estaba', 'Quedó'],
+  STATUS_FAILED: ['Estaba', 'Se quiso'],
+  RELISTED: ['Código anterior', 'Código nuevo'],
 };
 
 function photoSummary(refs: PhotoRef[]): string {
@@ -195,8 +201,12 @@ export function changeSides(field: string, before: unknown, after: unknown): { b
     return { before: a ? photoSummary(a) : '', after: b ? photoSummary(b) : 'Las del canal' };
   }
   if (field === 'publication') {
-    const code = after && typeof after === 'object' && 'externalId' in after ? String((after as { externalId: unknown }).externalId) : '';
-    return { before: '', after: code };
+    const code = (v: unknown) => (v && typeof v === 'object' && 'externalId' in v ? String((v as { externalId: unknown }).externalId) : '');
+    return { before: code(before), after: code(after) };
+  }
+  if (field === 'status') {
+    const label = (v: unknown) => (typeof v === 'string' && v in CHANNEL_STATUS_LABEL ? CHANNEL_STATUS_LABEL[v as ChannelStatus] : '');
+    return { before: label(before), after: label(after) };
   }
   return { before: typeof before === 'string' ? before.trim() : '', after: typeof after === 'string' ? after.trim() : '' };
 }

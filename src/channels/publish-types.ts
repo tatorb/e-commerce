@@ -68,6 +68,17 @@ export type ChannelCreated = {
   warnings: string[];
 };
 
+/** Los cambios de estado que se le piden al canal. Republicar va aparte, porque crea otra publicación. */
+export type ChannelStatusChange = 'pause' | 'activate' | 'close' | 'delete';
+
+/** Lo que pide el canal para republicar una finalizada: precio, cantidad y tipo, y la cantidad de cada medida si tiene. */
+export type ChannelRelist = {
+  price: number;
+  quantity: number;
+  listingType: string;
+  variants: (VariantLike & { quantity: number })[];
+};
+
 export interface ChannelPublisher {
   /** Los tipos de publicación que ofrece el canal, el primero es el de siempre. */
   listingTypes: { value: string; label: string }[];
@@ -89,4 +100,8 @@ export interface ChannelPublisher {
   update(accessToken: string, externalId: string, field: 'title' | 'description', value: string): Promise<void>;
   /** Cambia esos datos de catálogo; los demás quedan como están. Lanza PublishError si el canal no lo acepta. */
   updateAttributes(accessToken: string, externalId: string, attributes: ChannelAttributeUpdate[]): Promise<void>;
+  /** Pausa, reactiva, finaliza o elimina. Lanza PublishError si el canal no lo acepta. */
+  setStatus(accessToken: string, externalId: string, change: ChannelStatusChange): Promise<void>;
+  /** Republica una finalizada: el canal crea otra con los mismos datos. Devuelve su código. */
+  relist(accessToken: string, externalId: string, relist: ChannelRelist): Promise<{ externalId: string; url: string | null }>;
 }

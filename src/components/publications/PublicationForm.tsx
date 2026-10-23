@@ -17,18 +17,17 @@ import { RowList } from '@/components/products/RowList';
 import { cn } from '@/lib/utils/cn';
 import type { ChannelInfo } from '@/channels';
 import type { ChannelStatus } from '@/generated/prisma/enums';
+import { CHANNEL_STATUS_LABEL } from '@/domain/channel-status';
 import {
   createPublicationAction,
   updatePublicationAction,
   type PublicationFormInput,
 } from '@/app/a/[cuenta]/productos/actions';
 
-export const CHANNEL_STATUS_OPTIONS: { value: ChannelStatus; label: string }[] = [
-  { value: 'ACTIVE', label: 'Activa' },
-  { value: 'PAUSED', label: 'Pausada' },
-  { value: 'INACTIVE', label: 'Inactiva' },
-  { value: 'UNPUBLISHED', label: 'Sin publicar' },
-];
+export const CHANNEL_STATUS_OPTIONS: { value: ChannelStatus; label: string }[] = (Object.keys(CHANNEL_STATUS_LABEL) as ChannelStatus[]).map((value) => ({
+  value,
+  label: CHANNEL_STATUS_LABEL[value],
+}));
 
 type Status = { kind: 'idle' } | { kind: 'success' } | { kind: 'error'; message: string };
 

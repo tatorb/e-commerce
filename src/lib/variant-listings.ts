@@ -1,7 +1,7 @@
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import type { ChannelListing, ChannelListings } from '@/channels/listings';
 import { LISTINGS_BATCH } from '@/channels/listings';
-import type { VariantListing } from '@/domain/media';
+import { parseVariantListings, type VariantListing } from '@/domain/media';
 
 // Las medidas que el canal guarda como publicaciones aparte, agrupadas en una
 // familia. En la app son una sola publicación: se leen juntas y la cara del
@@ -9,6 +9,13 @@ import type { VariantListing } from '@/domain/media';
 // de canales.
 
 type Db = PrismaClient | Prisma.TransactionClient;
+
+/** Las publicaciones del canal de una de la app: la de cada medida si el canal las guarda aparte, o la única. */
+export function listingTargets(p: { externalId: string | null; variantListings: unknown }): string[] {
+  const family = parseVariantListings(p.variantListings);
+  if (family.length >= 2) return family.map((v) => v.externalId);
+  return p.externalId ? [p.externalId] : [];
+}
 
 /** A qué publicación de la app pertenece la publicación aparte de cada medida, por su código. */
 export async function variantListingOwners(db: Db, storeId: string): Promise<Map<string, string>> {

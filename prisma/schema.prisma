@@ -324,7 +324,14 @@ model Asset {
 enum ChannelStatus {
   ACTIVE
   PAUSED
+  // Finalizada: ya no se vende. Se puede republicar o eliminar.
+  CLOSED
+  // El canal la está revisando: mientras tanto no se puede cambiar.
+  UNDER_REVIEW
+  // Otros casos del canal, por ejemplo pendiente de pago o de activarse.
   INACTIVE
+  // Se eliminó en el canal. Queda en la app, archivada, con su historial.
+  DELETED
   UNPUBLISHED
 }
 
@@ -1295,6 +1302,12 @@ enum SyncChangeKind {
   ANSWERED
   // Se intentó responder y no se pudo.
   ANSWER_FAILED
+  // Se cambió el estado en el canal desde la app: pausar, reactivar, finalizar o eliminar.
+  STATUS_CHANGED
+  // Se intentó cambiar el estado y no se pudo.
+  STATUS_FAILED
+  // Se republicó una finalizada: quedó con otro código en el canal.
+  RELISTED
 }
 
 // Un dato que cambió por la sincronización: lo que llegó del canal, lo que se

@@ -41,7 +41,8 @@ describe('los filtros del Registro', () => {
     const reads = parseLogSearch({ tipo: 'lecturas' });
     expect(logKinds(reads)).toEqual([]);
     expect(logReads(reads)).toBe('all');
-    expect(logKinds(parseLogSearch({ tipo: 'fallidas,elecciones' }))).toEqual(['REJECTED', 'CREATE_FAILED', 'ANSWER_FAILED', 'CHOSE_CHANNEL', 'CHOSE_APP']);
+    expect(logKinds(parseLogSearch({ tipo: 'fallidas,elecciones' }))).toEqual(['REJECTED', 'CREATE_FAILED', 'ANSWER_FAILED', 'STATUS_FAILED', 'CHOSE_CHANNEL', 'CHOSE_APP']);
+    expect(logKinds(parseLogSearch({ tipo: 'estados' }))).toEqual(['STATUS_CHANGED', 'RELISTED']);
     expect(logReads(parseLogSearch({ tipo: 'subidas' }))).toBe('none');
     // Las lecturas son de la tienda: al buscar una publicación no aparecen.
     expect(logReads(parseLogSearch({ q: 'kit' }))).toBe('none');
@@ -85,6 +86,9 @@ describe('el antes y el después', () => {
     });
     expect(changeSides('photos', channel, null).after).toBe('Las del canal');
     expect(changeSides('publication', null, { externalId: 'MLA9' })).toEqual({ before: '', after: 'MLA9' });
+    // Republicar: el código anterior y el nuevo. El estado, con su nombre.
+    expect(changeSides('publication', { externalId: 'MLA1' }, { externalId: 'MLA9' })).toEqual({ before: 'MLA1', after: 'MLA9' });
+    expect(changeSides('status', 'ACTIVE', 'PAUSED')).toEqual({ before: 'Activa', after: 'Pausada' });
   });
 
   it('la planilla trae una fila por movimiento, con la hora de la cuenta', () => {

@@ -24,7 +24,7 @@ export const publicationDataSchema = z.object({
   description: text(50000),
   attributes: z.array(nameValueSchema).max(300).transform(compactNameValues),
   price: z.number().nonnegative().nullable(),
-  channelStatus: z.enum(['ACTIVE', 'PAUSED', 'INACTIVE', 'UNPUBLISHED']),
+  channelStatus: z.enum(['ACTIVE', 'PAUSED', 'CLOSED', 'UNDER_REVIEW', 'INACTIVE', 'DELETED', 'UNPUBLISHED']),
 });
 
 export type PublicationData = z.output<typeof publicationDataSchema>;

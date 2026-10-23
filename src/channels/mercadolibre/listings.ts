@@ -20,6 +20,7 @@ const ITEM_FIELDS = [
   'title',
   'price',
   'status',
+  'sub_status',
   'permalink',
   'sold_quantity',
   'category_id',
@@ -55,9 +56,12 @@ function attributeValue(a: Obj): string | null {
   return names.length > 0 ? names.join(', ') : null;
 }
 
-function statusOf(raw: unknown): ChannelStatus {
+/** El estado como lo maneja la app. Una finalizada que se eliminó sigue apareciendo como finalizada, con "deleted". */
+function statusOf(raw: unknown, sub: unknown): ChannelStatus {
   if (raw === 'active') return 'ACTIVE';
   if (raw === 'paused') return 'PAUSED';
+  if (raw === 'closed') return arr(sub).includes('deleted') ? 'DELETED' : 'CLOSED';
+  if (raw === 'under_review') return 'UNDER_REVIEW';
   return 'INACTIVE';
 }
 
@@ -121,7 +125,7 @@ export function parseItem(item: Obj): ChannelListing {
     title: str(item.title),
     description: null,
     price: num(item.price),
-    status: statusOf(item.status),
+    status: statusOf(item.status, item.sub_status),
     sold: num(item.sold_quantity),
     visits90d: null,
     photos,

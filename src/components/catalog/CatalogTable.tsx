@@ -10,7 +10,7 @@ import { Card } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ChannelStatusBadge, PipelineBadge } from '@/components/stages/StageBadge';
 import { ScoreBadge } from '@/components/stages/ScoreBadge';
-import { codeOrUnpublished } from '@/domain/channel-status';
+import { codeOrUnpublished, STATUS_ACTIONS, statusActions, statusConfirm, type StatusAction } from '@/domain/channel-status';
 import type { PipelineState } from '@/domain/pipeline';
 import { titleLockText, type TitleLock } from '@/domain/title-lock';
 import type { ChannelStatus, ProductKind } from '@/generated/prisma/enums';
@@ -18,7 +18,7 @@ import { KindBadge } from '@/components/products/KindBadge';
 import { plural } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
 import { addToPipelineAction } from '@/app/a/[cuenta]/publicaciones/pipeline-actions';
-import { pushDraftsAction } from '@/app/a/[cuenta]/publicaciones/sync-actions';
+import { changeStatusAction, pushDraftsAction } from '@/app/a/[cuenta]/publicaciones/sync-actions';
 import { useAddToPipeline } from './useAddToPipeline';
 import { titleOrUntitled } from '@/domain/publication-title';
 import type { SyncState } from '@/lib/queries/catalog-filters';
@@ -171,10 +171,48 @@ function useBulkPush(accountSlug: string, onDone: () => void) {
   return { run, progress, outcomes, clear: () => setOutcomes([]) };
 }
 
-export function CatalogTable({ accountSlug, rows }: { accountSlug: string; rows: CatalogRow[] }) {
+type BulkStatus = Exclude<StatusAction, 'relist'>;
+const BULK_STATUS: BulkStatus[] = ['pause', 'activate', 'close', 'delete'];
+
+/** Las elegidas a las que se les puede hacer esa acción: publicadas y en un estado que la permite. */
+const canChange = (r: CatalogRow, action: BulkStatus) => Boolean(r.externalId) && statusActions(r.channelStatus).includes(action);
+
+/** Cambia el estado de varias publicaciones, de a una, contando el avance. */
+function useBulkStatus(accountSlug: string, onDone: () => void) {
+  const router = useRouter();
+  const [progress, setProgress] = useState<{ action: BulkStatus; done: number; total: number } | null>(null);
+  const [outcomes, setOutcomes] = useState<{ action: BulkStatus; list: PushOutcome[] } | null>(null);
+  async function run(action: BulkStatus, rows: CatalogRow[]) {
+    setOutcomes(null);
+    setProgress({ action, done: 0, total: rows.length });
+    const out: PushOutcome[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      const title = titleOrUntitled(rows[i].title);
+      const r = await changeStatusAction(accountSlug, [rows[i].id], action).catch(() => null);
+      out.push(
+        !r
+          ? { title, kind: 'error', text: 'Se cortó la conexión con la app.' }
+          : !r.ok
+            ? { title, kind: 'error', text: r.error }
+            : r.failed.length > 0
+              ? { title, kind: 'error', text: r.failed[0].message }
+              : { title, kind: 'ok', text: STATUS_ACTIONS[action].done },
+      );
+      setProgress({ action, done: i + 1, total: rows.length });
+    }
+    setOutcomes({ action, list: out });
+    setProgress(null);
+    onDone();
+    router.refresh();
+  }
+  return { run, progress, outcomes, clear: () => setOutcomes(null) };
+}
+
+export function CatalogTable({ accountSlug, rows, channelName }: { accountSlug: string; rows: CatalogRow[]; channelName: string }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const add = useAddToPipeline(() => setSelected(new Set()));
   const push = useBulkPush(accountSlug, () => setSelected(new Set()));
+  const status = useBulkStatus(accountSlug, () => setSelected(new Set()));
 
   // Solo cuentan las que se ven ahora: si un filtro esconde una elegida, no se toca.
   const eligible = rows;
@@ -182,7 +220,7 @@ export function CatalogTable({ accountSlug, rows }: { accountSlug: string; rows:
   const allChosen = eligible.length > 0 && chosen.length === eligible.length;
   const toPipeline = chosen.filter(canEnter);
   const toPush = chosen.filter(canPush);
-  const busy = add.pending || push.progress !== null;
+  const busy = add.pending || push.progress !== null || status.progress !== null;
 
   function toggle(id: string, on: boolean) {
     setSelected((prev) => {
@@ -193,13 +231,25 @@ export function CatalogTable({ accountSlug, rows }: { accountSlug: string; rows:
     });
     add.clearMessage();
     push.clear();
+    status.clear();
   }
 
   function toggleAll(on: boolean) {
     setSelected(on ? new Set(eligible.map((r) => r.id)) : new Set());
     add.clearMessage();
     push.clear();
+    status.clear();
   }
+
+  function changeStatus(action: BulkStatus) {
+    const list = chosen.filter((r) => canChange(r, action));
+    if (list.length === 0) return;
+    const confirm = statusConfirm(action, channelName, list.length);
+    if (confirm && !window.confirm(confirm)) return;
+    status.run(action, list);
+  }
+  const statusDone = status.outcomes?.list.filter((o) => o.kind === 'ok').length ?? 0;
+  const statusFailed = status.outcomes?.list.filter((o) => o.kind === 'error') ?? [];
 
   const submit = () => add.run(() => addToPipelineAction(accountSlug, toPipeline.map((r) => r.id)));
   const pushed = push.outcomes.filter((o) => o.kind === 'ok').length;
@@ -207,7 +257,7 @@ export function CatalogTable({ accountSlug, rows }: { accountSlug: string; rows:
 
   return (
     <>
-      {chosen.length > 0 || add.message || push.progress || push.outcomes.length > 0 ? (
+      {chosen.length > 0 || add.message || push.progress || push.outcomes.length > 0 || status.progress || status.outcomes ? (
         <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
           {chosen.length > 0 ? (
             <>
@@ -227,6 +277,23 @@ export function CatalogTable({ accountSlug, rows }: { accountSlug: string; rows:
                 <Upload className="h-4 w-4" />
                 Subir los cambios{toPush.length > 0 ? ` (${toPush.length})` : ''}
               </Button>
+              <select
+                aria-label="Cambiar el estado"
+                className="h-8 rounded-md border border-input bg-background px-2 text-sm shadow-sm disabled:opacity-50"
+                value=""
+                disabled={busy || chosen.every((r) => !BULK_STATUS.some((a) => canChange(r, a)))}
+                onChange={(e) => changeStatus(e.target.value as BulkStatus)}
+              >
+                <option value="">Cambiar el estado…</option>
+                {BULK_STATUS.map((a) => {
+                  const n = chosen.filter((r) => canChange(r, a)).length;
+                  return (
+                    <option key={a} value={a} disabled={n === 0}>
+                      {STATUS_ACTIONS[a].label} ({n})
+                    </option>
+                  );
+                })}
+              </select>
               <Button size="sm" variant="ghost" onClick={() => toggleAll(false)} disabled={busy}>
                 <X className="h-4 w-4" />
                 Quitar selección
@@ -237,6 +304,30 @@ export function CatalogTable({ accountSlug, rows }: { accountSlug: string; rows:
             <span className="tabular-nums text-muted-foreground" aria-live="polite">
               Subiendo {push.progress.done} de {push.progress.total}
             </span>
+          ) : null}
+          {status.progress ? (
+            <span className="tabular-nums text-muted-foreground" aria-live="polite">
+              {STATUS_ACTIONS[status.progress.action].label} {status.progress.done} de {status.progress.total}
+            </span>
+          ) : null}
+          {status.outcomes ? (
+            <div className="basis-full space-y-1" role="status">
+              <p>
+                {statusDone > 0
+                  ? `Listo, ${plural(statusDone, 'publicación', 'publicaciones')} ${statusDone === 1 ? 'quedó' : 'quedaron'} ${STATUS_ACTIONS[status.outcomes.action].done}${statusDone === 1 ? '' : 's'} en ${channelName}.`
+                  : 'No cambió ninguna.'}
+                {statusFailed.length > 0 ? ` ${plural(statusFailed.length, 'no se pudo', 'no se pudieron')}:` : ''}
+              </p>
+              {statusFailed.length > 0 ? (
+                <ul className="list-disc space-y-0.5 pl-5 text-destructive">
+                  {statusFailed.slice(0, 10).map((o, i) => (
+                    <li key={i}>
+                      <span className="font-medium">{o.title}:</span> {o.text}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
           ) : null}
           {add.message ? (
             <p className={cn('basis-full', add.message.kind === 'error' ? 'text-destructive' : 'text-foreground')} role="status">

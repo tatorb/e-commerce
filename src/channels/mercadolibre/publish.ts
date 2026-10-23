@@ -1,14 +1,14 @@
 import { MercadoLibreRequestError, mlGet, mlSend } from './http';
 import { variationsOf } from './listings';
-import { measureText, variantKey, type ChannelVariation } from '@/domain/media';
+import { measureText, variantKey, type ChannelVariation, type VariantLike } from '@/domain/media';
 import {
   PublishError,
   type ChannelAttributeUpdate,
   type ChannelCreated,
   type ChannelNewListing,
   type ChannelPicture,
-  type ChannelPictureLayout,
   type ChannelPublisher,
+  type ChannelStatusChange,
 } from '../publish-types';
 
 // Subir a Mercado Libre el título y la descripción de una publicación propia.
@@ -76,15 +76,46 @@ const sameMeasure = (a: string | null, b: string | null) => measureText(a) !== n
  * La medida de la ficha de una variante: la que tiene el mismo SKU y la misma
  * medida; si no, la única con ese SKU, o la única con esa medida.
  */
-function variantOf(layout: ChannelPictureLayout, v: { sku: string | null; measure: string | null }) {
+function variantOf<T extends VariantLike>(list: T[], v: VariantLike): T | undefined {
   const key = variantKey(v);
-  const exact = key ? layout.variants.find((x) => variantKey(x) === key) : undefined;
+  const exact = key ? list.find((x) => variantKey(x) === key) : undefined;
   if (exact) return exact;
-  const bySku = layout.variants.filter((x) => sameSku(x.sku, v.sku));
+  const bySku = list.filter((x) => sameSku(x.sku, v.sku));
   if (bySku.length === 1) return bySku[0];
-  const byMeasure = (bySku.length > 1 ? bySku : layout.variants).filter((x) => sameMeasure(x.measure, v.measure));
+  const byMeasure = (bySku.length > 1 ? bySku : list).filter((x) => sameMeasure(x.measure, v.measure));
   return byMeasure.length === 1 ? byMeasure[0] : undefined;
 }
+
+// Los motivos más comunes al cambiar el estado, antes que los generales.
+const STATUS_KNOWN: [RegExp, string][] = [
+  [/quantity|stock/i, 'No tiene stock en Mercado Libre: cargale stock para reactivarla.'],
+  [/under_review|moderat/i, 'La publicación está en revisión en Mercado Libre: no se puede cambiar por ahora.'],
+  [/deleted|delete/i, 'Mercado Libre solo deja eliminar publicaciones finalizadas.'],
+  [/relist/i, 'Mercado Libre no deja republicar esta publicación.'],
+];
+
+/** Lo mismo que send, con los motivos de los cambios de estado. */
+async function sendStatus(method: 'PUT' | 'POST', path: string, token: string, body: unknown): Promise<unknown> {
+  try {
+    return await mlSend(method, path, token, body);
+  } catch (e) {
+    if (e instanceof MercadoLibreRequestError && e.status !== 401 && e.status !== 429 && e.status !== 403 && e.status !== 404) {
+      const causes = isObj(e.body) && Array.isArray(e.body.cause) ? e.body.cause.filter(isObj) : [];
+      const text = [...causes.map((c) => `${c.code ?? ''} ${c.message ?? ''}`), isObj(e.body) ? `${e.body.error ?? ''} ${e.body.message ?? ''}` : ''].join(' ');
+      const known = STATUS_KNOWN.find(([pattern]) => pattern.test(text));
+      if (known) throw new PublishError(known[1]);
+    }
+    throw translated(e);
+  }
+}
+
+const STATUS_BODY: Record<ChannelStatusChange, Obj> = {
+  pause: { status: 'paused' },
+  activate: { status: 'active' },
+  close: { status: 'closed' },
+  // Solo las finalizadas: después no se pueden recuperar.
+  delete: { deleted: 'true' },
+};
 
 /** Las fotos como las pide Mercado Libre: los archivos se suben antes y quedan por su código. */
 async function picturesBody(token: string, pictures: ChannelPicture[]): Promise<({ id: string } | { source: string })[]> {
@@ -309,7 +340,7 @@ export const mercadolibrePublisher: ChannelPublisher = {
       ...(variations.length > 0
         ? {
             variations: variations.map((v) => {
-              const own = (variantOf(layout, v)?.pictures ?? layout.general).filter((i) => i >= 0 && i < body.length);
+              const own = (variantOf(layout.variants, v)?.pictures ?? layout.general).filter((i) => i >= 0 && i < body.length);
               // Cada variante necesita al menos una foto.
               return { id: v.id, picture_ids: (own.length > 0 ? own : everything).map((i) => ref(body[i])) };
             }),
@@ -327,6 +358,27 @@ export const mercadolibrePublisher: ChannelPublisher = {
       out.push(keeper.learn(l.pictures, pictureIdsOf(res)));
     }
     return out;
+  },
+
+  async setStatus(accessToken, externalId, change) {
+    await sendStatus('PUT', `/items/${encodeURIComponent(externalId)}`, accessToken, STATUS_BODY[change]);
+  },
+
+  async relist(accessToken, externalId, r) {
+    const id = encodeURIComponent(externalId);
+    // Con variantes, la cantidad va en cada una, todas al mismo precio.
+    const item = await get(`/items/${id}?attributes=variations`, accessToken);
+    const variations = isObj(item) ? variationsOf(item) : [];
+    const res = await sendStatus('POST', `/items/${id}/relist`, accessToken, {
+      price: r.price,
+      listing_type_id: LISTING_TYPE_ID[r.listingType] ?? 'gold_special',
+      ...(variations.length > 0
+        ? { variations: variations.map((v) => ({ id: v.id, price: r.price, quantity: variantOf(r.variants, v)?.quantity ?? r.quantity })) }
+        : { quantity: r.quantity }),
+    });
+    const newId = isObj(res) && typeof res.id === 'string' ? res.id : null;
+    if (!newId) throw new PublishError('Mercado Libre no devolvió el código de la publicación republicada.');
+    return { externalId: newId, url: isObj(res) && typeof res.permalink === 'string' ? res.permalink : null };
   },
 
   async updateAttributes(accessToken, externalId, attributes) {

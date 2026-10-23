@@ -34,6 +34,7 @@ import { checkTitle } from '@/domain/titles';
 import { readOne } from '@/lib/channel-sync';
 import { photoOriginsOf, picturesFor } from '@/lib/media';
 import { withAccessToken } from '@/lib/connections';
+import { listingTargets } from '@/lib/variant-listings';
 import { loadTitleRules } from '@/lib/title-rules';
 
 // Subir al canal el borrador de una publicación: lo que cambió en la app y
@@ -98,15 +99,9 @@ function titleLocked(p: Loaded): boolean {
   return resolveTitleLock(adapter.titleLock(latestMetrics(p.measurements)), p.titleLockedManual, Boolean(p.externalId)).locked === true;
 }
 
-/** Las publicaciones del canal a las que va cada cambio: la de cada medida si el canal las guarda aparte, o la única. */
-function targets(p: Loaded): string[] {
-  const family = parseVariantListings(p.variantListings);
-  return family.length >= 2 ? family.map((v) => v.externalId) : [p.externalId!];
-}
-
 /** Hace lo mismo en cada publicación del canal, en orden. Si una no lo acepta, se corta ahí. */
 async function eachTarget(p: Loaded, run: (externalId: string) => Promise<void>): Promise<void> {
-  for (const id of targets(p)) await run(id);
+  for (const id of listingTargets(p)) await run(id);
 }
 
 const names = (list: string[]) => (list.length <= 1 ? list.join('') : `${list.slice(0, -1).join(', ')} y ${list[list.length - 1]}`);

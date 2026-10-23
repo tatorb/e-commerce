@@ -15,6 +15,8 @@ export {
   type ChannelPicture,
   type ChannelPictureLayout,
   type ChannelPublisher,
+  type ChannelRelist,
+  type ChannelStatusChange,
   type PublishField,
 } from './publish-types';
 

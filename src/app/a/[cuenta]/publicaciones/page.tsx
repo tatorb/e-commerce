@@ -292,7 +292,7 @@ export default async function PublicationsPage({
             </div>
           </Card>
         ) : (
-          <CatalogTable accountSlug={account.slug} rows={rows} />
+          <CatalogTable accountSlug={account.slug} rows={rows} channelName={channelNames.join(' y ') || 'el canal'} />
         )}
       </PageBody>
     </>

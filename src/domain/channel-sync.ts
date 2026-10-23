@@ -28,6 +28,9 @@ export const SYNC_CHANGE_LABEL = {
   CREATE_FAILED: 'no se pudo crear en el canal',
   ANSWERED: 'se respondió desde la app',
   ANSWER_FAILED: 'no se pudo responder',
+  STATUS_CHANGED: 'se cambió el estado',
+  STATUS_FAILED: 'no se pudo cambiar el estado',
+  RELISTED: 'se republicó',
 } as const;
 
 export function isFaceField(value: string): value is FaceField {

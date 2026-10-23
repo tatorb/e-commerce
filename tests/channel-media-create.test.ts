@@ -18,6 +18,7 @@ import {
   type PhotoRef,
 } from '@/domain/media';
 import { createChecks, CreateError, createInChannel, warrantyText } from '@/lib/channel-create';
+import { changeStatus, relistInChannel, relistInfo } from '@/lib/channel-status';
 import { pushDrafts } from '@/lib/channel-push';
 import { runSyncStep, startSync } from '@/lib/channel-sync';
 import { encrypt } from '@/lib/crypto';
@@ -156,6 +157,9 @@ type Item = {
   category_id: string;
   attributes: object[];
   variations?: Variation[];
+  status?: 'active' | 'paused' | 'closed';
+  deleted?: boolean;
+  quantity?: number;
 };
 
 describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
@@ -234,6 +238,29 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
         const it = items[item[1]];
         return it ? json(200, { id: item[1], variations: it.variations ?? [] }) : json(404, {});
       }
+      // Como Mercado Libre: pausar, reactivar, finalizar y eliminar, y republicar una finalizada.
+      if (item && req.method === 'PUT' && (body.status || body.deleted)) {
+        const it = items[item[1]];
+        if (!it) return json(404, {});
+        if (body.deleted) {
+          if (it.status !== 'closed') return json(400, { message: 'Validation error', cause: [{ code: 'item.deleted.invalid', message: 'Only closed items can be deleted' }] });
+          it.deleted = true;
+        } else {
+          if (body.status === 'active' && it.quantity === 0) {
+            return json(400, { message: 'Validation error', cause: [{ code: 'item.available_quantity.invalid', message: 'Item without stock cannot be activated' }] });
+          }
+          it.status = body.status;
+        }
+        return json(200, { id: item[1] });
+      }
+      const relist = u.pathname.match(/^\/items\/(\w+)\/relist$/);
+      if (relist && req.method === 'POST') {
+        const it = items[relist[1]];
+        if (!it || it.status !== 'closed') return json(400, { message: 'Validation error', cause: [{ code: 'item.relist.invalid', message: 'Only closed items can be relisted' }] });
+        const id = `MLA${900 + created++}`;
+        items[id] = { ...it, price: body.price, status: 'active', deleted: false, quantity: body.quantity };
+        return json(201, { id, permalink: `https://articulo.mercadolibre.com.ar/${id.replace('MLA', 'MLA-')}` });
+      }
       if (item && req.method === 'PUT' && body.pictures) {
         const it = items[item[1]];
         const sent = body.pictures.map((p: { id?: string; source?: string }) => p.id ?? p.source);
@@ -269,7 +296,8 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
                 id,
                 seller_id: 7,
                 title: it.title,
-                status: 'active',
+                status: it.status ?? 'active',
+                sub_status: it.deleted ? ['deleted'] : [],
                 price: it.price,
                 sold_quantity: it.sold,
                 category_id: it.category_id,
@@ -925,6 +953,83 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     ]);
   });
 
+
+  describe('el estado en el canal', () => {
+    const logged = async (publicationId: string) =>
+      (await db.channelSyncChange.findMany({ where: { publicationId, field: { in: ['status', 'publication'] } }, orderBy: { id: 'asc' } })).map((c) => [
+        c.kind,
+        c.before,
+        c.after,
+        c.message,
+      ]);
+
+    it('pausa, reactiva y finaliza; lo que no se puede vuelve con el motivo', async () => {
+      const pub = await db.publication.create({ data: { productId, storeId, externalId: 'MLA1', title: 'Kit Embrague Ford Ka' } });
+      await readAll();
+      let r = await changeStatus(db, { accountId, publicationIds: [pub.id], action: 'pause', userId: null });
+      expect(r).toEqual({ done: [{ id: pub.id, title: 'Kit Embrague Ford Ka' }], failed: [] });
+      expect(calls.filter((c) => c.method === 'PUT').map((c) => [c.path, c.body])).toEqual([['/items/MLA1', { status: 'paused' }]]);
+      expect((await db.publication.findUniqueOrThrow({ where: { id: pub.id } })).channelStatus).toBe('PAUSED');
+
+      // Lo que no corresponde al estado no se manda.
+      r = await changeStatus(db, { accountId, publicationIds: [pub.id], action: 'pause', userId: null });
+      expect(r.failed).toEqual([{ id: pub.id, title: 'Kit Embrague Ford Ka', message: 'Está pausada, no se puede pausar.' }]);
+      expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(1);
+
+      // Sin stock, Mercado Libre no la reactiva.
+      items.MLA1.quantity = 0;
+      r = await changeStatus(db, { accountId, publicationIds: [pub.id], action: 'activate', userId: null });
+      expect(r.failed[0].message).toBe('No tiene stock en Mercado Libre: cargale stock para reactivarla.');
+      items.MLA1.quantity = 3;
+      await changeStatus(db, { accountId, publicationIds: [pub.id], action: 'activate', userId: null });
+      await changeStatus(db, { accountId, publicationIds: [pub.id], action: 'close', userId: null });
+      expect((await db.publication.findUniqueOrThrow({ where: { id: pub.id } })).channelStatus).toBe('CLOSED');
+      expect(await logged(pub.id)).toEqual([
+        ['STATUS_CHANGED', 'ACTIVE', 'PAUSED', null],
+        ['STATUS_FAILED', 'PAUSED', 'ACTIVE', 'No tiene stock en Mercado Libre: cargale stock para reactivarla.'],
+        ['STATUS_CHANGED', 'PAUSED', 'ACTIVE', null],
+        ['STATUS_CHANGED', 'ACTIVE', 'CLOSED', null],
+      ]);
+      // La lectura trae el mismo estado.
+      await readAll();
+      expect((await db.publication.findUniqueOrThrow({ where: { id: pub.id } })).channelStatus).toBe('CLOSED');
+    });
+
+    it('solo se elimina una finalizada; queda archivada y ya no se lee', async () => {
+      const pub = await db.publication.create({ data: { productId, storeId, externalId: 'MLA1', title: 'Kit Embrague Ford Ka' } });
+      await readAll();
+      let r = await changeStatus(db, { accountId, publicationIds: [pub.id], action: 'delete', userId: null });
+      expect(r.failed[0].message).toBe('Está activa, no se puede eliminar.');
+      await changeStatus(db, { accountId, publicationIds: [pub.id], action: 'close', userId: null });
+      r = await changeStatus(db, { accountId, publicationIds: [pub.id], action: 'delete', userId: null });
+      expect(r.done).toHaveLength(1);
+      expect(calls.filter((c) => c.method === 'PUT').map((c) => c.body)).toEqual([{ status: 'closed' }, { deleted: 'true' }]);
+      expect((await db.publication.findUniqueOrThrow({ where: { id: pub.id } })).channelStatus).toBe('DELETED');
+      const run = await startSync(db, { storeId, trigger: 'MANUAL' });
+      expect((await db.channelSync.findUniqueOrThrow({ where: { id: run!.id } })).ids).toEqual([]);
+    });
+
+    it('republicar deja la misma publicación con el código nuevo', async () => {
+      const pub = await db.publication.create({ data: { productId, storeId, externalId: 'MLA1', title: 'Kit Embrague Ford Ka' } });
+      await readAll();
+      await changeStatus(db, { accountId, publicationIds: [pub.id], action: 'close', userId: null });
+      const info = await relistInfo(db, { accountId, publicationId: pub.id });
+      expect(info).toMatchObject({ blocked: null, measures: [], price: 100 });
+      const r = await relistInChannel(db, { accountId, publicationId: pub.id, price: 120, quantity: 2, listingType: 'clasica', userId: null });
+      expect(r).toEqual({ externalId: 'MLA900', warnings: [] });
+      expect(calls.find((c) => c.path === '/items/MLA1/relist')!.body).toEqual({ price: 120, listing_type_id: 'gold_special', quantity: 2 });
+      const after = await db.publication.findUniqueOrThrow({ where: { id: pub.id }, include: { channelCopy: true } });
+      expect(after).toMatchObject({ externalId: 'MLA900', channelStatus: 'ACTIVE' });
+      expect(Number(after.price)).toBe(120);
+      expect(after.channelCopy!.missingSince).toBeNull();
+      expect((await logged(pub.id)).at(-1)).toEqual(['RELISTED', { externalId: 'MLA1' }, { externalId: 'MLA900' }, null]);
+      // Una activa no se republica.
+      await expect(relistInChannel(db, { accountId, publicationId: pub.id, price: 120, quantity: 2, listingType: 'clasica', userId: null })).rejects.toThrow(
+        'Está activa, no se puede republicar.',
+      );
+    });
+  });
+
   describe('en una cuenta donde cada medida es una publicación aparte', () => {
     const std = 'sku:SP-413 medida:std';
     const half = 'sku:SP-413 medida:0.50';
@@ -1026,6 +1131,31 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
         ['/items/MLA901', [{ id: 'SUBIDA-1' }, { id: 'LINK-1' }]],
       ]);
       expect(await state(pub.id)).toEqual({ draft: [], choose: [], rejected: [] });
+    });
+
+    it('el estado cambia en cada medida, y republicar republica cada una', async () => {
+      const { pub } = await createFamily();
+      calls.length = 0;
+      await changeStatus(db, { accountId, publicationIds: [pub.id], action: 'close', userId: null });
+      expect(calls.filter((c) => c.method === 'PUT').map((c) => [c.path, c.body])).toEqual([
+        ['/items/MLA900', { status: 'closed' }],
+        ['/items/MLA901', { status: 'closed' }],
+      ]);
+      const info = await relistInfo(db, { accountId, publicationId: pub.id });
+      expect(info.measures).toEqual([
+        { key: std, label: 'STD' },
+        { key: half, label: '0,50' },
+      ]);
+      const r = await relistInChannel(db, { accountId, publicationId: pub.id, price: 90000, quantities: { [std]: 1, [half]: 4 }, listingType: 'clasica', userId: null });
+      expect(r.externalId).toBe('MLA902');
+      expect(calls.filter((c) => c.path.endsWith('/relist')).map((c) => [c.path, c.body])).toEqual([
+        ['/items/MLA900/relist', { price: 90000, listing_type_id: 'gold_special', quantity: 1 }],
+        ['/items/MLA901/relist', { price: 90000, listing_type_id: 'gold_special', quantity: 4 }],
+      ]);
+      expect((await db.publication.findUniqueOrThrow({ where: { id: pub.id } })).variantListings).toEqual([
+        { externalId: 'MLA902', sku: 'SP-413', measure: 'STD' },
+        { externalId: 'MLA903', sku: 'SP-413', measure: '0,50' },
+      ]);
     });
 
     it('una sola medida se crea con nombre de familia y sin título', async () => {

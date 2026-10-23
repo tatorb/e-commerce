@@ -15,6 +15,8 @@ import { prisma } from '@/lib/db';
 import { loadMediaSources } from '@/lib/media';
 import { createChecks } from '@/lib/channel-create';
 import { CreateInChannelCard } from '@/components/publication/CreateInChannelCard';
+import { ChannelStatusCard } from '@/components/publication/ChannelStatusCard';
+import { relistInfo } from '@/lib/channel-status';
 import { FACE_FIELDS, FACE_FIELD_LABEL, SYNC_CHANGE_LABEL, type FaceField, type FaceValues } from '@/domain/channel-sync';
 import { titleOrUntitled } from '@/domain/publication-title';
 import { fieldLabel } from '@/domain/sync-log';
@@ -65,6 +67,8 @@ export default async function PublicationPage({
   const [data, media] = await Promise.all([loadPublicationFaces(account.id, id), loadMediaSources(prisma, account.id, id).catch(() => null)]);
   // Sin publicar: lo que hace falta para crearla en el canal.
   const create = data && !data.publication.externalId ? await createChecks(prisma, { accountId: account.id, publicationId: id }) : null;
+  // Finalizada: lo que hace falta para republicarla.
+  const relist = data?.publication.channelStatus === 'CLOSED' ? await relistInfo(prisma, { accountId: account.id, publicationId: id }) : null;
   if (!data) notFound();
 
   const { publication: p, channelName, app, channel, states, summary, copy } = data;
@@ -131,6 +135,10 @@ export default async function PublicationPage({
       </PageHeader>
 
       <PageBody className="max-w-5xl">
+        {p.externalId ? (
+          <ChannelStatusCard accountSlug={account.slug} publicationId={p.id} status={p.channelStatus} channelName={channelName} relist={relist} />
+        ) : null}
+
         {/* Las dos caras de la publicación. */}
         <div className="inline-flex w-full rounded-lg border bg-muted/50 p-1 sm:w-auto" role="tablist" aria-label="Cara de la publicación">
           {(

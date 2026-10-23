@@ -90,7 +90,7 @@ describe('de Mercado Libre al formato neutro', () => {
     ]);
   });
 
-  it('las variantes dan el SKU y la medida, y un estado que no es activa ni pausada es finalizada', () => {
+  it('las variantes dan el SKU y la medida, y cada estado como lo maneja Mercado Libre', () => {
     const l = parseItem(ITEMS.MLA2 as Record<string, unknown>);
     expect(l.status).toBe('PAUSED');
     expect(l.hasVideo).toBe(true);
@@ -106,8 +106,9 @@ describe('de Mercado Libre al formato neutro', () => {
       { sku: 'AROS-050', measure: '0.50', photoIds: ['F2', 'F3'] },
       { sku: null, measure: null, photoIds: [] },
     ]);
-    expect(parseItem({ id: 'MLA9', status: 'closed' }).status).toBe('INACTIVE');
-    expect(parseItem({ id: 'MLA9', status: 'under_review' }).status).toBe('INACTIVE');
+    expect(parseItem({ id: 'MLA9', status: 'closed' }).status).toBe('CLOSED');
+    expect(parseItem({ id: 'MLA9', status: 'under_review' }).status).toBe('UNDER_REVIEW');
+    expect(parseItem({ id: 'MLA9', status: 'inactive' }).status).toBe('INACTIVE');
   });
 });
 

@@ -203,7 +203,8 @@ export function filterPublications<T extends Filterable>(all: T[], f: CatalogFil
   const familySet = new Set(families.map((x) => x.toLowerCase()));
   return all
     .filter((p) => !band || scoreBand(p.score) === BAND_KEY[band])
-    .filter((p) => statuses.length === 0 || statuses.includes(p.channelStatus))
+    // Las eliminadas quedan archivadas: solo se ven si se filtra por ese estado.
+    .filter((p) => (statuses.length === 0 ? p.channelStatus !== 'DELETED' : statuses.includes(p.channelStatus)))
     .filter((p) => pipeline.length === 0 || pipeline.includes(p.pipelineStatus))
     .filter((p) => familySet.size === 0 || familySet.has((p.family ?? '').toLowerCase()))
     .filter((p) => kinds.length === 0 || kinds.includes(p.kind))
