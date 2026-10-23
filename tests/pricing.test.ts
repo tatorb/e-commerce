@@ -47,7 +47,8 @@ describe('precio', () => {
     const parts = breakdown(250_000, COST, P, 6);
     const total = BREAKDOWN_PARTS.reduce((sum, k) => sum + parts[k], 0);
     expect(total).toBeCloseTo(250_000, 6);
-    expect(parts.installments).toBeCloseTo(22_500, 6);
+    // 6 cuotas al mismo precio: 12,9 %.
+    expect(parts.installments).toBeCloseTo(32_250, 6);
     expect(parts.shippingPackaging).toBe(10_890);
   });
 
@@ -84,8 +85,8 @@ describe('precio', () => {
   });
 
   it('los planes de cuotas que se pueden usar', () => {
-    expect(availablePlans(P)).toEqual([0, 3, 6]);
-    expect(availablePlans({ ...P, installments12Pct: 15 })).toEqual([0, 3, 6, 12]);
+    expect(availablePlans(P)).toEqual([0, 3, 6, 9, 12]);
+    expect(availablePlans({ ...P, installments9Pct: null, installments12Pct: null })).toEqual([0, 3, 6]);
   });
 
   it('cuenta, producto y valores de partida', () => {

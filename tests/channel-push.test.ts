@@ -419,18 +419,18 @@ describe.skipIf(!url)('subir al canal en la base', () => {
 
   it('el precio decidido queda para subir y se sube; con medidas, en cada una', async () => {
     const p = await pub('MLA1');
-    const saved = await decide(p.id, 250_000, { discountPct: 10, plan: 3 });
-    expect(saved.simulation.finalPrice).toBe(225_000);
-    expect(Number((await pub('MLA1')).price)).toBe(250_000);
+    const saved = await decide(p.id, 260_000, { discountPct: 10, plan: 3 });
+    expect(saved.simulation.finalPrice).toBe(234_000);
+    expect(Number((await pub('MLA1')).price)).toBe(260_000);
     expect((await state('MLA1')).draft).toEqual(['price']);
     expect(await db.priceDecision.findFirst({ where: { publicationId: p.id } })).toMatchObject({ installments: 3, belowMinConfirmed: false });
     expect(Number((await db.product.findUniqueOrThrow({ where: { id: productId } })).replacementCost)).toBe(100_000);
 
     const result = await pushDrafts(db, { accountId, publicationId: p.id, userId: null });
     expect(result).toEqual({ sent: ['price'], rejected: [], confirmed: true });
-    expect(writes.map((w) => w.body)).toEqual([{ price: 250_000 }]);
+    expect(writes.map((w) => w.body)).toEqual([{ price: 260_000 }]);
     expect(await state('MLA1')).toEqual({ draft: [], choose: [], rejected: [] });
-    expect(await db.channelSyncChange.findFirst({ where: { publicationId: p.id, kind: 'SENT' } })).toMatchObject({ field: 'price', after: '250000' });
+    expect(await db.channelSyncChange.findFirst({ where: { publicationId: p.id, kind: 'SENT' } })).toMatchObject({ field: 'price', after: '260000' });
 
     // Con medidas, Mercado Libre pide el precio en cada una.
     items.MLA2.variations = [
@@ -452,7 +452,7 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     await expect(advance()).rejects.toThrow('Guardá el precio');
 
     await expect(decide(p.id, 150_000)).rejects.toThrow(/debajo del mínimo/);
-    await expect(decide(p.id, 150_000, { plan: 9 })).rejects.toThrow(/costo de 9 cuotas/);
+    await expect(decide(p.id, 150_000, { plan: 9, overrides: { installments9Pct: null } })).rejects.toThrow(/costo de 9 cuotas/);
     await decide(p.id, 150_000, { confirmBelowMin: true });
     expect(await db.priceDecision.findFirst({ where: { publicationId: p.id } })).toMatchObject({ belowMinConfirmed: true });
     expect(await advance()).toEqual({ step: 'PUBLISH' });

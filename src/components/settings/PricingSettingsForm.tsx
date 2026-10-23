@@ -9,8 +9,8 @@ import { AMOUNT_KEYS, PRICING_DEFAULTS, PRICING_LABEL, pricingText, type Pricing
 import { savePricingSettingsAction } from '@/app/a/[cuenta]/pipeline/price-actions';
 
 // Los parámetros del precio de la cuenta. Cada casillero vacío toma el valor
-// de partida, que se ve de fondo. Los costos de 9 y 12 cuotas arrancan sin
-// cargar: hasta que se carguen, esos planes no se pueden elegir.
+// de partida, que se ve de fondo. Un plan de cuotas escrito como "sin cargar"
+// no se puede elegir.
 
 const GROUPS: { title: string; keys: PricingKey[] }[] = [
   { title: 'Cargos e impuestos', keys: ['channelFeePct', 'taxesPct', 'vatRatePct'] },

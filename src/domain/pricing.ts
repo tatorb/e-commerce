@@ -36,14 +36,15 @@ export type PricingParams = {
 
 export type PricingKey = keyof PricingParams;
 
+// Las cuotas, como las cobra Mercado Libre por ofrecerlas al mismo precio publicado.
 export const PRICING_DEFAULTS: PricingParams = {
   channelFeePct: 14.3,
   taxesPct: 4.9,
   vatRatePct: 21,
-  installments3Pct: 5,
-  installments6Pct: 9,
-  installments9Pct: null,
-  installments12Pct: null,
+  installments3Pct: 8.5,
+  installments6Pct: 12.9,
+  installments9Pct: 17.3,
+  installments12Pct: 20.8,
   adsPct: 0,
   returnsPct: 0,
   shipping: 10_890,

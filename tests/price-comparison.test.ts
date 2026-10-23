@@ -45,8 +45,8 @@ describe('comparación con la competencia', () => {
 
   it('copiar sus cuotas solo si ese plan tiene el costo cargado', () => {
     const c = compare({ mine: { listPrice: 260_000, discountPct: 0, plan: 0 }, competitors: [competitor('Doce', 200_000, 0, 12, true)], cost: COST, params: P });
-    expect(copyablePlan(c.cheapest, P)).toEqual({ plan: 12, available: false });
-    expect(copyablePlan(c.cheapest, { ...P, installments12Pct: 15 })).toEqual({ plan: 12, available: true });
+    expect(copyablePlan(c.cheapest, P)).toEqual({ plan: 12, available: true });
+    expect(copyablePlan(c.cheapest, { ...P, installments12Pct: null })).toEqual({ plan: 12, available: false });
     expect(copyablePlan(null, P)).toBeNull();
   });
 });
