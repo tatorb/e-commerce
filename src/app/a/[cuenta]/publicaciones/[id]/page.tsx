@@ -1,9 +1,16 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ExternalLink, KanbanSquare, Package } from 'lucide-react';
+import { ArrowRight, ExternalLink, KanbanSquare, Package } from 'lucide-react';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Breadcrumb } from '@/components/navigation/Breadcrumb';
+import { EntityLabel } from '@/components/navigation/EntityLabel';
+import { PublicationHistoryPanel } from '@/components/publication/PublicationHistoryPanel';
+import { channelInfo } from '@/channels';
+import { codeOrUnpublished } from '@/domain/channel-status';
+import { isAiConfigured } from '@/ai/claude';
+import { getProduct } from '@/lib/queries/products';
+import { loadRulesByChannel } from '@/lib/queries/scoring';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { SectionBody, SectionCard } from '@/components/ui/section-card';
@@ -26,8 +33,9 @@ import { cn } from '@/lib/utils/cn';
 import { loadPublicationFaces, type PublicationFaces } from '@/lib/queries/publication-faces';
 
 export const dynamic = 'force-dynamic';
-// Subir al canal hace varios pedidos y vuelve a leer la publicación.
-export const maxDuration = 60;
+// Subir al canal hace varios pedidos y vuelve a leer la publicación, y generar
+// una propuesta con IA puede tardar más de un minuto.
+export const maxDuration = 300;
 
 export async function generateMetadata({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
@@ -75,8 +83,25 @@ export default async function PublicationPage({
   const tz = account.timezone;
   const base = `/a/${account.slug}/publicaciones/${p.id}`;
   const pending = summary.draft.length + summary.choose.length;
-  const face = cara === 'canal' || cara === 'borrador' ? cara : pending > 0 || !p.externalId ? 'borrador' : 'canal';
+  const face = cara === 'canal' || cara === 'borrador' || cara === 'historial' ? cara : pending > 0 || !p.externalId ? 'borrador' : 'canal';
   const title = titleOrUntitled(p.title);
+  const channelOf = channelInfo(p.store.channel.kind, p.store.channel.name);
+  const productHref = `/a/${account.slug}/productos/${p.product.id}`;
+  // Las otras publicaciones del mismo producto, para pasar de una a otra.
+  const [others, history] = await Promise.all([
+    prisma.publication.findMany({
+      where: { productId: p.product.id, id: { not: p.id } },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, title: true, externalId: true, store: { select: { name: true } } },
+    }),
+    // El puntaje y el historial: solo en su pestaña.
+    face === 'historial'
+      ? Promise.all([getProduct(account.id, p.product.id), loadRulesByChannel(account.id)]).then(([product, rules]) => {
+          const pub = product?.publications.find((x) => x.id === p.id);
+          return product && pub ? { product, pub, rules: rules.get(pub.store.channelId) ?? [] } : null;
+        })
+      : Promise.resolve(null),
+  ]);
   const pushable = summary.draft.filter((f) => data.publishable.includes(f));
 
   return (
@@ -86,15 +111,17 @@ export default async function PublicationPage({
           <Breadcrumb
             items={[
               { label: account.name, href: `/a/${account.slug}/pipeline` },
-              { label: 'Catálogo', href: `/a/${account.slug}/publicaciones` },
+              { label: 'Productos', href: `/a/${account.slug}/productos` },
+              { label: p.product.name, href: productHref },
               { label: title },
             ]}
           />
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0 space-y-1.5">
-              <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+              <EntityLabel kind="publication" channelName={channelName} accent={channelOf.accent} />
+              <h1 className="text-xl font-semibold tracking-tight md:text-2xl">{title}</h1>
               <p className="text-sm text-muted-foreground">
-                {p.externalId ?? 'Sin publicar'} · {p.store.name} · {p.product.name}
+                {p.store.name} · {codeOrUnpublished(p.externalId)}
               </p>
               <div className="flex flex-wrap gap-1.5">
                 <ChannelStatusBadge status={p.channelStatus} />
@@ -114,12 +141,6 @@ export default async function PublicationPage({
                   </a>
                 </Button>
               ) : null}
-              <Button size="sm" variant="outline" asChild>
-                <Link href={`/a/${account.slug}/productos/${p.product.id}`}>
-                  <Package />
-                  Ficha del producto
-                </Link>
-              </Button>
               {p.pipelineStatus === 'IN_PIPELINE' ? (
                 <Button size="sm" variant="outline" asChild>
                   <Link href={`/a/${account.slug}/pipeline/${p.id}`}>
@@ -132,6 +153,36 @@ export default async function PublicationPage({
             </div>
           </div>
         </div>
+        {/* De qué producto es, y sus otras publicaciones. */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+          <Link href={productHref} className="inline-flex min-w-0 items-center gap-1.5 hover:underline">
+            <Package className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+            <span className="text-muted-foreground">Producto</span>
+            <span className="truncate font-medium">{p.product.name}</span>
+            <ArrowRight className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          </Link>
+          {others.length > 0 ? (
+            <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="text-muted-foreground">{others.length === 1 ? 'Otra publicación:' : 'Otras publicaciones:'}</span>
+              {others.slice(0, 3).map((o) => (
+                <Link
+                  key={o.id}
+                  href={`/a/${account.slug}/publicaciones/${o.id}`}
+                  title={`${titleOrUntitled(o.title)} · ${o.store.name}`}
+                  className="inline-flex min-w-0 max-w-full items-center gap-1 underline-offset-4 hover:underline"
+                >
+                  <span className="truncate sm:max-w-[16rem]">{titleOrUntitled(o.title)}</span>
+                  <span className="shrink-0 text-muted-foreground">· {codeOrUnpublished(o.externalId)}</span>
+                </Link>
+              ))}
+              {others.length > 3 ? (
+                <Link href={`${productHref}?seccion=publicaciones`} className="text-muted-foreground underline-offset-4 hover:underline">
+                  y {others.length - 3} más
+                </Link>
+              ) : null}
+            </span>
+          ) : null}
+        </div>
       </PageHeader>
 
       <PageBody className="max-w-5xl">
@@ -139,12 +190,13 @@ export default async function PublicationPage({
           <ChannelStatusCard accountSlug={account.slug} publicationId={p.id} status={p.channelStatus} channelName={channelName} relist={relist} />
         ) : null}
 
-        {/* Las dos caras de la publicación. */}
+        {/* Las dos caras de la publicación, y su puntaje e historial. */}
         <div className="inline-flex w-full rounded-lg border bg-muted/50 p-1 sm:w-auto" role="tablist" aria-label="Cara de la publicación">
           {(
             [
               ['canal', channelName, null],
               ['borrador', 'Borrador', pending],
+              ['historial', 'Puntaje e historial', null],
             ] as const
           ).map(([key, label, count]) => (
             <Link
@@ -153,7 +205,7 @@ export default async function PublicationPage({
               role="tab"
               aria-selected={face === key}
               className={cn(
-                'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-1.5 text-sm font-medium transition-colors sm:flex-none',
+                'flex flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors sm:flex-none sm:px-4',
                 face === key ? 'bg-card shadow-sm' : 'text-muted-foreground hover:text-foreground',
               )}
             >
@@ -163,7 +215,19 @@ export default async function PublicationPage({
           ))}
         </div>
 
-        {face === 'borrador' ? (
+        {face === 'historial' ? (
+          history ? (
+            <PublicationHistoryPanel
+              accountSlug={account.slug}
+              timeZone={tz}
+              product={history.product}
+              pub={history.pub}
+              rules={history.rules}
+              aiReady={isAiConfigured()}
+              connected={p.store.connection?.status === 'ACTIVE'}
+            />
+          ) : null
+        ) : face === 'borrador' ? (
           <>
             {create ? <CreateInChannelCard accountSlug={account.slug} publicationId={p.id} info={create} /> : null}
             {p.externalId ? (
@@ -290,6 +354,8 @@ export default async function PublicationPage({
           </>
         )}
 
+        {face !== 'historial' ? (
+          <>
         <SectionCard
           title="Preguntas de los compradores"
           count={p._count.buyerQuestions}
@@ -322,6 +388,11 @@ export default async function PublicationPage({
           )}
         </SectionCard>
 
+          </>
+        ) : null}
+
+        {face === 'historial' ? (
+          <>
         <SectionCard
           title="Historial con el canal"
           description="Lo que llegó del canal, lo que se subió y lo que se eligió, lo más nuevo primero."
@@ -353,6 +424,8 @@ export default async function PublicationPage({
             </SectionBody>
           )}
         </SectionCard>
+          </>
+        ) : null}
       </PageBody>
     </>
   );

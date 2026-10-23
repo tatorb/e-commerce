@@ -16,15 +16,10 @@ import { PhotoUploader } from './PhotoUploader';
 import { ArchivePhotoButton, AsIsButton, ChannelPhotosButton } from './PhotoListActions';
 import { asIsProblem, type ChannelPhotoRules } from '@/domain/media';
 import { photoTone, type PhotoTone } from '@/domain/photo-steps';
+import { PHOTO_TONE as TONE } from './tone';
 import { WorkerStatusLine } from './WorkerStatusLine';
 import { BrandMark } from '@/components/ui/brand-loader';
 
-// Cada foto de la lista lleva el color de su estado.
-const TONE: Record<PhotoTone, { label: string; dot: string; pill: string; card: string }> = {
-  approved: { label: 'Aprobadas', dot: 'bg-emerald-500', pill: 'bg-emerald-100 text-emerald-800', card: 'border-emerald-200' },
-  review: { label: 'Falta verificar', dot: 'bg-amber-400', pill: 'bg-amber-100 text-amber-900', card: 'border-amber-300' },
-  pending: { label: 'Sin procesar', dot: 'bg-red-500', pill: 'bg-red-100 text-red-800', card: 'border-red-200' },
-};
 
 // El paso Imágenes: las fotos del producto, cada una con su línea de
 // corrección. El trabajador de la Mac procesa cada paso; acá se aprueba. Una

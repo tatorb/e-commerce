@@ -1,42 +1,31 @@
 import { notFound } from 'next/navigation';
-import Link from 'next/link';
-import { ExternalLink, KanbanSquare } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { AddToPipelineButton } from '@/components/pipeline/AddToPipelineButton';
-import { PipelineHistory } from '@/components/pipeline/PipelineHistory';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Breadcrumb } from '@/components/navigation/Breadcrumb';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Separator } from '@/components/ui/separator';
-import { ProductForm, type ProductFormValues } from '@/components/products/ProductForm';
+import { EntityLabel } from '@/components/navigation/EntityLabel';
+import type { ProductFormValues } from '@/components/products/ProductForm';
 import { DeleteProductButton } from '@/components/products/DeleteProductButton';
 import { ComboItemsCard } from '@/components/products/ComboItemsCard';
 import { InCombosCard } from '@/components/products/InCombosCard';
 import { KindBadge } from '@/components/products/KindBadge';
-import { loadCombo } from '@/lib/queries/combos';
-import { prisma } from '@/lib/db';
-import { PublicationForm } from '@/components/publications/PublicationForm';
+import { ProductMediaPanel } from '@/components/products/ProductMediaPanel';
+import { ProductPublications } from '@/components/products/ProductPublications';
+import { ProductResearchPanel } from '@/components/products/ProductResearchPanel';
+import { ProductTabs, type ProductTabKey } from '@/components/products/ProductTabs';
 import { NewPublicationDialog } from '@/components/publications/NewPublicationDialog';
-import { ChannelStatusBadge, PipelineBadge, StageBadge } from '@/components/stages/StageBadge';
-import { TitleLockControl } from '@/components/publications/TitleLockControl';
-import { resolveTitleLock } from '@/domain/title-lock';
-import { ScoreBadge, ScoreDot } from '@/components/stages/ScoreBadge';
-import { scorePublication } from '@/domain/standard';
-import { loadRulesByChannel, toScoreInput } from '@/lib/queries/scoring';
-import { channelInfo, getChannelAdapter } from '@/channels';
+import { channelInfo } from '@/channels';
 import { parseNameValueList } from '@/domain/name-value';
-import { METRICS, METRIC_KEYS, formatMetric, latestMetrics, parseMetrics } from '@/domain/measurements';
+import { scorePublication } from '@/domain/standard';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
+import { prisma } from '@/lib/db';
+import { plural } from '@/lib/format';
+import { loadPhotoLine } from '@/lib/photos';
+import { loadCombo } from '@/lib/queries/combos';
 import { getProduct, listStores, type ProductDetail } from '@/lib/queries/products';
-import { formatDateTime, formatDuration } from '@/lib/format';
-import { PublicationProposal } from '@/components/proposals/PublicationProposal';
-import { isAiConfigured } from '@/ai/claude';
-import { SubHeader } from '@/components/ui/section-card';
+import { loadResearch } from '@/lib/queries/research';
+import { loadRulesByChannel, toScoreInput } from '@/lib/queries/scoring';
 
 export const dynamic = 'force-dynamic';
-// Generar una propuesta con IA puede tardar más de un minuto.
-export const maxDuration = 300;
 
 export async function generateMetadata({ params }: { params: Promise<{ cuenta: string; id: string }> }) {
   const { cuenta, id } = await params;
@@ -75,284 +64,123 @@ function toFormValues(p: ProductDetail): ProductFormValues {
   };
 }
 
-// Precio guardado → texto con la costumbre argentina, para editarlo.
-function priceToInput(price: { toString(): string } | null): string {
-  if (price === null) return '';
-  const n = Number(price.toString());
-  return new Intl.NumberFormat('es-AR', { maximumFractionDigits: 2 }).format(n);
-}
+const TAB_KEYS: ProductTabKey[] = ['publicaciones', 'ficha', 'compatibilidades', 'investigacion', 'fotos', 'combos'];
 
-export default async function ProductPage({ params }: { params: Promise<{ cuenta: string; id: string }> }) {
-  const { cuenta, id } = await params;
+// El producto: lo que es la pieza, y lo comparten todas sus publicaciones. Sus
+// partes van en pestañas: las publicaciones, la ficha, las compatibilidades,
+// la investigación, las fotos y videos, y los combos. Lo de cada publicación
+// se trabaja en su propia página.
+export default async function ProductPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ cuenta: string; id: string }>;
+  searchParams: Promise<{ seccion?: string }>;
+}) {
+  const [{ cuenta, id }, { seccion }] = await Promise.all([params, searchParams]);
   const { account } = await requireAccount(cuenta);
-  const [product, stores, rules, combo] = await Promise.all([
+  const [product, stores, rules, combo, research, photos, videos] = await Promise.all([
     getProduct(account.id, id),
     listStores(account.id),
     loadRulesByChannel(account.id),
     loadCombo(prisma, id),
+    loadResearch(prisma, id),
+    loadPhotoLine(prisma, id),
+    prisma.productVideo.findMany({
+      where: { productId: id },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, name: true, durationMs: true, width: true, height: true },
+    }),
   ]);
   if (!product || !combo) notFound();
-  const aiReady = isAiConfigured();
 
   const base = `/a/${account.slug}/productos`;
-  const storeOptions = stores.map((s) => ({
-    id: s.id,
-    name: s.name,
-    channel: channelInfo(s.channel.kind, s.channel.name),
-  }));
-  const subtitle = [product.brand, product.productType, product.partNumber].filter(Boolean).join(' · ');
-  const now = new Date();
+  const storeOptions = stores.map((s) => ({ id: s.id, name: s.name, channel: channelInfo(s.channel.kind, s.channel.name) }));
+  const pubs = product.publications;
+  const channels = new Map(pubs.map((p) => [p.id, channelInfo(p.store.channel.kind, p.store.channel.name)]));
+  const scores = new Map(pubs.map((p) => [p.id, scorePublication(rules.get(p.store.channelId) ?? [], toScoreInput(product, p)).score]));
+  const known = [...scores.values()].filter((s): s is number => s !== null);
+  const inPipeline = pubs.filter((p) => p.pipelineStatus === 'IN_PIPELINE').length;
+  const measures = product.variants.map((v) => v.measure?.trim()).filter(Boolean);
+  const subtitle = [product.brand, product.productType, product.partNumber, measures.length > 1 ? measures.join(', ') : null].filter(Boolean).join(' · ');
+  const summary = [
+    plural(pubs.length, 'publicación', 'publicaciones'),
+    inPipeline > 0 ? `${inPipeline} en el pipeline` : null,
+    known.length > 0 ? `puntaje más bajo ${Math.min(...known)}` : null,
+  ].filter(Boolean);
+
+  // Para ir a trabajar lo del producto en el pipeline: la que ya está ahí o la primera.
+  const worked = pubs.find((p) => p.pipelineStatus === 'IN_PIPELINE') ?? pubs[0] ?? null;
+  const stepHref = worked ? (step: string) => `/a/${account.slug}/pipeline/${worked.id}?paso=${step}` : null;
+  const isCombo = combo.kind === 'COMBO';
+  const comboCount = isCombo ? combo.items.length : combo.inCombos.length;
+
+  const tabs: { key: ProductTabKey; label: string; count?: number | null }[] = [
+    { key: 'publicaciones', label: 'Publicaciones', count: pubs.length },
+    { key: 'ficha', label: 'Ficha' },
+    { key: 'compatibilidades', label: 'Compatibilidades', count: product.compatibilities.length },
+    { key: 'investigacion', label: 'Investigación' },
+    { key: 'fotos', label: 'Fotos y videos', count: photos.length + videos.length + product.assets.length },
+    { key: 'combos', label: isCombo ? 'Productos del combo' : 'Combos', count: comboCount },
+  ];
+  const wanted = TAB_KEYS.find((k) => k === seccion);
+  const initial: ProductTabKey = wanted ?? (pubs.length > 0 ? 'publicaciones' : 'ficha');
+  const newPublication = (label: string) => (
+    <NewPublicationDialog accountSlug={account.slug} productId={product.id} productName={product.name} stores={storeOptions} label={label} />
+  );
 
   return (
     <>
       <PageHeader staticOnMobile className="max-w-5xl">
         <div className="space-y-2">
           <Breadcrumb items={[{ label: account.name, href: base }, { label: 'Productos', href: base }, { label: product.name }]} />
-          <div className="space-y-1">
-            <h1 className="flex flex-wrap items-center gap-2 text-2xl font-semibold tracking-tight">
-              {product.name}
-              <KindBadge kind={product.kind} />
-            </h1>
-            <p className="text-sm text-muted-foreground">{subtitle || 'Ficha maestra del producto.'}</p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0 space-y-1.5">
+              <EntityLabel kind="product" />
+              <h1 className="flex flex-wrap items-center gap-2 text-xl font-semibold tracking-tight md:text-2xl">
+                {product.name}
+                <KindBadge kind={product.kind} />
+              </h1>
+              {subtitle ? <p className="text-sm text-muted-foreground">{subtitle}</p> : null}
+              <p className="text-sm">{summary.join(' · ')}</p>
+            </div>
+            {pubs.length > 0 ? newPublication('Agregar publicación') : null}
           </div>
         </div>
       </PageHeader>
       <PageBody className="max-w-5xl">
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">Publicaciones</p>
-          {product.publications.length > 0 ? (
-            <NewPublicationDialog
-              accountSlug={account.slug}
-              productId={product.id}
-              productName={product.name}
-              stores={storeOptions}
-              label="Agregar otra publicación"
-            />
-          ) : null}
-        </div>
-
-        {product.publications.length === 0 ? (
-          <div className="rounded-lg border border-dashed p-8 text-center space-y-3">
-            <p className="text-sm text-muted-foreground">
-              Todavía no tiene publicación en {stores.map((s) => s.name).join(' ni en ') || 'ninguna tienda'}.
-            </p>
-            <NewPublicationDialog
-              accountSlug={account.slug}
-              productId={product.id}
-              productName={product.name}
-              stores={storeOptions}
-              label="Agregar publicación"
-            />
-          </div>
-        ) : (
-          product.publications.map((pub) => {
-            const channel = channelInfo(pub.store.channel.kind, pub.store.channel.name);
-            const score = scorePublication(rules.get(pub.store.channelId) ?? [], toScoreInput(product, pub));
-            const lastMetrics = latestMetrics(pub.measurements);
-            const titleLock = resolveTitleLock(
-              getChannelAdapter(pub.store.channel.kind, pub.store.channel.name).titleLock(lastMetrics),
-              pub.titleLockedManual,
-            );
-            return (
-              <Card key={pub.id}>
-                <CardHeader className="space-y-3">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="space-y-1.5">
-                      <CardTitle>
-                        {pub.store.name} · {channel.name}
-                      </CardTitle>
-                      <p className="text-sm text-muted-foreground">{pub.externalId ?? 'Sin ID todavía'}</p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <ScoreBadge score={score.score} />
-                      <PipelineBadge state={pub} />
-                      <ChannelStatusBadge status={pub.channelStatus} />
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                    {pub.pipelineStatus === 'IN_PIPELINE' ? (
-                      <Button size="sm" variant="outline" asChild>
-                        <Link href={`/a/${account.slug}/pipeline/${pub.id}`}>
-                          <KanbanSquare className="h-4 w-4" />
-                          Abrir en el pipeline
-                        </Link>
-                      </Button>
-                    ) : (
-                      <AddToPipelineButton
-                        accountSlug={account.slug}
-                        publicationId={pub.id}
-                        label={
-                          pub.pipelineStatus === 'CORRECTED'
-                            ? 'Volver a corregirla'
-                            : pub.pipelineStatus === 'DISCARDED'
-                              ? 'Volver a agregarla al pipeline'
-                              : 'Agregar al pipeline'
-                        }
-                      />
-                    )}
-                    {/* Sin publicar, el título todavía no se puede bloquear. */}
-                    {pub.externalId ? (
-                      <TitleLockControl accountSlug={account.slug} publicationId={pub.id} lock={titleLock} />
-                    ) : null}
-                  </div>
-                  {pub.url ? (
-                    <a
-                      href={pub.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex w-fit items-center gap-1 text-sm text-primary underline-offset-4 hover:underline"
-                    >
-                      <ExternalLink className="h-3.5 w-3.5" />
-                      Ver en {channel.name}
-                    </a>
-                  ) : null}
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  <PublicationForm
-                    accountSlug={account.slug}
-                    channel={channel}
-                    mode={{ kind: 'edit', publicationId: pub.id }}
-                    initial={{
-                      externalId: pub.externalId ?? '',
-                      url: pub.url ?? '',
-                      title: pub.title ?? '',
-                      description: pub.description ?? '',
-                      attributes: parseNameValueList(pub.attributes),
-                      price: priceToInput(pub.price),
-                      channelStatus: pub.channelStatus,
-                    }}
-                  />
-                  <Separator />
-                  {score.results.length > 0 ? (
-                    <div className="overflow-hidden rounded-md border">
-                      <SubHeader
-                        title="Estándar"
-                        action={
-                          <p className="text-xs text-muted-foreground">
-                            {score.score === null
-                              ? 'Ninguna regla aplica.'
-                              : score.missing.length === 0
-                                ? `Puntaje ${score.score}. Cumple todo el estándar.`
-                                : `Puntaje ${score.score}. ${score.missing.length === 1 ? 'Le falta 1 cosa' : `Le faltan ${score.missing.length} cosas`}.`}
-                          </p>
-                        }
-                      />
-                      <ul className="divide-y">
-                        {[...score.results]
-                          .sort((a, b) => {
-                            const order = { fail: 0, pass: 1, na: 2 };
-                            return order[a.status] - order[b.status] || b.weight - a.weight;
-                          })
-                          .map((r) => (
-                            <li key={r.ruleId} className="flex items-start gap-3 px-4 py-2.5 text-sm">
-                              <ScoreDot
-                                band={r.status === 'pass' ? 'high' : r.status === 'fail' ? 'low' : 'none'}
-                                className="mt-1.5"
-                              />
-                              <div className="flex-1 min-w-0">
-                                <span className="font-medium">{r.name}</span>
-                                <span className="text-muted-foreground tabular-nums"> · peso {r.weight}</span>
-                                {r.status === 'na' ? <span className="text-muted-foreground"> · no aplica</span> : null}
-                                {r.detail ? <p className="text-muted-foreground">{r.detail}</p> : null}
-                              </div>
-                            </li>
-                          ))}
-                      </ul>
-                    </div>
-                  ) : null}
-                  {pub.pipelineMovements.length > 0 ? (
-                    <div className="overflow-hidden rounded-md border">
-                      <SubHeader title="Historial del pipeline" />
-                      <PipelineHistory movements={pub.pipelineMovements} timeZone={account.timezone} />
-                    </div>
-                  ) : null}
-                  <PublicationProposal
-                    accountSlug={account.slug}
-                    timeZone={account.timezone}
-                    publicationId={pub.id}
-                    stage={pub.stage}
-                    proposal={pub.proposals[0] ?? null}
-                    proposalCount={pub._count.proposals}
-                    aiReady={aiReady}
-                    channelName={channel.name}
-                    application={pub.applications[0] ?? null}
-                  />
-                  {/* Sin propuestas todavía, el historial es solo el comienzo: no se muestra. */}
-                  {pub.stageMovements.length > 1 ? (
-                    <div className="overflow-hidden rounded-md border">
-                      <SubHeader title="Historial de la propuesta con IA" />
-                      <ul className="divide-y">
-                        {pub.stageMovements.map((m) => (
-                          <li key={m.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-sm">
-                            <div className="w-40 shrink-0">
-                              <StageBadge stage={m.stage} />
-                            </div>
-                            <span className="tabular-nums text-muted-foreground">
-                              {formatDateTime(m.enteredAt, account.timezone)}
-                              {' → '}
-                              {m.exitedAt ? formatDateTime(m.exitedAt, account.timezone) : 'estado actual'}
-                            </span>
-                            <span className="tabular-nums text-muted-foreground">
-                              {formatDuration(m.enteredAt, m.exitedAt ?? now)}
-                            </span>
-                            <span className="text-muted-foreground sm:ml-auto">{m.user?.name ?? '—'}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-                  {pub.measurements.length > 0 ? (
-                    <div className="overflow-hidden rounded-md border">
-                      <SubHeader title="Mediciones" />
-                      <div className="divide-y">
-                        {pub.measurements.map((m) => {
-                          const metrics = parseMetrics(m.metrics);
-                          const keys = METRIC_KEYS.filter((k) => metrics[k] !== undefined);
-                          return (
-                            <div key={m.id} className="px-4 py-3 space-y-2">
-                              <p className="text-sm font-medium">
-                                Datos del {new Intl.DateTimeFormat('es-AR', { dateStyle: 'medium', timeZone: 'UTC' }).format(m.takenAt)}
-                                <span className="text-muted-foreground font-normal">
-                                  {m.source === 'IMPORT' ? ' · importados' : ''}
-                                </span>
-                              </p>
-                              <dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
-                                {keys.map((k) => (
-                                  <div key={k} className="flex items-baseline justify-between gap-3">
-                                    <dt className="text-muted-foreground">{METRICS[k].label}</dt>
-                                    <dd className="tabular-nums">{formatMetric(k, metrics[k]!)}</dd>
-                                  </div>
-                                ))}
-                              </dl>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ) : null}
-                </CardContent>
-              </Card>
-            );
-          })
-        )}
-
-        <p className="text-xs uppercase tracking-wide text-muted-foreground pt-2">Ficha maestra</p>
-        <ProductForm accountSlug={account.slug} productId={product.id} initial={toFormValues(product)} />
-        {combo.kind === 'COMBO' ? (
-          <ComboItemsCard accountSlug={account.slug} comboId={product.id} initial={combo.items} />
-        ) : (
-          <InCombosCard accountSlug={account.slug} combos={combo.inCombos} />
-        )}
-
-        <Separator />
-        <div>
-          <DeleteProductButton
-            accountSlug={account.slug}
-            productId={product.id}
-            productName={product.name}
-            publicationCount={product.publications.length}
-          />
-        </div>
+        <ProductTabs
+          tabs={tabs}
+          initial={initial}
+          form={{ accountSlug: account.slug, productId: product.id, initial: toFormValues(product) }}
+          panels={{
+            publicaciones:
+              pubs.length > 0 ? (
+                <ProductPublications accountSlug={account.slug} publications={pubs} channels={channels} scores={scores} />
+              ) : (
+                <div className="space-y-3 rounded-lg border border-dashed p-8 text-center">
+                  <p className="text-sm text-muted-foreground">
+                    Todavía no tiene publicación en {stores.map((s) => s.name).join(' ni en ') || 'ninguna tienda'}.
+                  </p>
+                  {newPublication('Agregar publicación')}
+                </div>
+              ),
+            investigacion: <ProductResearchPanel research={research} editHref={stepHref ? stepHref('informacion') : null} />,
+            fotos: <ProductMediaPanel photos={photos} videos={videos} timeZone={account.timezone} stepHref={stepHref} />,
+            combos: isCombo ? (
+              <ComboItemsCard accountSlug={account.slug} comboId={product.id} initial={combo.items} />
+            ) : (
+              <InCombosCard accountSlug={account.slug} combos={combo.inCombos} />
+            ),
+          }}
+          after={{
+            ficha: (
+              <div className="border-t pt-4">
+                <DeleteProductButton accountSlug={account.slug} productId={product.id} productName={product.name} publicationCount={pubs.length} />
+              </div>
+            ),
+          }}
+        />
       </PageBody>
     </>
   );

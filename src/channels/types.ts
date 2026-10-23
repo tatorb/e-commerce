@@ -65,4 +65,6 @@ export interface ChannelAdapter {
   photos: ChannelPhotoRules | null;
   /** Lo que pide el canal para un video corto vertical, y cómo se sube a mano. Null si el canal no tiene clips. */
   clips: ClipRules | null;
+  /** Los colores con que se reconoce el canal en la app, para marcar sus publicaciones. Null: los de la app. */
+  accent: { background: string; foreground: string } | null;
 }

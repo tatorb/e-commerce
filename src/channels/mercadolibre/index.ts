@@ -44,4 +44,6 @@ export const mercadolibre: ChannelAdapter = {
   fullSizePhotoUrl: mercadolibreFullSizePhoto,
   photos: MERCADOLIBRE_PHOTOS,
   clips: MERCADOLIBRE_CLIPS,
+  // El amarillo y el azul de Mercado Libre.
+  accent: { background: '#FFE600', foreground: '#2D3277' },
 };

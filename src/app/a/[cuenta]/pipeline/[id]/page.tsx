@@ -1,9 +1,10 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { AppWindow, ExternalLink, FileText, Lock } from 'lucide-react';
+import { AppWindow, ExternalLink, Lock, Package } from 'lucide-react';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Breadcrumb } from '@/components/navigation/Breadcrumb';
+import { EntityLabel } from '@/components/navigation/EntityLabel';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { PipelineBadge } from '@/components/stages/StageBadge';
@@ -141,6 +142,7 @@ export default async function PipelineStepPage({
         <div className="space-y-2">
           <Breadcrumb items={[{ label: account.name, href: boardHref }, { label: 'Pipeline', href: boardHref }, { label: titleOrUntitled(pub.title) }]} />
           <div className="space-y-1.5">
+            <EntityLabel kind="publication" channelName={pub.channelName} accent={pub.channelAccent} />
             <h1 className="flex items-start gap-2 text-2xl font-semibold tracking-tight">
               <span className={pub.title ? undefined : 'text-muted-foreground'}>{titleOrUntitled(pub.title)}</span>
               {lock ? (
@@ -161,8 +163,8 @@ export default async function PipelineStepPage({
                 href={`/a/${account.slug}/productos/${pub.productId}`}
                 className="inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline"
               >
-                <FileText className="h-3.5 w-3.5" />
-                Ver la ficha
+                <Package className="h-3.5 w-3.5" />
+                Producto: {pub.productName}
               </Link>
               {pub.url ? (
                 <a

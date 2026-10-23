@@ -59,6 +59,9 @@ export const EMPTY_PRODUCT: ProductFormValues = {
 
 type Status = { kind: 'idle' } | { kind: 'success' } | { kind: 'error'; message: string };
 
+/** Las partes de la ficha, para mostrar solo algunas en cada pestaña del producto. */
+export type ProductFormSection = 'general' | 'variants' | 'compatibilities' | 'specs' | 'kit' | 'assets' | 'notes';
+
 const GENERAL_FIELDS: { key: keyof ProductFormValues; label: string; placeholder?: string }[] = [
   { key: 'brand', label: 'Marca del repuesto', placeholder: 'Persan, Dexco, Sabó…' },
   { key: 'partNumber', label: 'Número de pieza u OEM' },
@@ -72,10 +75,13 @@ export function ProductForm({
   accountSlug,
   productId,
   initial,
+  sections,
 }: {
   accountSlug: string;
   productId: string | null;
   initial: ProductFormValues;
+  // Las partes que se ven; sin elegir, todas. Lo que no se ve se guarda igual, como está.
+  sections?: ProductFormSection[];
 }) {
   const router = useRouter();
   const [values, setValues] = useState<ProductFormValues>(initial);
@@ -83,6 +89,7 @@ export function ProductForm({
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const [pending, startTransition] = useTransition();
   const isNew = productId === null;
+  const show = (section: ProductFormSection) => !sections || sections.includes(section);
 
   const dirty = useMemo(() => JSON.stringify(values) !== JSON.stringify(saved), [values, saved]);
 
@@ -128,232 +135,252 @@ export function ProductForm({
         handleSave();
       }}
     >
-      <Card>
-        <CardHeader>
-          <CardTitle>Datos generales</CardTitle>
-          <CardDescription>Lo que identifica al producto, en cualquier canal.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="name">Nombre</Label>
-            <Input
-              id="name"
-              value={values.name}
-              onChange={(e) => set('name', e.target.value)}
-              placeholder="subconjunto Ford 1.6 8v Zetec Rocam…"
-              disabled={pending}
-              maxLength={300}
-              required
-            />
-          </div>
-          <fieldset className="space-y-1.5">
-            <legend className="text-sm font-medium">Tipo</legend>
-            <div className="inline-flex rounded-md border p-0.5" role="radiogroup" aria-label="Tipo">
-              {PRODUCT_KINDS.map((k) => (
-                <button
-                  key={k}
-                  type="button"
-                  role="radio"
-                  aria-checked={values.kind === k}
-                  disabled={pending}
-                  onClick={() => set('kind', k)}
-                  className={cn(
-                    'rounded px-3 py-1 text-sm transition-colors',
-                    values.kind === k ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  {PRODUCT_KIND_LABEL[k]}
-                </button>
+      {show('general') ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Datos generales</CardTitle>
+            <CardDescription>Lo que identifica al producto, en cualquier canal.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="name">Nombre</Label>
+              <Input
+                id="name"
+                value={values.name}
+                onChange={(e) => set('name', e.target.value)}
+                placeholder="subconjunto Ford 1.6 8v Zetec Rocam…"
+                disabled={pending}
+                maxLength={300}
+                required
+              />
+            </div>
+            <fieldset className="space-y-1.5">
+              <legend className="text-sm font-medium">Tipo</legend>
+              <div className="inline-flex rounded-md border p-0.5" role="radiogroup" aria-label="Tipo">
+                {PRODUCT_KINDS.map((k) => (
+                  <button
+                    key={k}
+                    type="button"
+                    role="radio"
+                    aria-checked={values.kind === k}
+                    disabled={pending}
+                    onClick={() => set('kind', k)}
+                    className={cn(
+                      'rounded px-3 py-1 text-sm transition-colors',
+                      values.kind === k ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    {PRODUCT_KIND_LABEL[k]}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {values.kind === 'COMBO'
+                  ? isNew || saved.kind !== 'COMBO'
+                    ? 'Un combo se arma con productos individuales. Los elegís después de guardar, en la tarjeta Productos del combo.'
+                    : 'Un combo se arma con productos individuales. Se eligen en la tarjeta Productos del combo.'
+                  : 'Se vende tal cual. Puede formar parte de combos.'}
+              </p>
+            </fieldset>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {GENERAL_FIELDS.map((f) => (
+                <div key={f.key} className="space-y-1.5">
+                  <Label htmlFor={f.key}>{f.label}</Label>
+                  <Input
+                    id={f.key}
+                    value={values[f.key] as string}
+                    onChange={(e) => set(f.key, e.target.value)}
+                    placeholder={f.placeholder}
+                    disabled={pending}
+                    maxLength={200}
+                  />
+                </div>
               ))}
             </div>
-            <p className="text-xs text-muted-foreground">
-              {values.kind === 'COMBO'
-                ? isNew || saved.kind !== 'COMBO'
-                  ? 'Un combo se arma con productos individuales. Los elegís después de guardar, en la tarjeta Productos del combo.'
-                  : 'Un combo se arma con productos individuales. Se eligen en la tarjeta Productos del combo.'
-                : 'Se vende tal cual. Puede formar parte de combos.'}
-            </p>
-          </fieldset>
-          <div className="grid gap-4 sm:grid-cols-2">
-            {GENERAL_FIELDS.map((f) => (
-              <div key={f.key} className="space-y-1.5">
-                <Label htmlFor={f.key}>{f.label}</Label>
-                <Input
-                  id={f.key}
-                  value={values[f.key] as string}
-                  onChange={(e) => set(f.key, e.target.value)}
-                  placeholder={f.placeholder}
-                  disabled={pending}
-                  maxLength={200}
-                />
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Medidas y SKU</CardTitle>
-          <CardDescription>
-            Una fila por medida, por ejemplo STD, 0.25 o 0.50, cada una con su SKU.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <RowList
-            idPrefix="variant"
-            rows={values.variants}
-            onChange={(rows) => set('variants', rows)}
-            template={{ measure: '', sku: '' }}
-            columns={[
-              { key: 'measure', label: 'Medida', placeholder: 'STD, 0.50…' },
-              { key: 'sku', label: 'SKU' },
-            ]}
-            gridClassName="sm:grid-cols-2"
-            addLabel="Agregar medida"
-            emptyLabel="Sin medidas cargadas."
-            disabled={pending}
-          />
-        </CardContent>
-      </Card>
+      {show('variants') ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Medidas y SKU</CardTitle>
+            <CardDescription>
+              Una fila por medida, por ejemplo STD, 0.25 o 0.50, cada una con su SKU.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <RowList
+              idPrefix="variant"
+              rows={values.variants}
+              onChange={(rows) => set('variants', rows)}
+              template={{ measure: '', sku: '' }}
+              columns={[
+                { key: 'measure', label: 'Medida', placeholder: 'STD, 0.50…' },
+                { key: 'sku', label: 'SKU' },
+              ]}
+              gridClassName="sm:grid-cols-2"
+              mobileGridClassName="grid-cols-2"
+              addLabel="Agregar medida"
+              emptyLabel="Sin medidas cargadas."
+              disabled={pending}
+            />
+          </CardContent>
+        </Card>
+      ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Compatibilidades</CardTitle>
-          <CardDescription>
-            Con qué vehículos y motores es compatible. Si dejás vacíos la cilindrada o el combustible, se completan con
-            lo que diga el motor.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <RowList
-            idPrefix="compat"
-            rows={values.compatibilities}
-            onChange={(rows) => set('compatibilities', rows)}
-            template={{ vehicleBrand: '', model: '', engine: '', displacement: '', fuel: '', yearFrom: '', yearTo: '', note: '' }}
-            columns={[
-              { key: 'vehicleBrand', label: 'Marca', placeholder: 'Ford…' },
-              { key: 'model', label: 'Modelo', placeholder: 'Fiesta…' },
-              { key: 'engine', label: 'Motor', placeholder: '1.6 8v Rocam…' },
-              { key: 'displacement', label: 'Cilindrada', placeholder: '1.6' },
-              { key: 'fuel', label: 'Combustible', placeholder: 'Nafta…' },
-              { key: 'yearFrom', label: 'Desde', placeholder: 'año', inputMode: 'numeric' },
-              { key: 'yearTo', label: 'Hasta', placeholder: 'año', inputMode: 'numeric' },
-              { key: 'note', label: 'Nota' },
-            ]}
-            gridClassName="sm:grid-cols-[1fr_1fr_1fr_4.5rem_6rem_4.5rem_4.5rem_1fr]"
-            addLabel="Agregar compatibilidad"
-            emptyLabel="Sin compatibilidades cargadas."
-            disabled={pending}
-          />
-        </CardContent>
-      </Card>
+      {show('compatibilities') ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Compatibilidades</CardTitle>
+            <CardDescription>
+              Con qué vehículos y motores es compatible. Si dejás vacíos la cilindrada o el combustible, se completan con
+              lo que diga el motor.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <RowList
+              idPrefix="compat"
+              rows={values.compatibilities}
+              onChange={(rows) => set('compatibilities', rows)}
+              template={{ vehicleBrand: '', model: '', engine: '', displacement: '', fuel: '', yearFrom: '', yearTo: '', note: '' }}
+              columns={[
+                { key: 'vehicleBrand', label: 'Marca', placeholder: 'Ford…' },
+                { key: 'model', label: 'Modelo', placeholder: 'Fiesta…' },
+                { key: 'engine', label: 'Motor', placeholder: '1.6 8v Rocam…' },
+                { key: 'displacement', label: 'Cilindrada', placeholder: '1.6' },
+                { key: 'fuel', label: 'Combustible', placeholder: 'Nafta…' },
+                { key: 'yearFrom', label: 'Desde', placeholder: 'año', inputMode: 'numeric' },
+                { key: 'yearTo', label: 'Hasta', placeholder: 'año', inputMode: 'numeric' },
+                { key: 'note', label: 'Nota' },
+              ]}
+              gridClassName="sm:grid-cols-[1fr_1fr_1fr_4.5rem_6rem_4.5rem_4.5rem_1fr]"
+              mobileGridClassName="grid-cols-2"
+              addLabel="Agregar compatibilidad"
+              emptyLabel="Sin compatibilidades cargadas."
+              disabled={pending}
+            />
+          </CardContent>
+        </Card>
+      ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Ficha técnica</CardTitle>
-          <CardDescription>Datos técnicos como atributo y valor, por ejemplo Diámetro y 79,5 mm.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <RowList
-            idPrefix="spec"
-            rows={values.specs}
-            onChange={(rows) => set('specs', rows)}
-            template={{ name: '', value: '' }}
-            columns={[
-              { key: 'name', label: 'Atributo' },
-              { key: 'value', label: 'Valor' },
-            ]}
-            gridClassName="sm:grid-cols-2"
-            addLabel="Agregar atributo"
-            emptyLabel="Sin datos técnicos cargados."
-            disabled={pending}
-          />
-        </CardContent>
-      </Card>
+      {show('specs') ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Ficha técnica</CardTitle>
+            <CardDescription>Datos técnicos como atributo y valor, por ejemplo Diámetro y 79,5 mm.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <RowList
+              idPrefix="spec"
+              rows={values.specs}
+              onChange={(rows) => set('specs', rows)}
+              template={{ name: '', value: '' }}
+              columns={[
+                { key: 'name', label: 'Atributo' },
+                { key: 'value', label: 'Valor' },
+              ]}
+              gridClassName="sm:grid-cols-2"
+              addLabel="Agregar atributo"
+              emptyLabel="Sin datos técnicos cargados."
+              disabled={pending}
+            />
+          </CardContent>
+        </Card>
+      ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Contenido del kit y garantía</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="kitContents">Contenido del kit</Label>
+      {show('kit') ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Contenido del kit y garantía</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="kitContents">Contenido del kit</Label>
+              <Textarea
+                id="kitContents"
+                value={values.kitContents}
+                onChange={(e) => set('kitContents', e.target.value)}
+                placeholder="qué trae y qué no trae…"
+                disabled={pending}
+                rows={3}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="warranty">Garantía</Label>
+              <Input
+                id="warranty"
+                value={values.warranty}
+                onChange={(e) => set('warranty', e.target.value)}
+                placeholder="30 días de garantía…"
+                disabled={pending}
+                maxLength={500}
+              />
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {show('assets') ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Fotos y videos por link</CardTitle>
+            <CardDescription>
+              Fotos y videos del producto que están en otro lado, por su link. Se pueden elegir en Organización de multimedia.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <RowList
+              idPrefix="asset"
+              rows={values.assets}
+              onChange={(rows) => set('assets', rows as ProductFormValues['assets'])}
+              template={{ kind: 'PHOTO', url: '' }}
+              columns={[
+                {
+                  key: 'kind',
+                  label: 'Tipo',
+                  options: [
+                    { value: 'PHOTO', label: 'Foto' },
+                    { value: 'VIDEO', label: 'Video' },
+                  ],
+                },
+                { key: 'url', label: 'Link', placeholder: 'https://…', inputMode: 'url' },
+              ]}
+              gridClassName="sm:grid-cols-[8rem_1fr]"
+              addLabel="Agregar foto o video"
+              emptyLabel="Sin fotos ni videos cargados."
+              disabled={pending}
+            />
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {show('notes') ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Notas</CardTitle>
+            <CardDescription>Para el equipo. No se muestran en ningún canal.</CardDescription>
+          </CardHeader>
+          <CardContent>
             <Textarea
-              id="kitContents"
-              value={values.kitContents}
-              onChange={(e) => set('kitContents', e.target.value)}
-              placeholder="qué trae y qué no trae…"
+              id="notes"
+              aria-label="Notas"
+              value={values.notes}
+              onChange={(e) => set('notes', e.target.value)}
               disabled={pending}
               rows={3}
             />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="warranty">Garantía</Label>
-            <Input
-              id="warranty"
-              value={values.warranty}
-              onChange={(e) => set('warranty', e.target.value)}
-              placeholder="30 días de garantía…"
-              disabled={pending}
-              maxLength={500}
-            />
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Fotos y videos</CardTitle>
-          <CardDescription>Links a las fotos y videos del producto, en el orden en que se muestran.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <RowList
-            idPrefix="asset"
-            rows={values.assets}
-            onChange={(rows) => set('assets', rows as ProductFormValues['assets'])}
-            template={{ kind: 'PHOTO', url: '' }}
-            columns={[
-              {
-                key: 'kind',
-                label: 'Tipo',
-                options: [
-                  { value: 'PHOTO', label: 'Foto' },
-                  { value: 'VIDEO', label: 'Video' },
-                ],
-              },
-              { key: 'url', label: 'Link', placeholder: 'https://…', inputMode: 'url' },
-            ]}
-            gridClassName="sm:grid-cols-[8rem_1fr]"
-            addLabel="Agregar foto o video"
-            emptyLabel="Sin fotos ni videos cargados."
-            disabled={pending}
-          />
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Notas</CardTitle>
-          <CardDescription>Para el equipo. No se muestran en ningún canal.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Textarea
-            id="notes"
-            aria-label="Notas"
-            value={values.notes}
-            onChange={(e) => set('notes', e.target.value)}
-            disabled={pending}
-            rows={3}
-          />
-        </CardContent>
-      </Card>
-
-      <div className="flex flex-wrap items-center gap-3">
+      {/* En el celular, el botón queda a la vista abajo mientras se completa. */}
+      <div className="sticky bottom-0 z-10 -mx-4 flex flex-wrap items-center gap-3 border-t bg-background/95 px-4 py-3 backdrop-blur md:static md:mx-0 md:border-0 md:bg-transparent md:p-0 md:backdrop-blur-none">
         <Button type="submit" pending={pending} disabled={pending || !dirty || !values.name.trim()}>
           {isNew ? (pending ? 'Creando…' : 'Crear producto') : pending ? 'Guardando…' : 'Guardar cambios'}
         </Button>
         {status.kind === 'success' ? <span className="text-sm text-green-600">Guardado.</span> : null}
+        {dirty && status.kind === 'idle' && !isNew ? <span className="text-sm text-muted-foreground">Hay cambios sin guardar.</span> : null}
         {status.kind === 'error' ? (
           <span className="text-sm text-destructive">{status.message}</span>
         ) : null}

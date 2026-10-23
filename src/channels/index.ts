@@ -60,6 +60,7 @@ function genericAdapter(kind: ChannelKind, name: string): ChannelAdapter {
     fullSizePhotoUrl: () => null,
     photos: null,
     clips: null,
+    accent: null,
   };
 }
 
@@ -87,6 +88,7 @@ export type ChannelInfo = {
   externalIdPlaceholder: string;
   externalIdHelp: string;
   titleMaxLength: number | null;
+  accent: { background: string; foreground: string } | null;
 };
 
 export function channelInfo(kind: ChannelKind, fallbackName?: string): ChannelInfo {
@@ -97,5 +99,6 @@ export function channelInfo(kind: ChannelKind, fallbackName?: string): ChannelIn
     externalIdPlaceholder: a.externalId.placeholder,
     externalIdHelp: a.externalId.help,
     titleMaxLength: a.titleMaxLength,
+    accent: a.accent,
   };
 }
