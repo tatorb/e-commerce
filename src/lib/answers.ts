@@ -9,7 +9,8 @@ import { comboParts } from '@/domain/combos';
 import { loadContent } from '@/domain/content';
 import { parseNameValueList } from '@/domain/name-value';
 import { isUniqueViolation } from '@/domain/publications';
-import { richTextToMarkdown, withoutPrices } from '@/domain/research';
+import { knowledgeForAi, withoutPrices } from '@/domain/research';
+import { loadKnowledge } from '@/lib/queries/research';
 import { receiveNotice, saveQuestions } from '@/lib/buyer-questions';
 import { withAccessToken } from '@/lib/connections';
 import { loadCombo } from '@/lib/queries/combos';
@@ -53,7 +54,7 @@ const withoutPriceAnswers = (list: { text: string; answer: string | null }[]) =>
 /** Lo que recibe Claude para proponer la respuesta. */
 export async function answerInput(db: Db, q: LoadedQuestion): Promise<AnswerInput> {
   const answered = { storeId: q.storeId, status: 'ANSWERED' as const, answer: { not: null }, text: { not: '' } };
-  const [settings, previous, examples, earlier, content, combo, research] = await Promise.all([
+  const [settings, previous, examples, earlier, content, combo, knowledge] = await Promise.all([
     db.questionSettings.findUnique({ where: { accountId: q.store.accountId } }),
     db.buyerQuestion.findMany({
       where: { ...answered, listingId: q.listingId, id: { not: q.id } },
@@ -77,7 +78,7 @@ export async function answerInput(db: Db, q: LoadedQuestion): Promise<AnswerInpu
       : [],
     q.publication ? loadContent(db, q.publication.productId, q.publication.id) : null,
     q.publication ? loadCombo(db, q.publication.productId).then(comboParts) : null,
-    q.publication ? db.productResearch.findUnique({ where: { productId: q.publication.productId }, select: { storeKnowledge: true } }) : null,
+    q.publication ? loadKnowledge(db, q.publication.productId) : null,
   ]);
   return {
     channelName: q.store.channel.name,
@@ -95,7 +96,7 @@ export async function answerInput(db: Db, q: LoadedQuestion): Promise<AnswerInpu
       : null,
     content,
     combo,
-    knowledge: withoutPrices(richTextToMarkdown(research?.storeKnowledge ?? null)).text?.trim() || null,
+    knowledge: knowledge ? knowledgeForAi(knowledge) : null,
     previous: withoutPriceAnswers(previous),
     examples: withoutPriceAnswers(examples).slice(0, EXAMPLES),
   };

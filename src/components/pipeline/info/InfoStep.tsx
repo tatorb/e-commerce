@@ -12,6 +12,7 @@ import { ClarificationsCard } from './ClarificationsCard';
 import { CompetitorsCard } from './CompetitorsCard';
 import type { CompetitorRow } from './CompetitorsForm';
 import { KnowledgeCard } from './KnowledgeCard';
+import { KnowledgeParts } from '@/components/products/KnowledgeParts';
 import { ManufacturerCard } from './ManufacturerCard';
 import { ProductInfoForm } from './ProductInfoForm';
 import { withSharedNote } from './SharedNote';
@@ -113,7 +114,13 @@ export function InfoStep({
         files={research.files.map((f) => ({ id: f.id, kind: f.kind, name: f.name, size: f.size }))}
         driveReady={driveReady}
       />
-      <KnowledgeCard accountSlug={accountSlug} target={{ publicationId }} sharedWith={ctx.sharedWith} initial={s(r?.storeKnowledge)} />
+      <KnowledgeCard
+        accountSlug={accountSlug}
+        target={{ publicationId }}
+        sharedWith={ctx.sharedWith}
+        initial={s(r?.storeKnowledge)}
+        extra={<KnowledgeParts accountSlug={accountSlug} parts={research.knowledgeParts} />}
+      />
       {catalog ? (
         <CatalogCard
           accountSlug={accountSlug}

@@ -27,6 +27,9 @@ import { relistInfo } from '@/lib/channel-status';
 import { FACE_FIELDS, FACE_FIELD_LABEL, priceFaceText, SYNC_CHANGE_LABEL, type FaceField, type FaceValues } from '@/domain/channel-sync';
 import { quantityText, type QuantityLine } from '@/domain/quantities';
 import { QuantityEditor } from '@/components/publication/QuantityEditor';
+import { RichTextView } from '@/components/ui/rich-text-view';
+import { KnowledgeParts } from '@/components/products/KnowledgeParts';
+import { loadKnowledge } from '@/lib/queries/research';
 import { titleOrUntitled } from '@/domain/publication-title';
 import { fieldLabel } from '@/domain/sync-log';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
@@ -97,7 +100,7 @@ export default async function PublicationPage({
   const channelOf = channelInfo(p.store.channel.kind, p.store.channel.name);
   const productHref = `/a/${account.slug}/productos/${p.product.id}`;
   // Las otras publicaciones del mismo producto, para pasar de una a otra.
-  const [others, history] = await Promise.all([
+  const [others, history, knowledge] = await Promise.all([
     prisma.publication.findMany({
       where: { productId: p.product.id, id: { not: p.id } },
       orderBy: { createdAt: 'asc' },
@@ -110,6 +113,8 @@ export default async function PublicationPage({
           return product && pub ? { product, pub, rules: rules.get(pub.store.channelId) ?? [] } : null;
         })
       : Promise.resolve(null),
+    // Lo que sabe la tienda: es del producto y la publicación lo hereda.
+    loadKnowledge(prisma, p.product.id),
   ]);
   const pushable = summary.draft.filter((f) => data.publishable.includes(f));
 
@@ -381,6 +386,21 @@ export default async function PublicationPage({
 
         {face !== 'historial' ? (
           <>
+        <SectionCard
+          title="Lo que sabe la tienda"
+          description={`Es del producto${others.length > 0 ? ` y lo comparten sus ${others.length + 1} publicaciones` : ''}. Lo usan las respuestas a los compradores y la descripción.`}
+          action={
+            <Link href={`${productHref}?seccion=investigacion`} className="text-xs font-medium underline-offset-4 hover:underline">
+              Editar en Investigación
+            </Link>
+          }
+        >
+          <SectionBody>
+            <RichTextView html={knowledge.own} empty="Todavía no se cargó nada." />
+            <KnowledgeParts accountSlug={account.slug} parts={knowledge.parts} />
+          </SectionBody>
+        </SectionCard>
+
         <SectionCard
           title="Preguntas de los compradores"
           count={p._count.buyerQuestions}

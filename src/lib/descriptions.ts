@@ -7,7 +7,8 @@ import { contactFound, contactList } from '@/domain/contact';
 import { checkDescription, composeDescription, splitDescription, toConfirmMarks } from '@/domain/descriptions';
 import { parseNameValueList } from '@/domain/name-value';
 import { isUniqueViolation } from '@/domain/publications';
-import { richTextToMarkdown, withoutPrices } from '@/domain/research';
+import { knowledgeForAi, richTextToMarkdown, withoutPrices } from '@/domain/research';
+import { loadKnowledge } from '@/lib/queries/research';
 import { DraftError, saveDraft } from '@/lib/channel-push';
 import { loadCombo } from '@/lib/queries/combos';
 
@@ -78,11 +79,12 @@ async function publicationFor(db: Db, accountId: string, publicationId: string) 
 /** Lo que recibe Claude para proponer la descripción. */
 export async function descriptionInput(db: Db, accountId: string, publicationId: string): Promise<DescriptionInput> {
   const pub = await publicationFor(db, accountId, publicationId);
-  const [settings, content, combo, research, insights, questions] = await Promise.all([
+  const [settings, content, combo, research, knowledge, insights, questions] = await Promise.all([
     loadDescriptionSettings(db, accountId),
     loadContent(db, pub.productId, pub.id),
     loadCombo(db, pub.productId).then(comboParts),
-    db.productResearch.findUnique({ where: { productId: pub.productId }, select: { manufacturerText: true, clarifications: true, storeKnowledge: true } }),
+    db.productResearch.findUnique({ where: { productId: pub.productId }, select: { manufacturerText: true, clarifications: true } }),
+    loadKnowledge(db, pub.productId),
     db.buyerInsight.findMany({ where: { productId: pub.productId }, orderBy: [{ position: 'asc' }, { createdAt: 'asc' }], select: { kind: true, text: true } }),
     db.buyerQuestion.findMany({
       where: { publicationId: pub.id, text: { not: '' } },
@@ -109,7 +111,7 @@ export async function descriptionInput(db: Db, accountId: string, publicationId:
     research: {
       manufacturer: noPrices(research?.manufacturerText ?? null),
       clarifications: noPrices(richTextToMarkdown(research?.clarifications ?? null)),
-      knowledge: noPrices(richTextToMarkdown(research?.storeKnowledge ?? null)),
+      knowledge: knowledgeForAi(knowledge),
       pains: insights.filter((i) => i.kind === 'PAIN').map((i) => i.text),
       objections: insights.filter((i) => i.kind === 'OBJECTION').map((i) => i.text),
     },

@@ -4,6 +4,8 @@ import { Button } from '@/components/ui/button';
 import { SectionBody, SectionCard } from '@/components/ui/section-card';
 import type { ResearchData } from '@/lib/queries/research';
 import { KnowledgeCard } from '@/components/pipeline/info/KnowledgeCard';
+import { RichTextView } from '@/components/ui/rich-text-view';
+import { KnowledgeParts } from './KnowledgeParts';
 
 // La investigación del producto, para leerla de un vistazo: lo del
 // fabricante, las aclaraciones para las imágenes, las preguntas de la
@@ -58,7 +60,13 @@ export function ProductResearchPanel({
           </Button>
         ) : null}
       </div>
-      <KnowledgeCard accountSlug={accountSlug} target={{ productId }} sharedWith={publications} initial={r?.storeKnowledge ?? ''} />
+      <KnowledgeCard
+        accountSlug={accountSlug}
+        target={{ productId }}
+        sharedWith={publications}
+        initial={r?.storeKnowledge ?? ''}
+        extra={<KnowledgeParts accountSlug={accountSlug} parts={research.knowledgeParts} />}
+      />
       <SectionCard title="Lo del fabricante">
         <SectionBody className="space-y-3">
           {r?.manufacturerSite || r?.manufacturerProductUrl ? (
@@ -98,7 +106,7 @@ export function ProductResearchPanel({
       </SectionCard>
       <SectionCard title="Aclaraciones para las imágenes">
         <SectionBody>
-          <Text value={r?.clarifications} />
+          <RichTextView html={r?.clarifications} />
         </SectionBody>
       </SectionCard>
     </>

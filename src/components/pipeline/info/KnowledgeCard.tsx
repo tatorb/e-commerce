@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { RichTextEditor } from '@/components/ui/rich-text-editor';
 import { SectionBody, SectionCard } from '@/components/ui/section-card';
@@ -17,12 +17,15 @@ export function KnowledgeCard({
   target,
   sharedWith,
   initial,
+  extra,
 }: {
   accountSlug: string;
   // Desde el paso Información, la publicación; desde la ficha, el producto.
   target: { publicationId: string } | { productId: string };
   sharedWith: number;
   initial: string;
+  // Lo que se muestra debajo, como lo que hereda un combo de sus productos.
+  extra?: ReactNode;
 }) {
   const [html, setHtml] = useState(initial);
   const { run, pending, status } = useStepAction();
@@ -48,6 +51,7 @@ export function KnowledgeCard({
           </Button>
           <StatusText status={status} />
         </div>
+        {extra}
       </SectionBody>
     </SectionCard>
   );

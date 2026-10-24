@@ -6,12 +6,10 @@ import StarterKit from '@tiptap/starter-kit';
 import { Bold, Italic, List, ListOrdered } from 'lucide-react';
 import { IconButton } from '@/components/ui/section-card';
 import { cn } from '@/lib/utils/cn';
+import { RICH_TEXT_CLASS } from './rich-text-class';
 
 // Editor de texto con formato: solo negrita, cursiva y listas. Devuelve HTML;
 // el servidor lo limpia igual al guardar (src/domain/research.ts).
-
-// Las listas y los párrafos, que Tailwind deja sin estilo.
-export const RICH_TEXT_CLASS = '[&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:list-disc [&_ul]:pl-5 [&_li]:my-0.5 [&_p]:my-1.5';
 
 export function RichTextEditor({
   initial,

@@ -32,7 +32,7 @@ import { listBoard, listPipelineMovements } from '@/lib/queries/pipeline';
 import { listScoredPublications, type ScoredPublication } from '@/lib/queries/scoring';
 import { KIND_OPTIONS, parseKinds } from '@/lib/queries/catalog-filters';
 import { fileHref } from '@/lib/file-rules';
-import { loadResearch } from '@/lib/queries/research';
+import { loadKnowledge, loadResearch } from '@/lib/queries/research';
 import { loadCombo } from '@/lib/queries/combos';
 import { comboForAi, comboParts, PRODUCT_KIND_LABEL } from '@/domain/combos';
 import { loadCatalogData } from '@/lib/catalog-data';
@@ -389,7 +389,7 @@ const getPublication = defineTool({
       loadCatalogData(ctx.db, id),
     ]);
     const product = pub.product;
-    const combo = await loadCombo(ctx.db, product.id);
+    const [combo, knowledge] = await Promise.all([loadCombo(ctx.db, product.id), loadKnowledge(ctx.db, product.id)]);
     const r = research.research;
     const manufacturerText = withoutPrices(r?.manufacturerText ?? null);
     const measurement = pub.measurements[0] ?? null;
@@ -479,7 +479,11 @@ const getPublication = defineTool({
           })),
         },
         // Contexto, preguntas frecuentes, condiciones y aclaraciones que cargó la tienda.
-        lo_que_sabe_la_tienda: richTextToMarkdown(r?.storeKnowledge ?? null) || null,
+        lo_que_sabe_la_tienda: richTextToMarkdown(knowledge.own) || null,
+        // Un combo hereda lo que se sabe de cada producto que lo forma.
+        ...(knowledge.parts.length > 0
+          ? { lo_que_sabe_la_tienda_de_sus_productos: knowledge.parts.map((x) => ({ producto: x.name, texto: richTextToMarkdown(x.html) })) }
+          : {}),
         aclaraciones_para_imagenes: richTextToMarkdown(r?.clarifications ?? null) || null,
         preguntas: {
           // Las que llegaron solas del canal, con su respuesta si la tiene.

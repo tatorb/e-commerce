@@ -242,6 +242,27 @@ export function markdownToRichText(md: string): string | null {
 }
 
 /** Saca las líneas que parecen precios o listas de precios, por si se pegaron en el texto del fabricante. */
+// ───────────────────────────── Lo que sabe la tienda ─────────────────────────────
+
+/**
+ * Lo que sabe la tienda de un producto, en HTML limpio, y si es un combo, lo de
+ * cada producto que lo forma. Lo heredan todas las publicaciones del producto.
+ */
+export type StoreKnowledge = { own: string | null; parts: { productId: string; name: string; html: string }[] };
+
+/** Para la IA: lo propio y lo de cada producto del combo, en Markdown, sin las líneas con precios. Null si no hay nada. */
+export function knowledgeForAi(k: StoreKnowledge): string | null {
+  const md = (html: string | null) => withoutPrices(richTextToMarkdown(html)).text?.trim() || '';
+  const blocks = [
+    md(k.own),
+    ...k.parts.map((p) => {
+      const text = md(p.html);
+      return text ? `De «${p.name}», que forma parte del combo:\n${text}` : '';
+    }),
+  ].filter(Boolean);
+  return blocks.length > 0 ? blocks.join('\n\n') : null;
+}
+
 export function withoutPrices(text: string | null): { text: string | null; hidden: number } {
   if (!text) return { text, hidden: 0 };
   const lines = text.split(/\r?\n/);

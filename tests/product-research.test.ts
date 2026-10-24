@@ -6,6 +6,7 @@ import { PrismaClient } from '@/generated/prisma/client';
 import {
   addInsight,
   cleanInsight,
+  knowledgeForAi,
   cleanRichText,
   deleteInsight,
   manufacturerSchema,
@@ -20,6 +21,7 @@ import {
   updateResearch,
 } from '@/domain/research';
 import { deleteProductFile, FileError, isOwnBlobUrl, readBlob, registerProductFile } from '@/lib/files';
+import { loadKnowledge } from '@/lib/queries/research';
 
 // Datos inventados.
 
@@ -63,6 +65,21 @@ describe('texto con formato para Claude', () => {
   it('oculta las líneas que parecen precios', () => {
     expect(withoutPrices('Diámetro 200 mm\nPrecio de lista: 1000\nCosto $ 500\n24 estrías')).toEqual({ text: 'Diámetro 200 mm\n24 estrías', hidden: 2 });
     expect(withoutPrices(null)).toEqual({ text: null, hidden: 0 });
+  });
+});
+
+describe('lo que sabe la tienda para la IA', () => {
+  it('lo propio y, en un combo, lo de cada producto, sin las líneas con precios', () => {
+    expect(knowledgeForAi({ own: null, parts: [] })).toBeNull();
+    expect(
+      knowledgeForAi({
+        own: '<p>Kit para Gol.</p><ul><li><p>Precio especial por cantidad: $ 9000</p></li></ul>',
+        parts: [
+          { productId: 'a', name: 'Disco SKF', html: '<ul><li><p>No incluye el rulemán.</p></li></ul>' },
+          { productId: 'b', name: 'Placa', html: '<p>Precio de lista 5000</p>' },
+        ],
+      }),
+    ).toBe('Kit para Gol.\n\nDe «Disco SKF», que forma parte del combo:\n- No incluye el rulemán.');
   });
 });
 
@@ -167,6 +184,19 @@ describe.skipIf(!url)('investigación del producto en la base', () => {
     otherId = (await db.product.create({ data: { accountId, name: 'Kit B' } })).id;
     blobs.clear();
     deleted.length = 0;
+  });
+
+  it('un combo hereda lo que sabe la tienda de sus productos, en su orden', async () => {
+    const accountId = (await db.product.findUniqueOrThrow({ where: { id: productId } })).accountId;
+    const combo = await db.product.create({
+      data: { accountId, name: 'Combo A + B', kind: 'COMBO', comboItems: { create: [{ productId: otherId, position: 0 }, { productId, position: 1 }] } },
+    });
+    await updateResearch(db, { productId, userId: 'u1', data: { storeKnowledge: '<p>Lo de A</p>' } });
+    await updateResearch(db, { productId: combo.id, userId: 'u1', data: { storeKnowledge: '<p>Lo del combo</p>' } });
+    // B no tiene nada cargado: no aparece.
+    expect(await loadKnowledge(db, combo.id)).toEqual({ own: '<p>Lo del combo</p>', parts: [{ productId, name: 'Kit A', html: '<p>Lo de A</p>' }] });
+    // Un individual no hereda nada.
+    expect(await loadKnowledge(db, productId)).toEqual({ own: '<p>Lo de A</p>', parts: [] });
   });
 
   it('guarda solo los campos que llegan', async () => {
