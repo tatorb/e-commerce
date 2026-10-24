@@ -24,10 +24,10 @@ describe('herramientas de escritura en la lista', () => {
     expect(tools.get('save_catalog_data')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('create_publication')).toMatchObject({ readOnlyHint: false, destructiveHint: false });
     expect(tools.get('update_publication')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
-    for (const name of ['save_technical_sheet', 'save_kit_contents', 'set_publication_title', 'copy_publication_data', 'save_store_knowledge']) {
+    for (const name of ['save_technical_sheet', 'save_kit_contents', 'set_publication_title', 'copy_publication_data', 'save_store_knowledge', 'save_publication_qa']) {
       expect(tools.get(name)).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     }
-    expect(tools.size).toBe(32);
+    expect(tools.size).toBe(33);
   });
 });
 
@@ -353,6 +353,33 @@ describe.skipIf(!url)('herramientas de escritura', () => {
       dolores: ['No sabe si le sirve', 'Teme que no sea la medida'],
       objeciones: ['Duda de la calidad'],
     });
+  });
+
+  it('preguntas y respuestas: son de la publicación y el interruptor no se toca desde acá', async () => {
+    const saved = await call('save_publication_qa', {
+      publicacion: 'MLA1110001',
+      preguntas_frecuentes: '- ¿Trae juntas? No, se venden aparte.',
+      reglas: 'Si preguntan por **otro motor**, que responda una persona.',
+    });
+    expect(saved.isError).toBeFalsy();
+    // Lo que no se manda queda como está.
+    await call('save_publication_qa', { publicacion: 'MLA1110001', reglas: 'Si preguntan por **otro motor**, que responda una persona.' });
+    expect(await db.publication.findFirstOrThrow({ where: { externalId: 'MLA1110001' }, select: { faq: true, answerRules: true, autoAnswer: true } })).toEqual({
+      faq: '<ul><li><p>¿Trae juntas? No, se venden aparte.</p></li></ul>',
+      answerRules: '<p>Si preguntan por <strong>otro motor</strong>, que responda una persona.</p>',
+      autoAnswer: false,
+    });
+    expect((await call('get_publication', { publicacion: 'MLA1110001' })).data.preguntas_y_respuestas).toEqual({
+      preguntas_frecuentes: '- ¿Trae juntas? No, se venden aparte.',
+      cuando_responde_una_persona: 'Si preguntan por **otro motor**, que responda una persona.',
+      claude_responde_solo: false,
+    });
+    // La otra publicación del mismo producto no las hereda.
+    expect((await call('get_publication', { publicacion: 'MLA1110002' })).data.preguntas_y_respuestas.preguntas_frecuentes).toBeNull();
+    // Vacío lo borra; sin nada, avisa.
+    await call('save_publication_qa', { publicacion: 'MLA1110001', preguntas_frecuentes: '' });
+    expect((await db.publication.findFirstOrThrow({ where: { externalId: 'MLA1110001' }, select: { faq: true } })).faq).toBeNull();
+    expect((await call('save_publication_qa', { publicacion: 'MLA1110001' })).isError).toBe(true);
   });
 
   it('datos de catálogo: los campos con sus opciones, y solo valores válidos', async () => {

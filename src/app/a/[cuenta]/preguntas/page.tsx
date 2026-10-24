@@ -45,6 +45,7 @@ const OUTCOME_LABEL = {
   SENT_EDITED: 'se corrigió antes de mandarla',
   DISCARDED: 'se descartó',
   ANSWERED_IN_CHANNEL: 'no se usó: respondieron en el canal',
+  SENT_AUTO: 'Claude la mandó solo',
 } as const;
 
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
@@ -65,6 +66,7 @@ function Practice({ p, channels }: { p: PracticeCounts; channels: string }) {
   const parts = [
     `${p.SENT_AS_IS} mandadas tal cual`,
     `${p.SENT_EDITED} corregidas`,
+    ...(p.SENT_AUTO > 0 ? [`${p.SENT_AUTO} mandadas por Claude solo`] : []),
     `${p.DISCARDED} descartadas`,
     `${p.ANSWERED_IN_CHANNEL} respondidas en ${channels} sin usarla`,
     ...(p.PENDING > 0 ? [`${p.PENDING} esperando`] : []),
@@ -175,13 +177,17 @@ function QuestionItem({
       {q.answer ? (
         <div className="rounded-md bg-muted px-3 py-2">
           <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            {q.answeredFrom === 'APP' ? `Respondida desde la app${q.answeredBy ? ` por ${q.answeredBy.name}` : ''}` : `Respondida en ${q.store.channel.name}`}
+            {q.draft?.outcome === 'SENT_AUTO'
+              ? 'Claude la respondió solo'
+              : q.answeredFrom === 'APP'
+                ? `Respondida desde la app${q.answeredBy ? ` por ${q.answeredBy.name}` : ''}`
+                : `Respondida en ${q.store.channel.name}`}
             {q.answeredAt ? ` el ${formatDateTime(q.answeredAt, timeZone)}` : ''}
           </p>
           <p className="mt-0.5 whitespace-pre-line break-words">{q.answer}</p>
         </div>
       ) : null}
-      {q.status === 'ANSWERED' && q.draft && q.draft.outcome !== 'SENT_AS_IS' ? (
+      {q.status === 'ANSWERED' && q.draft && q.draft.outcome !== 'SENT_AS_IS' && q.draft.outcome !== 'SENT_AUTO' ? (
         <details className="text-xs">
           <summary className="cursor-pointer text-muted-foreground">
             Lo que había propuesto Claude{q.draft.outcome ? `: ${OUTCOME_LABEL[q.draft.outcome]}` : ''}
@@ -311,8 +317,22 @@ export default async function QuestionsPage({ params, searchParams }: { params: 
           </form>
         </Card>
 
+        {list.forPerson.length > 0 ? (
+          <Card className="overflow-hidden border-alert/60">
+            <div className="space-y-0.5 border-b bg-alert/20 px-4 py-2">
+              <h2 className="text-sm font-semibold">Para una persona · {list.counts.forPerson}</h2>
+              <p className="text-xs text-muted-foreground">Claude no las mandó porque no está seguro, le falta un dato o una regla pide que responda una persona.</p>
+            </div>
+            <ul className="divide-y">
+              {list.forPerson.map((q) => (
+                <QuestionItem key={q.id} q={q} accountSlug={account.slug} timeZone={tz} now={now} showStore={list.stores.length > 1} canDraft={aiReady} />
+              ))}
+            </ul>
+          </Card>
+        ) : null}
+
         <p className="text-sm text-muted-foreground">
-          {plural(list.total, 'pregunta', 'preguntas')}
+          {list.forPerson.length > 0 ? plural(list.total, 'otra pregunta', 'otras preguntas') : plural(list.total, 'pregunta', 'preguntas')}
           {list.pages > 1 ? ` · página ${f.page} de ${list.pages}` : ''}
           {f.view === 'sin-responder' && list.total > 0 ? ', la que más espera arriba.' : ''}
         </p>
@@ -325,7 +345,9 @@ export default async function QuestionsPage({ params, searchParams }: { params: 
                 : f.q || f.publicationId
                   ? 'No hay preguntas que coincidan.'
                   : f.view === 'sin-responder'
-                    ? 'No hay preguntas sin responder.'
+                    ? list.counts.forPerson > 0
+                      ? 'No hay otras preguntas sin responder.'
+                      : 'No hay preguntas sin responder.'
                     : 'Todavía no hay preguntas respondidas.'}
             </p>
           ) : (

@@ -16,7 +16,9 @@ import { resolveTitleLock, titleLockText } from '@/domain/title-lock';
 describe('pasos del pipeline', () => {
   it('van en orden, sin anterior al primero ni siguiente al último', () => {
     expect(nextStep('INFO')).toBe('TITLE');
-    expect(nextStep('DESCRIPTION')).toBe('PRICE');
+    expect(nextStep('DESCRIPTION')).toBe('QA');
+    expect(nextStep('QA')).toBe('PRICE');
+    expect(previousStep('PRICE')).toBe('QA');
     expect(nextStep('PRICE')).toBe('PUBLISH');
     expect(nextStep('PUBLISH')).toBeNull();
     expect(previousStep('TITLE')).toBe('INFO');
@@ -26,6 +28,7 @@ describe('pasos del pipeline', () => {
   it('cada paso tiene su nombre en la dirección, de ida y vuelta', () => {
     for (const step of PIPELINE_STEPS) expect(stepFromSlug(PIPELINE_STEP_SLUG[step])).toBe(step);
     expect(stepFromSlug('informacion')).toBe('INFO');
+    expect(stepFromSlug('preguntas')).toBe('QA');
     expect(stepFromSlug(' Titulo ')).toBe('TITLE');
     expect(stepFromSlug(['multimedia', 'titulo'])).toBe('MEDIA');
     expect(stepFromSlug('otro')).toBeNull();

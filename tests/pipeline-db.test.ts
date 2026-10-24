@@ -145,7 +145,7 @@ describe.skipIf(!url)('pipeline de una publicación', () => {
   it('al terminar el último paso queda corregida; si vuelve a entrar, empieza de cero', async () => {
     const a = await publication('Kit A', 'MLA1');
     await add([a.id]);
-    for (const step of ['INFO', 'TITLE', 'IMAGES', 'VIDEOS', 'MEDIA', 'DESCRIPTION', 'PRICE'] as const) {
+    for (const step of ['INFO', 'TITLE', 'IMAGES', 'VIDEOS', 'MEDIA', 'DESCRIPTION', 'QA', 'PRICE'] as const) {
       if (step === 'PRICE') await priced(a.id);
       await db.$transaction((tx) => advanceStep(tx, { publicationId: a.id, expected: step, userId }));
     }
@@ -205,7 +205,7 @@ describe.skipIf(!url)('pipeline de una publicación', () => {
 
   it('sin ID no se marca como corregida; con el ID cargado, sí', async () => {
     const r = await create({ storeId, newProduct: { name: 'Kit nuevo', productType: '', kind: 'INDIVIDUAL' } });
-    for (const step of ['INFO', 'TITLE', 'IMAGES', 'VIDEOS', 'MEDIA', 'DESCRIPTION', 'PRICE'] as const) {
+    for (const step of ['INFO', 'TITLE', 'IMAGES', 'VIDEOS', 'MEDIA', 'DESCRIPTION', 'QA', 'PRICE'] as const) {
       if (step === 'PRICE') await priced(r.publicationId);
       await db.$transaction((tx) => advanceStep(tx, { publicationId: r.publicationId, expected: step, userId }));
     }

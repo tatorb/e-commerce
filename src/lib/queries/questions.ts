@@ -34,6 +34,28 @@ export async function unansweredSummary(accountId: string) {
   return { count, oldestAt: oldest?.askedAt ?? null };
 }
 
+// Lo que trae cada pregunta de la lista.
+const QUESTION_SELECT = {
+  id: true,
+  text: true,
+  status: true,
+  askedAt: true,
+  answer: true,
+  answeredAt: true,
+  listingId: true,
+  buyerId: true,
+  answeredFrom: true,
+  answeredBy: { select: { name: true } },
+  draft: {
+    select: { text: true, kind: true, usedData: true, missing: true, needsPerson: true, reason: true, outcome: true, sentText: true, costUsd: true },
+  },
+  publication: { select: { id: true, title: true, externalId: true } },
+  store: { select: { name: true, channel: { select: { name: true } } } },
+} satisfies Prisma.BuyerQuestionSelect;
+
+// La propuesta que Claude dejó para que la revise una persona y todavía nadie usó.
+const FOR_PERSON = { needsPerson: true, outcome: null } satisfies Prisma.QuestionDraftWhereInput;
+
 export async function loadQuestions(accountId: string, f: QuestionFilters) {
   const base: Prisma.BuyerQuestionWhereInput = {
     store: { accountId },
@@ -49,33 +71,24 @@ export async function loadQuestions(accountId: string, f: QuestionFilters) {
         }
       : {}),
   };
-  const where: Prisma.BuyerQuestionWhereInput = { ...base, status: f.view === 'respondidas' ? 'ANSWERED' : 'UNANSWERED' };
-  const [questions, total, unanswered, answered, stores, publication] = await Promise.all([
+  // Sin responder, las que Claude dejó para una persona van aparte, arriba.
+  const forPersonWhere: Prisma.BuyerQuestionWhereInput = { ...base, status: 'UNANSWERED', draft: { is: FOR_PERSON } };
+  const where: Prisma.BuyerQuestionWhereInput =
+    f.view === 'respondidas' ? { ...base, status: 'ANSWERED' } : { ...base, status: 'UNANSWERED', NOT: { draft: { is: FOR_PERSON } } };
+  const [questions, forPerson, total, forPersonCount, unanswered, answered, stores, publication] = await Promise.all([
     prisma.buyerQuestion.findMany({
       where,
       // Sin responder, la que más espera arriba. Respondidas, la última arriba.
       orderBy: f.view === 'respondidas' ? [{ answeredAt: { sort: 'desc', nulls: 'last' } }, { askedAt: 'desc' }] : [{ askedAt: 'asc' }],
       skip: (f.page - 1) * QUESTIONS_PAGE_SIZE,
       take: QUESTIONS_PAGE_SIZE,
-      select: {
-        id: true,
-        text: true,
-        status: true,
-        askedAt: true,
-        answer: true,
-        answeredAt: true,
-        listingId: true,
-        buyerId: true,
-        answeredFrom: true,
-        answeredBy: { select: { name: true } },
-        draft: {
-          select: { text: true, kind: true, usedData: true, missing: true, needsPerson: true, reason: true, outcome: true, sentText: true, costUsd: true },
-        },
-        publication: { select: { id: true, title: true, externalId: true } },
-        store: { select: { name: true, channel: { select: { name: true } } } },
-      },
+      select: QUESTION_SELECT,
     }),
+    f.view === 'sin-responder' && f.page === 1
+      ? prisma.buyerQuestion.findMany({ where: forPersonWhere, orderBy: { askedAt: 'asc' }, take: QUESTIONS_PAGE_SIZE, select: QUESTION_SELECT })
+      : [],
     prisma.buyerQuestion.count({ where }),
+    f.view === 'sin-responder' ? prisma.buyerQuestion.count({ where: forPersonWhere }) : 0,
     prisma.buyerQuestion.count({ where: { ...base, status: 'UNANSWERED' } }),
     prisma.buyerQuestion.count({ where: { ...base, status: 'ANSWERED' } }),
     // Las conectadas, aunque haya que volver a conectarlas.
@@ -90,9 +103,10 @@ export async function loadQuestions(accountId: string, f: QuestionFilters) {
   ]);
   return {
     questions,
+    forPerson,
     total,
     pages: Math.min(Math.max(1, Math.ceil(total / QUESTIONS_PAGE_SIZE)), MAX_PAGE),
-    counts: { unanswered, answered },
+    counts: { unanswered, answered, forPerson: forPersonCount },
     stores: stores
       .filter((s) => getChannelQuestions(s.channel.kind) !== null)
       .map((s) => ({ id: s.id, name: s.name, channelName: s.channel.name, connected: s.connection?.status === 'ACTIVE', reader: s.questionReader })),

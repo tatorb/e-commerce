@@ -370,6 +370,12 @@ model Publication {
   // Las preguntas de los compradores en esta publicación, pegadas tal cual.
   // Las de la competencia son del producto (ProductResearch).
   ownQuestions      String?
+  // Paso Preguntas y respuestas: las preguntas frecuentes con su respuesta y
+  // las reglas de cuándo responde Claude y cuándo una persona, en HTML limpio.
+  faq               String?
+  answerRules       String?
+  // Claude manda solo las respuestas que está seguro de que están bien.
+  autoAnswer        Boolean              @default(false)
   // El precio publicado, como lo decide el paso Precio o lo trae el canal.
   price             Decimal?             @db.Decimal(14, 2)
   // Las cuotas: 0 sin cuotas, 1 la cuota promocionada, o 3, 6, 9 o 12 sin
@@ -682,6 +688,7 @@ enum PipelineStep {
   VIDEOS
   MEDIA
   DESCRIPTION
+  QA
   PRICE
   PUBLISH
 }
@@ -1459,6 +1466,8 @@ enum DraftOutcome {
   DISCARDED
   // Alguien respondió en el canal, fuera de la app.
   ANSWERED_IN_CHANNEL
+  // Claude la mandó solo: la publicación lo deja y estaba seguro.
+  SENT_AUTO
 }
 
 // La respuesta que propuso Claude para una pregunta, y qué se hizo con ella:

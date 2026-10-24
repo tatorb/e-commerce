@@ -402,6 +402,31 @@ export default async function PublicationPage({
         </SectionCard>
 
         <SectionCard
+          title="Preguntas y respuestas"
+          description={
+            p.autoAnswer
+              ? 'Claude manda solo las respuestas de las que está seguro. Las demás quedan en Preguntas para una persona.'
+              : 'Las respuestas que propone Claude las manda una persona.'
+          }
+          action={
+            <Link href={`/a/${account.slug}/pipeline/${p.id}?paso=preguntas`} className="text-xs font-medium underline-offset-4 hover:underline">
+              Editar en el Pipeline
+            </Link>
+          }
+        >
+          <SectionBody>
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-muted-foreground">Preguntas frecuentes</p>
+              <RichTextView html={p.faq} empty="Todavía no se cargó ninguna." />
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-muted-foreground">Cuándo responde una persona</p>
+              <RichTextView html={p.answerRules} empty="Sin reglas." />
+            </div>
+          </SectionBody>
+        </SectionCard>
+
+        <SectionCard
           title="Preguntas de los compradores"
           count={p._count.buyerQuestions}
           description={`Las que llegaron de ${channelName}, lo más nuevo primero.`}

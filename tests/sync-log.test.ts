@@ -14,6 +14,7 @@ import {
   type LogChange,
   type LogRead,
 } from '@/domain/sync-log';
+import { AUTO_ANSWERED } from '@/domain/answers';
 
 // El Registro: los filtros, cómo se cuenta cada cambio y la planilla. Los
 // datos son de prueba.
@@ -142,6 +143,9 @@ describe('el antes y el después', () => {
     expect(personOf({ ...change, user: null, kind: 'RENEWED' })).toBe('Automático');
     expect(personOf({ ...change, user: null, kind: 'REJECTED', message: 'Al renovarlo solo: no' })).toBe('Automático');
     expect(personOf({ ...change, user: null, kind: 'SENT' })).toBe('Alguien del equipo');
+    // Lo que Claude respondió solo.
+    expect(personOf({ ...change, user: null, kind: 'ANSWERED', field: 'question', message: AUTO_ANSWERED })).toBe('Automático');
+    expect(personOf({ ...change, user: null, kind: 'ANSWERED', field: 'question', message: null })).toBe('Alguien del equipo');
   });
 });
 

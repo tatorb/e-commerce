@@ -46,6 +46,9 @@ export function checkAnswer(text: string): string[] {
   return problems;
 }
 
+// El motivo en el Registro de una respuesta que Claude mandó solo.
+export const AUTO_ANSWERED = 'Claude la respondió automáticamente.';
+
 const normalized = (text: string) => text.replace(/\s+/g, ' ').trim().toLowerCase();
 
 /** Si se mandó la propuesta tal cual o se corrigió. */
@@ -57,7 +60,7 @@ export type PracticeCounts = Record<DraftOutcome | 'PENDING', number> & { total:
 
 /** Cómo le va a Claude: qué se hizo con sus propuestas y cuánto costaron. */
 export function practiceCounts(drafts: { outcome: DraftOutcome | null; costUsd: number }[]): PracticeCounts {
-  const counts: PracticeCounts = { SENT_AS_IS: 0, SENT_EDITED: 0, DISCARDED: 0, ANSWERED_IN_CHANNEL: 0, PENDING: 0, total: 0, costUsd: 0 };
+  const counts: PracticeCounts = { SENT_AS_IS: 0, SENT_EDITED: 0, SENT_AUTO: 0, DISCARDED: 0, ANSWERED_IN_CHANNEL: 0, PENDING: 0, total: 0, costUsd: 0 };
   for (const d of drafts) {
     counts[d.outcome ?? 'PENDING']++;
     counts.total++;

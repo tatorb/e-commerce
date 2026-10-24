@@ -4,12 +4,12 @@ import { requestAnswer, type AnswerInput, type AnswerResult } from '@/ai/answers
 import { ProposalError } from '@/ai/request';
 import { ConnectError } from '@/channels/connect';
 import { AnswerError, getChannelQuestions } from '@/channels/questions';
-import { checkAnswer, sentOutcome } from '@/domain/answers';
+import { AUTO_ANSWERED, checkAnswer, sentOutcome } from '@/domain/answers';
 import { comboParts } from '@/domain/combos';
 import { loadContent } from '@/domain/content';
 import { parseNameValueList } from '@/domain/name-value';
 import { isUniqueViolation } from '@/domain/publications';
-import { knowledgeForAi, withoutPrices } from '@/domain/research';
+import { knowledgeForAi, richTextToMarkdown, withoutPrices } from '@/domain/research';
 import { loadKnowledge } from '@/lib/queries/research';
 import { receiveNotice, saveQuestions } from '@/lib/buyer-questions';
 import { withAccessToken } from '@/lib/connections';
@@ -17,7 +17,8 @@ import { loadCombo } from '@/lib/queries/combos';
 
 // Responder las preguntas de los compradores desde la app: Claude propone una
 // respuesta con los datos de la app, una persona la manda como está, la
-// corrige o la descarta, y queda anotado qué se hizo con cada propuesta.
+// corrige o la descarta, y queda anotado qué se hizo con cada propuesta. En
+// las publicaciones que lo dejan, Claude manda solo las que está seguro.
 // Recibe la base y el pedido a Claude por parámetro para poder probarlo.
 
 type Db = PrismaClient;
@@ -39,7 +40,9 @@ async function loadQuestion(db: Db, accountId: string, questionId: string) {
     where: { id: questionId, store: { accountId } },
     include: {
       store: { select: { id: true, name: true, accountId: true, channel: { select: { kind: true, name: true } } } },
-      publication: { select: { id: true, title: true, description: true, attributes: true, productId: true } },
+      publication: {
+        select: { id: true, title: true, description: true, attributes: true, productId: true, faq: true, answerRules: true, autoAnswer: true },
+      },
       draft: true,
     },
   });
@@ -97,17 +100,23 @@ export async function answerInput(db: Db, q: LoadedQuestion): Promise<AnswerInpu
     content,
     combo,
     knowledge: knowledge ? knowledgeForAi(knowledge) : null,
+    faq: richTextToMarkdown(q.publication?.faq ?? null) || null,
+    rules: richTextToMarkdown(q.publication?.answerRules ?? null) || null,
     previous: withoutPriceAnswers(previous),
     examples: withoutPriceAnswers(examples).slice(0, EXAMPLES),
   };
 }
 
-export type DraftOutcomeResult = { ok: true; costUsd: number } | { ok: false; error: string; costUsd: number };
+export type DraftOutcomeResult = { ok: true; costUsd: number; sent: boolean } | { ok: false; error: string; costUsd: number };
 
-/** Pide a Claude una respuesta para la pregunta y la guarda. Si ya había una sin usar, la reemplaza. */
+/**
+ * Pide a Claude una respuesta para la pregunta y la guarda. Si ya había una sin
+ * usar, la reemplaza. Con auto, la manda sola si la publicación lo deja y
+ * Claude está seguro: lo usan las propuestas que llegan solas, no las que pide una persona.
+ */
 export async function draftAnswer(
   db: Db,
-  args: { accountId: string; questionId: string },
+  args: { accountId: string; questionId: string; auto?: boolean; now?: Date },
   request: Requester = requestAnswer,
 ): Promise<DraftOutcomeResult> {
   const q = await loadQuestion(db, args.accountId, args.questionId);
@@ -131,8 +140,9 @@ export async function draftAnswer(
     kind: o.kind,
     usedData: clean(o.usedData),
     missing: clean(o.missing),
-    needsPerson: o.needsPerson,
-    reason: o.reason.trim() || null,
+    // Si no está seguro, también la mira una persona.
+    needsPerson: o.needsPerson || !o.sure,
+    reason: o.reason.trim() || (o.sure ? null : 'Claude no está seguro de la respuesta.'),
     model: r.model,
     usage: json(r.usage),
   };
@@ -151,11 +161,32 @@ export async function draftAnswer(
       await update();
     }
   }
-  return { ok: true, costUsd: r.usage.costUsd };
+  // Lo que no se puede mandar, como un [COMPLETAR], también queda para una persona.
+  const sent = args.auto && q.publication?.autoAnswer && !data.needsPerson ? await sendAlone(db, args, data.text) : false;
+  return { ok: true, costUsd: r.usage.costUsd, sent };
 }
 
-/** Las que esperan respuesta sin propuesta, de las cuentas que proponen solas. */
-export async function questionsToDraft(db: Db, args: { accountId?: string; externalId?: string; max: number; now?: Date }) {
+/** Manda sola la respuesta. Si no puede, queda para una persona con el motivo. */
+async function sendAlone(db: Db, args: { accountId: string; questionId: string; now?: Date }, text: string): Promise<boolean> {
+  try {
+    const r = await sendAnswer(db, { ...args, text, userId: null, auto: true });
+    return r.sent;
+  } catch (e) {
+    if (!(e instanceof ReplyError)) console.error('No se pudo mandar sola la respuesta', e instanceof Error ? e.message : e);
+    const why = e instanceof ReplyError ? e.message : 'Se cortó la conexión con el canal.';
+    await db.questionDraft.update({ where: { questionId: args.questionId }, data: { needsPerson: true, reason: `No se pudo mandar sola. ${why}` } });
+    return false;
+  }
+}
+
+/**
+ * Las que esperan respuesta sin propuesta, de las cuentas que proponen solas o
+ * de las publicaciones en que Claude responde solo. Con autoAnswer, solo esas.
+ */
+export async function questionsToDraft(
+  db: Db,
+  args: { accountId?: string; externalId?: string; autoAnswer?: boolean; max: number; now?: Date },
+) {
   const since = new Date((args.now ?? new Date()).getTime() - AUTO_DRAFT_DAYS * 24 * 60 * 60 * 1000);
   return db.buyerQuestion.findMany({
     where: {
@@ -164,10 +195,13 @@ export async function questionsToDraft(db: Db, args: { accountId?: string; exter
       draft: { is: null },
       text: { not: '' },
       askedAt: { gte: since },
-      store: {
-        ...(args.accountId ? { accountId: args.accountId } : {}),
-        account: { OR: [{ questionSettings: { is: null } }, { questionSettings: { is: { autoDraft: true } } }] },
-      },
+      ...(args.accountId ? { store: { accountId: args.accountId } } : {}),
+      OR: [
+        ...(args.autoAnswer
+          ? []
+          : [{ store: { account: { OR: [{ questionSettings: { is: null } }, { questionSettings: { is: { autoDraft: true } } }] } } }]),
+        { publication: { is: { autoAnswer: true } } },
+      ],
     },
     orderBy: { askedAt: 'asc' },
     take: args.max,
@@ -191,11 +225,33 @@ export async function handleNotice(
   const pending = await questionsToDraft(db, { externalId: notice.questionId, max: 5, now: opts.now });
   let drafted = 0;
   for (const q of pending) {
-    const r = await draftAnswer(db, { accountId: q.store.accountId, questionId: q.id }, opts.request);
+    const r = await draftAnswer(db, { accountId: q.store.accountId, questionId: q.id, auto: true, now: opts.now }, opts.request);
     if (r.ok) drafted++;
     else console.error('No se pudo proponer la respuesta', r.error);
   }
   return { saved, drafted };
+}
+
+/**
+ * En la tarea de cada hora: las preguntas de las publicaciones en que Claude
+ * responde solo que llegaron sin el aviso del canal. Una por pedido, porque
+ * cada propuesta tarda; pending dice si quedan.
+ */
+export async function answerAlone(db: Db, opts: { aiReady: boolean; request?: Requester; now?: Date }): Promise<{ sent: number; pending: boolean }> {
+  if (!opts.aiReady) return { sent: 0, pending: false };
+  const list = await questionsToDraft(db, { autoAnswer: true, max: 2, now: opts.now });
+  const q = list[0];
+  if (!q) return { sent: 0, pending: false };
+  const r = await draftAnswer(db, { accountId: q.store.accountId, questionId: q.id, auto: true, now: opts.now }, opts.request).catch((e: unknown) => ({
+    ok: false as const,
+    error: e instanceof Error ? e.message : String(e),
+  }));
+  if (!r.ok) {
+    // Sin seguir en este pedido: la próxima hora prueba de nuevo.
+    console.error('No se pudo proponer la respuesta', r.error);
+    return { sent: 0, pending: false };
+  }
+  return { sent: r.sent ? 1 : 0, pending: list.length > 1 };
 }
 
 export type SendResult = { sent: true } | { sent: false; answer: string | null };
@@ -206,7 +262,7 @@ export type SendResult = { sent: true } | { sent: false; answer: string | null }
  */
 export async function sendAnswer(
   db: Db,
-  args: { accountId: string; questionId: string; text: string; userId: string | null; now?: Date },
+  args: { accountId: string; questionId: string; text: string; userId: string | null; auto?: boolean; now?: Date },
 ): Promise<SendResult> {
   const now = args.now ?? new Date();
   const q = await loadQuestion(db, args.accountId, args.questionId);
@@ -257,7 +313,7 @@ export async function sendAnswer(
       data: { status: 'ANSWERED', answer: text, answeredAt: now, answeredFrom: 'APP', answeredById: args.userId, readAt: now },
     });
     if (q.draft && !q.draft.outcome) {
-      const outcome = sentOutcome(q.draft.text, text);
+      const outcome = args.auto ? 'SENT_AUTO' : sentOutcome(q.draft.text, text);
       await tx.questionDraft.update({
         where: { id: q.draft.id },
         data: { outcome, sentText: outcome === 'SENT_EDITED' ? text : null, decidedAt: now, decidedById: args.userId },
@@ -265,7 +321,15 @@ export async function sendAnswer(
     }
     if (q.publicationId) {
       await tx.channelSyncChange.create({
-        data: { publicationId: q.publicationId, field: 'question', kind: 'ANSWERED', before: q.text, after: text, userId: args.userId },
+        data: {
+          publicationId: q.publicationId,
+          field: 'question',
+          kind: 'ANSWERED',
+          before: q.text,
+          after: text,
+          message: args.auto ? AUTO_ANSWERED : null,
+          userId: args.userId,
+        },
       });
     }
   });

@@ -24,6 +24,7 @@ import {
   MAX_INSIGHTS,
   questionsSchema,
   replaceInsights,
+  ResearchError,
   saveQuestions,
   updateResearch,
 } from '@/domain/research';
@@ -45,6 +46,7 @@ import { checkTitle, parsePastedSuggestions, wordKey } from '@/domain/titles';
 import { resolveExternalIds } from '@/lib/catalog';
 import { createPipelinePublication } from '@/domain/pipeline-publications';
 import { savePublicationCode } from '@/lib/publication-code';
+import { QaError, saveQaTexts } from '@/lib/publication-qa';
 import { loadCatalogData, saveCatalogData } from '@/lib/catalog-data';
 import { loadTitleContext } from '@/lib/queries/title-step';
 import { loadTitleRules } from '@/lib/title-rules';
@@ -623,6 +625,33 @@ const saveKnowledgeTool = defineTool({
   },
 });
 
+const savePublicationQaTool = defineTool({
+  name: 'save_publication_qa',
+  title: 'Guardar las preguntas frecuentes y las reglas de la publicación',
+  description:
+    'Guarda el paso Preguntas y respuestas de la publicación: las preguntas frecuentes con la respuesta de la tienda, y las reglas de cuándo responde Claude y cuándo una persona. Son de esta publicación, no del producto, y las lee la IA que responde a los compradores. Lo que no se manda queda como está; vacío lo borra. Reemplaza cada texto entero: si querés sumar algo, leé antes lo que hay con get_publication. Se escribe en Markdown simple: **negrita**, _cursiva_, listas con "- " o "1. ". Usá solo lo que te dijo la persona. Si Claude responde solo se prende y se apaga desde la app.',
+  input: z.object({
+    cuenta: accountArg,
+    publicacion: publicationArg,
+    preguntas_frecuentes: z.string().max(50_000).optional().describe('Cada pregunta con su respuesta.'),
+    reglas: z.string().max(50_000).optional().describe('Qué preguntas responde Claude y cuáles deja para una persona.'),
+  }),
+  readOnly: false,
+  destructive: true,
+  async run(ctx, args) {
+    const { account, id } = await target(ctx, args);
+    if (args.preguntas_frecuentes === undefined && args.reglas === undefined) throw new McpToolError('Mandá las preguntas frecuentes, las reglas o las dos.');
+    const html = (md: string | undefined) => (md === undefined ? undefined : (markdownToRichText(md) ?? ''));
+    try {
+      await saveQaTexts(ctx.db, { accountId: account.id, publicationId: id, faq: html(args.preguntas_frecuentes), rules: html(args.reglas) });
+    } catch (e) {
+      if (e instanceof QaError || e instanceof ResearchError) throw new McpToolError(e.message);
+      throw e;
+    }
+    return { listo: true, link_app: appLink(ctx, account, id) };
+  },
+});
+
 const saveQuestionsTool = defineTool({
   name: 'save_buyer_questions',
   title: 'Guardar las preguntas de los compradores',
@@ -1195,6 +1224,7 @@ export const WRITE_TOOLS = [
   saveManufacturerTool,
   saveClarificationsTool,
   saveKnowledgeTool,
+  savePublicationQaTool,
   saveQuestionsTool,
   saveInsightsTool,
   saveCatalogTool,

@@ -4,7 +4,7 @@ import type { PipelineExit, PipelineRemoval, PipelineStatus, PipelineStep } from
 // Pipeline: el recorrido por pasos para corregir una publicación de punta a
 // punta. Es por publicación y no sabe nada de ningún canal.
 
-export const PIPELINE_STEPS: PipelineStep[] = ['INFO', 'TITLE', 'IMAGES', 'VIDEOS', 'MEDIA', 'DESCRIPTION', 'PRICE', 'PUBLISH'];
+export const PIPELINE_STEPS: PipelineStep[] = ['INFO', 'TITLE', 'IMAGES', 'VIDEOS', 'MEDIA', 'DESCRIPTION', 'QA', 'PRICE', 'PUBLISH'];
 
 export const PIPELINE_STEP_LABEL: Record<PipelineStep, string> = {
   INFO: 'Información',
@@ -13,6 +13,7 @@ export const PIPELINE_STEP_LABEL: Record<PipelineStep, string> = {
   VIDEOS: 'Videos',
   MEDIA: 'Organización de multimedia',
   DESCRIPTION: 'Descripción',
+  QA: 'Preguntas y respuestas',
   PRICE: 'Precio',
   PUBLISH: 'Publicación',
 };
@@ -25,6 +26,7 @@ export const PIPELINE_STEP_SLUG: Record<PipelineStep, string> = {
   VIDEOS: 'videos',
   MEDIA: 'multimedia',
   DESCRIPTION: 'descripcion',
+  QA: 'preguntas',
   PRICE: 'precio',
   PUBLISH: 'publicacion',
 };

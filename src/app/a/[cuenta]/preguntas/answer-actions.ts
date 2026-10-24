@@ -49,7 +49,8 @@ export async function draftMissingAction(accountSlug: string): Promise<Result<{ 
   const list = await questionsToDraft(prisma, { accountId: ctx.account.id, max: DRAFTS_PER_STEP + 1 });
   let drafted = 0;
   for (const q of list.slice(0, DRAFTS_PER_STEP)) {
-    const r = await draftAnswer(prisma, { accountId: ctx.account.id, questionId: q.id });
+    // Se proponen solas: en las publicaciones que lo dejan, Claude manda las que está seguro.
+    const r = await draftAnswer(prisma, { accountId: ctx.account.id, questionId: q.id, auto: true });
     if (!r.ok) return { ok: false, error: r.error };
     drafted++;
   }

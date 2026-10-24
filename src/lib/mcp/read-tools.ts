@@ -328,7 +328,7 @@ const getPublication = defineTool({
   name: 'get_publication',
   title: 'Ver una publicación',
   description:
-    'Muestra todo de una publicación: la ficha del producto (la fuente de verdad), el título y la descripción actuales, los atributos del canal, los datos de catálogo del canal (cada campo del formulario de su categoría, con sus opciones y lo cargado), el puntaje y lo que le falta, la última medición, el estado e historial del pipeline, el candado del título, la competencia cargada y la investigación del producto: lo del fabricante, las aclaraciones para las imágenes, las preguntas de los compradores (las que llegaron solas del canal, con su respuesta, y las pegadas) y sus dolores y objeciones. La ficha y la investigación son del producto y las comparten todas sus publicaciones; las preguntas de la publicación propia son solo de esta.',
+    'Muestra todo de una publicación: la ficha del producto (la fuente de verdad), el título y la descripción actuales, los atributos del canal, los datos de catálogo del canal (cada campo del formulario de su categoría, con sus opciones y lo cargado), el puntaje y lo que le falta, la última medición, el estado e historial del pipeline, el candado del título, la competencia cargada, las preguntas frecuentes y las reglas de la publicación (paso Preguntas y respuestas) y la investigación del producto: lo del fabricante, las aclaraciones para las imágenes, las preguntas de los compradores (las que llegaron solas del canal, con su respuesta, y las pegadas) y sus dolores y objeciones. La ficha y la investigación son del producto y las comparten todas sus publicaciones; las preguntas de la publicación propia son solo de esta.',
   input: z.object({ cuenta: accountArg, publicacion: publicationArg }),
   readOnly: true,
   async run(ctx, args) {
@@ -342,6 +342,9 @@ const getPublication = defineTool({
           description: true,
           attributes: true,
           ownQuestions: true,
+          faq: true,
+          answerRules: true,
+          autoAnswer: true,
           buyerQuestions: {
             where: { status: { in: ['UNANSWERED', 'ANSWERED'] }, text: { not: '' } },
             orderBy: { askedAt: 'desc' },
@@ -458,6 +461,12 @@ const getPublication = defineTool({
           motivo: m.removal ? PIPELINE_REMOVAL_LABEL[m.removal] : null,
           salio_por: m.exitedBy?.name ?? null,
         })),
+      },
+      // El paso Preguntas y respuestas: es de la publicación, no del producto.
+      preguntas_y_respuestas: {
+        preguntas_frecuentes: richTextToMarkdown(pub.faq) || null,
+        cuando_responde_una_persona: richTextToMarkdown(pub.answerRules) || null,
+        claude_responde_solo: pub.autoAnswer,
       },
       competencia: pub.competitors.map(competitorOut),
       investigacion: {

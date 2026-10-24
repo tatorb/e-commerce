@@ -49,6 +49,8 @@ import { loadVideosStep } from '@/lib/videos';
 import { driveEmail, folderUrl, knownFolderId } from '@/lib/drive';
 import { DescriptionStep } from '@/components/pipeline/description/DescriptionStep';
 import { loadDescriptionStep } from '@/lib/descriptions';
+import { QaStep } from '@/components/pipeline/qa/QaStep';
+import { loadQaStep } from '@/lib/publication-qa';
 import { PriceStep } from '@/components/pipeline/price/PriceStep';
 import { latestPriceDecision, loadPriceStep, productPricing } from '@/lib/pricing';
 import { PriceDecisionCard } from '@/components/pipeline/price/PriceDecisionCard';
@@ -104,7 +106,7 @@ export default async function PipelineStepPage({
   const lock = pub.titleLock.locked ? titleLockText(pub.titleLock) : null;
   // Lo que usa el paso que se mira, pedido todo junto: con la base lejos, cada
   // consulta en fila suma una ida y vuelta.
-  const [ctx, info, images, channel, faces, media, create, videos, description, price, decision] = await Promise.all([
+  const [ctx, info, images, channel, faces, media, create, videos, description, qa, price, decision] = await Promise.all([
     // Información y Título usan la ficha, la competencia y lo leído del buscador.
     viewing === 'INFO' || viewing === 'TITLE' ? loadTitleContext(prisma, account.id, pub.id) : null,
     viewing === 'INFO'
@@ -144,6 +146,7 @@ export default async function PipelineStepPage({
     viewing === 'PUBLISH' && !pub.externalId ? createChecks(prisma, { accountId: account.id, publicationId: pub.id }) : null,
     viewing === 'VIDEOS' ? loadVideosStep(prisma, { accountId: account.id, publicationId: pub.id }) : null,
     viewing === 'DESCRIPTION' ? loadDescriptionStep(prisma, { accountId: account.id, publicationId: pub.id }) : null,
+    viewing === 'QA' ? loadQaStep(prisma, { accountId: account.id, publicationId: pub.id }) : null,
     // Precio usa el costo, los parámetros y la competencia; Información, el envío; Publicación, el precio decidido.
     viewing === 'PRICE' ? loadPriceStep(prisma, account.id, pub.id) : null,
     viewing === 'PUBLISH' ? latestPriceDecision(prisma, pub.id) : null,
@@ -316,6 +319,8 @@ export default async function PipelineStepPage({
             aiDisabledReason={isAiConfigured() ? null : AI_NOT_CONFIGURED}
             publicationHref={`/a/${account.slug}/publicaciones/${pub.id}`}
           />
+        ) : qa && viewing === 'QA' ? (
+          <QaStep accountSlug={account.slug} publicationId={pub.id} data={qa} aiReady={isAiConfigured()} timeZone={account.timezone} />
         ) : price && viewing === 'PRICE' ? (
           <PriceStep
             accountSlug={account.slug}

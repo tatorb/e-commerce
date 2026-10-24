@@ -1,6 +1,7 @@
 import Papa from 'papaparse';
 import type { ChannelStatus, SyncChangeKind, SyncStatus, SyncTrigger } from '@/generated/prisma/enums';
 import { CHANNEL_STATUS_LABEL } from './channel-status';
+import { AUTO_ANSWERED } from './answers';
 import { attributeDiff, FACE_FIELD_LABEL, isFaceField, priceFaceText, RENEWAL_FAILED, SYNC_CHANGE_LABEL } from './channel-sync';
 import { parseMedia, photoVariants, type PhotoRef } from './media';
 import { parseNameValueList, type NameValue } from './name-value';
@@ -270,8 +271,12 @@ export function readSummary(r: LogRead): string {
 export function personOf(e: LogEntry): string {
   if (e.user) return e.user;
   if (e.type === 'read') return e.trigger === 'SCHEDULE' ? 'Automático' : 'Alguien del equipo';
-  // Lo que llegó del canal y el descuento que la app renovó sola.
-  const automatic = e.kind === 'TAKEN' || e.kind === 'RENEWED' || (e.kind === 'REJECTED' && e.message?.startsWith(RENEWAL_FAILED));
+  // Lo que llegó del canal, el descuento que la app renovó sola y lo que Claude respondió solo.
+  const automatic =
+    e.kind === 'TAKEN' ||
+    e.kind === 'RENEWED' ||
+    (e.kind === 'REJECTED' && e.message?.startsWith(RENEWAL_FAILED)) ||
+    (e.kind === 'ANSWERED' && e.message === AUTO_ANSWERED);
   return automatic ? 'Automático' : 'Alguien del equipo';
 }
 

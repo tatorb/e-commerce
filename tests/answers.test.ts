@@ -5,8 +5,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@/generated/prisma/client';
 import { buildAnswerRequest, type AnswerInput, type AnswerOutput, type AnswerResult } from '@/ai/answers';
 import { ProposalError } from '@/ai/request';
-import { checkAnswer, practiceCounts, sentOutcome } from '@/domain/answers';
-import { discardDraft, draftAnswer, handleNotice, questionsToDraft, ReplyError, saveAnswerSettings, sendAnswer } from '@/lib/answers';
+import { AUTO_ANSWERED, checkAnswer, practiceCounts, sentOutcome } from '@/domain/answers';
+import { answerAlone, discardDraft, draftAnswer, handleNotice, questionsToDraft, ReplyError, saveAnswerSettings, sendAnswer } from '@/lib/answers';
+import { loadQaStep, QaError, saveQaTexts, setAutoAnswer } from '@/lib/publication-qa';
 import { readQuestions } from '@/lib/buyer-questions';
 import { encrypt } from '@/lib/crypto';
 
@@ -35,7 +36,7 @@ describe('antes de mandar una respuesta', () => {
         { outcome: 'SENT_EDITED', costUsd: 0.02 },
         { outcome: null, costUsd: 0.015 },
       ]),
-    ).toEqual({ SENT_AS_IS: 1, SENT_EDITED: 1, DISCARDED: 0, ANSWERED_IN_CHANNEL: 0, PENDING: 1, total: 3, costUsd: 0.05 });
+    ).toEqual({ SENT_AS_IS: 1, SENT_EDITED: 1, SENT_AUTO: 0, DISCARDED: 0, ANSWERED_IN_CHANNEL: 0, PENDING: 1, total: 3, costUsd: 0.05 });
   });
 });
 
@@ -49,6 +50,8 @@ const input: AnswerInput = {
   content: null,
   combo: null,
   knowledge: '- No incluye las juntas: se venden aparte.',
+  faq: '- ¿Hacen factura A? Sí, la pedís al comprar.',
+  rules: '- Si preguntan por otro motor, que responda una persona.',
   previous: [{ question: '¿Trae rulemán?', answer: 'Sí, trae rulemán.' }],
   examples: [],
 };
@@ -67,6 +70,13 @@ describe('el pedido a Claude', () => {
     expect(content).toContain('"Marca: Sachs"');
     expect(content).toContain('"lo_que_sabe_la_tienda_de_este_producto": "- No incluye las juntas: se venden aparte."');
     expect(r.system[0].text).toContain('lo que la tienda sabe de este producto');
+    // Las preguntas frecuentes van con los datos; las reglas, aparte.
+    expect(content).toContain('"preguntas_frecuentes_de_la_publicacion": "- ¿Hacen factura A? Sí, la pedís al comprar."');
+    expect(content).toContain('<reglas>\n- Si preguntan por otro motor, que responda una persona.\n</reglas>');
+    expect(r.system[0].text).toContain('Las reglas de la publicación');
+    expect(r.system[0].text).toContain('Marcá sure solo si');
+    // Sin reglas, lo dice.
+    expect(buildAnswerRequest({ ...input, rules: null }).messages[0].content).toContain('<reglas>\n(ninguna)\n</reglas>');
   });
 });
 
@@ -110,7 +120,7 @@ describe.skipIf(!url)('responder en la base', () => {
   const claude = (output: Partial<AnswerOutput> = {}, costUsd = 0.02) => async (i: AnswerInput): Promise<AnswerResult> => {
     asked.push(i);
     return {
-      output: { answer: '¡Hola! Sí, le sirve al Gol 1.6. Saludos, TIENDA.', kind: 'compatibilidad', usedData: ['Compatibilidades de la ficha'], missing: [], needsPerson: false, reason: '', ...output },
+      output: { answer: '¡Hola! Sí, le sirve al Gol 1.6. Saludos, TIENDA.', kind: 'compatibilidad', usedData: ['Compatibilidades de la ficha'], missing: [], needsPerson: false, sure: true, reason: '', ...output },
       usage: { model: 'claude-opus-5-5', inputTokens: 1000, outputTokens: 200, cacheWriteTokens: 0, cacheReadTokens: 0, costUsd },
       model: 'claude-opus-5-5',
     };
@@ -205,7 +215,7 @@ describe.skipIf(!url)('responder en la base', () => {
       data: { productId, storeKnowledge: '<ul><li>No incluye las juntas: se venden aparte.</li><li>Por cantidad, precio especial de $ 38000.</li></ul>' },
     });
     const target = await question('3');
-    expect(await draftAnswer(db, { accountId, questionId: target.id }, claude())).toEqual({ ok: true, costUsd: 0.02 });
+    expect(await draftAnswer(db, { accountId, questionId: target.id }, claude())).toEqual({ ok: true, costUsd: 0.02, sent: false });
     const sent = asked[0];
     expect(sent.settings).toEqual({ greeting: '¡Hola!', signature: 'Saludos, TIENDA.', tone: null, notes: 'Envíos por Mercado Envíos.' });
     expect(sent.previous).toEqual([{ question: '¿Trae rulemán?', answer: 'Sí, trae rulemán. Saludos.' }]);
@@ -313,6 +323,104 @@ describe.skipIf(!url)('responder en la base', () => {
     questions.push(q(8, 0, '¿Es nuevo?'));
     expect(await handleNotice(db, 'MERCADOLIBRE', notice(8), { aiReady: true, request: claude() })).toEqual({ saved: 1, drafted: 0 });
     expect(await questionsToDraft(db, { accountId, max: 10 })).toEqual([]);
+  });
+
+  const noticeOf = (id: number) => ({ topic: 'questions', resource: `/questions/${id}`, user_id: 7, application_id: 1234567890 });
+
+  it('el paso Preguntas y respuestas guarda los textos limpios y solo en su cuenta', async () => {
+    await saveQaTexts(db, { accountId, publicationId, faq: '<p onclick="x">¿Trae <b>juntas</b>?</p><script>alert(1)</script>' });
+    await saveQaTexts(db, { accountId, publicationId, rules: '<p>El stock lo responde una persona.</p>' });
+    const saved = () => db.publication.findUniqueOrThrow({ where: { id: publicationId }, select: { faq: true, answerRules: true, autoAnswer: true } });
+    expect(await saved()).toEqual({ faq: '<p>¿Trae <strong>juntas</strong>?</p>', answerRules: '<p>El stock lo responde una persona.</p>', autoAnswer: false });
+    // Vacío lo borra.
+    await saveQaTexts(db, { accountId, publicationId, faq: '<p> </p>' });
+    expect((await saved()).faq).toBeNull();
+    await expect(saveQaTexts(db, { accountId, publicationId, faq: `<p>${'x'.repeat(60_000)}</p>` })).rejects.toThrow(QaError);
+    // De otra cuenta, nada.
+    await expect(saveQaTexts(db, { accountId: 'otra', publicationId, faq: '<p>Hola</p>' })).rejects.toThrow('no existe en esta cuenta');
+    await expect(setAutoAnswer(db, { accountId: 'otra', publicationId, on: true })).rejects.toThrow(QaError);
+    expect((await saved()).autoAnswer).toBe(false);
+
+    const step = await loadQaStep(db, { accountId, publicationId });
+    expect(step).toMatchObject({
+      faq: null,
+      rules: '<p>El stock lo responde una persona.</p>',
+      autoAnswer: false,
+      channelName: 'Mercado Libre',
+      published: true,
+      canAnswer: true,
+      counts: { waiting: 1, forPerson: 0 },
+    });
+    expect(step.recent.map((r) => r.text)).toEqual(['¿Sirve para Gol 1.6?', '¿Cuánto sale?', '¿Trae rulemán?']);
+  });
+
+  it('en una publicación que responde sola, Claude manda las que está seguro y deja las demás para una persona', async () => {
+    await saveQaTexts(db, {
+      accountId,
+      publicationId,
+      faq: '<p>¿Hacen factura A? Sí, la pedís al comprar.</p>',
+      rules: '<ul><li><p>Si preguntan por otro motor, que responda una persona.</p></li></ul>',
+    });
+    await setAutoAnswer(db, { accountId, publicationId, on: true });
+    // Aunque la cuenta no proponga sola, en esta publicación sí.
+    await saveAnswerSettings(db, accountId, { greeting: '', signature: '', tone: '', notes: '', autoDraft: false });
+
+    questions.push(q(10, 0, '¿Hacen factura A?'));
+    const sure = claude({ answer: '¡Hola! Sí, la pedís al comprar. Saludos.' });
+    expect(await handleNotice(db, 'MERCADOLIBRE', noticeOf(10), { aiReady: true, request: sure })).toEqual({ saved: 1, drafted: 1 });
+    expect(asked[0]).toMatchObject({ faq: '¿Hacen factura A? Sí, la pedís al comprar.', rules: '- Si preguntan por otro motor, que responda una persona.' });
+    expect(answers).toEqual([{ question_id: 10, text: '¡Hola! Sí, la pedís al comprar. Saludos.' }]);
+    expect(await question('10')).toMatchObject({ status: 'ANSWERED', answeredFrom: 'APP', answeredById: null, draft: { outcome: 'SENT_AUTO', decidedById: null } });
+    expect(await db.channelSyncChange.findFirst({ where: { kind: 'ANSWERED' } })).toMatchObject({ publicationId, userId: null, message: AUTO_ANSWERED });
+
+    // No está seguro: queda para una persona.
+    questions.push(q(11, 0, '¿Sirve para el Gol Trend?'));
+    await handleNotice(db, 'MERCADOLIBRE', noticeOf(11), { aiReady: true, request: claude({ sure: false }) });
+    expect(await question('11')).toMatchObject({ status: 'UNANSWERED', draft: { needsPerson: true, reason: 'Claude no está seguro de la respuesta.', outcome: null } });
+    // Una regla pide una persona.
+    questions.push(q(12, 0, '¿Sirve para el motor AP?'));
+    await handleNotice(db, 'MERCADOLIBRE', noticeOf(12), { aiReady: true, request: claude({ needsPerson: true, sure: false, reason: 'Pregunta por otro motor.' }) });
+    expect(await question('12')).toMatchObject({ status: 'UNANSWERED', draft: { needsPerson: true, reason: 'Pregunta por otro motor.' } });
+    // Dice que está seguro pero dejó algo para completar: tampoco la manda.
+    questions.push(q(13, 0, '¿Cuándo llega?'));
+    await handleNotice(db, 'MERCADOLIBRE', noticeOf(13), { aiReady: true, request: claude({ answer: 'Llega en [COMPLETAR: plazo].' }) });
+    expect(await question('13')).toMatchObject({ status: 'UNANSWERED', draft: { needsPerson: true, reason: expect.stringContaining('[COMPLETAR]') } });
+    // El canal no la acepta: queda para una persona con el motivo, y en el Registro.
+    questions.push(q(14, 0, '¿Es original?'));
+    await handleNotice(db, 'MERCADOLIBRE', noticeOf(14), { aiReady: true, request: claude({ answer: 'Sí, RECHAZAR.' }) });
+    expect(await question('14')).toMatchObject({ status: 'UNANSWERED', draft: { needsPerson: true, reason: expect.stringContaining('no acepta links') } });
+    expect(await db.channelSyncChange.findFirst({ where: { kind: 'ANSWER_FAILED' } })).toMatchObject({ publicationId, userId: null });
+    expect(answers).toHaveLength(1);
+    expect((await loadQaStep(db, { accountId, publicationId })).counts).toEqual({ waiting: 5, forPerson: 4 });
+  });
+
+  it('sin el interruptor, o si la pide una persona desde Preguntas, Claude no manda nada', async () => {
+    await setAutoAnswer(db, { accountId, publicationId, on: true });
+    const target = await question('3');
+    expect(await draftAnswer(db, { accountId, questionId: target.id }, claude())).toEqual({ ok: true, costUsd: 0.02, sent: false });
+    await setAutoAnswer(db, { accountId, publicationId, on: false });
+    questions.push(q(15, 0, '¿Trae juntas?'));
+    await handleNotice(db, 'MERCADOLIBRE', noticeOf(15), { aiReady: true, request: claude() });
+    expect(answers).toEqual([]);
+    expect(await question('15')).toMatchObject({ status: 'UNANSWERED', draft: { needsPerson: false, outcome: null } });
+  });
+
+  it('la tarea de cada hora responde de a una las que llegaron sin el aviso', async () => {
+    expect(await answerAlone(db, { aiReady: true, request: claude() })).toEqual({ sent: 0, pending: false });
+    await setAutoAnswer(db, { accountId, publicationId, on: true });
+    questions.push(q(16, 1, '¿Tienen el kit?'));
+    await readQuestions(db, storeId, { budgetMs: 30_000 });
+    expect(await answerAlone(db, { aiReady: false, request: claude() })).toEqual({ sent: 0, pending: false });
+    expect(await answerAlone(db, { aiReady: true, request: claude() })).toEqual({ sent: 1, pending: true });
+    expect(await answerAlone(db, { aiReady: true, request: claude() })).toEqual({ sent: 1, pending: false });
+    expect(answers.map((a) => a.question_id)).toEqual([3, 16]);
+    // Si Claude falla, no corta la tarea.
+    questions.push(q(17, 0, '¿Hay en stock?'));
+    await readQuestions(db, storeId, { budgetMs: 30_000 });
+    const failing = async (): Promise<AnswerResult> => {
+      throw new Error('se cortó');
+    };
+    expect(await answerAlone(db, { aiReady: true, request: failing })).toEqual({ sent: 0, pending: false });
   });
 
   it('las preguntas viejas no se proponen solas', async () => {
