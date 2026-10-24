@@ -49,7 +49,7 @@ import { loadVideosStep } from '@/lib/videos';
 import { driveEmail, folderUrl, knownFolderId } from '@/lib/drive';
 import { DescriptionStep } from '@/components/pipeline/description/DescriptionStep';
 import { loadDescriptionStep } from '@/lib/descriptions';
-import { QaStep } from '@/components/pipeline/qa/QaStep';
+import { QaPanel } from '@/components/pipeline/qa/QaPanel';
 import { loadQaStep } from '@/lib/publication-qa';
 import { PriceStep } from '@/components/pipeline/price/PriceStep';
 import { latestPriceDecision, loadPriceStep, productPricing } from '@/lib/pricing';
@@ -320,7 +320,15 @@ export default async function PipelineStepPage({
             publicationHref={`/a/${account.slug}/publicaciones/${pub.id}`}
           />
         ) : qa && viewing === 'QA' ? (
-          <QaStep accountSlug={account.slug} publicationId={pub.id} data={qa} aiReady={isAiConfigured()} timeZone={account.timezone} />
+          <QaPanel
+            variant="step"
+            accountSlug={account.slug}
+            publicationId={pub.id}
+            data={qa}
+            aiReady={isAiConfigured()}
+            timeZone={account.timezone}
+            knowledgeHref={`${pageHref}?paso=${PIPELINE_STEP_SLUG.INFO}`}
+          />
         ) : price && viewing === 'PRICE' ? (
           <PriceStep
             accountSlug={account.slug}

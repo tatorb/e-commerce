@@ -30,6 +30,8 @@ import { QuantityEditor } from '@/components/publication/QuantityEditor';
 import { RichTextView } from '@/components/ui/rich-text-view';
 import { KnowledgeParts } from '@/components/products/KnowledgeParts';
 import { loadKnowledge } from '@/lib/queries/research';
+import { QaPanel } from '@/components/pipeline/qa/QaPanel';
+import { loadQaStep } from '@/lib/publication-qa';
 import { titleOrUntitled } from '@/domain/publication-title';
 import { fieldLabel } from '@/domain/sync-log';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
@@ -100,7 +102,7 @@ export default async function PublicationPage({
   const channelOf = channelInfo(p.store.channel.kind, p.store.channel.name);
   const productHref = `/a/${account.slug}/productos/${p.product.id}`;
   // Las otras publicaciones del mismo producto, para pasar de una a otra.
-  const [others, history, knowledge] = await Promise.all([
+  const [others, history, knowledge, qa] = await Promise.all([
     prisma.publication.findMany({
       where: { productId: p.product.id, id: { not: p.id } },
       orderBy: { createdAt: 'asc' },
@@ -115,6 +117,8 @@ export default async function PublicationPage({
       : Promise.resolve(null),
     // Lo que sabe la tienda: es del producto y la publicación lo hereda.
     loadKnowledge(prisma, p.product.id),
+    // Preguntas y respuestas: es de la publicación.
+    face !== 'historial' ? loadQaStep(prisma, { accountId: account.id, publicationId: p.id }) : Promise.resolve(null),
   ]);
   const pushable = summary.draft.filter((f) => data.publishable.includes(f));
 
@@ -401,30 +405,18 @@ export default async function PublicationPage({
           </SectionBody>
         </SectionCard>
 
-        <SectionCard
-          title="Preguntas y respuestas"
-          description={
-            p.autoAnswer
-              ? 'Claude manda solo las respuestas de las que está seguro. Las demás quedan en Preguntas para una persona.'
-              : 'Las respuestas que propone Claude las manda una persona.'
-          }
-          action={
-            <Link href={`/a/${account.slug}/pipeline/${p.id}?paso=preguntas`} className="text-xs font-medium underline-offset-4 hover:underline">
-              Editar en el Pipeline
-            </Link>
-          }
-        >
-          <SectionBody>
-            <div className="space-y-1">
-              <p className="text-xs font-medium text-muted-foreground">Preguntas frecuentes</p>
-              <RichTextView html={p.faq} empty="Todavía no se cargó ninguna." />
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs font-medium text-muted-foreground">Cuándo responde una persona</p>
-              <RichTextView html={p.answerRules} empty="Sin reglas." />
-            </div>
-          </SectionBody>
-        </SectionCard>
+        {qa ? (
+          <QaPanel
+            variant="publication"
+            accountSlug={account.slug}
+            publicationId={p.id}
+            data={qa}
+            aiReady={isAiConfigured()}
+            timeZone={tz}
+            knowledgeHref={`${productHref}?seccion=investigacion`}
+            stepHref={`/a/${account.slug}/pipeline/${p.id}?paso=preguntas`}
+          />
+        ) : null}
 
         <SectionCard
           title="Preguntas de los compradores"

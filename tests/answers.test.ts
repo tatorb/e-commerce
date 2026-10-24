@@ -6,7 +6,7 @@ import { PrismaClient } from '@/generated/prisma/client';
 import { buildAnswerRequest, type AnswerInput, type AnswerOutput, type AnswerResult } from '@/ai/answers';
 import { ProposalError } from '@/ai/request';
 import { AUTO_ANSWERED, checkAnswer, practiceCounts, sentOutcome } from '@/domain/answers';
-import { answerAlone, discardDraft, draftAnswer, handleNotice, questionsToDraft, ReplyError, saveAnswerSettings, sendAnswer } from '@/lib/answers';
+import { answerAlone, discardDraft, draftAnswer, handleNotice, questionsToDraft, ReplyError, saveAnswerSettings, sendAnswer, tryAnswer } from '@/lib/answers';
 import { loadQaStep, QaError, saveQaTexts, setAutoAnswer } from '@/lib/publication-qa';
 import { readQuestions } from '@/lib/buyer-questions';
 import { encrypt } from '@/lib/crypto';
@@ -403,6 +403,50 @@ describe.skipIf(!url)('responder en la base', () => {
     await handleNotice(db, 'MERCADOLIBRE', noticeOf(15), { aiReady: true, request: claude() });
     expect(answers).toEqual([]);
     expect(await question('15')).toMatchObject({ status: 'UNANSWERED', draft: { needsPerson: false, outcome: null } });
+  });
+
+  it('la prueba responde con lo escrito sin guardar y no guarda ni manda nada', async () => {
+    await saveQaTexts(db, { accountId, publicationId, faq: '<p>Vieja: no hacemos factura A.</p>' });
+    const unsaved = { faq: '<p>¿Hacen factura A? Sí, la pedís al comprar.</p>', rules: '<ul><li><p>El stock lo responde una persona.</p></li></ul>' };
+    const r = await tryAnswer(db, { accountId, publicationId, question: '  ¿TRAE rulemán?  ', ...unsaved }, claude({ answer: '¡Hola! Sí, trae rulemán.' }));
+    expect(r).toEqual({
+      ok: true,
+      result: { answer: '¡Hola! Sí, trae rulemán.', kind: 'compatibilidad', usedData: ['Compatibilidades de la ficha'], missing: [], alone: true, reason: null, costUsd: 0.02 },
+    });
+    expect(asked[0]).toMatchObject({
+      question: '¿TRAE rulemán?',
+      faq: '¿Hacen factura A? Sí, la pedís al comprar.',
+      rules: '- El stock lo responde una persona.',
+      publication: { title: 'Kit Embrague Gol 1.6' },
+    });
+    // La misma pregunta ya respondida no se le pasa: así se ve qué respondería hoy.
+    expect(asked[0].previous).toEqual([]);
+    // Nada quedó guardado ni se mandó.
+    expect(await db.questionDraft.count()).toBe(0);
+    expect(answers).toEqual([]);
+    expect((await db.publication.findUniqueOrThrow({ where: { id: publicationId }, select: { faq: true } })).faq).toBe('<p>Vieja: no hacemos factura A.</p>');
+
+    // Si no está seguro, si falta un dato o si tiene datos de contacto, la dejaría para una persona.
+    const empty = { faq: '', rules: '' };
+    const notSure = await tryAnswer(db, { accountId, publicationId, question: '¿Hay stock?', ...empty }, claude({ sure: false }));
+    expect(notSure).toMatchObject({ ok: true, result: { alone: false, reason: 'Claude no está seguro de la respuesta.' } });
+    expect(asked[1]).toMatchObject({ faq: null, rules: null });
+    const fill = await tryAnswer(db, { accountId, publicationId, question: '¿Cuándo llega?', ...empty }, claude({ answer: 'Llega en [COMPLETAR: plazo].' }));
+    expect(fill).toMatchObject({ ok: true, result: { alone: false, reason: expect.stringContaining('[COMPLETAR]') } });
+    const byRule = await tryAnswer(db, { accountId, publicationId, question: '¿Sirve para el AP?', ...empty }, claude({ needsPerson: true, reason: 'Otro motor.' }));
+    expect(byRule).toMatchObject({ ok: true, result: { alone: false, reason: 'Otro motor.' } });
+
+    // Lo que no se puede probar.
+    await expect(tryAnswer(db, { accountId, publicationId, question: '  ', ...empty }, claude())).rejects.toThrow('Escribí una pregunta.');
+    await expect(tryAnswer(db, { accountId: 'otra', publicationId, question: '¿Hola?', ...empty }, claude())).rejects.toThrow(ReplyError);
+    const failing = async (): Promise<AnswerResult> => {
+      throw new ProposalError('Claude está recibiendo demasiados pedidos.', null, true);
+    };
+    expect(await tryAnswer(db, { accountId, publicationId, question: '¿Hola?', ...empty }, failing)).toEqual({
+      ok: false,
+      error: 'Claude está recibiendo demasiados pedidos.',
+      costUsd: 0,
+    });
   });
 
   it('la tarea de cada hora responde de a una las que llegaron sin el aviso', async () => {

@@ -1,6 +1,6 @@
 import { Prisma, type PrismaClient } from '@/generated/prisma/client';
 import type { ChannelKind } from '@/generated/prisma/enums';
-import { requestAnswer, type AnswerInput, type AnswerResult } from '@/ai/answers';
+import { requestAnswer, type AnswerInput, type AnswerOutput, type AnswerResult } from '@/ai/answers';
 import { ProposalError } from '@/ai/request';
 import { ConnectError } from '@/channels/connect';
 import { AnswerError, getChannelQuestions } from '@/channels/questions';
@@ -9,7 +9,7 @@ import { comboParts } from '@/domain/combos';
 import { loadContent } from '@/domain/content';
 import { parseNameValueList } from '@/domain/name-value';
 import { isUniqueViolation } from '@/domain/publications';
-import { knowledgeForAi, richTextToMarkdown, withoutPrices } from '@/domain/research';
+import { cleanRichText, knowledgeForAi, richTextToMarkdown, withoutPrices } from '@/domain/research';
 import { loadKnowledge } from '@/lib/queries/research';
 import { receiveNotice, saveQuestions } from '@/lib/buyer-questions';
 import { withAccessToken } from '@/lib/connections';
@@ -30,6 +30,9 @@ const PREVIOUS = 20;
 const EXAMPLES = 8;
 const EARLIER = 5;
 
+// El motivo cuando Claude no está seguro y no dijo por qué.
+const NOT_SURE = 'Claude no está seguro de la respuesta.';
+
 /** No se pudo responder: el motivo, para la pantalla. */
 export class ReplyError extends Error {}
 
@@ -40,9 +43,7 @@ async function loadQuestion(db: Db, accountId: string, questionId: string) {
     where: { id: questionId, store: { accountId } },
     include: {
       store: { select: { id: true, name: true, accountId: true, channel: { select: { kind: true, name: true } } } },
-      publication: {
-        select: { id: true, title: true, description: true, attributes: true, productId: true, faq: true, answerRules: true, autoAnswer: true },
-      },
+      publication: { select: PUBLICATION_SELECT },
       draft: true,
     },
   });
@@ -54,13 +55,67 @@ type LoadedQuestion = NonNullable<Awaited<ReturnType<typeof loadQuestion>>>;
 const withoutPriceAnswers = (list: { text: string; answer: string | null }[]) =>
   list.flatMap((q) => (q.answer && withoutPrices(q.answer).hidden === 0 ? [{ question: q.text, answer: q.answer }] : []));
 
+const PUBLICATION_SELECT = {
+  id: true,
+  title: true,
+  description: true,
+  attributes: true,
+  productId: true,
+  faq: true,
+  answerRules: true,
+  autoAnswer: true,
+} as const;
+
+// Una pregunta para responder, real o de prueba.
+type Asked = {
+  accountId: string;
+  storeId: string;
+  storeName: string;
+  channelName: string;
+  listingId: string;
+  publication: {
+    id: string;
+    title: string | null;
+    description: string | null;
+    attributes: Prisma.JsonValue;
+    productId: string;
+    faq: string | null;
+    answerRules: string | null;
+  } | null;
+  text: string;
+  // La pregunta real, para no pasarle su propia respuesta. Null en una prueba:
+  // se saltean las respuestas anteriores a la misma pregunta.
+  id: string | null;
+  buyerId: string | null;
+  askedAt: Date;
+};
+
 /** Lo que recibe Claude para proponer la respuesta. */
 export async function answerInput(db: Db, q: LoadedQuestion): Promise<AnswerInput> {
+  return inputFor(db, {
+    accountId: q.store.accountId,
+    storeId: q.storeId,
+    storeName: q.store.name,
+    channelName: q.store.channel.name,
+    listingId: q.listingId,
+    publication: q.publication,
+    text: q.text,
+    id: q.id,
+    buyerId: q.buyerId,
+    askedAt: q.askedAt,
+  });
+}
+
+async function inputFor(db: Db, q: Asked): Promise<AnswerInput> {
   const answered = { storeId: q.storeId, status: 'ANSWERED' as const, answer: { not: null }, text: { not: '' } };
   const [settings, previous, examples, earlier, content, combo, knowledge] = await Promise.all([
-    db.questionSettings.findUnique({ where: { accountId: q.store.accountId } }),
+    db.questionSettings.findUnique({ where: { accountId: q.accountId } }),
     db.buyerQuestion.findMany({
-      where: { ...answered, listingId: q.listingId, id: { not: q.id } },
+      where: {
+        ...answered,
+        listingId: q.listingId,
+        ...(q.id ? { id: { not: q.id } } : { NOT: { text: { equals: q.text.trim(), mode: 'insensitive' as const } } }),
+      },
       orderBy: { askedAt: 'desc' },
       take: PREVIOUS,
       select: { text: true, answer: true },
@@ -84,8 +139,8 @@ export async function answerInput(db: Db, q: LoadedQuestion): Promise<AnswerInpu
     q.publication ? loadKnowledge(db, q.publication.productId) : null,
   ]);
   return {
-    channelName: q.store.channel.name,
-    storeName: q.store.name,
+    channelName: q.channelName,
+    storeName: q.storeName,
     settings: {
       greeting: settings?.greeting ?? null,
       signature: settings?.signature ?? null,
@@ -104,6 +159,20 @@ export async function answerInput(db: Db, q: LoadedQuestion): Promise<AnswerInpu
     rules: richTextToMarkdown(q.publication?.answerRules ?? null) || null,
     previous: withoutPriceAnswers(previous),
     examples: withoutPriceAnswers(examples).slice(0, EXAMPLES),
+  };
+}
+
+const cleanList = (list: string[]) => [...new Set(list.map((s) => s.trim()).filter(Boolean))];
+
+/** La respuesta de Claude, y si tiene que mirarla una persona: también cuando no está seguro. */
+function decided(o: AnswerOutput) {
+  return {
+    text: o.answer.trim(),
+    kind: o.kind,
+    usedData: cleanList(o.usedData),
+    missing: cleanList(o.missing),
+    needsPerson: o.needsPerson || !o.sure,
+    reason: o.reason.trim() || (o.sure ? null : NOT_SURE),
   };
 }
 
@@ -133,19 +202,7 @@ export async function draftAnswer(
     if (e instanceof ProposalError) return { ok: false, error: e.message, costUsd: e.usage?.costUsd ?? 0 };
     throw e;
   }
-  const o = r.output;
-  const clean = (list: string[]) => [...new Set(list.map((s) => s.trim()).filter(Boolean))];
-  const data = {
-    text: o.answer.trim(),
-    kind: o.kind,
-    usedData: clean(o.usedData),
-    missing: clean(o.missing),
-    // Si no está seguro, también la mira una persona.
-    needsPerson: o.needsPerson || !o.sure,
-    reason: o.reason.trim() || (o.sure ? null : 'Claude no está seguro de la respuesta.'),
-    model: r.model,
-    usage: json(r.usage),
-  };
+  const data = { ...decided(r.output), model: r.model, usage: json(r.usage) };
   const update = () =>
     db.questionDraft.update({
       where: { questionId: q.id },
@@ -164,6 +221,71 @@ export async function draftAnswer(
   // Lo que no se puede mandar, como un [COMPLETAR], también queda para una persona.
   const sent = args.auto && q.publication?.autoAnswer && !data.needsPerson ? await sendAlone(db, args, data.text) : false;
   return { ok: true, costUsd: r.usage.costUsd, sent };
+}
+
+export type TryResult = {
+  answer: string;
+  kind: string;
+  usedData: string[];
+  missing: string[];
+  // Si la mandaría sola con el interruptor prendido. Si no, por qué la deja para una persona.
+  alone: boolean;
+  reason: string | null;
+  costUsd: number;
+};
+
+/**
+ * Una pregunta de prueba en una publicación: Claude responde con lo mismo que
+ * usa de verdad, pero con las preguntas frecuentes y las reglas que llegan,
+ * aunque no estén guardadas. No se guarda ni se manda nada.
+ */
+export async function tryAnswer(
+  db: Db,
+  args: { accountId: string; publicationId: string; question: string; faq: string; rules: string; now?: Date },
+  request: Requester = requestAnswer,
+): Promise<{ ok: true; result: TryResult } | { ok: false; error: string; costUsd: number }> {
+  const text = args.question.replace(/\r\n?/g, '\n').trim();
+  if (!text) throw new ReplyError('Escribí una pregunta.');
+  const pub = await db.publication.findFirst({
+    where: { id: args.publicationId, product: { accountId: args.accountId } },
+    select: { ...PUBLICATION_SELECT, externalId: true, store: { select: { id: true, name: true, channel: { select: { name: true } } } } },
+  });
+  if (!pub) throw new ReplyError('La publicación no está en la cuenta.');
+  const input = await inputFor(db, {
+    accountId: args.accountId,
+    storeId: pub.store.id,
+    storeName: pub.store.name,
+    channelName: pub.store.channel.name,
+    // Sin publicar, todavía no tiene preguntas.
+    listingId: pub.externalId ?? '',
+    publication: { ...pub, faq: cleanRichText(args.faq), answerRules: cleanRichText(args.rules) },
+    text,
+    id: null,
+    buyerId: null,
+    askedAt: args.now ?? new Date(),
+  });
+  let r: AnswerResult;
+  try {
+    r = await request(input);
+  } catch (e) {
+    if (e instanceof ProposalError) return { ok: false, error: e.message, costUsd: e.usage?.costUsd ?? 0 };
+    throw e;
+  }
+  const d = decided(r.output);
+  // Lo mismo que se revisa antes de mandarla sola.
+  const problems = d.needsPerson ? [] : checkAnswer(d.text);
+  return {
+    ok: true,
+    result: {
+      answer: d.text,
+      kind: d.kind,
+      usedData: d.usedData,
+      missing: d.missing,
+      alone: !d.needsPerson && problems.length === 0,
+      reason: d.needsPerson ? d.reason : problems.join(' ') || null,
+      costUsd: r.usage.costUsd,
+    },
+  };
 }
 
 /** Manda sola la respuesta. Si no puede, queda para una persona con el motivo. */
