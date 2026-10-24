@@ -35,6 +35,8 @@ describe('texto con formato', () => {
       '<p>Texto link </p>',
     );
     expect(cleanRichText('<h1>Título</h1>')).toBe('<p>Título</p>');
+    // Los renglones vacíos del final no se guardan.
+    expect(cleanRichText('<p>Hola</p><ul><li><p>uno</p></li></ul><p></p><p><br /></p>')).toBe('<p>Hola</p><ul><li><p>uno</p></li></ul>');
   });
 
   it('vacío da null, y no acepta textos enormes', () => {

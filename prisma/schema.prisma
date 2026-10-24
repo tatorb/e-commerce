@@ -772,6 +772,9 @@ model ProductResearch {
   manufacturerText       String?
   // Texto con formato, en HTML limpio: solo negrita, cursiva y listas.
   clarifications         String?
+  // Lo que sabe la tienda del producto: contexto, preguntas frecuentes,
+  // condiciones que pueden surgir y sus aclaraciones. Texto con formato, como clarifications.
+  storeKnowledge         String?
   competitorQuestions    String?
   updatedById            String?
   updatedBy              User?    @relation(fields: [updatedById], references: [id], onDelete: SetNull)

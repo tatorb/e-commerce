@@ -165,7 +165,15 @@ export default async function ProductPage({
                   {newPublication('Agregar publicación')}
                 </div>
               ),
-            investigacion: <ProductResearchPanel research={research} editHref={stepHref ? stepHref('informacion') : null} />,
+            investigacion: (
+              <ProductResearchPanel
+                accountSlug={account.slug}
+                productId={product.id}
+                publications={pubs.length}
+                research={research}
+                editHref={stepHref ? stepHref('informacion') : null}
+              />
+            ),
             fotos: <ProductMediaPanel photos={photos} videos={videos} timeZone={account.timezone} stepHref={stepHref} />,
             combos: isCombo ? (
               <ComboItemsCard accountSlug={account.slug} comboId={product.id} initial={combo.items} />

@@ -23,7 +23,7 @@ import { publicAppUrl } from '@/lib/public-url';
 import { removeStored, storageError } from '@/lib/stored-files';
 
 // Lo que se guarda desde las tarjetas nuevas del paso Información: fabricante,
-// aclaraciones, preguntas, dolores y objeciones. Todo es del producto, salvo
+// lo que sabe la tienda, aclaraciones, preguntas, dolores y objeciones. Todo es del producto, salvo
 // las preguntas en la publicación propia.
 
 type Result = { ok: true; message?: string } | { ok: false; error: string };
@@ -80,6 +80,24 @@ export async function saveClarificationsAction(accountSlug: string, publicationI
   if (!productId) return NOT_FOUND;
   return guard(accountSlug, async () => {
     await updateResearch(prisma, { productId, userId: user.id, data: { clarifications: cleanRichText(String(html ?? '')) } });
+    return 'Guardado.';
+  });
+}
+
+/**
+ * Lo que sabe la tienda del producto. Se guarda desde el paso Información, con
+ * la publicación, o desde la pestaña Investigación del producto.
+ */
+export async function saveKnowledgeAction(accountSlug: string, target: { publicationId?: string; productId?: string }, html: string): Promise<Result> {
+  const user = await requireUser();
+  const productId = target.publicationId
+    ? await productOf(accountSlug, String(target.publicationId))
+    : target.productId
+      ? ((await prisma.product.findFirst({ where: { id: String(target.productId), account: { slug: accountSlug } }, select: { id: true } }))?.id ?? null)
+      : null;
+  if (!productId) return { ok: false, error: 'El producto no existe en esta cuenta.' };
+  return guard(accountSlug, async () => {
+    await updateResearch(prisma, { productId, userId: user.id, data: { storeKnowledge: cleanRichText(String(html ?? '')) } });
     return 'Guardado.';
   });
 }

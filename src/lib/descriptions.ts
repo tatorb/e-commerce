@@ -82,7 +82,7 @@ export async function descriptionInput(db: Db, accountId: string, publicationId:
     loadDescriptionSettings(db, accountId),
     loadContent(db, pub.productId, pub.id),
     loadCombo(db, pub.productId).then(comboParts),
-    db.productResearch.findUnique({ where: { productId: pub.productId }, select: { manufacturerText: true, clarifications: true } }),
+    db.productResearch.findUnique({ where: { productId: pub.productId }, select: { manufacturerText: true, clarifications: true, storeKnowledge: true } }),
     db.buyerInsight.findMany({ where: { productId: pub.productId }, orderBy: [{ position: 'asc' }, { createdAt: 'asc' }], select: { kind: true, text: true } }),
     db.buyerQuestion.findMany({
       where: { publicationId: pub.id, text: { not: '' } },
@@ -109,6 +109,7 @@ export async function descriptionInput(db: Db, accountId: string, publicationId:
     research: {
       manufacturer: noPrices(research?.manufacturerText ?? null),
       clarifications: noPrices(richTextToMarkdown(research?.clarifications ?? null)),
+      knowledge: noPrices(richTextToMarkdown(research?.storeKnowledge ?? null)),
       pains: insights.filter((i) => i.kind === 'PAIN').map((i) => i.text),
       objections: insights.filter((i) => i.kind === 'OBJECTION').map((i) => i.text),
     },

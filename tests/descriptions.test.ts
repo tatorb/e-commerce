@@ -70,7 +70,13 @@ describe('el pedido a Claude', () => {
     publication: { title: 'Kit de embrague Ford Ka', currentDescription: 'Texto actual', catalog: [{ name: 'Marca', value: 'SKF' }] },
     content,
     combo: null,
-    research: { manufacturer: 'Del fabricante', clarifications: null, pains: ['No saben si sirve para el 1.0'], objections: [] },
+    research: {
+      manufacturer: 'Del fabricante',
+      clarifications: null,
+      knowledge: 'La garantía vale con la factura del taller.',
+      pains: ['No saben si sirve para el 1.0'],
+      objections: [],
+    },
     questions: [{ question: '¿Sirve para Ka 1.0?', answer: 'No, solo 1.6.' }],
   };
 
@@ -83,6 +89,7 @@ describe('el pedido a Claude', () => {
     const user = req.messages[0].content;
     expect(user).toContain('"numero_de_pieza": "PD-1"');
     expect(user).toContain('No saben si sirve para el 1.0');
+    expect(user).toContain('"lo_que_sabe_la_tienda": "La garantía vale con la factura del taller."');
     expect(user).toContain('¿Sirve para Ka 1.0?');
     expect(user).toContain('Texto actual');
     expect(user).not.toContain('NOTA INTERNA');

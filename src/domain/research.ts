@@ -4,8 +4,8 @@ import type { Prisma } from '@/generated/prisma/client';
 import type { InsightKind } from '@/generated/prisma/enums';
 
 // La investigación del producto que se junta en el paso Información: lo del
-// fabricante, las aclaraciones para las imágenes, las preguntas de los
-// compradores y los dolores y objeciones. Es del producto, como la ficha,
+// fabricante, lo que sabe la tienda, las aclaraciones para las imágenes, las
+// preguntas de los compradores y los dolores y objeciones. Es del producto, como la ficha,
 // salvo las preguntas en la publicación propia, que son de cada publicación.
 // No sabe nada de canales.
 
@@ -57,7 +57,10 @@ export function cleanRichText(html: string): string | null {
     allowedTags: RICH_TAGS,
     allowedAttributes: {},
     transformTags: { b: 'strong', i: 'em', div: 'p', h1: 'p', h2: 'p', h3: 'p', h4: 'p', h5: 'p', h6: 'p' },
-  }).trim();
+  })
+    .trim()
+    // Los renglones vacíos del final no cuentan.
+    .replace(/(<p>(\s|<br \/>)*<\/p>)+$/, '');
   const text = sanitizeHtml(clean, { allowedTags: [], allowedAttributes: {} }).trim();
   if (text === '') return null;
   if (clean.length > MAX_RICH_TEXT) throw new ResearchError('El texto es demasiado largo.');
@@ -71,6 +74,7 @@ type ResearchFields = {
   manufacturerProductUrl?: string | null;
   manufacturerText?: string | null;
   clarifications?: string | null;
+  storeKnowledge?: string | null;
   competitorQuestions?: string | null;
 };
 

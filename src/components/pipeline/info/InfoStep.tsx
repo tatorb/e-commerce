@@ -11,6 +11,7 @@ import { CatalogCard } from './CatalogCard';
 import { ClarificationsCard } from './ClarificationsCard';
 import { CompetitorsCard } from './CompetitorsCard';
 import type { CompetitorRow } from './CompetitorsForm';
+import { KnowledgeCard } from './KnowledgeCard';
 import { ManufacturerCard } from './ManufacturerCard';
 import { ProductInfoForm } from './ProductInfoForm';
 import { withSharedNote } from './SharedNote';
@@ -36,7 +37,7 @@ function competitorRow(c: TitleContext['competitors'][number]): CompetitorRow {
 }
 
 // Paso Información, en este orden: los datos de la ficha (y los del combo), lo
-// del fabricante, los datos de catálogo del canal, la competencia, los dolores
+// del fabricante, lo que sabe la tienda, los datos de catálogo del canal, la competencia, los dolores
 // del comprador, las aclaraciones para las imágenes y lo que se fue juntando
 // en el paso Título. La ficha y la investigación son del producto: las
 // comparten todas sus publicaciones, y las tarjetas lo avisan. Los datos de
@@ -112,6 +113,7 @@ export function InfoStep({
         files={research.files.map((f) => ({ id: f.id, kind: f.kind, name: f.name, size: f.size }))}
         driveReady={driveReady}
       />
+      <KnowledgeCard accountSlug={accountSlug} target={{ publicationId }} sharedWith={ctx.sharedWith} initial={s(r?.storeKnowledge)} />
       {catalog ? (
         <CatalogCard
           accountSlug={accountSlug}

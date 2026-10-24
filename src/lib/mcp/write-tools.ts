@@ -608,6 +608,21 @@ const saveClarificationsTool = defineTool({
   },
 });
 
+const saveKnowledgeTool = defineTool({
+  name: 'save_store_knowledge',
+  title: 'Guardar lo que sabe la tienda del producto',
+  description:
+    'Guarda lo que sabe la tienda del producto: contexto, preguntas frecuentes, condiciones que pueden surgir y sus aclaraciones. Es del producto: lo comparten todas sus publicaciones, y lo usan las respuestas a los compradores y la descripción. Reemplaza el texto entero: si querés sumar algo, leé antes lo que hay con get_publication. Se escribe en Markdown simple: **negrita**, _cursiva_, listas con "- " o "1. ". Usá solo lo que te dijo la persona.',
+  input: z.object({ cuenta: accountArg, publicacion: publicationArg, texto: z.string().max(50_000).describe('Vacío lo borra.') }),
+  readOnly: false,
+  destructive: true,
+  async run(ctx, args) {
+    const { account, id, productId } = await productTarget(ctx, args);
+    await updateResearch(ctx.db, { productId, userId: ctx.userId, data: { storeKnowledge: markdownToRichText(args.texto) } });
+    return { listo: true, link_app: appLink(ctx, account, id) };
+  },
+});
+
 const saveQuestionsTool = defineTool({
   name: 'save_buyer_questions',
   title: 'Guardar las preguntas de los compradores',
@@ -1179,6 +1194,7 @@ export const WRITE_TOOLS = [
   saveCompetitorsTool,
   saveManufacturerTool,
   saveClarificationsTool,
+  saveKnowledgeTool,
   saveQuestionsTool,
   saveInsightsTool,
   saveCatalogTool,

@@ -3,11 +3,13 @@ import { ExternalLink, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SectionBody, SectionCard } from '@/components/ui/section-card';
 import type { ResearchData } from '@/lib/queries/research';
+import { KnowledgeCard } from '@/components/pipeline/info/KnowledgeCard';
 
 // La investigación del producto, para leerla de un vistazo: lo del
 // fabricante, las aclaraciones para las imágenes, las preguntas de la
 // competencia y los dolores y objeciones de los compradores. Es del producto y
-// la comparten todas sus publicaciones; se carga en el paso Información.
+// la comparten todas sus publicaciones; se carga en el paso Información. Lo
+// que sabe la tienda se edita también acá, sin pasar por el pipeline.
 
 const Empty = () => <p className="text-sm text-muted-foreground">Sin cargar.</p>;
 
@@ -26,13 +28,26 @@ function Items({ list }: { list: { id: string; text: string }[] }) {
   );
 }
 
-export function ProductResearchPanel({ research, editHref }: { research: ResearchData; editHref: string | null }) {
+export function ProductResearchPanel({
+  accountSlug,
+  productId,
+  publications,
+  research,
+  editHref,
+}: {
+  accountSlug: string;
+  productId: string;
+  // Cuántas publicaciones tiene el producto, para avisar que lo comparten.
+  publications: number;
+  research: ResearchData;
+  editHref: string | null;
+}) {
   const r = research.research;
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/30 px-3 py-2.5">
         <p className="text-sm text-muted-foreground">
-          Es del producto y la comparten todas sus publicaciones. Se carga en el paso Información de cualquiera de ellas.
+          Es del producto y la comparten todas sus publicaciones. Lo que sabe la tienda se edita acá. Lo demás, en el paso Información de cualquiera de ellas.
         </p>
         {editHref ? (
           <Button size="sm" variant="outline" asChild>
@@ -43,6 +58,7 @@ export function ProductResearchPanel({ research, editHref }: { research: Researc
           </Button>
         ) : null}
       </div>
+      <KnowledgeCard accountSlug={accountSlug} target={{ productId }} sharedWith={publications} initial={r?.storeKnowledge ?? ''} />
       <SectionCard title="Lo del fabricante">
         <SectionBody className="space-y-3">
           {r?.manufacturerSite || r?.manufacturerProductUrl ? (

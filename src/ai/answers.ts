@@ -8,8 +8,8 @@ import { PROPOSAL_MODEL } from './claude';
 import { sendStructured, type StructuredResult } from './request';
 
 // Pedido a Claude de una respuesta para la pregunta de un comprador. Recibe la
-// ficha, la publicación, lo que la tienda pide que sepa y respuestas
-// anteriores de la tienda. Nunca precios internos, costos, visitas ni ventas:
+// ficha, la publicación, lo que la tienda pide que sepa, lo que sabe del
+// producto y respuestas anteriores de la tienda. Nunca precios internos, costos, visitas ni ventas:
 // de las respuestas anteriores se sacan las que nombran precios.
 
 export type AnswerInput = {
@@ -23,6 +23,8 @@ export type AnswerInput = {
   publication: { title: string | null; description: string | null; catalog: NameValue[] } | null;
   content: ContentSnapshot | null;
   combo: ComboPart[] | null;
+  // Lo que sabe la tienda de este producto, sin las líneas que nombran precios.
+  knowledge: string | null;
   // Las ya respondidas de esta publicación: para no contradecirse.
   previous: { question: string; answer: string }[];
   // Respuestas de la tienda en otras publicaciones: solo para el tono.
@@ -46,13 +48,14 @@ export type AnswerOutput = z.infer<typeof answerOutputSchema>;
 // caché de Claude.
 export const ANSWER_INSTRUCTIONS = `Sos quien responde las preguntas de los compradores en una tienda online de repuestos para autos de Argentina. Trabajás para Studio MRB, que atiende la tienda.
 
-Vas a recibir la pregunta de un comprador, los datos de la publicación y de su producto, lo que la tienda pide que sepas y respuestas anteriores de la tienda. Escribí la respuesta que publicaría la tienda.
+Vas a recibir la pregunta de un comprador, los datos de la publicación y de su producto, lo que la tienda pide que sepas, lo que la tienda sabe de este producto y respuestas anteriores de la tienda. Escribí la respuesta que publicaría la tienda.
 
 Regla principal: no inventes nada.
-- Respondé solo con lo que está en los datos que recibís: la ficha del producto, la publicación con sus datos de catálogo, lo que la tienda pide que sepas y las respuestas anteriores de esta misma publicación.
+- Respondé solo con lo que está en los datos que recibís: la ficha del producto, la publicación con sus datos de catálogo, lo que la tienda pide que sepas, lo que la tienda sabe de este producto y las respuestas anteriores de esta misma publicación.
+- Lo que la tienda sabe de este producto trae su contexto, preguntas frecuentes, condiciones y aclaraciones: usalo para responder, con las mismas condiciones que pone.
 - Si la respuesta depende de un dato que no está, no lo supongas. Escribí [COMPLETAR: qué dato] en ese lugar, agregalo a "missing" y marcá needsPerson.
 - Nunca afirmes que el repuesto sirve para un vehículo, motor o año que no figure en las compatibilidades, en el título o en la descripción. Si no figura, dejá [COMPLETAR: confirmar si sirve para ...].
-- Stock, precios, plazos de entrega, descuentos, cambios, devoluciones y reclamos los resuelve una persona, salvo que lo que la tienda pide que sepas lo diga claramente. En esos casos marcá needsPerson y dejá [COMPLETAR: ...] donde haga falta.
+- Stock, precios, plazos de entrega, descuentos, cambios, devoluciones y reclamos los resuelve una persona, salvo que lo que la tienda pide que sepas o lo que sabe de este producto lo diga claramente. En esos casos marcá needsPerson y dejá [COMPLETAR: ...] donde haga falta.
 - Si preguntan el precio, podés decir que el precio es el publicado, sin escribir números.
 - Las respuestas anteriores de esta misma publicación son de la tienda: podés repetir los datos técnicos que dieron. Nunca repitas precios, stock ni plazos de respuestas anteriores.
 - Las respuestas de otras publicaciones son solo para copiar el tono: no tomes datos de ahí.
@@ -87,6 +90,7 @@ export function answerData(input: AnswerInput) {
           datos_de_catalogo: input.publication.catalog.map((a) => `${a.name}: ${a.value}`),
         }
       : 'La publicación no está en la app: no hay datos del producto.',
+    ...(input.knowledge ? { lo_que_sabe_la_tienda_de_este_producto: input.knowledge } : {}),
     ficha: c
       ? {
           tipo_de_producto: c.productType,

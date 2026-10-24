@@ -24,10 +24,10 @@ describe('herramientas de escritura en la lista', () => {
     expect(tools.get('save_catalog_data')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('create_publication')).toMatchObject({ readOnlyHint: false, destructiveHint: false });
     expect(tools.get('update_publication')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
-    for (const name of ['save_technical_sheet', 'save_kit_contents', 'set_publication_title', 'copy_publication_data']) {
+    for (const name of ['save_technical_sheet', 'save_kit_contents', 'set_publication_title', 'copy_publication_data', 'save_store_knowledge']) {
       expect(tools.get(name)).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     }
-    expect(tools.size).toBe(31);
+    expect(tools.size).toBe(32);
   });
 });
 
@@ -320,6 +320,7 @@ describe.skipIf(!url)('herramientas de escritura', () => {
     expect((await call('save_manufacturer_info', { publicacion: 'MLA1110001', pagina_del_producto: 'fabricante.com/kit' })).isError).toBe(true);
     await call('save_manufacturer_info', { publicacion: 'MLA1110001', pagina_del_producto: 'https://fabricante.com/kit' });
     await call('save_image_clarifications', { publicacion: 'MLA1110001', texto: 'Sirve para **Gol 1.6**\n- No confundir con 1.4' });
+    await call('save_store_knowledge', { publicacion: 'MLA1110001', texto: '- No incluye las juntas\n- La garantía vale con la factura del taller' });
     await call('save_buyer_questions', { publicacion: 'MLA1110001', propia: '¿Sirve para Gol 2012?', competencia: '¿Es original?' });
     await call('save_buyer_insights', { publicacion: 'MLA1110001', lista: 'dolores', accion: 'agregar', items: ['No sabe si le sirve'] });
     await call('save_buyer_insights', { publicacion: 'MLA1110001', lista: 'dolores', accion: 'agregar', items: ['Teme que no sea la medida'] });
@@ -332,6 +333,7 @@ describe.skipIf(!url)('herramientas de escritura', () => {
       manufacturerSite: 'https://fabricante.com',
       manufacturerProductUrl: 'https://fabricante.com/kit',
       clarifications: '<p>Sirve para <strong>Gol 1.6</strong></p><ul><li><p>No confundir con 1.4</p></li></ul>',
+      storeKnowledge: '<ul><li><p>No incluye las juntas</p></li><li><p>La garantía vale con la factura del taller</p></li></ul>',
       competitorQuestions: '¿Es original?',
       updatedById: 'u1',
     });
@@ -346,6 +348,7 @@ describe.skipIf(!url)('herramientas de escritura', () => {
     expect(data.investigacion).toMatchObject({
       fabricante: { sitio: 'https://fabricante.com', texto: 'Diámetro 200 mm', aviso: 'Se ocultó una línea que parecía un precio.', archivos: [] },
       aclaraciones_para_imagenes: 'Sirve para **Gol 1.6**\n- No confundir con 1.4',
+      lo_que_sabe_la_tienda: '- No incluye las juntas\n- La garantía vale con la factura del taller',
       preguntas: { propia: null, competencia: '¿Es original?' },
       dolores: ['No sabe si le sirve', 'Teme que no sea la medida'],
       objeciones: ['Duda de la calidad'],

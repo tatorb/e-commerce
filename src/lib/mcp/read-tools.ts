@@ -478,6 +478,8 @@ const getPublication = defineTool({
             link: `${ctx.baseUrl}${fileHref(f.id)}`,
           })),
         },
+        // Contexto, preguntas frecuentes, condiciones y aclaraciones que cargó la tienda.
+        lo_que_sabe_la_tienda: richTextToMarkdown(r?.storeKnowledge ?? null) || null,
         aclaraciones_para_imagenes: richTextToMarkdown(r?.clarifications ?? null) || null,
         preguntas: {
           // Las que llegaron solas del canal, con su respuesta si la tiene.

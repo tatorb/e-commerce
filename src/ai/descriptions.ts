@@ -24,6 +24,8 @@ export type DescriptionInput = {
   research: {
     manufacturer: string | null;
     clarifications: string | null;
+    // Lo que sabe la tienda del producto: contexto, preguntas frecuentes y condiciones.
+    knowledge: string | null;
     pains: string[];
     objections: string[];
   };
@@ -48,7 +50,7 @@ export const DESCRIPTION_INSTRUCTIONS = `Escribís las descripciones de las publ
 Vas a recibir los datos del producto y de la publicación. Escribí el cuerpo de la descripción: el encabezado y el pie de la tienda los agrega la app, no los escribas.
 
 Regla principal: no inventes nada.
-- Usá solo lo que está en los datos: la ficha del producto, los datos de catálogo, lo del fabricante, las aclaraciones, las preguntas de los compradores con la respuesta de la tienda y la descripción actual.
+- Usá solo lo que está en los datos: la ficha del producto, los datos de catálogo, lo del fabricante, lo que sabe la tienda del producto, las aclaraciones, las preguntas de los compradores con la respuesta de la tienda y la descripción actual.
 - Nunca afirmes que el repuesto sirve para un vehículo, motor o año que no figure en las compatibilidades. Si una compatibilidad parece incompleta, escribí [A CONFIRMAR: qué falta].
 - Si un dato sería útil para el comprador pero no está, o los datos se contradicen, no lo supongas: escribí [A CONFIRMAR: qué dato] en ese lugar y agregalo a "toConfirm".
 - De la descripción actual podés tomar datos técnicos. Si contradice la ficha, vale la ficha y marcá [A CONFIRMAR].
@@ -113,6 +115,7 @@ export function descriptionData(input: DescriptionInput) {
     investigacion: {
       del_fabricante: input.research.manufacturer,
       aclaraciones: input.research.clarifications,
+      lo_que_sabe_la_tienda: input.research.knowledge,
       dolores_del_comprador: input.research.pains,
       objeciones_del_comprador: input.research.objections,
     },
