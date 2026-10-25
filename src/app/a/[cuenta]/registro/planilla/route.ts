@@ -1,4 +1,5 @@
 import { requireUser } from '@/lib/auth/session';
+import { can, canSeeAccount } from '@/domain/access';
 import { getAccountBySlug } from '@/lib/queries/accounts';
 import { listSyncLog } from '@/lib/queries/sync-log';
 import { buildLogSheet, logSheetFileName, parseLogSearch, type LogSearch } from '@/domain/sync-log';
@@ -13,10 +14,12 @@ function todayIn(timeZone: string): string {
 }
 
 export async function GET(request: Request, { params }: { params: Promise<{ cuenta: string }> }) {
-  await requireUser();
+  const user = await requireUser();
   const { cuenta } = await params;
   const account = await getAccountBySlug(cuenta);
-  if (!account) return new Response('La cuenta no existe.', { status: 404 });
+  if (!account || !canSeeAccount(user.access, account.id) || !can(user.access, 'registro', 'read')) {
+    return new Response('La cuenta no existe.', { status: 404 });
+  }
 
   const search = Object.fromEntries(new URL(request.url).searchParams) as LogSearch;
   const entries = await listSyncLog(account.id, account.timezone, parseLogSearch(search));

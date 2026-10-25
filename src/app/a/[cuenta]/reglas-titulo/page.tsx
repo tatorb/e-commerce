@@ -18,7 +18,7 @@ export async function generateMetadata({ params }: { params: Promise<{ cuenta: s
 
 export default async function TitleRulesPage({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
-  const { account } = await requireAccount(cuenta);
+  const { account } = await requireAccount(cuenta, 'reglas');
 
   const stores = await prisma.store.findMany({ where: { accountId: account.id }, include: { channel: true } });
   const channels = [...new Map(stores.map((s) => [s.channel.id, s.channel])).values()];

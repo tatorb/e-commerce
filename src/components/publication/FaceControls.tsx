@@ -71,7 +71,7 @@ export function DraftBar({
     <div className="space-y-2">
       <div className="flex flex-wrap gap-2">
         {canPush ? (
-          <Button
+          <Button access="subir"
             size="sm"
             disabled={busy !== null}
             pending={busy === 'push'}
@@ -109,7 +109,7 @@ export function ReadOneButton({ accountSlug, publicationId, channelName }: { acc
   const { busy, message, run } = useBusy();
   return (
     <div className="flex flex-col items-start gap-1">
-      <Button
+      <Button access="view"
         size="sm"
         variant="outline"
         disabled={busy !== null}
@@ -269,7 +269,7 @@ export function DraftField({
             </Button>
           ) : null}
           {state === 'draft' && !pushBlocked ? (
-            <Button
+            <Button access="subir"
               size="sm"
               disabled={busy !== null}
               pending={busy === 'push'}

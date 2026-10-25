@@ -134,7 +134,7 @@ function ReadItem({ e, timeZone }: { e: LogRead; timeZone: string }) {
 
 export default async function SyncLogPage({ params, searchParams }: { params: Promise<{ cuenta: string }>; searchParams: Promise<LogSearch> }) {
   const [{ cuenta }, search] = await Promise.all([params, searchParams]);
-  const { account } = await requireAccount(cuenta);
+  const { account } = await requireAccount(cuenta, 'registro');
   const tz = account.timezone;
   const filters = parseLogSearch(search);
   const log = await loadSyncLog(account.id, tz, filters);
@@ -213,7 +213,7 @@ export default async function SyncLogPage({ params, searchParams }: { params: Pr
               .map(([k, v]) => (
                 <input key={k} type="hidden" name={k} value={v} />
               ))}
-            <Button type="submit">Filtrar</Button>
+            <Button access="view" type="submit">Filtrar</Button>
             {filtered ? (
               <Button type="button" variant="ghost" size="sm" asChild>
                 <Link href="?">Limpiar</Link>

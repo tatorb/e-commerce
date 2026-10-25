@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth/session';
+import { canSeeProduct } from '@/lib/auth/product-access';
 import { DriveError, fileThumbnail, withDriveToken } from '@/lib/drive';
 
 // La miniatura que arma Google para cada video. Recién subido, Google tarda un
@@ -9,10 +10,11 @@ import { DriveError, fileThumbnail, withDriveToken } from '@/lib/drive';
 export const dynamic = 'force-dynamic';
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
-  if (!(await getCurrentUser())) return new NextResponse(null, { status: 401 });
+  const user = await getCurrentUser();
+  if (!user) return new NextResponse(null, { status: 401 });
   const { id } = await params;
-  const video = await prisma.productVideo.findUnique({ where: { id }, select: { driveFileId: true } });
-  if (!video) return new NextResponse(null, { status: 404 });
+  const video = await prisma.productVideo.findUnique({ where: { id }, select: { driveFileId: true, productId: true } });
+  if (!video || !(await canSeeProduct(user, video.productId))) return new NextResponse(null, { status: 404 });
   try {
     const res = await withDriveToken(prisma, (token) => fileThumbnail(token, video.driveFileId, 480));
     if (!res) return new NextResponse(null, { status: 404, headers: { 'Cache-Control': 'no-store' } });

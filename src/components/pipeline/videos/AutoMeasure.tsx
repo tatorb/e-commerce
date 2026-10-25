@@ -1,5 +1,6 @@
 'use client';
 
+import { useReadOnly } from '@/components/access/AccessProvider';
 import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { saveVideoMeasureAction } from '@/app/a/[cuenta]/pipeline/video-actions';
@@ -12,8 +13,11 @@ export function AutoMeasure({ accountSlug, videoIds }: { accountSlug: string; vi
   const router = useRouter();
   const tried = useRef(new Set<string>());
   const key = videoIds.join(',');
+  // Quien solo puede ver no guarda medidas.
+  const readOnly = useReadOnly();
 
   useEffect(() => {
+    if (readOnly) return;
     let cancelled = false;
     (async () => {
       let changed = false;
@@ -30,7 +34,7 @@ export function AutoMeasure({ accountSlug, videoIds }: { accountSlug: string; vi
     return () => {
       cancelled = true;
     };
-  }, [accountSlug, key, router]);
+  }, [accountSlug, key, router, readOnly]);
 
   return null;
 }

@@ -79,8 +79,8 @@ const stepArg = asEnum(PIPELINE_STEPS).describe(
 );
 
 async function target(ctx: McpContext, args: { cuenta?: string; publicacion: string }) {
-  const account = await resolveAccount(ctx.db, args.cuenta);
-  const id = await resolvePublication(ctx.db, account.id, args.publicacion);
+  const account = await resolveAccount(ctx, args.cuenta);
+  const id = await resolvePublication(ctx, account.id, args.publicacion);
   return { account, id };
 }
 
@@ -104,6 +104,7 @@ async function titleTarget(ctx: McpContext, args: { cuenta?: string; publicacion
 
 const addToPipelineTool = defineTool({
   name: 'add_to_pipeline',
+  section: ['publicaciones', 'pipeline'],
   title: 'Agregar al pipeline',
   description:
     'Agrega publicaciones al pipeline, estén publicadas o no. Entran en Información; una descartada retoma el paso donde estaba. Si alguna es del mismo producto o tiene el mismo título que otra del pipeline, entra igual y vuelve un aviso: contáselo a la persona.',
@@ -118,7 +119,7 @@ const addToPipelineTool = defineTool({
   readOnly: false,
   destructive: false,
   async run(ctx, args) {
-    const account = await resolveAccount(ctx.db, args.cuenta);
+    const account = await resolveAccount(ctx, args.cuenta);
     const ids: string[] = [];
     const notFound: string[] = [];
     const invalid: string[] = [];
@@ -162,6 +163,7 @@ const addToPipelineTool = defineTool({
 
 const moveStepTool = defineTool({
   name: 'move_pipeline_step',
+  section: 'pipeline',
   title: 'Mover de paso',
   description:
     'Avanza una publicación al paso siguiente, la vuelve al anterior o, en el último paso, la marca como corregida. Hay que decir en qué paso está ahora: si cambió mientras tanto, no se mueve.',
@@ -189,6 +191,7 @@ const moveStepTool = defineTool({
 
 const createPublicationTool = defineTool({
   name: 'create_publication',
+  section: ['pipeline', 'publicaciones'],
   title: 'Crear una publicación nueva',
   description:
     'Crea una publicación nueva, todavía sin publicar en el canal, y la deja en el pipeline en Información. Es de un producto que ya está (producto) o de uno nuevo con ficha corta (producto_nuevo), uno de los dos. Antes de crearla, mostrale a la persona qué vas a crear y esperá que confirme. Cuando ya esté publicada, su código se carga con update_publication.',
@@ -215,7 +218,7 @@ const createPublicationTool = defineTool({
   readOnly: false,
   destructive: false,
   async run(ctx, args) {
-    const account = await resolveAccount(ctx.db, args.cuenta);
+    const account = await resolveAccount(ctx, args.cuenta);
     if (Boolean(args.producto?.trim()) === Boolean(args.producto_nuevo)) {
       throw new McpToolError('Mandá producto o producto_nuevo, uno de los dos.');
     }
@@ -270,6 +273,7 @@ const createPublicationTool = defineTool({
 
 const updatePublicationTool = defineTool({
   name: 'update_publication',
+  section: ['publicaciones', 'pipeline'],
   title: 'Cargar el código de una publicación',
   description:
     'Carga el código del canal de una publicación que ya se publicó: pegá el código o el link, la app lo limpia y arma el link. Si estaba sin publicar, pasa a activa. Si ya tenía un código, confirmalo con la persona antes de cambiarlo.',
@@ -290,6 +294,7 @@ const updatePublicationTool = defineTool({
 
 const removeTool = defineTool({
   name: 'remove_from_pipeline',
+  section: ['publicaciones', 'pipeline'],
   title: 'Sacar del pipeline',
   description:
     'Saca una publicación del pipeline con un motivo. No borra nada: si se vuelve a agregar, retoma en el mismo paso. Confirmalo con la persona antes.',
@@ -340,6 +345,7 @@ const optionalText = (what: string) => z.string().optional().describe(`${what}. 
 
 const updateProductInfoTool = defineTool({
   name: 'update_product_info',
+  section: ['productos', 'pipeline'],
   title: 'Corregir la ficha',
   description:
     'Corrige la ficha del producto de una publicación: tipo, marca, número de pieza, línea, origen, medidas y compatibilidades. También si es individual o combo, y los productos del combo: un combo se arma solo con productos individuales, y un producto que está dentro de un combo no puede ser combo. La ficha es la fuente de verdad y la comparten todas las publicaciones del producto. Lo que no se manda queda como está; las listas reemplazan la lista entera. Usá solo datos que te dio la persona o que están en la ficha, nunca supuestos.',
@@ -500,6 +506,7 @@ const updateProductInfoTool = defineTool({
 
 const saveCompetitorsTool = defineTool({
   name: 'save_competitors',
+  section: 'pipeline',
   title: 'Cargar la competencia',
   description: `Guarda las publicaciones de la competencia que más venden; conviene al menos 3 y no hay un tope práctico. Sus títulos suman palabras al mapa del paso Título, y su precio, descuento, cuotas y envío sirven para comparar precios. Reemplaza la lista entera; una lista vacía la borra, y lo que no mandes de una publicación queda vacío. Solo publicaciones y precios reales que te pasó la persona o que viste en el canal. Si mandás el precio sin la fecha, queda con la fecha de hoy.`,
   input: z.object({
@@ -565,6 +572,7 @@ const keepOr = (sent: string | undefined, current: string | null | undefined) =>
 
 const saveManufacturerTool = defineTool({
   name: 'save_manufacturer_info',
+  section: ['pipeline', 'productos'],
   title: 'Guardar lo del fabricante',
   description:
     'Guarda el sitio del fabricante, la página del producto y el texto del fabricante, en la investigación del producto. Lo comparten todas sus publicaciones. Lo que no se manda queda como está; vacío lo borra. Solo datos reales que te pasó la persona; nunca precios ni costos del proveedor. Los archivos se suben desde la app.',
@@ -597,6 +605,7 @@ const saveManufacturerTool = defineTool({
 
 const saveClarificationsTool = defineTool({
   name: 'save_image_clarifications',
+  section: ['pipeline', 'productos'],
   title: 'Guardar las aclaraciones para las imágenes',
   description:
     'Guarda las aclaraciones para las imágenes del producto: modelos compatibles, confusiones habituales y lo que tiene que quedar claro. Son del producto: las comparten todas sus publicaciones. Reemplaza el texto entero. Se escribe en Markdown simple: **negrita**, _cursiva_, listas con "- " o "1. ". Usá solo datos de la ficha o que te dio la persona.',
@@ -612,6 +621,7 @@ const saveClarificationsTool = defineTool({
 
 const saveKnowledgeTool = defineTool({
   name: 'save_store_knowledge',
+  section: ['pipeline', 'productos'],
   title: 'Guardar lo que sabe la tienda del producto',
   description:
     'Guarda lo que sabe la tienda del producto: contexto, preguntas frecuentes, condiciones que pueden surgir y sus aclaraciones. Es del producto: lo comparten todas sus publicaciones, y lo usan las respuestas a los compradores y la descripción. Reemplaza el texto entero: si querés sumar algo, leé antes lo que hay con get_publication. Se escribe en Markdown simple: **negrita**, _cursiva_, listas con "- " o "1. ". Usá solo lo que te dijo la persona.',
@@ -627,6 +637,7 @@ const saveKnowledgeTool = defineTool({
 
 const savePublicationQaTool = defineTool({
   name: 'save_publication_qa',
+  section: ['pipeline', 'publicaciones'],
   title: 'Guardar las preguntas frecuentes y las reglas de la publicación',
   description:
     'Guarda el paso Preguntas y respuestas de la publicación: las preguntas frecuentes con la respuesta de la tienda, y las reglas de cuándo responde Claude y cuándo una persona. Son de esta publicación, no del producto, y las lee la IA que responde a los compradores. Lo que no se manda queda como está; vacío lo borra. Reemplaza cada texto entero: si querés sumar algo, leé antes lo que hay con get_publication. Se escribe en Markdown simple: **negrita**, _cursiva_, listas con "- " o "1. ". Usá solo lo que te dijo la persona. Si Claude responde solo se prende y se apaga desde la app.',
@@ -654,6 +665,7 @@ const savePublicationQaTool = defineTool({
 
 const saveQuestionsTool = defineTool({
   name: 'save_buyer_questions',
+  section: ['pipeline', 'productos'],
   title: 'Guardar las preguntas de los compradores',
   description:
     'Guarda las preguntas de los compradores que te pegó la persona, tal como vienen. Las de la publicación propia quedan solo en esta publicación; las de la competencia son del producto y las comparten todas sus publicaciones. Lo que no se manda queda como está; vacío lo borra.',
@@ -683,6 +695,7 @@ const KIND = { dolores: 'PAIN', objeciones: 'OBJECTION' } as const;
 
 const saveInsightsTool = defineTool({
   name: 'save_buyer_insights',
+  section: ['pipeline', 'productos'],
   title: 'Guardar dolores u objeciones',
   description: `Agrega a la lista de dolores o de objeciones de los compradores, o la reemplaza entera, hasta ${MAX_INSIGHTS} por lista. Son del producto: las comparten todas sus publicaciones. Cada ítem es una frase corta. Tienen que salir de las preguntas guardadas o de lo que te dijo la persona, no de suposiciones. Para reemplazar, confirmalo con la persona antes.`,
   input: z.object({
@@ -714,6 +727,7 @@ const saveInsightsTool = defineTool({
 
 const saveCatalogTool = defineTool({
   name: 'save_catalog_data',
+  section: ['pipeline', 'publicaciones'],
   title: 'Guardar los datos de catálogo',
   description:
     'Carga los datos de catálogo de la publicación: los campos del formulario del canal para su categoría, por ejemplo "Tipo de embrague" o "Incluye disco". Antes miralos en get_publication, en datos_de_catalogo: cada campo dice su tipo, sus opciones y lo cargado. Los de tipo opción y sí o no solo aceptan sus opciones; los de texto aceptan cualquier texto y sus sugerencias son las que usa el canal. Marca, número de pieza y origen salen de la ficha: se cambian con update_product_info. Lo que no se manda queda como está; null o vacío lo borra. Usá solo datos de la ficha, del fabricante o que te dio la persona, nunca supuestos.',
@@ -763,6 +777,7 @@ async function sheetResult(ctx: McpContext, account: AccountRef, productId: stri
 
 const saveTechnicalSheetTool = defineTool({
   name: 'save_technical_sheet',
+  section: ['productos', 'pipeline'],
   title: 'Cargar la ficha técnica',
   description: `Carga o corrige la ficha técnica del producto: datos técnicos como nombre y valor con su unidad, por ejemplo «Diámetro del cilindro: 83,00 mm». Es la que cuenta en el puntaje como «Ficha técnica completa». Es del producto: la comparten todas sus publicaciones. completar cambia los datos que tienen el mismo nombre y suma los nuevos; un valor vacío borra ese dato. reemplazar cambia la ficha técnica entera: confirmalo con la persona antes. Hasta ${MAX_SPECS} datos. Usá solo datos de la ficha, del fabricante o que te dio la persona, nunca supuestos, calculados ni de memoria. La respuesta trae los campos esperados para la familia del producto en cada canal y cuáles faltan.`,
   input: z.object({
@@ -803,6 +818,7 @@ const MAX_KIT = 5000;
 
 const saveKitContentsTool = defineTool({
   name: 'save_kit_contents',
+  section: ['productos', 'pipeline'],
   title: 'Cargar el contenido del kit',
   description: `Carga qué trae la caja del producto, por ejemplo «4 pistones, 4 juegos de aros, 4 pernos, 8 seguros». Es la que cuenta en el puntaje como «Contenido del kit declarado». Es del producto: la comparten todas sus publicaciones. Reemplaza el texto entero; vacío lo borra. Usá solo datos confirmados: de la ficha, del fabricante o que te dio la persona, nunca supuestos.`,
   input: z.object({
@@ -824,6 +840,7 @@ const saveKitContentsTool = defineTool({
 
 const saveSeedsTool = defineTool({
   name: 'save_title_seeds',
+  section: 'pipeline',
   title: 'Guardar semillas',
   description:
     'Guarda las semillas del paso Título: lo que se escribe en el buscador del canal para ver qué completa. Reemplaza las que había, hasta 20.',
@@ -839,6 +856,7 @@ const saveSeedsTool = defineTool({
 
 const saveSuggestionsTool = defineTool({
   name: 'save_search_suggestions',
+  section: 'pipeline',
   title: 'Guardar sugerencias del buscador',
   description:
     'Guarda lo que completó el buscador del canal para una semilla, con la fecha de hoy. Solo sugerencias reales que la persona copió del buscador: nunca inventadas ni supuestas. Sirven para todas las publicaciones de la cuenta con la misma semilla.',
@@ -874,6 +892,7 @@ const STATUS = { usar: 'use', descartar: 'discard', sin_marcar: null } as const;
 
 const setWordsTool = defineTool({
   name: 'set_title_words',
+  section: 'pipeline',
   title: 'Tildar palabras',
   description:
     'Marca palabras del mapa de palabras del paso Título como para usar o para descartar, o les saca la marca. Solo palabras que están en el mapa (get_title_workspace).',
@@ -905,6 +924,7 @@ const setWordsTool = defineTool({
 
 const setMainSearchesTool = defineTool({
   name: 'set_main_searches',
+  section: 'pipeline',
   title: 'Elegir búsquedas principales',
   description: `Elige las búsquedas principales del paso Título, hasta ${MAX_MAIN_SEARCHES}: las que se usan para medir la posición antes y después. Reemplaza las que había.`,
   input: z.object({ cuenta: accountArg, publicacion: publicationArg, busquedas: z.array(z.string()).max(MAX_MAIN_SEARCHES) }),
@@ -919,6 +939,7 @@ const setMainSearchesTool = defineTool({
 
 const savePositionTool = defineTool({
   name: 'save_search_position',
+  section: 'pipeline',
   title: 'Cargar una posición',
   description: `Guarda en qué página y posición aparece la publicación al buscar algo, con la fecha de hoy. Sin página: no aparece en las primeras ${MAX_PAGES}. Solo datos reales que te pasó la persona.`,
   input: z.object({
@@ -939,6 +960,7 @@ const savePositionTool = defineTool({
 
 const decideLockTool = defineTool({
   name: 'decide_title_lock',
+  section: 'pipeline',
   title: 'Decidir sobre el título bloqueado',
   description:
     'Para un título bloqueado por ventas, en el paso Título: mantener el título (completa el paso sin cambios y pasa a Imágenes) o probar el título nuevo en la copia con cuotas (sigue en el paso). deshacer quita la decisión de probar en la copia. Confirmalo con la persona antes.',
@@ -959,6 +981,7 @@ const decideLockTool = defineTool({
 
 const saveProposalsTool = defineTool({
   name: 'save_title_proposals',
+  section: 'pipeline',
   title: 'Guardar propuestas de título',
   description: `Guarda hasta ${MAX_PROPOSALS} propuestas de título con su motivo, para que la persona las vea y elija en el paso Título de la app. Reemplazan las que había. Chequealas antes con check_title.`,
   input: z.object({
@@ -994,6 +1017,7 @@ const saveProposalsTool = defineTool({
 
 const approveTitleTool = defineTool({
   name: 'approve_title',
+  section: 'pipeline',
   title: 'Aprobar el título',
   description:
     'Aprueba el título en el paso Título: lo escribe en la publicación (o lo deja para la copia con cuotas si se decidió así) y pasa a Imágenes. No deja aprobar un título con errores, ni uno bloqueado sin decidir antes. Confirmalo con la persona antes.',
@@ -1027,6 +1051,7 @@ const approveTitleTool = defineTool({
 
 const setTitleTool = defineTool({
   name: 'set_publication_title',
+  section: ['pipeline', 'publicaciones'],
   title: 'Poner el título sin aprobarlo',
   description:
     'Pone o corrige el título de una publicación sin aprobarlo y sin mover el paso del pipeline: sirve para cargar un título provisorio o corregir uno. Usa el mismo chequeo que check_title (largo, signos y palabras no permitidas) y no guarda un título con errores. El título es de la publicación, no el nombre del producto. Si la publicación tiene ventas, el canal no deja cambiar el título: eso se decide en el paso Título. Para aprobarlo y pasar a Imágenes, usá approve_title.',
@@ -1072,6 +1097,7 @@ type Copyable = keyof typeof COPYABLE;
 
 const copyResearchTool = defineTool({
   name: 'copy_publication_data',
+  section: ['pipeline', 'publicaciones'],
   title: 'Copiar datos de otra publicación del mismo producto',
   description: `Copia a una publicación los datos que son de cada publicación desde otra del mismo producto, eligiendo qué copiar: ${Object.entries(COPYABLE)
     .map(([k, v]) => `${k} (${v})`)
@@ -1089,7 +1115,7 @@ const copyResearchTool = defineTool({
   destructive: true,
   async run(ctx, args) {
     const { account, id } = await target(ctx, args);
-    const fromId = await resolvePublication(ctx.db, account.id, args.desde);
+    const fromId = await resolvePublication(ctx, account.id, args.desde);
     if (fromId === id) throw new McpToolError('La publicación de origen y la de destino son la misma.');
     const select = {
       productId: true,
@@ -1148,6 +1174,7 @@ const copyResearchTool = defineTool({
 
 const updateTitleRulesTool = defineTool({
   name: 'update_title_rules',
+  section: 'reglas',
   title: 'Editar las reglas de título',
   description:
     'Edita las reglas de título de la cuenta para un canal: largo máximo, signos y palabras no permitidas, y la estructura sugerida por familia. Lo que no se manda queda como está; las listas reemplazan la lista entera. restablecer vuelve a las reglas del canal. Confirmalo con la persona antes.',
@@ -1166,7 +1193,7 @@ const updateTitleRulesTool = defineTool({
   readOnly: false,
   destructive: true,
   async run(ctx, args) {
-    const account = await resolveAccount(ctx.db, args.cuenta);
+    const account = await resolveAccount(ctx, args.cuenta);
     const stores = await ctx.db.store.findMany({
       where: { accountId: account.id },
       select: { channel: { select: { id: true, kind: true, name: true } } },

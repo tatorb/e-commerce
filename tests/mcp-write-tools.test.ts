@@ -33,7 +33,7 @@ describe('herramientas de escritura en la lista', () => {
 
 describe.skipIf(!url)('herramientas de escritura', () => {
   const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: url! }) });
-  const ctx: McpContext = { db, userId: 'u1', baseUrl: 'https://app.ejemplo.com' };
+  const ctx: McpContext = { db, userId: 'u1', access: { isAdmin: true, permissions: {}, accountIds: [] }, baseUrl: 'https://app.ejemplo.com' };
   let accountId = '';
   let productId = '';
   let kitId = '';

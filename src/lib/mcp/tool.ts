@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { PrismaClient } from '@/generated/prisma/client';
 import { resolveExternalIds } from '@/lib/catalog';
+import { canSeeAccount, type Access, type Section } from '@/domain/access';
 import { DEFAULT_TIMEZONE, formatDateTime } from '@/lib/format';
 
 // Lo común de las herramientas que la app le ofrece a Claude: quién llama,
@@ -10,8 +11,12 @@ export type McpContext = {
   db: PrismaClient;
   // La persona que autorizó la conexión: cada cambio queda a su nombre.
   userId: string;
+  // Lo que puede esa persona: Claude no hace nada que ella no pueda.
+  access: Access;
   // La dirección de la app, para armar links.
   baseUrl: string;
+  // La cuenta y la publicación que tocó la herramienta, para la actividad.
+  touched?: { accountId?: string; publicationId?: string };
 };
 
 /** Un error que se le muestra a Claude tal cual, para que lo explique o corrija el pedido. */
@@ -26,6 +31,9 @@ export type McpTool<S extends z.ZodType = z.ZodType> = {
   readOnly: boolean;
   // Pisa o borra algo que ya estaba, o mueve la publicación de una forma que conviene confirmar.
   destructive?: boolean;
+  // La sección, o las secciones, donde la persona tiene que poder ver (las que
+  // leen) o cambiar (las demás). Sin sección, alcanza con tener sesión.
+  section?: Section | readonly Section[];
   run: (ctx: McpContext, args: z.output<S>) => Promise<unknown>;
 };
 
@@ -47,11 +55,20 @@ export const publicationArg = z
 
 export type AccountRef = { id: string; slug: string; name: string; timezone: string };
 
-export async function resolveAccount(db: PrismaClient, ref: string | undefined): Promise<AccountRef> {
-  const accounts = await db.account.findMany({
-    orderBy: { name: 'asc' },
-    select: { id: true, slug: true, name: true, timezone: true },
-  });
+/** La cuenta pedida, entre las que ve la persona. */
+export async function resolveAccount(ctx: McpContext, ref: string | undefined): Promise<AccountRef> {
+  const accounts = (
+    await ctx.db.account.findMany({
+      orderBy: { name: 'asc' },
+      select: { id: true, slug: true, name: true, timezone: true },
+    })
+  ).filter((a) => canSeeAccount(ctx.access, a.id));
+  const found = pick(accounts, ref);
+  ctx.touched = { ...ctx.touched, accountId: found.id };
+  return found;
+}
+
+function pick(accounts: AccountRef[], ref: string | undefined): AccountRef {
   const wanted = ref?.trim().toLowerCase();
   if (!wanted) {
     if (accounts.length === 1) return accounts[0];
@@ -69,7 +86,13 @@ export async function resolveAccount(db: PrismaClient, ref: string | undefined):
 }
 
 /** Busca la publicación en la cuenta por id, código del canal o link. */
-export async function resolvePublication(db: PrismaClient, accountId: string, ref: string): Promise<string> {
+export async function resolvePublication(ctx: McpContext, accountId: string, ref: string): Promise<string> {
+  const id = await findPublication(ctx.db, accountId, ref);
+  ctx.touched = { ...ctx.touched, publicationId: id };
+  return id;
+}
+
+async function findPublication(db: PrismaClient, accountId: string, ref: string): Promise<string> {
   const text = ref.trim();
   const byId = await db.publication.findFirst({ where: { id: text, product: { accountId } }, select: { id: true } });
   if (byId) return byId.id;

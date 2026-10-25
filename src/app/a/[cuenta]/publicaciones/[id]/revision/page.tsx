@@ -29,7 +29,7 @@ export async function generateMetadata({ params }: { params: Promise<{ cuenta: s
 
 export default async function ReviewPage({ params }: { params: Promise<{ cuenta: string; id: string }> }) {
   const { cuenta, id } = await params;
-  const { account } = await requireAccount(cuenta);
+  const { account } = await requireAccount(cuenta, 'publicaciones');
 
   const publication = await prisma.publication.findFirst({
     where: { id, product: { accountId: account.id } },

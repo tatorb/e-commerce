@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth/session';
+import { canSeeProduct } from '@/lib/auth/product-access';
 import { DriveError, fileMedia, withDriveToken } from '@/lib/drive';
 import { videoPieceRange } from '@/domain/videos';
 
@@ -12,10 +13,11 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  if (!(await getCurrentUser())) return new NextResponse(null, { status: 401 });
+  const user = await getCurrentUser();
+  if (!user) return new NextResponse(null, { status: 401 });
   const { id } = await params;
-  const video = await prisma.productVideo.findUnique({ where: { id }, select: { driveFileId: true, mimeType: true } });
-  if (!video) return new NextResponse(null, { status: 404 });
+  const video = await prisma.productVideo.findUnique({ where: { id }, select: { driveFileId: true, mimeType: true, productId: true } });
+  if (!video || !(await canSeeProduct(user, video.productId))) return new NextResponse(null, { status: 404 });
   try {
     const res = await withDriveToken(prisma, (token) => fileMedia(token, video.driveFileId, videoPieceRange(req.headers.get('range'))));
     const headers = new Headers({

@@ -1,5 +1,6 @@
 'use client';
 
+import { useReadOnly } from '@/components/access/AccessProvider';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ExternalLink, RefreshCw } from 'lucide-react';
@@ -58,11 +59,13 @@ export function DriveSync({ accountSlug, target, folderUrl, label }: { accountSl
     [accountSlug, key, router],
   );
 
+  // Quien solo puede ver no actualiza nada al abrir.
+  const readOnly = useReadOnly();
   useEffect(() => {
-    if (started.current) return;
+    if (started.current || readOnly) return;
     started.current = true;
     void sync(false);
-  }, [sync]);
+  }, [sync, readOnly]);
 
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">

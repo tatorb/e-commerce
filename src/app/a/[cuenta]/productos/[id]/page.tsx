@@ -78,7 +78,7 @@ export default async function ProductPage({
   searchParams: Promise<{ seccion?: string }>;
 }) {
   const [{ cuenta, id }, { seccion }] = await Promise.all([params, searchParams]);
-  const { account } = await requireAccount(cuenta);
+  const { account } = await requireAccount(cuenta, 'productos');
   const [product, stores, rules, combo, research, photos, videos] = await Promise.all([
     getProduct(account.id, id),
     listStores(account.id),

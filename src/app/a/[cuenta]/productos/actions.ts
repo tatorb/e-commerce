@@ -1,5 +1,6 @@
 'use server';
 
+import { act } from '@/lib/auth/guard';
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@/lib/db';
 import { requireUser } from '@/lib/auth/session';
@@ -30,40 +31,46 @@ export async function saveProductAction(
   productId: string | null,
   input: ProductInput,
 ): Promise<SaveResult> {
-  await requireUser();
-  const accountId = await accountIdFor(accountSlug);
-  if (!accountId) return { ok: false, error: 'La cuenta no existe.' };
+  return act(accountSlug, { section: 'productos', does: (productId ? 'Guardó la ficha del producto' : 'Creó un producto'), productId }, async () => {
+    await requireUser();
+    const accountId = await accountIdFor(accountSlug);
+    if (!accountId) return { ok: false, error: 'La cuenta no existe.' };
 
-  const parsed = productInputSchema.safeParse(dropEmptyRows(input));
-  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Revisá los datos.' };
+    const parsed = productInputSchema.safeParse(dropEmptyRows(input));
+    if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Revisá los datos.' };
 
-  try {
-    const { id } = await saveProduct(prisma, { accountId, productId, data: parsed.data });
-    revalidatePath(`/a/${accountSlug}`, 'layout');
-    return { ok: true, id };
-  } catch (e) {
-    if (e instanceof ComboError) return { ok: false, error: e.message };
-    throw e;
-  }
+    try {
+      const { id } = await saveProduct(prisma, { accountId, productId, data: parsed.data });
+      revalidatePath(`/a/${accountSlug}`, 'layout');
+      return { ok: true, id };
+    } catch (e) {
+      if (e instanceof ComboError) return { ok: false, error: e.message };
+      throw e;
+    }
+  });
 }
 
 export async function deleteProductAction(accountSlug: string, productId: string): Promise<SimpleResult> {
-  await requireUser();
-  const accountId = await accountIdFor(accountSlug);
-  if (!accountId) return { ok: false, error: 'La cuenta no existe.' };
-  let count = 0;
-  try {
-    count = await prisma.$transaction(async (tx) => {
-      await assertNotInCombos(tx, productId);
-      return (await tx.product.deleteMany({ where: { id: productId, accountId } })).count;
-    });
-  } catch (e) {
-    if (e instanceof ComboError) return { ok: false, error: e.message };
-    throw e;
-  }
-  if (count === 0) return { ok: false, error: 'El producto ya no existe.' };
-  revalidatePath(`/a/${accountSlug}/productos`);
-  return { ok: true };
+  // Su nombre, antes de borrarlo, para que se entienda en la actividad.
+  const name = (await prisma.product.findUnique({ where: { id: String(productId) }, select: { name: true } }))?.name ?? null;
+  return act(accountSlug, { section: 'productos', does: 'Borró un producto', productId, targetLabel: name }, async () => {
+    await requireUser();
+    const accountId = await accountIdFor(accountSlug);
+    if (!accountId) return { ok: false, error: 'La cuenta no existe.' };
+    let count = 0;
+    try {
+      count = await prisma.$transaction(async (tx) => {
+        await assertNotInCombos(tx, productId);
+        return (await tx.product.deleteMany({ where: { id: productId, accountId } })).count;
+      });
+    } catch (e) {
+      if (e instanceof ComboError) return { ok: false, error: e.message };
+      throw e;
+    }
+    if (count === 0) return { ok: false, error: 'El producto ya no existe.' };
+    revalidatePath(`/a/${accountSlug}/productos`);
+    return { ok: true };
+  });
 }
 
 export type PublicationFormInput = {
@@ -131,28 +138,30 @@ export async function createPublicationAction(
   storeId: string,
   input: PublicationFormInput,
 ): Promise<SimpleResult> {
-  const user = await requireUser();
-  const accountId = await accountIdFor(accountSlug);
-  if (!accountId) return { ok: false, error: 'La cuenta no existe.' };
+  return act(accountSlug, { section: ['productos', 'publicaciones'], does: 'Creó una publicación', productId }, async () => {
+    const user = await requireUser();
+    const accountId = await accountIdFor(accountSlug);
+    if (!accountId) return { ok: false, error: 'La cuenta no existe.' };
 
-  const [product, store] = await Promise.all([
-    prisma.product.findFirst({ where: { id: productId, accountId }, select: { id: true } }),
-    prisma.store.findFirst({ where: { id: storeId, accountId }, include: { channel: true } }),
-  ]);
-  if (!product) return { ok: false, error: 'El producto no existe en esta cuenta.' };
-  if (!store) return { ok: false, error: 'La tienda no existe en esta cuenta.' };
+    const [product, store] = await Promise.all([
+      prisma.product.findFirst({ where: { id: productId, accountId }, select: { id: true } }),
+      prisma.store.findFirst({ where: { id: storeId, accountId }, include: { channel: true } }),
+    ]);
+    if (!product) return { ok: false, error: 'El producto no existe en esta cuenta.' };
+    if (!store) return { ok: false, error: 'La tienda no existe en esta cuenta.' };
 
-  const result = toPublicationData(store.channel, input);
-  if (!result.ok) return result;
+    const result = toPublicationData(store.channel, input);
+    if (!result.ok) return result;
 
-  try {
-    await createPublication(prisma, { productId, storeId, data: result.data, userId: user.id });
-  } catch (e) {
-    if (e instanceof DuplicateExternalIdError) return { ok: false, error: e.message };
-    throw e;
-  }
-  revalidatePath(`/a/${accountSlug}/productos`);
-  return { ok: true };
+    try {
+      await createPublication(prisma, { productId, storeId, data: result.data, userId: user.id });
+    } catch (e) {
+      if (e instanceof DuplicateExternalIdError) return { ok: false, error: e.message };
+      throw e;
+    }
+    revalidatePath(`/a/${accountSlug}/productos`);
+    return { ok: true };
+  });
 }
 
 export async function updatePublicationAction(
@@ -160,25 +169,27 @@ export async function updatePublicationAction(
   publicationId: string,
   input: PublicationFormInput,
 ): Promise<SimpleResult> {
-  await requireUser();
-  const accountId = await accountIdFor(accountSlug);
-  if (!accountId) return { ok: false, error: 'La cuenta no existe.' };
+  return act(accountSlug, { section: ['productos', 'publicaciones'], does: 'Editó los datos de una publicación', publicationId }, async () => {
+    await requireUser();
+    const accountId = await accountIdFor(accountSlug);
+    if (!accountId) return { ok: false, error: 'La cuenta no existe.' };
 
-  const publication = await prisma.publication.findFirst({
-    where: { id: publicationId, product: { accountId } },
-    include: { store: { include: { channel: true } } },
+    const publication = await prisma.publication.findFirst({
+      where: { id: publicationId, product: { accountId } },
+      include: { store: { include: { channel: true } } },
+    });
+    if (!publication) return { ok: false, error: 'La publicación no existe en esta cuenta.' };
+
+    const result = toPublicationData(publication.store.channel, input);
+    if (!result.ok) return result;
+
+    try {
+      await updatePublication(prisma, { publicationId, data: result.data });
+    } catch (e) {
+      if (e instanceof DuplicateExternalIdError) return { ok: false, error: e.message };
+      throw e;
+    }
+    revalidatePath(`/a/${accountSlug}/productos`);
+    return { ok: true };
   });
-  if (!publication) return { ok: false, error: 'La publicación no existe en esta cuenta.' };
-
-  const result = toPublicationData(publication.store.channel, input);
-  if (!result.ok) return result;
-
-  try {
-    await updatePublication(prisma, { publicationId, data: result.data });
-  } catch (e) {
-    if (e instanceof DuplicateExternalIdError) return { ok: false, error: e.message };
-    throw e;
-  }
-  revalidatePath(`/a/${accountSlug}/productos`);
-  return { ok: true };
 }

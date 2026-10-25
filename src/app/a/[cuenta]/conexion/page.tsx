@@ -61,7 +61,7 @@ export default async function ConnectionPage({
   searchParams: Promise<{ resultado?: string; detalle?: string }>;
 }) {
   const [{ cuenta }, { resultado, detalle }] = await Promise.all([params, searchParams]);
-  const { account } = await requireAccount(cuenta);
+  const { account } = await requireAccount(cuenta, 'conexion');
 
   const stores = (
     await prisma.store.findMany({ where: { accountId: account.id }, include: { channel: true }, orderBy: { name: 'asc' } })

@@ -19,7 +19,7 @@ export function CopyButton({ value, label }: { value: string; label: string }) {
   }
 
   return (
-    <Button
+    <Button access="view"
       type="button"
       size="sm"
       variant="outline"

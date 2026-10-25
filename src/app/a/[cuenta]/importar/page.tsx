@@ -32,7 +32,7 @@ function todayIn(timeZone: string): string {
 
 export default async function ImportPage({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
-  const { account } = await requireAccount(cuenta);
+  const { account } = await requireAccount(cuenta, 'importar');
 
   const [stores, mappings, runs] = await Promise.all([
     prisma.store.findMany({

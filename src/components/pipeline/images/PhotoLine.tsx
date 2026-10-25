@@ -301,7 +301,7 @@ function RunPanel({ accountSlug, run, photo, compact }: { accountSlug: string; r
           ) : null}
 
           {compact ? (
-            <Button type="button" size="sm" variant="ghost" aria-expanded={showParts} onClick={() => setShowParts(!showParts)}>
+            <Button access="view" type="button" size="sm" variant="ghost" aria-expanded={showParts} onClick={() => setShowParts(!showParts)}>
               <ChevronDown className={cn('h-4 w-4 transition-transform', showParts && 'rotate-180')} />
               {showParts ? 'Ocultar los ajustes' : `Ver los ${run.parts.length} ajustes y sus valores`}
             </Button>

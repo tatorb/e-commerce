@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { loadUser } from '@/lib/auth/session';
 import { prisma } from '@/lib/db';
 import { baseUrlFrom, verifyAccessToken } from '@/lib/mcp/oauth';
 import { handleRpc, rpcError, type RpcMessage } from '@/lib/mcp/server';
@@ -53,7 +54,10 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json(rpcError(null, -32700, 'JSON inválido'), { status: 400, headers: CORS });
   }
-  const ctx = { db: prisma, userId: user.userId, baseUrl: baseUrlFrom(req) };
+  // Con la persona dada de baja, la conexión ya no sirve.
+  const person = await loadUser(user.userId);
+  if (!person) return unauthorized(req, true);
+  const ctx = { db: prisma, userId: person.id, access: person.access, baseUrl: baseUrlFrom(req) };
   const messages = (Array.isArray(body) ? body : [body]) as RpcMessage[];
   const responses: object[] = [];
   for (const m of messages) {

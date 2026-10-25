@@ -18,7 +18,7 @@ export async function generateMetadata({ params }: { params: Promise<{ cuenta: s
 
 export default async function StandardPage({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
-  const { account } = await requireAccount(cuenta);
+  const { account } = await requireAccount(cuenta, 'estandar');
 
   // Un estándar por cada canal en el que la cuenta tiene tiendas.
   const [stores, rules] = await Promise.all([

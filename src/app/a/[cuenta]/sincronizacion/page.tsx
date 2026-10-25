@@ -54,7 +54,7 @@ function LastRead({ run, timeZone }: { run: Run | null; timeZone: string }) {
 
 export default async function SyncPage({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
-  const { account } = await requireAccount(cuenta);
+  const { account } = await requireAccount(cuenta, 'sincronizacion');
   const overview = await loadSyncOverview(account.id);
   const tz = account.timezone;
   const scheduled = Boolean(process.env.CRON_SECRET);

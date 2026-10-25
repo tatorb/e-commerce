@@ -275,7 +275,7 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
             <p className="break-all text-xs font-medium">{v.name}</p>
             <VideoFacts video={v} />
             {v.check && clip && (unusable || v.check.notes.length > 0) ? <ClipCheckLine check={v.check} clipName={clip.name} /> : null}
-            <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setPlaying(open ? null : v.id)}>
+            <Button access="view" size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setPlaying(open ? null : v.id)}>
               <Play />
               {open ? 'Cerrar' : 'Ver'}
             </Button>

@@ -41,5 +41,16 @@ export const auth = betterAuth({
     autoSignIn: false,
   },
   disabledPaths: ['/sign-up/email'],
+  // Un usuario dado de baja no abre sesiones, aunque sepa la contraseña.
+  databaseHooks: {
+    session: {
+      create: {
+        before: async (session) => {
+          const user = await prisma.user.findUnique({ where: { id: session.userId }, select: { disabledAt: true } });
+          if (user?.disabledAt) return false;
+        },
+      },
+    },
+  },
   plugins: [nextCookies()],
 });

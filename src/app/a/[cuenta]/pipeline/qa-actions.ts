@@ -1,5 +1,6 @@
 'use server';
 
+import { act } from '@/lib/auth/guard';
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@/lib/db';
 import { requireUser } from '@/lib/auth/session';
@@ -30,17 +31,21 @@ async function guard(accountSlug: string, run: (accountId: string) => Promise<st
 
 /** Las preguntas frecuentes o las reglas, en HTML. */
 export async function saveQaTextAction(accountSlug: string, publicationId: string, field: 'faq' | 'rules', html: string): Promise<Result> {
-  if (field !== 'faq' && field !== 'rules') return { ok: false, error: 'El campo no es válido.' };
-  return guard(accountSlug, async (accountId) => {
-    await saveQaTexts(prisma, { accountId, publicationId: String(publicationId), [field]: String(html ?? '') });
-    return 'Guardado.';
+  return act(accountSlug, { section: ['pipeline', 'publicaciones'], does: (field === 'rules' ? 'Guardó cuándo responde una persona' : 'Guardó las preguntas frecuentes'), publicationId }, async () => {
+    if (field !== 'faq' && field !== 'rules') return { ok: false, error: 'El campo no es válido.' };
+    return guard(accountSlug, async (accountId) => {
+      await saveQaTexts(prisma, { accountId, publicationId: String(publicationId), [field]: String(html ?? '') });
+      return 'Guardado.';
+    });
   });
 }
 
 export async function setAutoAnswerAction(accountSlug: string, publicationId: string, on: boolean): Promise<Result> {
-  return guard(accountSlug, async (accountId) => {
-    await setAutoAnswer(prisma, { accountId, publicationId: String(publicationId), on: on === true });
-    return on === true ? 'Listo. Claude manda solo las respuestas de las que está seguro.' : 'Listo. Las respuestas las manda una persona.';
+  return act(accountSlug, { section: ['pipeline', 'publicaciones'], does: (on === true ? 'Prendió que Claude responda solo' : 'Apagó que Claude responda solo'), publicationId }, async () => {
+    return guard(accountSlug, async (accountId) => {
+      await setAutoAnswer(prisma, { accountId, publicationId: String(publicationId), on: on === true });
+      return on === true ? 'Listo. Claude manda solo las respuestas de las que está seguro.' : 'Listo. Las respuestas las manda una persona.';
+    });
   });
 }
 
@@ -53,24 +58,26 @@ export async function tryAnswerAction(
   publicationId: string,
   input: { question: string; faq: string; rules: string },
 ): Promise<{ ok: true; result: TryResult } | { ok: false; error: string }> {
-  await requireUser();
-  const account = await getAccountBySlug(accountSlug);
-  if (!account) return { ok: false, error: 'La cuenta no existe.' };
-  if (!isAiConfigured()) return { ok: false, error: AI_NOT_CONFIGURED };
-  const question = String(input?.question ?? '').trim();
-  if (!question) return { ok: false, error: 'Escribí una pregunta.' };
-  if (question.length > MAX_QUESTION) return { ok: false, error: `La pregunta puede tener hasta ${MAX_QUESTION} caracteres.` };
-  try {
-    const r = await tryAnswer(prisma, {
-      accountId: account.id,
-      publicationId: String(publicationId),
-      question,
-      faq: String(input?.faq ?? ''),
-      rules: String(input?.rules ?? ''),
-    });
-    return r.ok ? r : { ok: false, error: r.error };
-  } catch (e) {
-    if (e instanceof ReplyError || e instanceof ResearchError) return { ok: false, error: e.message };
-    throw e;
-  }
+  return act(accountSlug, { section: ['pipeline', 'publicaciones'], does: 'Probó una respuesta de Claude', publicationId, detail: String(input?.question ?? '') }, async () => {
+    await requireUser();
+    const account = await getAccountBySlug(accountSlug);
+    if (!account) return { ok: false, error: 'La cuenta no existe.' };
+    if (!isAiConfigured()) return { ok: false, error: AI_NOT_CONFIGURED };
+    const question = String(input?.question ?? '').trim();
+    if (!question) return { ok: false, error: 'Escribí una pregunta.' };
+    if (question.length > MAX_QUESTION) return { ok: false, error: `La pregunta puede tener hasta ${MAX_QUESTION} caracteres.` };
+    try {
+      const r = await tryAnswer(prisma, {
+        accountId: account.id,
+        publicationId: String(publicationId),
+        question,
+        faq: String(input?.faq ?? ''),
+        rules: String(input?.rules ?? ''),
+      });
+      return r.ok ? r : { ok: false, error: r.error };
+    } catch (e) {
+      if (e instanceof ReplyError || e instanceof ResearchError) return { ok: false, error: e.message };
+      throw e;
+    }
+  });
 }

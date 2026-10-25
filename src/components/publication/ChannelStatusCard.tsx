@@ -93,7 +93,7 @@ export function ChannelStatusCard({
             {actions.map((a) => {
               const Icon = ICON[a];
               return (
-                <Button
+                <Button access="subir"
                   key={a}
                   size="sm"
                   variant={a === 'delete' ? 'destructive' : 'outline'}
@@ -154,7 +154,7 @@ export function ChannelStatusCard({
                 </div>
               </fieldset>
             ) : null}
-            <Button size="sm" onClick={republish} pending={busy === 'relist'} disabled={busy !== null || !price.trim() || missingQuantity}>
+            <Button access="subir" size="sm" onClick={republish} pending={busy === 'relist'} disabled={busy !== null || !price.trim() || missingQuantity}>
               <RotateCcw />
               Republicar en {channelName}
             </Button>

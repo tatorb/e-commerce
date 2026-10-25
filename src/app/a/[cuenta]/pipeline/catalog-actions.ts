@@ -1,5 +1,6 @@
 'use server';
 
+import { act } from '@/lib/auth/guard';
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@/lib/db';
 import { requireUser } from '@/lib/auth/session';
@@ -30,9 +31,11 @@ async function guard(accountSlug: string, publicationId: string, run: () => Prom
 
 /** Elige la categoría a mano. Null vuelve a la de la familia. */
 export async function setCatalogCategoryAction(accountSlug: string, publicationId: string, categoryId: string | null): Promise<Result> {
-  return guard(accountSlug, publicationId, async () => {
-    await saveCatalogData(prisma, { publicationId, category: categoryId, values: {} });
-    return 'Categoría cambiada.';
+  return act(accountSlug, { section: ['pipeline', 'publicaciones'], does: 'Eligió la categoría del canal', publicationId }, async () => {
+    return guard(accountSlug, publicationId, async () => {
+      await saveCatalogData(prisma, { publicationId, category: categoryId, values: {} });
+      return 'Categoría cambiada.';
+    });
   });
 }
 
@@ -42,8 +45,10 @@ export async function saveCatalogAction(
   categoryId: string,
   values: Record<string, string>,
 ): Promise<Result> {
-  return guard(accountSlug, publicationId, async () => {
-    await saveCatalogData(prisma, { publicationId, expectedCategoryId: categoryId, values });
-    return 'Guardado.';
+  return act(accountSlug, { section: ['pipeline', 'publicaciones'], does: 'Guardó los datos de catálogo', publicationId }, async () => {
+    return guard(accountSlug, publicationId, async () => {
+      await saveCatalogData(prisma, { publicationId, expectedCategoryId: categoryId, values });
+      return 'Guardado.';
+    });
   });
 }

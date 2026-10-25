@@ -1,4 +1,10 @@
+import Link from 'next/link';
 import { headers } from 'next/headers';
+import { History, Plus } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { accessSummary, can, parsePermissions, SECTION_KEYS, SECTIONS } from '@/domain/access';
+import { listUsers } from '@/lib/users';
+import { visibleAccounts } from '@/lib/queries/accounts';
 import { prisma } from '@/lib/db';
 import { PASSWORD_MIN } from '@/lib/auth';
 import { requireUser } from '@/lib/auth/session';
@@ -9,15 +15,6 @@ import { publicAppUrl } from '@/lib/public-url';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { NewTeamMemberDialog } from '@/components/team/NewTeamMemberDialog';
 import { ChangePasswordForm } from '@/components/team/ChangePasswordForm';
 import { ClaudeConnections } from '@/components/team/ClaudeConnections';
 import { CopyButton } from '@/components/apply/CopyButton';
@@ -40,82 +37,116 @@ export const maxDuration = 120;
 export default async function TeamPage({ searchParams }: { searchParams: Promise<{ drive?: string; detalle?: string }> }) {
   const me = await requireUser();
   const back = await searchParams;
-  const [users, connections, worker, drive, left] = await Promise.all([
-    prisma.user.findMany({
-      orderBy: { createdAt: 'asc' },
-      select: { id: true, name: true, email: true, createdAt: true },
-    }),
+  const admin = me.isAdmin;
+  const [users, connections, worker, drive, left, myAccounts] = await Promise.all([
+    admin ? listUsers(prisma) : Promise.resolve([]),
     listConnections(prisma, me.id),
-    workerState(prisma),
-    driveSummary(prisma),
-    vercelLeft(prisma),
+    admin ? workerState(prisma) : Promise.resolve(null),
+    admin ? driveSummary(prisma) : Promise.resolve(null),
+    admin ? vercelLeft(prisma) : Promise.resolve(0),
+    visibleAccounts(me.access),
   ]);
   const storeConnected = isBlobConfigured();
   // Lo que dijo la vuelta de Google al conectar el Drive.
   const driveBack = back.drive === 'ok' || back.drive === 'error' ? { ok: back.drive === 'ok', text: back.detalle ?? '' } : null;
   const now = new Date();
   const mcpUrl = `${baseUrlFromHeaders(await headers(), publicAppUrl())}/api/mcp`;
+  const active = users.filter((u) => !u.disabledAt);
 
   return (
     <>
       <PageHeader className="max-w-3xl">
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-1">
             <h1 className="text-2xl font-semibold tracking-tight">Equipo</h1>
             <p className="text-sm text-muted-foreground">
-              Las personas del estudio que pueden entrar a la app. Todas ven todas las cuentas.
+              {admin
+                ? 'Las personas que pueden entrar a la app, qué cuentas ven y qué pueden hacer en cada sección.'
+                : 'Tu usuario, tu contraseña y tu conexión con Claude.'}
             </p>
           </div>
-          <NewTeamMemberDialog passwordMin={PASSWORD_MIN} />
+          {admin ? (
+            <div className="flex flex-wrap gap-2">
+              <Button asChild size="sm" variant="outline">
+                <Link href="/equipo/actividad">
+                  <History className="h-4 w-4" />
+                  Actividad
+                </Link>
+              </Button>
+              <Button asChild size="sm">
+                <Link href="/equipo/usuarios/nuevo">
+                  <Plus className="h-4 w-4" />
+                  Nueva persona
+                </Link>
+              </Button>
+            </div>
+          ) : null}
         </div>
       </PageHeader>
       <PageBody className="max-w-3xl">
-        <p className="text-muted-foreground text-sm">{plural(users.length, 'persona')}</p>
-        <Card className="overflow-hidden">
-          <div className="md:hidden divide-y">
-            {users.map((u) => (
-              <div key={u.id} className="px-3 py-3 space-y-0.5">
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="font-medium truncate">
-                    {u.name}
-                    {u.id === me.id ? <span className="text-muted-foreground font-normal"> (vos)</span> : null}
-                  </span>
-                  <span className="text-xs text-muted-foreground tabular-nums shrink-0">
-                    {formatRelativeDate(u.createdAt)}
-                  </span>
-                </div>
-                <div className="text-xs text-muted-foreground truncate">{u.email}</div>
-              </div>
-            ))}
-          </div>
-          <div className="hidden md:block">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Nombre</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead className="text-right">Alta</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {users.map((u) => (
-                  <TableRow key={u.id}>
-                    <TableCell className="font-medium">
-                      {u.name}
-                      {u.id === me.id ? (
-                        <span className="text-muted-foreground font-normal"> (vos)</span>
-                      ) : null}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">{u.email}</TableCell>
-                    <TableCell className="text-right tabular-nums text-xs text-muted-foreground">
-                      {formatRelativeDate(u.createdAt)}
-                    </TableCell>
-                  </TableRow>
+        {admin ? (
+          <>
+            <p className="text-muted-foreground text-sm">
+              {plural(active.length, 'persona activa', 'personas activas')}
+              {users.length > active.length ? `, ${plural(users.length - active.length, 'dada de baja', 'dadas de baja')}` : ''}
+            </p>
+            <Card className="overflow-hidden">
+              <ul className="divide-y">
+                {users.map((u) => {
+                  const lastIn = u.activity[0]?.createdAt ?? null;
+                  return (
+                    <li key={u.id}>
+                      <Link href={`/equipo/usuarios/${u.id}`} className="flex flex-col gap-1 px-4 py-3 hover:bg-muted/50 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                          <p className={u.disabledAt ? 'font-medium text-muted-foreground line-through' : 'font-medium'}>
+                            {u.name}
+                            {u.id === me.id ? <span className="font-normal text-muted-foreground no-underline"> (vos)</span> : null}
+                          </p>
+                          <p className="truncate text-xs text-muted-foreground">{u.email}</p>
+                        </div>
+                        <div className="min-w-0 text-xs text-muted-foreground sm:text-right">
+                          <p className="text-foreground">
+                            {u.disabledAt
+                              ? `Dada de baja el ${formatDateTime(u.disabledAt)}`
+                              : accessSummary({ isAdmin: u.isAdmin, permissions: parsePermissions(u.permissions) })}
+                          </p>
+                          <p className="truncate">
+                            {u.isAdmin ? 'Todas las cuentas' : u.accounts.length > 0 ? u.accounts.map((a) => a.account.name).join(', ') : 'Ninguna cuenta'}
+                            {u.mustChangePassword && !u.disabledAt ? ' · tiene que cambiar la contraseña' : lastIn ? ` · entró ${formatRelativeDate(lastIn)}` : ''}
+                          </p>
+                        </div>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </Card>
+          </>
+        ) : (
+          <Card>
+            <CardHeader>
+              <CardTitle>Lo que podés hacer</CardTitle>
+              <CardDescription>Si necesitás algo más, pedíselo a un administrador.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              <p>
+                <span className="text-muted-foreground">Cuentas: </span>
+                {myAccounts.length > 0 ? myAccounts.map((a) => a.name).join(', ') : 'ninguna.'}
+              </p>
+              <ul className="space-y-0.5">
+                {SECTION_KEYS.filter((s) => can(me.access, s, 'read') || can(me.access, s, 'write')).map((s) => (
+                  <li key={s}>
+                    {SECTIONS[s].label}
+                    <span className="text-muted-foreground">
+                      {' · '}
+                      {s === 'subir' ? 'puede' : can(me.access, s, 'write') ? 've y cambia' : 'solo ve'}
+                    </span>
+                  </li>
                 ))}
-              </TableBody>
-            </Table>
-          </div>
-        </Card>
+              </ul>
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader>
@@ -171,81 +202,85 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
           </CardContent>
         </Card>
 
-        <Card id="drive">
-          <CardHeader>
-            <CardTitle>Google Drive del estudio</CardTitle>
-            <CardDescription>
-              Donde se guardan los videos de los productos, en una carpeta por cuenta y por producto. Se ven desde la Mac
-              con Google Drive y se pueden cambiar ahí. Es una sola conexión para todas las cuentas.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {driveBack ? (
-              <p role="status" className={driveBack.ok ? 'rounded-md border px-3 py-2 text-sm' : 'rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive'}>
-                {driveBack.ok ? `Listo: ${driveBack.text}` : driveBack.text}
-              </p>
-            ) : null}
-            <p className="text-sm">
-              {drive?.status === 'ACTIVE'
-                ? `Conectado con ${drive.email}${drive.connectedAt ? ` desde el ${formatDateTime(drive.connectedAt)}` : ''}${drive.connectedBy ? `, por ${drive.connectedBy.name}` : ''}.`
-                : drive?.status === 'NEEDS_REAUTH'
-                  ? `Hay que volver a conectarlo.${drive.lastError ? ` ${drive.lastError}` : ''}`
-                  : 'Sin conectar.'}
-            </p>
-            {isCryptoConfigured() ? (
-              <DriveCard
-                clientId={drive?.clientId ?? null}
-                secretHint={drive?.clientSecretHint ?? null}
-                connected={drive?.status === 'ACTIVE'}
-                redirectUri={driveRedirectUri()}
-              />
-            ) : (
-              <p className="text-sm text-muted-foreground">{KEY_NOT_CONFIGURED}</p>
-            )}
-          </CardContent>
-        </Card>
+        {admin && worker ? (
+          <>
+            <Card id="drive">
+              <CardHeader>
+                <CardTitle>Google Drive del estudio</CardTitle>
+                <CardDescription>
+                  Donde se guardan los videos de los productos, en una carpeta por cuenta y por producto. Se ven desde la Mac
+                  con Google Drive y se pueden cambiar ahí. Es una sola conexión para todas las cuentas.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {driveBack ? (
+                  <p role="status" className={driveBack.ok ? 'rounded-md border px-3 py-2 text-sm' : 'rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive'}>
+                    {driveBack.ok ? `Listo: ${driveBack.text}` : driveBack.text}
+                  </p>
+                ) : null}
+                <p className="text-sm">
+                  {drive?.status === 'ACTIVE'
+                    ? `Conectado con ${drive.email}${drive.connectedAt ? ` desde el ${formatDateTime(drive.connectedAt)}` : ''}${drive.connectedBy ? `, por ${drive.connectedBy.name}` : ''}.`
+                    : drive?.status === 'NEEDS_REAUTH'
+                      ? `Hay que volver a conectarlo.${drive.lastError ? ` ${drive.lastError}` : ''}`
+                      : 'Sin conectar.'}
+                </p>
+                {isCryptoConfigured() ? (
+                  <DriveCard
+                    clientId={drive?.clientId ?? null}
+                    secretHint={drive?.clientSecretHint ?? null}
+                    connected={drive?.status === 'ACTIVE'}
+                    redirectUri={driveRedirectUri()}
+                  />
+                ) : (
+                  <p className="text-sm text-muted-foreground">{KEY_NOT_CONFIGURED}</p>
+                )}
+              </CardContent>
+            </Card>
 
-        {left > 0 || storeConnected ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>Archivos guardados en Vercel</CardTitle>
-              <CardDescription>
-                Antes de pasar al Drive, las fotos y los archivos del fabricante se guardaban en el depósito de Vercel. Se pasan al Drive una
-                sola vez y después se borran de Vercel, para dejar de pagarlo.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <VercelFilesCard left={left} driveReady={drive?.status === 'ACTIVE'} storeConnected={storeConnected} />
-            </CardContent>
-          </Card>
+            {left > 0 || storeConnected ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Archivos guardados en Vercel</CardTitle>
+                  <CardDescription>
+                    Antes de pasar al Drive, las fotos y los archivos del fabricante se guardaban en el depósito de Vercel. Se pasan al Drive una
+                    sola vez y después se borran de Vercel, para dejar de pagarlo.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <VercelFilesCard left={left} driveReady={drive?.status === 'ACTIVE'} storeConnected={storeConnected} />
+                </CardContent>
+              </Card>
+            ) : null}
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Trabajador de imágenes</CardTitle>
+                <CardDescription>
+                  El programa que corrige las fotos del paso Imágenes. Corre en la Mac del estudio y es uno solo para todas
+                  las cuentas. Entra con su propia llave, que se carga una vez en la Mac. Cómo instalarlo está en IMAGENES.md.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <WorkerStatusLine state={worker} now={now} />
+                {worker.kind !== 'none' && (worker.info.version || worker.info.modelo_fondo) ? (
+                  <p className="text-xs text-muted-foreground">
+                    {[
+                      worker.info.version ? `Versión ${worker.info.version}` : null,
+                      worker.info.modelo_fondo ? `modelo para el fondo ${worker.info.modelo_fondo}` : null,
+                      worker.info.memoria_gb ? `${Math.round(worker.info.memoria_gb)} GB de memoria` : null,
+                      worker.lastSeenAt ? `última señal ${formatDateTime(worker.lastSeenAt)}` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(', ')}
+                    {'.'}
+                  </p>
+                ) : null}
+                <ImageWorkerCard hasKey={worker.kind !== 'none'} keyHint={worker.kind !== 'none' ? worker.keyHint : null} />
+              </CardContent>
+            </Card>
+          </>
         ) : null}
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Trabajador de imágenes</CardTitle>
-            <CardDescription>
-              El programa que corrige las fotos del paso Imágenes. Corre en la Mac del estudio y es uno solo para todas
-              las cuentas. Entra con su propia llave, que se carga una vez en la Mac. Cómo instalarlo está en IMAGENES.md.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <WorkerStatusLine state={worker} now={now} />
-            {worker.kind !== 'none' && (worker.info.version || worker.info.modelo_fondo) ? (
-              <p className="text-xs text-muted-foreground">
-                {[
-                  worker.info.version ? `Versión ${worker.info.version}` : null,
-                  worker.info.modelo_fondo ? `modelo para el fondo ${worker.info.modelo_fondo}` : null,
-                  worker.info.memoria_gb ? `${Math.round(worker.info.memoria_gb)} GB de memoria` : null,
-                  worker.lastSeenAt ? `última señal ${formatDateTime(worker.lastSeenAt)}` : null,
-                ]
-                  .filter(Boolean)
-                  .join(', ')}
-                {'.'}
-              </p>
-            ) : null}
-            <ImageWorkerCard hasKey={worker.kind !== 'none'} keyHint={worker.kind !== 'none' ? worker.keyHint : null} />
-          </CardContent>
-        </Card>
       </PageBody>
     </>
   );

@@ -8,7 +8,7 @@ export const metadata = { title: 'Nuevo producto' };
 
 export default async function NewProductPage({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
-  const { account } = await requireAccount(cuenta);
+  const { account } = await requireAccount(cuenta, 'productos');
   const base = `/a/${account.slug}/productos`;
 
   return (

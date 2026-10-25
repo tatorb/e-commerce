@@ -51,7 +51,7 @@ export default async function ProductsPage({
   searchParams: Promise<{ q?: string; tipo?: string }>;
 }) {
   const [{ cuenta }, { q, tipo }] = await Promise.all([params, searchParams]);
-  const { account } = await requireAccount(cuenta);
+  const { account } = await requireAccount(cuenta, 'productos');
 
   const kinds = parseKinds(tipo);
   const products = await listProducts(account.id, q, kinds);
@@ -88,7 +88,7 @@ export default async function ProductsPage({
                 placeholder="nombre, marca, número de pieza, SKU o ID…"
                 className="w-full sm:w-80"
               />
-              <Button type="submit">Buscar</Button>
+              <Button access="view" type="submit">Buscar</Button>
               <UrlFilterDropdown
                 label="Tipo"
                 paramKey="tipo"

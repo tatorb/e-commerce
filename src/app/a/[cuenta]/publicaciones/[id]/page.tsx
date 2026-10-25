@@ -85,7 +85,7 @@ export default async function PublicationPage({
   searchParams: Promise<{ cara?: string }>;
 }) {
   const [{ cuenta, id }, { cara }] = await Promise.all([params, searchParams]);
-  const { account } = await requireAccount(cuenta);
+  const { account } = await requireAccount(cuenta, 'publicaciones');
   const [data, media] = await Promise.all([loadPublicationFaces(account.id, id), loadMediaSources(prisma, account.id, id).catch(() => null)]);
   // Sin publicar: lo que hace falta para crearla en el canal.
   const create = data && !data.publication.externalId ? await createChecks(prisma, { accountId: account.id, publicationId: id }) : null;

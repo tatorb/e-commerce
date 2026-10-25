@@ -1,5 +1,6 @@
 'use server';
 
+import { act } from '@/lib/auth/guard';
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@/lib/db';
 import { requireUser } from '@/lib/auth/session';
@@ -16,44 +17,50 @@ type Result = { ok: true; message?: string } | { ok: false; error: string };
 const NO_ACCOUNT: Result = { ok: false, error: 'La cuenta no existe.' };
 
 export async function proposeDescriptionAction(accountSlug: string, publicationId: string): Promise<Result> {
-  const user = await requireUser();
-  const account = await getAccountBySlug(accountSlug);
-  if (!account) return NO_ACCOUNT;
-  if (!isAiConfigured()) return { ok: false, error: AI_NOT_CONFIGURED };
-  const r = await proposeDescription(prisma, { accountId: account.id, publicationId: String(publicationId), userId: user.id });
-  if (!r.ok) return r;
-  revalidatePath(`/a/${accountSlug}/pipeline/${publicationId}`);
-  return { ok: true, message: 'Claude propuso la descripción.' };
+  return act(accountSlug, { section: ['pipeline', 'publicaciones'], does: 'Pidió una descripción a Claude', publicationId }, async () => {
+    const user = await requireUser();
+    const account = await getAccountBySlug(accountSlug);
+    if (!account) return NO_ACCOUNT;
+    if (!isAiConfigured()) return { ok: false, error: AI_NOT_CONFIGURED };
+    const r = await proposeDescription(prisma, { accountId: account.id, publicationId: String(publicationId), userId: user.id });
+    if (!r.ok) return r;
+    revalidatePath(`/a/${accountSlug}/pipeline/${publicationId}`);
+    return { ok: true, message: 'Claude propuso la descripción.' };
+  });
 }
 
 export async function saveDescriptionAction(accountSlug: string, publicationId: string, body: string, withFrame: boolean): Promise<Result> {
-  await requireUser();
-  const account = await getAccountBySlug(accountSlug);
-  if (!account) return NO_ACCOUNT;
-  try {
-    const r = await saveDescription(prisma, { accountId: account.id, publicationId: String(publicationId), body: String(body ?? ''), withFrame: Boolean(withFrame) });
-    revalidatePath(`/a/${accountSlug}`, 'layout');
-    return { ok: true, message: ['Guardada en el borrador.', ...r.warnings].join(' ') };
-  } catch (e) {
-    if (e instanceof DescriptionError) return { ok: false, error: e.message };
-    throw e;
-  }
+  return act(accountSlug, { section: ['pipeline', 'publicaciones'], does: 'Guardó la descripción', publicationId }, async () => {
+    await requireUser();
+    const account = await getAccountBySlug(accountSlug);
+    if (!account) return NO_ACCOUNT;
+    try {
+      const r = await saveDescription(prisma, { accountId: account.id, publicationId: String(publicationId), body: String(body ?? ''), withFrame: Boolean(withFrame) });
+      revalidatePath(`/a/${accountSlug}`, 'layout');
+      return { ok: true, message: ['Guardada en el borrador.', ...r.warnings].join(' ') };
+    } catch (e) {
+      if (e instanceof DescriptionError) return { ok: false, error: e.message };
+      throw e;
+    }
+  });
 }
 
 export async function saveDescriptionSettingsAction(accountSlug: string, input: DescriptionSettingsInput): Promise<Result> {
-  await requireUser();
-  const account = await getAccountBySlug(accountSlug);
-  if (!account) return NO_ACCOUNT;
-  try {
-    await saveDescriptionSettings(prisma, account.id, {
-      header: String(input?.header ?? ''),
-      footer: String(input?.footer ?? ''),
-      guidelines: String(input?.guidelines ?? ''),
-    });
-  } catch (e) {
-    if (e instanceof DescriptionError) return { ok: false, error: e.message };
-    throw e;
-  }
-  revalidatePath(`/a/${accountSlug}`, 'layout');
-  return { ok: true };
+  return act(accountSlug, { section: 'descripciones', does: 'Guardó los ajustes de descripciones' }, async () => {
+    await requireUser();
+    const account = await getAccountBySlug(accountSlug);
+    if (!account) return NO_ACCOUNT;
+    try {
+      await saveDescriptionSettings(prisma, account.id, {
+        header: String(input?.header ?? ''),
+        footer: String(input?.footer ?? ''),
+        guidelines: String(input?.guidelines ?? ''),
+      });
+    } catch (e) {
+      if (e instanceof DescriptionError) return { ok: false, error: e.message };
+      throw e;
+    }
+    revalidatePath(`/a/${accountSlug}`, 'layout');
+    return { ok: true };
+  });
 }

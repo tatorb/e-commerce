@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth/session';
+import { canSeeProduct } from '@/lib/auth/product-access';
 import { signedDownloadUrl } from '@/lib/files';
 import { inVercel, readStored, storageError } from '@/lib/stored-files';
 
@@ -16,7 +17,8 @@ type Kind = (typeof KINDS)[number];
 const LIGHT: Kind[] = ['antes', 'vista'];
 
 export async function GET(req: Request) {
-  if (!(await getCurrentUser())) return new NextResponse('Entrá a la app para ver este archivo.', { status: 401 });
+  const user = await getCurrentUser();
+  if (!user) return new NextResponse('Entrá a la app para ver este archivo.', { status: 401 });
   const params = new URL(req.url).searchParams;
   const kind = params.get('tipo') as Kind;
   if (!KINDS.includes(kind)) return new NextResponse('Archivo desconocido.', { status: 400 });
@@ -24,11 +26,14 @@ export async function GET(req: Request) {
   let url: string | null = null;
   let name = 'foto';
   let contentType = 'image/jpeg';
+  // El producto de la foto: solo la ve quien ve el producto.
+  let productId: string | null = null;
   if (kind === 'antes' || kind === 'original') {
     const edit = await prisma.photoEdit.findUnique({ where: { id: params.get('foto') ?? '' } });
     url = kind === 'antes' ? (edit?.previewUrl ?? null) : (edit?.originalUrl ?? null);
     name = edit ? (kind === 'original' ? edit.originalName : `${edit.originalName.replace(/\.[^.]+$/, '')}-vista.jpg`) : name;
     contentType = kind === 'original' && edit ? edit.originalType : contentType;
+    productId = edit?.productId ?? null;
   } else {
     const run = await prisma.photoStepRun.findUnique({ where: { id: params.get('paso') ?? '' }, include: { edit: true } });
     const field = { vista: 'previewUrl', mascara: 'maskUrl', png: 'pngUrl', jpg: 'jpgUrl', vivo: 'liveUrl' } as const;
@@ -36,8 +41,9 @@ export async function GET(req: Request) {
     const base = run ? run.edit.originalName.replace(/\.[^.]+$/, '') : 'foto';
     name = { vista: `${base}-vista.jpg`, mascara: `${base}-silueta.png`, png: `${base}.png`, jpg: `${base}.jpg`, vivo: `${base}-en-vivo.bin` }[kind];
     contentType = kind === 'vivo' ? 'application/octet-stream' : kind === 'mascara' || kind === 'png' ? 'image/png' : 'image/jpeg';
+    productId = run?.edit.productId ?? null;
   }
-  if (!url) return new NextResponse('El archivo no existe.', { status: 404 });
+  if (!url || !(await canSeeProduct(user, productId))) return new NextResponse('El archivo no existe.', { status: 404 });
 
   if (inVercel(url) && !LIGHT.includes(kind)) {
     try {

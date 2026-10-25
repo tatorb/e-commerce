@@ -41,7 +41,7 @@ export function ContentSheetInstructions({ text }: { text: string }) {
         }
       }}
     >
-      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+      <Button access="view" size="sm" variant="outline" onClick={() => setOpen(true)}>
         <Sparkles className="h-4 w-4" />
         Instrucciones para la IA
       </Button>
@@ -62,10 +62,10 @@ export function ContentSheetInstructions({ text }: { text: string }) {
         />
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+          <Button access="view" type="button" variant="outline" onClick={() => setOpen(false)}>
             Cerrar
           </Button>
-          <Button type="button" onClick={copy}>
+          <Button access="view" type="button" onClick={copy}>
             {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
             {copied ? 'Copiado' : 'Copiar'}
           </Button>

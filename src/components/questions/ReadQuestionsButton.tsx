@@ -57,7 +57,7 @@ export function ReadQuestionsButton({ accountSlug }: { accountSlug: string }) {
 
   return (
     <div className="flex flex-col items-end gap-1">
-      <Button size="sm" variant="outline" onClick={read} pending={added !== null} disabled={added !== null}>
+      <Button access="view" size="sm" variant="outline" onClick={read} pending={added !== null} disabled={added !== null}>
         <RefreshCw />
         Leer ahora
       </Button>

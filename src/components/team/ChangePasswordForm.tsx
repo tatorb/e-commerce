@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -8,7 +9,19 @@ import { changeOwnPassword } from '@/lib/auth/actions';
 
 type Status = { kind: 'idle' } | { kind: 'success' } | { kind: 'error'; message: string };
 
-export function ChangePasswordForm({ passwordMin }: { passwordMin: number }) {
+export function ChangePasswordForm({
+  passwordMin,
+  currentLabel = 'Contraseña actual',
+  next,
+}: {
+  passwordMin: number;
+  currentLabel?: string;
+  // Adónde ir cuando la cambió, por ejemplo después del primer ingreso.
+  next?: string;
+}) {
+  // En una tarjeta angosta, un campo debajo del otro.
+  const stacked = Boolean(next);
+  const router = useRouter();
   const [current, setCurrent] = useState('');
   const [p1, setP1] = useState('');
   const [p2, setP2] = useState('');
@@ -24,6 +37,7 @@ export function ChangePasswordForm({ passwordMin }: { passwordMin: number }) {
     startTransition(async () => {
       const result = await changeOwnPassword({ currentPassword: current, newPassword: p1 });
       if (result.ok) {
+        if (next) return router.replace(next);
         setStatus({ kind: 'success' });
         setCurrent('');
         setP1('');
@@ -42,9 +56,9 @@ export function ChangePasswordForm({ passwordMin }: { passwordMin: number }) {
         handleSave();
       }}
     >
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className={stacked ? 'grid gap-3' : 'grid gap-3 sm:grid-cols-3'}>
         <div className="space-y-1.5">
-          <Label htmlFor="pw-current">Contraseña actual</Label>
+          <Label htmlFor="pw-current">{currentLabel}</Label>
           <Input
             id="pw-current"
             type="password"

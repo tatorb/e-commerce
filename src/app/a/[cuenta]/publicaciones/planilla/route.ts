@@ -1,4 +1,5 @@
 import { requireUser } from '@/lib/auth/session';
+import { can, canSeeAccount } from '@/domain/access';
 import { getAccountBySlug } from '@/lib/queries/accounts';
 import { listScoredPublications } from '@/lib/queries/scoring';
 import {
@@ -19,10 +20,12 @@ function todayIn(timeZone: string): string {
 }
 
 export async function GET(request: Request, { params }: { params: Promise<{ cuenta: string }> }) {
-  await requireUser();
+  const user = await requireUser();
   const { cuenta } = await params;
   const account = await getAccountBySlug(cuenta);
-  if (!account) return new Response('La cuenta no existe.', { status: 404 });
+  if (!account || !canSeeAccount(user.access, account.id) || !can(user.access, 'publicaciones', 'read')) {
+    return new Response('La cuenta no existe.', { status: 404 });
+  }
 
   const search = Object.fromEntries(new URL(request.url).searchParams) as PublicationSearch;
   const items = filterPublications(await listScoredPublications(account.id), parsePublicationSearch(search));

@@ -1,5 +1,6 @@
 'use server';
 
+import { act } from '@/lib/auth/guard';
 import { revalidatePath } from 'next/cache';
 import { headers } from 'next/headers';
 import { prisma } from '@/lib/db';
@@ -58,29 +59,33 @@ export async function saveManufacturerAction(
   publicationId: string,
   input: { site: string; productUrl: string; text: string },
 ): Promise<Result> {
-  const user = await requireUser();
-  const productId = await productOf(accountSlug, publicationId);
-  if (!productId) return NOT_FOUND;
-  const parsed = manufacturerSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, error: firstIssue(parsed.error) };
-  const { site, productUrl, text } = parsed.data;
-  return guard(accountSlug, async () => {
-    await updateResearch(prisma, {
-      productId,
-      userId: user.id,
-      data: { manufacturerSite: site, manufacturerProductUrl: productUrl, manufacturerText: text },
+  return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Guardó lo del fabricante', publicationId }, async () => {
+    const user = await requireUser();
+    const productId = await productOf(accountSlug, publicationId);
+    if (!productId) return NOT_FOUND;
+    const parsed = manufacturerSchema.safeParse(input);
+    if (!parsed.success) return { ok: false, error: firstIssue(parsed.error) };
+    const { site, productUrl, text } = parsed.data;
+    return guard(accountSlug, async () => {
+      await updateResearch(prisma, {
+        productId,
+        userId: user.id,
+        data: { manufacturerSite: site, manufacturerProductUrl: productUrl, manufacturerText: text },
+      });
+      return 'Guardado.';
     });
-    return 'Guardado.';
   });
 }
 
 export async function saveClarificationsAction(accountSlug: string, publicationId: string, html: string): Promise<Result> {
-  const user = await requireUser();
-  const productId = await productOf(accountSlug, publicationId);
-  if (!productId) return NOT_FOUND;
-  return guard(accountSlug, async () => {
-    await updateResearch(prisma, { productId, userId: user.id, data: { clarifications: cleanRichText(String(html ?? '')) } });
-    return 'Guardado.';
+  return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Guardó las aclaraciones para las imágenes', publicationId }, async () => {
+    const user = await requireUser();
+    const productId = await productOf(accountSlug, publicationId);
+    if (!productId) return NOT_FOUND;
+    return guard(accountSlug, async () => {
+      await updateResearch(prisma, { productId, userId: user.id, data: { clarifications: cleanRichText(String(html ?? '')) } });
+      return 'Guardado.';
+    });
   });
 }
 
@@ -89,16 +94,18 @@ export async function saveClarificationsAction(accountSlug: string, publicationI
  * la publicación, o desde la pestaña Investigación del producto.
  */
 export async function saveKnowledgeAction(accountSlug: string, target: { publicationId?: string; productId?: string }, html: string): Promise<Result> {
-  const user = await requireUser();
-  const productId = target.publicationId
-    ? await productOf(accountSlug, String(target.publicationId))
-    : target.productId
-      ? ((await prisma.product.findFirst({ where: { id: String(target.productId), account: { slug: accountSlug } }, select: { id: true } }))?.id ?? null)
-      : null;
-  if (!productId) return { ok: false, error: 'El producto no existe en esta cuenta.' };
-  return guard(accountSlug, async () => {
-    await updateResearch(prisma, { productId, userId: user.id, data: { storeKnowledge: cleanRichText(String(html ?? '')) } });
-    return 'Guardado.';
+  return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Guardó lo que sabe la tienda', publicationId: target?.publicationId ?? null, productId: target?.productId ?? null }, async () => {
+    const user = await requireUser();
+    const productId = target.publicationId
+      ? await productOf(accountSlug, String(target.publicationId))
+      : target.productId
+        ? ((await prisma.product.findFirst({ where: { id: String(target.productId), account: { slug: accountSlug } }, select: { id: true } }))?.id ?? null)
+        : null;
+    if (!productId) return { ok: false, error: 'El producto no existe en esta cuenta.' };
+    return guard(accountSlug, async () => {
+      await updateResearch(prisma, { productId, userId: user.id, data: { storeKnowledge: cleanRichText(String(html ?? '')) } });
+      return 'Guardado.';
+    });
   });
 }
 
@@ -107,46 +114,54 @@ export async function saveQuestionsAction(
   publicationId: string,
   input: { own: string; competitors: string },
 ): Promise<Result> {
-  const user = await requireUser();
-  const productId = await productOf(accountSlug, publicationId);
-  if (!productId) return NOT_FOUND;
-  const parsed = questionsSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, error: firstIssue(parsed.error) };
-  return guard(accountSlug, async () => {
-    await prisma.$transaction((tx) =>
-      saveQuestions(tx, { productId, publicationId, userId: user.id, own: parsed.data.own, competitors: parsed.data.competitors }),
-    );
-    return 'Preguntas guardadas.';
+  return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Guardó las preguntas de los compradores', publicationId }, async () => {
+    const user = await requireUser();
+    const productId = await productOf(accountSlug, publicationId);
+    if (!productId) return NOT_FOUND;
+    const parsed = questionsSchema.safeParse(input);
+    if (!parsed.success) return { ok: false, error: firstIssue(parsed.error) };
+    return guard(accountSlug, async () => {
+      await prisma.$transaction((tx) =>
+        saveQuestions(tx, { productId, publicationId, userId: user.id, own: parsed.data.own, competitors: parsed.data.competitors }),
+      );
+      return 'Preguntas guardadas.';
+    });
   });
 }
 
 const KINDS: InsightKind[] = ['PAIN', 'OBJECTION'];
 
 export async function addInsightAction(accountSlug: string, publicationId: string, kind: InsightKind, text: string): Promise<Result> {
-  await requireUser();
-  const productId = await productOf(accountSlug, publicationId);
-  if (!productId) return NOT_FOUND;
-  if (!KINDS.includes(kind)) return { ok: false, error: 'La lista no es válida.' };
-  return guard(accountSlug, async () => {
-    await prisma.$transaction((tx) => addInsight(tx, { productId, kind, text: String(text ?? '') }));
+  return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Agregó un dolor u objeción del comprador', publicationId, detail: text }, async () => {
+    await requireUser();
+    const productId = await productOf(accountSlug, publicationId);
+    if (!productId) return NOT_FOUND;
+    if (!KINDS.includes(kind)) return { ok: false, error: 'La lista no es válida.' };
+    return guard(accountSlug, async () => {
+      await prisma.$transaction((tx) => addInsight(tx, { productId, kind, text: String(text ?? '') }));
+    });
   });
 }
 
 export async function updateInsightAction(accountSlug: string, publicationId: string, id: string, text: string): Promise<Result> {
-  await requireUser();
-  const productId = await productOf(accountSlug, publicationId);
-  if (!productId) return NOT_FOUND;
-  return guard(accountSlug, async () => {
-    await updateInsight(prisma, { productId, id: String(id), text: String(text ?? '') });
+  return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Cambió un dolor u objeción del comprador', publicationId, detail: text }, async () => {
+    await requireUser();
+    const productId = await productOf(accountSlug, publicationId);
+    if (!productId) return NOT_FOUND;
+    return guard(accountSlug, async () => {
+      await updateInsight(prisma, { productId, id: String(id), text: String(text ?? '') });
+    });
   });
 }
 
 export async function deleteInsightAction(accountSlug: string, publicationId: string, id: string): Promise<Result> {
-  await requireUser();
-  const productId = await productOf(accountSlug, publicationId);
-  if (!productId) return NOT_FOUND;
-  return guard(accountSlug, async () => {
-    await deleteInsight(prisma, { productId, id: String(id) });
+  return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Borró un dolor u objeción del comprador', publicationId }, async () => {
+    await requireUser();
+    const productId = await productOf(accountSlug, publicationId);
+    if (!productId) return NOT_FOUND;
+    return guard(accountSlug, async () => {
+      await deleteInsight(prisma, { productId, id: String(id) });
+    });
   });
 }
 
@@ -156,11 +171,13 @@ export async function moveInsightAction(
   id: string,
   direction: 'up' | 'down',
 ): Promise<Result> {
-  await requireUser();
-  const productId = await productOf(accountSlug, publicationId);
-  if (!productId) return NOT_FOUND;
-  return guard(accountSlug, async () => {
-    await prisma.$transaction((tx) => moveInsight(tx, { productId, id: String(id), direction: direction === 'up' ? 'up' : 'down' }));
+  return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Reordenó los dolores u objeciones del comprador', publicationId }, async () => {
+    await requireUser();
+    const productId = await productOf(accountSlug, publicationId);
+    if (!productId) return NOT_FOUND;
+    return guard(accountSlug, async () => {
+      await prisma.$transaction((tx) => moveInsight(tx, { productId, id: String(id), direction: direction === 'up' ? 'up' : 'down' }));
+    });
   });
 }
 
@@ -170,51 +187,57 @@ export async function startFileUploadAction(
   publicationId: string,
   file: { name: string; size: number },
 ): Promise<{ ok: true; uploadUrl: string } | { ok: false; error: string }> {
-  await requireUser();
-  const productId = await productOf(accountSlug, publicationId);
-  if (!productId) return NOT_FOUND as { ok: false; error: string };
-  const name = String(file?.name ?? '').trim().slice(0, 200);
-  const size = Number(file?.size);
-  const problem = productFileProblem({ name, size });
-  if (problem) return { ok: false, error: problem };
-  // La subida se abre con el origen de la página, así el navegador puede usarla.
-  const origin = (await headers()).get('origin') ?? publicAppUrl();
-  try {
-    const uploadUrl = await withDriveToken(prisma, async (token, email) =>
-      startResumableUpload(token, {
-        folderId: await manufacturerFolderId(prisma, token, email, productId),
-        name,
-        type: FILE_TYPES[extensionOf(name)].contentType,
-        size,
-        origin,
-        properties: { mrbProducto: productId },
-      }),
-    );
-    return { ok: true, uploadUrl };
-  } catch (e) {
-    const message = storageError(e);
-    if (message) return { ok: false, error: message };
-    throw e;
-  }
+  return act(accountSlug, { section: ['pipeline', 'productos'] }, async () => {
+    await requireUser();
+    const productId = await productOf(accountSlug, publicationId);
+    if (!productId) return NOT_FOUND as { ok: false; error: string };
+    const name = String(file?.name ?? '').trim().slice(0, 200);
+    const size = Number(file?.size);
+    const problem = productFileProblem({ name, size });
+    if (problem) return { ok: false, error: problem };
+    // La subida se abre con el origen de la página, así el navegador puede usarla.
+    const origin = (await headers()).get('origin') ?? publicAppUrl();
+    try {
+      const uploadUrl = await withDriveToken(prisma, async (token, email) =>
+        startResumableUpload(token, {
+          folderId: await manufacturerFolderId(prisma, token, email, productId),
+          name,
+          type: FILE_TYPES[extensionOf(name)].contentType,
+          size,
+          origin,
+          properties: { mrbProducto: productId },
+        }),
+      );
+      return { ok: true, uploadUrl };
+    } catch (e) {
+      const message = storageError(e);
+      if (message) return { ok: false, error: message };
+      throw e;
+    }
+  });
 }
 
 /** Anota un archivo que el navegador ya subió al Drive. */
 export async function registerFileAction(accountSlug: string, publicationId: string, fileId: string): Promise<Result> {
-  const user = await requireUser();
-  const productId = await productOf(accountSlug, publicationId);
-  if (!productId) return NOT_FOUND;
-  return guard(accountSlug, async () => {
-    await addUploadedProductFile(prisma, { productId, fileId: String(fileId), userId: user.id });
+  return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Subió un archivo del fabricante', publicationId }, async () => {
+    const user = await requireUser();
+    const productId = await productOf(accountSlug, publicationId);
+    if (!productId) return NOT_FOUND;
+    return guard(accountSlug, async () => {
+      await addUploadedProductFile(prisma, { productId, fileId: String(fileId), userId: user.id });
+    });
   });
 }
 
 /** Saca el archivo de la ficha y lo manda a la papelera del Drive. */
 export async function deleteFileAction(accountSlug: string, publicationId: string, fileId: string): Promise<Result> {
-  await requireUser();
-  const productId = await productOf(accountSlug, publicationId);
-  if (!productId) return NOT_FOUND;
-  return guard(accountSlug, async () => {
-    await deleteProductFile(prisma, { productId, fileId: String(fileId) }, (url) => removeStored(prisma, url));
-    return 'Archivo borrado.';
+  return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Borró un archivo del fabricante', publicationId }, async () => {
+    await requireUser();
+    const productId = await productOf(accountSlug, publicationId);
+    if (!productId) return NOT_FOUND;
+    return guard(accountSlug, async () => {
+      await deleteProductFile(prisma, { productId, fileId: String(fileId) }, (url) => removeStored(prisma, url));
+      return 'Archivo borrado.';
+    });
   });
 }

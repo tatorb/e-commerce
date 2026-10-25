@@ -136,6 +136,8 @@ const listAccounts = defineTool({
     const [user, accounts] = await Promise.all([
       ctx.db.user.findUnique({ where: { id: ctx.userId }, select: { name: true } }),
       ctx.db.account.findMany({
+        // Solo las que ve la persona.
+        where: ctx.access.isAdmin ? {} : { id: { in: [...ctx.access.accountIds] } },
         orderBy: { name: 'asc' },
         select: { id: true, slug: true, name: true, stores: { select: { name: true, channel: { select: { name: true } } } } },
       }),
@@ -170,6 +172,7 @@ const listAccounts = defineTool({
 
 const searchCatalog = defineTool({
   name: 'search_catalog',
+  section: ['publicaciones', 'pipeline'],
   title: 'Buscar en Publicaciones',
   description:
     'Busca en la lista de Publicaciones de una cuenta, con los mismos filtros de la pantalla. Devuelve título, código, si es individual o combo, familia, puntaje, visitas y ventas de 90 días, si el título está bloqueado y el estado en el pipeline. Los filtros con varios valores aceptan cualquiera de ellos.',
@@ -220,7 +223,7 @@ const searchCatalog = defineTool({
   }),
   readOnly: true,
   async run(ctx, args) {
-    const account = await resolveAccount(ctx.db, args.cuenta);
+    const account = await resolveAccount(ctx, args.cuenta);
     const all = await listScoredPublications(account.id, {}, ctx.db);
     const counts = new Map<string, number>();
     for (const p of all) if (p.family) counts.set(p.family, (counts.get(p.family) ?? 0) + 1);
@@ -275,6 +278,7 @@ const searchCatalog = defineTool({
 
 const getPipelineBoard = defineTool({
   name: 'get_pipeline_board',
+  section: 'pipeline',
   title: 'Ver el tablero del pipeline',
   description:
     'Muestra el tablero del pipeline de una cuenta: cuántas publicaciones hay en cada paso, cuáles son y hace cuántos días esperan en ese paso. Las que esperan hace más van primero. Se puede ver solo individuales o solo combos.',
@@ -287,7 +291,7 @@ const getPipelineBoard = defineTool({
   }),
   readOnly: true,
   async run(ctx, args) {
-    const account = await resolveAccount(ctx.db, args.cuenta);
+    const account = await resolveAccount(ctx, args.cuenta);
     const now = new Date();
     const kinds = parseKinds(args.individual_o_combo?.join(','));
     const [board, completed] = await Promise.all([
@@ -326,14 +330,15 @@ const getPipelineBoard = defineTool({
 
 const getPublication = defineTool({
   name: 'get_publication',
+  section: ['publicaciones', 'pipeline', 'productos'],
   title: 'Ver una publicación',
   description:
     'Muestra todo de una publicación: la ficha del producto (la fuente de verdad), el título y la descripción actuales, los atributos del canal, los datos de catálogo del canal (cada campo del formulario de su categoría, con sus opciones y lo cargado), el puntaje y lo que le falta, la última medición, el estado e historial del pipeline, el candado del título, la competencia cargada, las preguntas frecuentes y las reglas de la publicación (paso Preguntas y respuestas) y la investigación del producto: lo del fabricante, las aclaraciones para las imágenes, las preguntas de los compradores (las que llegaron solas del canal, con su respuesta, y las pegadas) y sus dolores y objeciones. La ficha y la investigación son del producto y las comparten todas sus publicaciones; las preguntas de la publicación propia son solo de esta.',
   input: z.object({ cuenta: accountArg, publicacion: publicationArg }),
   readOnly: true,
   async run(ctx, args) {
-    const account = await resolveAccount(ctx.db, args.cuenta);
-    const id = await resolvePublication(ctx.db, account.id, args.publicacion);
+    const account = await resolveAccount(ctx, args.cuenta);
+    const id = await resolvePublication(ctx, account.id, args.publicacion);
     const [pub, [scored], movements, research, catalog] = await Promise.all([
       ctx.db.publication.findUniqueOrThrow({
         where: { id },
@@ -510,8 +515,8 @@ const getPublication = defineTool({
 // ───────────────────────────── Título ─────────────────────────────
 
 async function titleContext(ctx: McpContext, args: { cuenta?: string; publicacion: string }) {
-  const account = await resolveAccount(ctx.db, args.cuenta);
-  const id = await resolvePublication(ctx.db, account.id, args.publicacion);
+  const account = await resolveAccount(ctx, args.cuenta);
+  const id = await resolvePublication(ctx, account.id, args.publicacion);
   const tc = await loadTitleContext(ctx.db, account.id, id);
   if (!tc) throw new McpToolError('La publicación no está en la cuenta.');
   return { account, tc };
@@ -519,6 +524,7 @@ async function titleContext(ctx: McpContext, args: { cuenta?: string; publicacio
 
 const getTitleWorkspace = defineTool({
   name: 'get_title_workspace',
+  section: 'pipeline',
   title: 'Ver el trabajo del título',
   description:
     'Muestra el paso Título de una publicación: el candado y la decisión tomada, las reglas y la estructura sugerida, las semillas, las sugerencias del buscador guardadas con su fecha, el mapa de palabras con las tildadas, las búsquedas principales y sus posiciones, las propuestas guardadas, la competencia y el último título aprobado. Si el producto es un combo, trae los productos que lo forman: el título tiene que dejar claro que trae varios.',
@@ -613,6 +619,7 @@ const getTitleWorkspace = defineTool({
 
 const checkTitleTool = defineTool({
   name: 'check_title',
+  section: 'pipeline',
   title: 'Chequear un título',
   description:
     'Chequea un título para una publicación con el mismo control de la app: largo, signos y palabras no permitidas, palabras repetidas o sin tildar, y qué búsquedas cubre. Un título con errores no se puede aprobar. Usala antes de proponer un título.',

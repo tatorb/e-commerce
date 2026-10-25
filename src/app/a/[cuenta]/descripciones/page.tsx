@@ -17,7 +17,7 @@ export async function generateMetadata({ params }: { params: Promise<{ cuenta: s
 
 export default async function DescriptionSettingsPage({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
-  const { account } = await requireAccount(cuenta);
+  const { account } = await requireAccount(cuenta, 'descripciones');
   const row = await loadDescriptionSettings(prisma, account.id);
 
   return (

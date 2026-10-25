@@ -22,7 +22,9 @@ export async function GET(request: Request) {
   const state = params.get('state') ?? '';
   const code = params.get('code') ?? '';
   const denied = params.get('error');
-  if (!(await getCurrentUser())) return back({ ok: false, detail: 'Tu sesión en la app venció. Entrá y conectá el Drive de nuevo.' });
+  const user = await getCurrentUser();
+  if (!user) return back({ ok: false, detail: 'Tu sesión en la app venció. Entrá y conectá el Drive de nuevo.' });
+  if (!user.isAdmin) return back({ ok: false, detail: 'Solo un administrador puede conectar el Drive.' });
 
   if (denied || !code || !state) {
     if (state) {

@@ -1,5 +1,6 @@
 'use server';
 
+import { act } from '@/lib/auth/guard';
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@/lib/db';
 import { requireUser } from '@/lib/auth/session';
@@ -34,23 +35,25 @@ export async function moveStepAction(
   expected: PipelineStep,
   move: Move,
 ): Promise<Result> {
-  const user = await requireUser();
-  if (!PIPELINE_STEPS.includes(expected)) return { ok: false, error: 'El paso no es válido.' };
-  if (!(await belongs(accountSlug, publicationId))) return { ok: false, error: 'La publicación no existe en esta cuenta.' };
-  const args = { publicationId, expected, userId: user.id };
-  try {
-    await prisma.$transaction(async (tx) => {
-      if (move === 'advance') await advanceStep(tx, args);
-      else if (move === 'back') await backStep(tx, args);
-      else if (move === 'complete') await completePipeline(tx, args);
-      else throw new PipelineError('No se entiende qué hacer.');
-    });
-  } catch (e) {
-    if (e instanceof PipelineError) return { ok: false, error: e.message };
-    throw e;
-  }
-  revalidatePath(`/a/${accountSlug}`, 'layout');
-  return { ok: true };
+  return act(accountSlug, { section: ['pipeline'], does: 'Movió la publicación en el pipeline', publicationId }, async () => {
+    const user = await requireUser();
+    if (!PIPELINE_STEPS.includes(expected)) return { ok: false, error: 'El paso no es válido.' };
+    if (!(await belongs(accountSlug, publicationId))) return { ok: false, error: 'La publicación no existe en esta cuenta.' };
+    const args = { publicationId, expected, userId: user.id };
+    try {
+      await prisma.$transaction(async (tx) => {
+        if (move === 'advance') await advanceStep(tx, args);
+        else if (move === 'back') await backStep(tx, args);
+        else if (move === 'complete') await completePipeline(tx, args);
+        else throw new PipelineError('No se entiende qué hacer.');
+      });
+    } catch (e) {
+      if (e instanceof PipelineError) return { ok: false, error: e.message };
+      throw e;
+    }
+    revalidatePath(`/a/${accountSlug}`, 'layout');
+    return { ok: true };
+  });
 }
 
 /** Saca la publicación del pipeline con un motivo. No borra nada. */
@@ -60,26 +63,26 @@ export async function removeFromPipelineAction(
   expected: PipelineStep,
   reason: PipelineRemoval,
 ): Promise<Result> {
-  const user = await requireUser();
-  if (!PIPELINE_STEPS.includes(expected)) return { ok: false, error: 'El paso no es válido.' };
-  if (!PIPELINE_REMOVALS.includes(reason)) return { ok: false, error: 'Elegí un motivo.' };
-  if (!(await belongs(accountSlug, publicationId))) return { ok: false, error: 'La publicación no existe en esta cuenta.' };
-  try {
-    await prisma.$transaction((tx) => removeFromPipeline(tx, { publicationId, expected, userId: user.id, reason }));
-  } catch (e) {
-    if (e instanceof PipelineError) return { ok: false, error: e.message };
-    throw e;
-  }
-  revalidatePath(`/a/${accountSlug}`, 'layout');
-  return { ok: true };
+  return act(accountSlug, { section: ['publicaciones', 'pipeline'], does: 'Sacó la publicación del pipeline', publicationId }, async () => {
+    const user = await requireUser();
+    if (!PIPELINE_STEPS.includes(expected)) return { ok: false, error: 'El paso no es válido.' };
+    if (!PIPELINE_REMOVALS.includes(reason)) return { ok: false, error: 'Elegí un motivo.' };
+    if (!(await belongs(accountSlug, publicationId))) return { ok: false, error: 'La publicación no existe en esta cuenta.' };
+    try {
+      await prisma.$transaction((tx) => removeFromPipeline(tx, { publicationId, expected, userId: user.id, reason }));
+    } catch (e) {
+      if (e instanceof PipelineError) return { ok: false, error: e.message };
+      throw e;
+    }
+    revalidatePath(`/a/${accountSlug}`, 'layout');
+    return { ok: true };
+  });
 }
 
 /** Los productos que coinciden con lo que se escribe, para la publicación nueva. */
 export async function searchProductsAction(accountSlug: string, q: string): Promise<ProductPick[]> {
-  await requireUser();
-  const account = await getAccountBySlug(accountSlug);
-  if (!account) return [];
-  return searchProducts(prisma, account.id, String(q ?? ''));
+  const r = await act(accountSlug, { section: ['pipeline'], level: 'read' }, async ({ account }) => searchProducts(prisma, account.id, String(q ?? '')));
+  return Array.isArray(r) ? r : [];
 }
 
 /**
@@ -90,31 +93,33 @@ export async function createPipelinePublicationAction(
   accountSlug: string,
   input: { storeId: string; productId: string | null; newProduct: ShortProduct | null },
 ): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
-  const user = await requireUser();
-  const account = await getAccountBySlug(accountSlug);
-  if (!account) return { ok: false, error: 'La cuenta no existe.' };
-  const str = (v: unknown) => (typeof v === 'string' ? v : '');
-  const raw = input?.newProduct;
-  const newProduct: ShortProduct | null =
-    raw && typeof raw === 'object'
-      ? { name: str(raw.name), productType: str(raw.productType), kind: PRODUCT_KINDS.includes(raw.kind) ? raw.kind : 'INDIVIDUAL' }
-      : null;
-  try {
-    const r = await prisma.$transaction((tx) =>
-      createPipelinePublication(tx, {
-        accountId: account.id,
-        storeId: str(input?.storeId),
-        productId: str(input?.productId) || null,
-        newProduct,
-        userId: user.id,
-      }),
-    );
-    revalidatePath(`/a/${accountSlug}`, 'layout');
-    return { ok: true, id: r.publicationId };
-  } catch (e) {
-    if (e instanceof PipelineError) return { ok: false, error: e.message };
-    throw e;
-  }
+  return act(accountSlug, { section: ['pipeline'], does: 'Creó una publicación nueva en el pipeline' }, async () => {
+    const user = await requireUser();
+    const account = await getAccountBySlug(accountSlug);
+    if (!account) return { ok: false, error: 'La cuenta no existe.' };
+    const str = (v: unknown) => (typeof v === 'string' ? v : '');
+    const raw = input?.newProduct;
+    const newProduct: ShortProduct | null =
+      raw && typeof raw === 'object'
+        ? { name: str(raw.name), productType: str(raw.productType), kind: PRODUCT_KINDS.includes(raw.kind) ? raw.kind : 'INDIVIDUAL' }
+        : null;
+    try {
+      const r = await prisma.$transaction((tx) =>
+        createPipelinePublication(tx, {
+          accountId: account.id,
+          storeId: str(input?.storeId),
+          productId: str(input?.productId) || null,
+          newProduct,
+          userId: user.id,
+        }),
+      );
+      revalidatePath(`/a/${accountSlug}`, 'layout');
+      return { ok: true, id: r.publicationId };
+    } catch (e) {
+      if (e instanceof PipelineError) return { ok: false, error: e.message };
+      throw e;
+    }
+  });
 }
 
 /** Carga el ID del canal cuando la publicación ya se publicó. */
@@ -123,11 +128,13 @@ export async function savePublicationCodeAction(
   publicationId: string,
   raw: string,
 ): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
-  await requireUser();
-  const account = await getAccountBySlug(accountSlug);
-  if (!account) return { ok: false, error: 'La cuenta no existe.' };
-  const r = await savePublicationCode(prisma, { accountId: account.id, publicationId, raw: String(raw ?? '') });
-  if (!r.ok) return r;
-  revalidatePath(`/a/${accountSlug}`, 'layout');
-  return { ok: true, message: `Guardado: ${r.externalId}.` };
+  return act(accountSlug, { section: ['pipeline', 'publicaciones'], does: 'Cargó el código de la publicación en el canal', publicationId, detail: raw }, async () => {
+    await requireUser();
+    const account = await getAccountBySlug(accountSlug);
+    if (!account) return { ok: false, error: 'La cuenta no existe.' };
+    const r = await savePublicationCode(prisma, { accountId: account.id, publicationId, raw: String(raw ?? '') });
+    if (!r.ok) return r;
+    revalidatePath(`/a/${accountSlug}`, 'layout');
+    return { ok: true, message: `Guardado: ${r.externalId}.` };
+  });
 }

@@ -80,12 +80,12 @@ export function ToPushList({ accountSlug, rows }: { accountSlug: string; rows: T
               <span className="tabular-nums text-muted-foreground" aria-live="polite">
                 Subiendo {progress.done} de {progress.total}
               </span>
-              <Button size="sm" variant="ghost" onClick={() => (stop.current = true)}>
+              <Button access="subir" size="sm" variant="ghost" onClick={() => (stop.current = true)}>
                 Parar
               </Button>
             </>
           ) : null}
-          <Button size="sm" disabled={chosen.length === 0 || progress !== null} pending={progress !== null} onClick={() => push(chosen)}>
+          <Button access="subir" size="sm" disabled={chosen.length === 0 || progress !== null} pending={progress !== null} onClick={() => push(chosen)}>
             <Upload />
             Subir las elegidas{chosen.length > 0 ? ` (${chosen.length})` : ''}
           </Button>
@@ -132,7 +132,7 @@ export function ToPushList({ accountSlug, rows }: { accountSlug: string; rows: T
               </div>
               <div className="flex shrink-0 flex-col items-end gap-2">
                 {canPush ? (
-                  <Button size="sm" variant="outline" disabled={progress !== null} onClick={() => push([row.id])}>
+                  <Button access="subir" size="sm" variant="outline" disabled={progress !== null} onClick={() => push([row.id])}>
                     Subir
                   </Button>
                 ) : (

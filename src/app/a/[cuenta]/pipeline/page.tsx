@@ -33,7 +33,7 @@ export default async function PipelinePage({
   searchParams: Promise<{ tipo?: string; vista?: string }>;
 }) {
   const [{ cuenta }, { tipo, vista }] = await Promise.all([params, searchParams]);
-  const { account } = await requireAccount(cuenta);
+  const { account } = await requireAccount(cuenta, 'pipeline');
 
   const kinds = parseKinds(tipo);
   const toPushView = vista === 'por-subir';

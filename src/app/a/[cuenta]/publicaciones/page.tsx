@@ -72,7 +72,7 @@ export default async function PublicationsPage({
   searchParams: Promise<PublicationSearch>;
 }) {
   const [{ cuenta }, search] = await Promise.all([params, searchParams]);
-  const { account } = await requireAccount(cuenta);
+  const { account } = await requireAccount(cuenta, 'publicaciones');
 
   const filters = parsePublicationSearch(search);
   const { band, statuses, sort } = filters;
@@ -275,7 +275,7 @@ export default async function PublicationsPage({
                 .map(([k, v]) => (
                   <input key={k} type="hidden" name={k} value={v as string} />
                 ))}
-              <Button type="submit">Buscar</Button>
+              <Button access="view" type="submit">Buscar</Button>
               {filtered ? (
                 <Button type="button" variant="ghost" size="sm" asChild>
                   <Link href="?">Limpiar</Link>

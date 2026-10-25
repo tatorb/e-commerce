@@ -1,5 +1,6 @@
 'use server';
 
+import { act } from '@/lib/auth/guard';
 import { revalidatePath } from 'next/cache';
 import { headers } from 'next/headers';
 import { prisma } from '@/lib/db';
@@ -46,10 +47,12 @@ const NO_ACCOUNT: Fail = { ok: false, error: 'La cuenta no existe.' };
 
 /** Lee la carpeta del producto en el Drive. */
 export async function syncVideosAction(accountSlug: string, productId: string): Promise<({ ok: true } & SyncResult) | Fail> {
-  await requireUser();
-  const accountId = await accountIdOf(accountSlug);
-  if (!accountId) return NO_ACCOUNT;
-  return guard(() => syncProductVideos(prisma, { accountId, productId: String(productId) }));
+  return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Actualizó los videos del Drive', productId }, async () => {
+    await requireUser();
+    const accountId = await accountIdOf(accountSlug);
+    if (!accountId) return NO_ACCOUNT;
+    return guard(() => syncProductVideos(prisma, { accountId, productId: String(productId) }));
+  });
 }
 
 /** Abre la subida de un video: el navegador manda el archivo directo a Google. */
@@ -58,19 +61,21 @@ export async function startVideoUploadAction(
   productId: string,
   file: { name: string; size: number; type: string },
 ): Promise<({ ok: true } & { uploadUrl: string }) | Fail> {
-  await requireUser();
-  const accountId = await accountIdOf(accountSlug);
-  if (!accountId) return NO_ACCOUNT;
-  // La subida se abre con el origen de la página, así el navegador puede usarla.
-  const origin = (await headers()).get('origin') ?? publicAppUrl();
-  return guard(() =>
-    startVideoUpload(prisma, {
-      accountId,
-      productId: String(productId),
-      file: { name: String(file?.name ?? ''), size: Number(file?.size), type: String(file?.type ?? '') },
-      origin,
-    }),
-  );
+  return act(accountSlug, { section: ['pipeline', 'productos'] }, async () => {
+    await requireUser();
+    const accountId = await accountIdOf(accountSlug);
+    if (!accountId) return NO_ACCOUNT;
+    // La subida se abre con el origen de la página, así el navegador puede usarla.
+    const origin = (await headers()).get('origin') ?? publicAppUrl();
+    return guard(() =>
+      startVideoUpload(prisma, {
+        accountId,
+        productId: String(productId),
+        file: { name: String(file?.name ?? ''), size: Number(file?.size), type: String(file?.type ?? '') },
+        origin,
+      }),
+    );
+  });
 }
 
 export async function finishVideoUploadAction(
@@ -80,22 +85,26 @@ export async function finishVideoUploadAction(
   size: number,
   measure: unknown,
 ): Promise<({ ok: true } & { videoId: string }) | Fail> {
-  const user = await requireUser();
-  const accountId = await accountIdOf(accountSlug);
-  if (!accountId) return NO_ACCOUNT;
-  const r = await guard(() =>
-    finishVideoUpload(prisma, { accountId, productId: String(productId), fileId: String(fileId), size: Number(size), measure, userId: user.id }),
-  );
-  if (r.ok) revalidatePath(`/a/${accountSlug}`, 'layout');
-  return r;
+  return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Subió un video', productId }, async () => {
+    const user = await requireUser();
+    const accountId = await accountIdOf(accountSlug);
+    if (!accountId) return NO_ACCOUNT;
+    const r = await guard(() =>
+      finishVideoUpload(prisma, { accountId, productId: String(productId), fileId: String(fileId), size: Number(size), measure, userId: user.id }),
+    );
+    if (r.ok) revalidatePath(`/a/${accountSlug}`, 'layout');
+    return r;
+  });
 }
 
 /** Las medidas que tomó el navegador al reproducir el video. */
 export async function saveVideoMeasureAction(accountSlug: string, videoId: string, measure: unknown): Promise<{ ok: true; changed: boolean } | Fail> {
-  await requireUser();
-  const accountId = await accountIdOf(accountSlug);
-  if (!accountId) return NO_ACCOUNT;
-  return guard(async () => ({ changed: await saveVideoMeasure(prisma, { accountId, videoId: String(videoId), measure }) }));
+  return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Cambió la medida de un video' }, async () => {
+    await requireUser();
+    const accountId = await accountIdOf(accountSlug);
+    if (!accountId) return NO_ACCOUNT;
+    return guard(async () => ({ changed: await saveVideoMeasure(prisma, { accountId, videoId: String(videoId), measure }) }));
+  });
 }
 
 async function simple(accountSlug: string, run: (accountId: string, userId: string) => Promise<unknown>, message?: string): Promise<Result> {
@@ -111,27 +120,37 @@ async function simple(accountSlug: string, run: (accountId: string, userId: stri
 }
 
 export async function trashVideoAction(accountSlug: string, videoId: string): Promise<Result> {
-  return simple(accountSlug, (accountId) => trashVideo(prisma, { accountId, videoId: String(videoId) }), 'Video en la papelera del Drive.');
+  return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Mandó un video a la papelera' }, async () => {
+    return simple(accountSlug, (accountId) => trashVideo(prisma, { accountId, videoId: String(videoId) }), 'Video en la papelera del Drive.');
+  });
 }
 
 export async function chooseClipAction(accountSlug: string, publicationId: string, videoId: string): Promise<Result> {
-  return simple(accountSlug, (accountId, userId) =>
-    chooseClip(prisma, { accountId, publicationId: String(publicationId), videoId: String(videoId), userId }),
-  );
+  return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Eligió un clip', publicationId }, async () => {
+    return simple(accountSlug, (accountId, userId) =>
+      chooseClip(prisma, { accountId, publicationId: String(publicationId), videoId: String(videoId), userId }),
+    );
+  });
 }
 
 export async function removeClipAction(accountSlug: string, publicationId: string, videoId: string): Promise<Result> {
-  return simple(accountSlug, (accountId) => removeClip(prisma, { accountId, publicationId: String(publicationId), videoId: String(videoId) }));
+  return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Sacó un clip', publicationId }, async () => {
+    return simple(accountSlug, (accountId) => removeClip(prisma, { accountId, publicationId: String(publicationId), videoId: String(videoId) }));
+  });
 }
 
 export async function moveClipAction(accountSlug: string, publicationId: string, videoId: string, by: number): Promise<Result> {
-  return simple(accountSlug, (accountId) =>
-    moveClip(prisma, { accountId, publicationId: String(publicationId), videoId: String(videoId), by: Number(by) < 0 ? -1 : 1 }),
-  );
+  return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Reordenó los clips', publicationId }, async () => {
+    return simple(accountSlug, (accountId) =>
+      moveClip(prisma, { accountId, publicationId: String(publicationId), videoId: String(videoId), by: Number(by) < 0 ? -1 : 1 }),
+    );
+  });
 }
 
 export async function markClipUploadedAction(accountSlug: string, publicationId: string, videoId: string, uploaded: boolean): Promise<Result> {
-  return simple(accountSlug, (accountId, userId) =>
-    markClipUploaded(prisma, { accountId, publicationId: String(publicationId), videoId: String(videoId), uploaded: Boolean(uploaded), userId }),
-  );
+  return act(accountSlug, { section: ['pipeline', 'productos'], does: (uploaded ? 'Marcó un clip como subido' : 'Marcó un clip como no subido'), publicationId }, async () => {
+    return simple(accountSlug, (accountId, userId) =>
+      markClipUploaded(prisma, { accountId, publicationId: String(publicationId), videoId: String(videoId), uploaded: Boolean(uploaded), userId }),
+    );
+  });
 }

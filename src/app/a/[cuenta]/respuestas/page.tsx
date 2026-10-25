@@ -17,7 +17,7 @@ export async function generateMetadata({ params }: { params: Promise<{ cuenta: s
 
 export default async function AnswerSettingsPage({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
-  const { account } = await requireAccount(cuenta);
+  const { account } = await requireAccount(cuenta, 'respuestas');
   const row = await loadAnswerSettings(account.id);
 
   return (

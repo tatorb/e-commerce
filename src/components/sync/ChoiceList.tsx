@@ -141,7 +141,7 @@ export function ChoiceList({ accountSlug, rows }: { accountSlug: string; rows: C
 
       {rows.length > shown ? (
         <div className="border-t px-4 py-3 text-center">
-          <Button size="sm" variant="ghost" onClick={() => setShown((n) => n + PAGE)}>
+          <Button access="view" size="sm" variant="ghost" onClick={() => setShown((n) => n + PAGE)}>
             Ver {Math.min(PAGE, rows.length - shown)} más de {rows.length - shown}
           </Button>
         </div>

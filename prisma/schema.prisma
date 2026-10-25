@@ -23,48 +23,59 @@ datasource db {
 // Los usuarios son del equipo del estudio y ven todas las cuentas.
 
 model User {
-  id                String               @id
-  name              String
-  email             String               @unique
-  emailVerified     Boolean              @default(false)
-  image             String?
-  createdAt         DateTime             @default(now())
-  updatedAt         DateTime             @default(now()) @updatedAt
-  sessions          Session[]
-  authAccounts      AuthAccount[]
-  stageMovements    StageMovement[]
-  importRuns        ImportRun[]
-  importMappings    ImportMapping[]
-  proposals         Proposal[]           @relation("ProposalCreatedBy")
-  decidedProposals  Proposal[]           @relation("ProposalDecidedBy")
-  applications      ChannelApplication[]
-  pipelineEntries   PipelineMovement[]   @relation("PipelineMovedIn")
-  pipelineExits     PipelineMovement[]   @relation("PipelineMovedOut")
-  titleLockChoices  TitleWork[]
-  titleApprovals    TitleApproval[]
-  titleRuleSets     TitleRuleSet[]
-  connections       ChannelConnection[]
-  connectAttempts   ConnectAttempt[]
-  mcpCodes          McpAuthCode[]
-  mcpTokens         McpToken[]
-  researchEdits     ProductResearch[]
-  uploadedFiles     ProductFile[]
-  imageWorkers      ImageWorker[]
-  photoSettings     PhotoSettings[]
-  photoEdits        PhotoEdit[]
-  photoDecisions    PhotoStepRun[]
-  channelSyncs      ChannelSync[]
-  syncChoices       ChannelSyncChange[]
-  questionAnswers   BuyerQuestion[]
-  questionDrafts    QuestionDraft[]
-  driveConnections  DriveConnection[]    @relation("DriveConnectedBy")
-  driveAttempts     DriveConnection[]    @relation("DriveAttemptBy")
-  uploadedVideos    ProductVideo[]
-  clipChoices       PublicationClip[]    @relation("ClipChosenBy")
-  clipUploads       PublicationClip[]    @relation("ClipUploadedBy")
-  descriptionDrafts DescriptionDraft[]
-  pricingSettings   PricingSettings[]    @relation("PricingSettingsUpdatedBy")
-  priceDecisions    PriceDecision[]      @relation("PriceDecidedBy")
+  id                 String               @id
+  name               String
+  email              String               @unique
+  emailVerified      Boolean              @default(false)
+  image              String?
+  // Administrador: puede todo, ve todas las cuentas y maneja los usuarios.
+  isAdmin            Boolean              @default(false)
+  // Qué puede en cada sección (src/domain/access.ts): { "<sección>": "read" | "write" }.
+  // Sin la sección, no la ve.
+  permissions        Json                 @default("{}")
+  // Dado de baja: no puede entrar. No se borra, así la actividad conserva su nombre.
+  disabledAt         DateTime?
+  // Entró con una contraseña que le dieron: tiene que cambiarla.
+  mustChangePassword Boolean              @default(false)
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @default(now()) @updatedAt
+  accounts           UserAccount[]
+  activity           ActivityLog[]
+  sessions           Session[]
+  authAccounts       AuthAccount[]
+  stageMovements     StageMovement[]
+  importRuns         ImportRun[]
+  importMappings     ImportMapping[]
+  proposals          Proposal[]           @relation("ProposalCreatedBy")
+  decidedProposals   Proposal[]           @relation("ProposalDecidedBy")
+  applications       ChannelApplication[]
+  pipelineEntries    PipelineMovement[]   @relation("PipelineMovedIn")
+  pipelineExits      PipelineMovement[]   @relation("PipelineMovedOut")
+  titleLockChoices   TitleWork[]
+  titleApprovals     TitleApproval[]
+  titleRuleSets      TitleRuleSet[]
+  connections        ChannelConnection[]
+  connectAttempts    ConnectAttempt[]
+  mcpCodes           McpAuthCode[]
+  mcpTokens          McpToken[]
+  researchEdits      ProductResearch[]
+  uploadedFiles      ProductFile[]
+  imageWorkers       ImageWorker[]
+  photoSettings      PhotoSettings[]
+  photoEdits         PhotoEdit[]
+  photoDecisions     PhotoStepRun[]
+  channelSyncs       ChannelSync[]
+  syncChoices        ChannelSyncChange[]
+  questionAnswers    BuyerQuestion[]
+  questionDrafts     QuestionDraft[]
+  driveConnections   DriveConnection[]    @relation("DriveConnectedBy")
+  driveAttempts      DriveConnection[]    @relation("DriveAttemptBy")
+  uploadedVideos     ProductVideo[]
+  clipChoices        PublicationClip[]    @relation("ClipChosenBy")
+  clipUploads        PublicationClip[]    @relation("ClipUploadedBy")
+  descriptionDrafts  DescriptionDraft[]
+  pricingSettings    PricingSettings[]    @relation("PricingSettingsUpdatedBy")
+  priceDecisions     PriceDecision[]      @relation("PriceDecidedBy")
 
   @@map("users")
 }
@@ -118,6 +129,63 @@ model Verification {
   @@map("verifications")
 }
 
+// Las cuentas que ve cada usuario que no es administrador.
+model UserAccount {
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId String
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([userId, accountId])
+  @@index([accountId])
+  @@map("user_accounts")
+}
+
+enum ActivityKind {
+  // Guardó o cambió algo.
+  CHANGE
+  SIGN_IN
+  SIGN_IN_FAILED
+  SIGN_OUT
+}
+
+enum ActivitySource {
+  APP
+  // Claude, conectado con el usuario de la persona.
+  CLAUDE
+}
+
+// Lo que hace cada persona en la app: cada cambio que guarda y cada ingreso.
+// Lo que la app hace sola queda en el Registro, no acá.
+model ActivityLog {
+  id            Int            @id @default(autoincrement())
+  userId        String?
+  user          User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  // En un ingreso fallido, el email que escribió.
+  email         String?
+  accountId     String?
+  account       Account?       @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  kind          ActivityKind
+  // La sección de la app (src/domain/access.ts), o "equipo".
+  section       String?
+  // Qué hizo, en una frase: "Aprobó el título".
+  summary       String
+  // Sobre qué: los códigos y cómo se llamaba en ese momento, por si después se borra.
+  publicationId String?
+  productId     String?
+  targetLabel   String?
+  // Un dato más, por ejemplo el título que aprobó.
+  detail        String?
+  via           ActivitySource @default(APP)
+  createdAt     DateTime       @default(now())
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([accountId, createdAt])
+  @@map("activity_logs")
+}
+
 // ───────────────────────────── Cuentas y canales ─────────────────────────────
 
 // Cuenta: el cliente del estudio. Todo dato pertenece a una cuenta.
@@ -138,6 +206,8 @@ model Account {
   photoSettings       PhotoSettings?
   questionSettings    QuestionSettings?
   descriptionSettings DescriptionSettings?
+  members             UserAccount[]
+  activity            ActivityLog[]
   pricingSettings     PricingSettings?
 
   @@map("accounts")

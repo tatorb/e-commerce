@@ -215,7 +215,7 @@ function QuestionItem({
 
 export default async function QuestionsPage({ params, searchParams }: { params: Promise<{ cuenta: string }>; searchParams: Promise<QuestionSearch> }) {
   const [{ cuenta }, search] = await Promise.all([params, searchParams]);
-  const { account } = await requireAccount(cuenta);
+  const { account, canWrite } = await requireAccount(cuenta, 'preguntas');
   const tz = account.timezone;
   const f = parseQuestionSearch(search);
   const [list, practice, settings] = await Promise.all([loadQuestions(account.id, f), loadPractice(account.id), loadAnswerSettings(account.id)]);
@@ -223,7 +223,8 @@ export default async function QuestionsPage({ params, searchParams }: { params: 
   const aiReady = isAiConfigured();
   // Las que Claude todavía no propuso: se proponen al abrir la pantalla.
   const toDraft =
-    aiReady && settings?.autoDraft !== false && f.view === 'sin-responder'
+    // Quien solo puede ver no pide propuestas.
+    canWrite && aiReady && settings?.autoDraft !== false && f.view === 'sin-responder'
       ? list.questions.filter((q) => !q.draft && q.text && now.getTime() - q.askedAt.getTime() < AUTO_DRAFT_DAYS * 86_400_000).length
       : 0;
   const channels = [...new Set(list.stores.map((s) => s.channelName))].join(' y ') || 'los canales';
@@ -308,7 +309,7 @@ export default async function QuestionsPage({ params, searchParams }: { params: 
               .map(([k, v]) => (
                 <input key={k} type="hidden" name={k} value={v} />
               ))}
-            <Button type="submit">Buscar</Button>
+            <Button access="view" type="submit">Buscar</Button>
             {f.q ? (
               <Button type="button" variant="ghost" size="sm" asChild>
                 <Link href={hrefWith({ q: null, page: null })}>Limpiar</Link>

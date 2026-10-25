@@ -109,7 +109,7 @@ export function CreateInChannelCard({ accountSlug, publicationId, info }: { acco
         ) : null}
 
         {!info.blocked ? (
-          <Button onClick={create} disabled={!info.ready || busy || !price.trim() || missingQuantity} pending={busy}>
+          <Button access="subir" onClick={create} disabled={!info.ready || busy || !price.trim() || missingQuantity} pending={busy}>
             <Upload />
             Crear en {channelName}
           </Button>

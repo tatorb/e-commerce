@@ -44,7 +44,7 @@ export function CompetitorsCard({
       description={`Las publicaciones de otros vendedores que más venden este producto, con su precio. Conviene cargar al menos 3. Sus títulos suman palabras al paso Título y sus precios se comparan en el paso Precio. El precio efectivo suma un envío de ${formatPrice(shippingCost)} si no es gratis.`}
       action={
         initial.length > 0 ? (
-          <Button type="button" size="sm" variant="outline" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+          <Button access="view" type="button" size="sm" variant="outline" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
             {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
             {open ? 'Cerrar' : 'Editar'}
           </Button>

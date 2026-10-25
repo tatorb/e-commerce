@@ -9,6 +9,8 @@ import { READ_TOOLS } from './read-tools';
 import { WRITE_TOOLS } from './write-tools';
 import { MCP_INSTRUCTIONS } from './instructions';
 import { McpToolError, type McpContext, type McpTool } from './tool';
+import { can, SECTIONS } from '@/domain/access';
+import { logActivity } from '@/lib/activity';
 
 // El protocolo MCP resuelto a mano: mensajes JSON-RPC, una respuesta por
 // pedido, sin conexión abierta. Así anda bien en Vercel.
@@ -32,8 +34,14 @@ export const rpcError = (id: RpcMessage['id'], code: number, message: string) =>
   error: { code, message },
 });
 
-export function toolList() {
-  return TOOLS.map((t) => {
+/** Si la persona puede usar la herramienta: ver en su sección para las que leen, cambiar para las demás. */
+export function allowed(ctx: Pick<McpContext, 'access'>, t: McpTool): boolean {
+  return !t.section || can(ctx.access, t.section, t.readOnly ? 'read' : 'write');
+}
+
+/** Las herramientas que la persona puede usar. */
+export function toolList(ctx?: Pick<McpContext, 'access'>) {
+  return TOOLS.filter((t) => !ctx || allowed(ctx, t)).map((t) => {
     const schema = z.toJSONSchema(t.input, { io: 'input' }) as Record<string, unknown>;
     delete schema.$schema;
     return {
@@ -59,10 +67,26 @@ async function callTool(ctx: McpContext, name: string, rawArgs: unknown) {
   const tool = TOOLS.find((t) => t.name === name)!;
   const started = Date.now();
   const text = (t: string, isError = false) => ({ content: [{ type: 'text', text: t }], ...(isError ? { isError: true } : {}) });
+  if (!allowed(ctx, tool)) {
+    const section = typeof tool.section === 'string' ? tool.section : tool.section![0];
+    return text(`El usuario de la persona no puede ${tool.readOnly ? 'ver' : 'hacer cambios en'} ${SECTIONS[section].label}. Decile que le pida el permiso a un administrador.`, true);
+  }
   try {
     const parsed = tool.input.safeParse(rawArgs ?? {});
     if (!parsed.success) return text(`Datos inválidos: ${zodMessage(parsed.error)}`, true);
+    ctx.touched = {};
     const out = await tool.run(ctx, parsed.data);
+    // Lo que cambia queda en la actividad de la persona, hecho por Claude.
+    if (!tool.readOnly) {
+      await logActivity(ctx.db, {
+        userId: ctx.userId,
+        accountId: ctx.touched?.accountId ?? null,
+        section: typeof tool.section === 'string' ? tool.section : (tool.section?.[0] ?? null),
+        summary: tool.title,
+        publicationId: ctx.touched?.publicationId ?? null,
+        via: 'CLAUDE',
+      });
+    }
     // El registro dice qué herramienta se usó, nunca los datos.
     console.info(`[mcp] ${name} ${Date.now() - started} ms`);
     return text(JSON.stringify(out));
@@ -101,7 +125,7 @@ export async function handleRpc(msg: RpcMessage, ctx: McpContext): Promise<objec
     case 'ping':
       return result(id, {});
     case 'tools/list':
-      return result(id, { tools: toolList() });
+      return result(id, { tools: toolList(ctx) });
     case 'tools/call': {
       const name = typeof params?.name === 'string' ? params.name : null;
       if (!name || !TOOLS.some((t) => t.name === name)) return rpcError(id, -32602, `Herramienta desconocida: ${name ?? '(sin nombre)'}`);

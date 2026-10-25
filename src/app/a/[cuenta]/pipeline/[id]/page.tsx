@@ -89,7 +89,7 @@ export default async function PipelineStepPage({
 }) {
   const { cuenta, id } = await params;
   const { paso, foto, fotos } = await searchParams;
-  const { account } = await requireAccount(cuenta);
+  const { account } = await requireAccount(cuenta, 'pipeline');
   const pub = await getPipelinePublication(account.id, id);
   if (!pub) notFound();
 

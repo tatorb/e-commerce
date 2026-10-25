@@ -1,17 +1,18 @@
 import { redirect } from 'next/navigation';
 import { prisma } from '@/lib/db';
-import { getCurrentUser } from '@/lib/auth/session';
-import { listAccounts } from '@/lib/queries/accounts';
+import { CHANGE_PASSWORD_PATH, getCurrentUser } from '@/lib/auth/session';
+import { visibleAccounts } from '@/lib/queries/accounts';
 
 export const dynamic = 'force-dynamic';
 
 // Inicio: sin usuarios va al primer ingreso, sin sesión al login y con
-// sesión al pipeline de la primera cuenta.
+// sesión a la primera cuenta que ve, en la primera sección que puede ver.
 export default async function Home() {
   if ((await prisma.user.count()) === 0) redirect('/primer-ingreso');
   const user = await getCurrentUser();
   if (!user) redirect('/login');
-  const [first] = await listAccounts();
+  if (user.mustChangePassword) redirect(CHANGE_PASSWORD_PATH);
+  const [first] = await visibleAccounts(user.access);
   if (!first) redirect('/equipo');
-  redirect(`/a/${first.slug}/pipeline`);
+  redirect(`/a/${first.slug}`);
 }

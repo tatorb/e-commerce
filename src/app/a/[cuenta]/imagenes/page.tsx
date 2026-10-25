@@ -17,7 +17,7 @@ export async function generateMetadata({ params }: { params: Promise<{ cuenta: s
 
 export default async function PhotoSettingsPage({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
-  const { account } = await requireAccount(cuenta);
+  const { account } = await requireAccount(cuenta, 'imagenes');
   const row = await prisma.photoSettings.findUnique({ where: { accountId: account.id } });
 
   return (

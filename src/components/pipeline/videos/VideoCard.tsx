@@ -172,7 +172,7 @@ export function VideoCard({
 
       {!video.gone ? (
         <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" variant="outline" onClick={() => setPlaying((p) => !p)}>
+          <Button access="view" size="sm" variant="outline" onClick={() => setPlaying((p) => !p)}>
             <Play />
             {playing ? 'Cerrar' : 'Ver'}
           </Button>

@@ -327,7 +327,7 @@ export function CatalogTable({ accountSlug, rows, channelName }: { accountSlug: 
                 <KanbanSquare className="h-4 w-4" />
                 {add.pending ? 'Agregando…' : `Agregar al pipeline${toPipeline.length !== chosen.length ? ` (${toPipeline.length})` : ''}`}
               </Button>
-              <Button
+              <Button access="subir"
                 size="sm"
                 variant="outline"
                 pending={push.progress !== null}
@@ -382,7 +382,7 @@ export function CatalogTable({ accountSlug, rows, channelName }: { accountSlug: 
                   Poner cantidad{toQuantity.length > 0 && toQuantity.length !== chosen.length ? ` (${toQuantity.length})` : ''}
                 </Button>
               </form>
-              <Button size="sm" variant="ghost" onClick={() => toggleAll(false)} disabled={busy}>
+              <Button access="view" size="sm" variant="ghost" onClick={() => toggleAll(false)} disabled={busy}>
                 <X className="h-4 w-4" />
                 Quitar selección
               </Button>

@@ -11,6 +11,7 @@ import {
 import { SessionFooter } from '@/components/auth/SessionFooter';
 import { Separator } from '@/components/ui/separator';
 import type { CurrentUser } from '@/lib/auth/session';
+import { can, SETTINGS_SECTIONS, type Section } from '@/domain/access';
 import { BRAND_ICON, BRAND_LOGO } from '@/lib/brand';
 
 // Menú lateral con la misma estructura que app.studiomrb.com: cabecera fija
@@ -24,14 +25,18 @@ export async function Sidebar({
   className,
 }: {
   user: CurrentUser;
-  account: AccountOption;
+  // Null si la persona no ve ninguna cuenta.
+  account: AccountOption | null;
   accounts: AccountOption[];
   // Preguntas de los compradores sin responder.
   questions?: number;
   className?: string;
 }) {
-  const accountHome = `/a/${account.slug}`;
-  const logoHref = `${accountHome}/pipeline`;
+  const accountHome = account ? `/a/${account.slug}` : null;
+  const logoHref = accountHome ?? '/equipo';
+  // Cada sección se ve en el menú solo si la persona la puede ver.
+  const sees = (section: Section) => accountHome !== null && can(user.access, section, 'read');
+  const settings = SETTINGS_SECTIONS.some(sees);
   const collapsed = (await cookies()).get('sidebar_collapsed')?.value === '1';
 
   return (
@@ -55,7 +60,7 @@ export async function Sidebar({
           <SidebarToggle />
         </div>
         <div className="md:group-data-[collapsed=true]:hidden">
-          <SidebarAccountHeader current={account} accounts={accounts} />
+          {account ? <SidebarAccountHeader current={account} accounts={accounts} /> : null}
         </div>
       </div>
 
@@ -64,51 +69,81 @@ export async function Sidebar({
       {/* En escritorio, la única región que scrollea. */}
       <div className="md:flex-1 md:min-h-0 md:overflow-y-auto">
         <nav className="flex flex-col gap-0.5">
-          <NavLink href={`${accountHome}/pipeline`} label="Pipeline">
-            <KanbanSquare className="h-4 w-4" />
-          </NavLink>
-          <NavLink href={`${accountHome}/productos`} label="Productos">
-            <Package className="h-4 w-4" />
-          </NavLink>
-          <NavLink href={`${accountHome}/publicaciones`} label="Publicaciones">
-            <ListChecks className="h-4 w-4" />
-          </NavLink>
-          <NavLink href={`${accountHome}/preguntas`} label="Preguntas" badge={questions}>
-            <MessageCircleQuestion className="h-4 w-4" />
-          </NavLink>
-          <NavLink href={`${accountHome}/importar`} label="Importar">
-            <Upload className="h-4 w-4" />
-          </NavLink>
-          <NavLink href={`${accountHome}/sincronizacion`} label="Sincronización">
-            <RefreshCw className="h-4 w-4" />
-          </NavLink>
-          <NavLink href={`${accountHome}/registro`} label="Registro">
-            <History className="h-4 w-4" />
-          </NavLink>
-          <p className="mt-3 mb-1 px-3 text-[10px] uppercase tracking-wide text-muted-foreground font-medium md:group-data-[collapsed=true]:hidden">
-            Ajustes
-          </p>
-          <NavLink href={`${accountHome}/estandar`} label="Estándar">
-            <SlidersHorizontal className="h-4 w-4" />
-          </NavLink>
-          <NavLink href={`${accountHome}/imagenes`} label="Imágenes">
-            <ImageIcon className="h-4 w-4" />
-          </NavLink>
-          <NavLink href={`${accountHome}/reglas-titulo`} label="Reglas de título">
-            <Type className="h-4 w-4" />
-          </NavLink>
-          <NavLink href={`${accountHome}/descripciones`} label="Descripciones">
-            <AlignLeft className="h-4 w-4" />
-          </NavLink>
-          <NavLink href={`${accountHome}/precios`} label="Precios">
-            <DollarSign className="h-4 w-4" />
-          </NavLink>
-          <NavLink href={`${accountHome}/respuestas`} label="Respuestas">
-            <MessageSquareText className="h-4 w-4" />
-          </NavLink>
-          <NavLink href={`${accountHome}/conexion`} label="Conexión">
-            <PlugZap className="h-4 w-4" />
-          </NavLink>
+          {sees('pipeline') ? (
+            <NavLink href={`${accountHome}/pipeline`} label="Pipeline">
+              <KanbanSquare className="h-4 w-4" />
+            </NavLink>
+          ) : null}
+          {sees('productos') ? (
+            <NavLink href={`${accountHome}/productos`} label="Productos">
+              <Package className="h-4 w-4" />
+            </NavLink>
+          ) : null}
+          {sees('publicaciones') ? (
+            <NavLink href={`${accountHome}/publicaciones`} label="Publicaciones">
+              <ListChecks className="h-4 w-4" />
+            </NavLink>
+          ) : null}
+          {sees('preguntas') ? (
+            <NavLink href={`${accountHome}/preguntas`} label="Preguntas" badge={questions}>
+              <MessageCircleQuestion className="h-4 w-4" />
+            </NavLink>
+          ) : null}
+          {sees('importar') ? (
+            <NavLink href={`${accountHome}/importar`} label="Importar">
+              <Upload className="h-4 w-4" />
+            </NavLink>
+          ) : null}
+          {sees('sincronizacion') ? (
+            <NavLink href={`${accountHome}/sincronizacion`} label="Sincronización">
+              <RefreshCw className="h-4 w-4" />
+            </NavLink>
+          ) : null}
+          {sees('registro') ? (
+            <NavLink href={`${accountHome}/registro`} label="Registro">
+              <History className="h-4 w-4" />
+            </NavLink>
+          ) : null}
+          {settings ? (
+            <p className="mt-3 mb-1 px-3 text-[10px] uppercase tracking-wide text-muted-foreground font-medium md:group-data-[collapsed=true]:hidden">
+              Ajustes
+            </p>
+          ) : null}
+          {sees('estandar') ? (
+            <NavLink href={`${accountHome}/estandar`} label="Estándar">
+              <SlidersHorizontal className="h-4 w-4" />
+            </NavLink>
+          ) : null}
+          {sees('imagenes') ? (
+            <NavLink href={`${accountHome}/imagenes`} label="Imágenes">
+              <ImageIcon className="h-4 w-4" />
+            </NavLink>
+          ) : null}
+          {sees('reglas') ? (
+            <NavLink href={`${accountHome}/reglas-titulo`} label="Reglas de título">
+              <Type className="h-4 w-4" />
+            </NavLink>
+          ) : null}
+          {sees('descripciones') ? (
+            <NavLink href={`${accountHome}/descripciones`} label="Descripciones">
+              <AlignLeft className="h-4 w-4" />
+            </NavLink>
+          ) : null}
+          {sees('precios') ? (
+            <NavLink href={`${accountHome}/precios`} label="Precios">
+              <DollarSign className="h-4 w-4" />
+            </NavLink>
+          ) : null}
+          {sees('respuestas') ? (
+            <NavLink href={`${accountHome}/respuestas`} label="Respuestas">
+              <MessageSquareText className="h-4 w-4" />
+            </NavLink>
+          ) : null}
+          {sees('conexion') ? (
+            <NavLink href={`${accountHome}/conexion`} label="Conexión">
+              <PlugZap className="h-4 w-4" />
+            </NavLink>
+          ) : null}
           <p className="mt-3 mb-1 px-3 text-[10px] uppercase tracking-wide text-muted-foreground font-medium md:group-data-[collapsed=true]:hidden">
             Estudio
           </p>
