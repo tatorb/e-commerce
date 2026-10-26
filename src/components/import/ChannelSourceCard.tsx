@@ -3,13 +3,16 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import type { ListingStatus } from '@/channels/listings-types';
 import type { RowInput } from '@/importers/mapping';
 import { plural } from '@/lib/format';
-import { countListingsAction, listListingIdsAction, readListingsAction, type Result } from '@/app/a/[cuenta]/importar/actions';
+import { countListingsAction, listingCodesAction, listListingIdsAction, readListingsAction, type Result } from '@/app/a/[cuenta]/importar/actions';
 
-export type ChannelStoreInfo = { id: string; name: string; channelName: string };
+// codeExample: cómo es un código de publicación del canal, para el ejemplo del campo.
+export type ChannelStoreInfo = { id: string; name: string; channelName: string; codeExample?: string };
 
 /** Cuánto se espera entre tandas y cuando el canal pide esperar, en segundos. */
 export type ReadPacing = { pauseSeconds: number; waitSeconds: number };
@@ -54,6 +57,8 @@ export function ChannelSourceCard({
   const [counts, setCounts] = useState<Counts | null>(null);
   const [countError, setCountError] = useState<string | null>(null);
   const [chosen, setChosen] = useState<Set<ListingStatus>>(new Set(['active', 'paused']));
+  // Los códigos pegados, para traer solo esas, en cualquier estado.
+  const [codes, setCodes] = useState('');
   const [status, setStatus] = useState<Status | null>(null);
   const [partial, setPartial] = useState<ReadSoFar | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -76,7 +81,10 @@ export function ChannelSourceCard({
   const reading = status !== null;
   const total = counts ? [...chosen].reduce((n, s) => n + counts[s], 0) : 0;
   const key = STATUS_ORDER.filter((s) => chosen.has(s)).join(',');
-  const resumable = partial && partial.key === key ? partial : null;
+  const codesKey = `codigos:${codes.trim()}`;
+  const resumeFor = (k: string) => (partial && partial.key === k ? partial : null);
+  const resumable = resumeFor(key);
+  const resumableCodes = resumeFor(codesKey);
 
   function toggle(s: ListingStatus, on: boolean) {
     setChosen((prev) => {
@@ -104,17 +112,31 @@ export function ChannelSourceCard({
     }
   }
 
-  async function read() {
+  /** Lee las de los estados elegidos, o solo las de los códigos pegados. */
+  async function read(by: 'status' | 'codes') {
     setError(null);
+    const readKey = by === 'codes' ? codesKey : key;
+    const resume = resumeFor(readKey);
     let ids: string[];
     let rows: RowInput[] = [];
     let missing = 0;
     let start = 0;
-    if (resumable) {
-      ({ ids, rows, missing } = resumable);
+    if (resume) {
+      ({ ids, rows, missing } = resume);
       rows = [...rows];
-      start = resumable.next;
+      start = resume.next;
       setStatus({ kind: 'reading', done: start, total: ids.length });
+    } else if (by === 'codes') {
+      setStatus({ kind: 'reading', done: 0, total: 0 });
+      const r = await listingCodesAction(accountSlug, store.id, codes).catch(() => null);
+      if (!r || !r.ok || r.invalid.length > 0) {
+        setStatus(null);
+        if (!r) setError('Se cortó la conexión con la app.');
+        else if (!r.ok) setError(r.error);
+        else setError(`No se entiende ${r.invalid.length === 1 ? 'este código' : 'estos códigos'}: ${r.invalid.join(', ')}. ${r.hint ?? ''}`.trim());
+        return;
+      }
+      ids = r.ids;
     } else {
       setStatus({ kind: 'reading', done: 0, total: 0 });
       const list = await patiently(() => listListingIdsAction(accountSlug, store.id, key.split(',')), 0, 0).catch(() => null);
@@ -139,7 +161,7 @@ export function ChannelSourceCard({
       );
       if (!r || !r.ok) {
         // Lo leído no se pierde: se puede seguir desde acá.
-        if (i > 0) setPartial({ key, ids, rows, missing, next: i });
+        if (i > 0) setPartial({ key: readKey, ids, rows, missing, next: i });
         setStatus(null);
         setError(r ? r.error : 'Se cortó la conexión con la app.');
         return;
@@ -149,7 +171,11 @@ export function ChannelSourceCard({
     }
     setStatus(null);
     if (rows.length === 0) {
-      setError('No se pudo leer ninguna publicación.');
+      setError(
+        by === 'codes'
+          ? `${store.channelName} no devolvió ninguna de esas publicaciones: revisá que los códigos sean de ${store.name}.`
+          : 'No se pudo leer ninguna publicación.',
+      );
       return;
     }
     onRead({ rows, missing });
@@ -206,26 +232,45 @@ export function ChannelSourceCard({
                 seguidos.
               </p>
             </fieldset>
-            <div className="flex flex-wrap items-center gap-3">
-              <Button type="button" pending={reading} onClick={read} disabled={reading || disabled || total === 0}>
-                {reading
-                  ? 'Leyendo…'
-                  : resumable
-                    ? `Seguir leyendo · faltan ${resumable.ids.length - resumable.next}`
-                    : `Leer ${plural(total, 'publicación', 'publicaciones')}`}
+            <Button type="button" pending={reading} onClick={() => read('status')} disabled={reading || disabled || total === 0}>
+              {reading
+                ? 'Leyendo…'
+                : resumable
+                  ? `Seguir leyendo · faltan ${resumable.ids.length - resumable.next}`
+                  : `Leer ${plural(total, 'publicación', 'publicaciones')}`}
+            </Button>
+
+            <div className="space-y-2 border-t pt-4">
+              <Label htmlFor={`codes-${store.id}`}>O traé solo algunas, por su código</Label>
+              <p className="text-xs text-muted-foreground">
+                Sirve para las que no aparecen arriba, como las inactivas sin stock. Pegá los códigos o los links, separados por
+                espacio, coma o renglón. Las que ya están en la app no se tocan, y las que tienen el SKU de un producto se suman a
+                ese producto.
+              </p>
+              <Textarea
+                id={`codes-${store.id}`}
+                rows={3}
+                value={codes}
+                onChange={(e) => setCodes(e.target.value)}
+                disabled={reading || disabled}
+                placeholder={store.codeExample ? `Por ejemplo ${store.codeExample}` : undefined}
+              />
+              <Button type="button" variant="outline" pending={reading} onClick={() => read('codes')} disabled={reading || disabled || !codes.trim()}>
+                {resumableCodes ? `Seguir leyendo · faltan ${resumableCodes.ids.length - resumableCodes.next}` : 'Leer estas'}
               </Button>
-              {status ? (
-                <span className="text-sm tabular-nums" role="status">
-                  {message(status)} No cierres esta pestaña.
-                </span>
-              ) : null}
-              {error ? (
-                <span className="text-sm text-destructive" role="alert">
-                  {error}
-                  {resumable ? ` Ya hay ${resumable.next} leídas, podés seguir desde ahí.` : ''}
-                </span>
-              ) : null}
             </div>
+
+            {status ? (
+              <p className="text-sm tabular-nums" role="status">
+                {message(status)} No cierres esta pestaña.
+              </p>
+            ) : null}
+            {error ? (
+              <p className="text-sm text-destructive" role="alert">
+                {error}
+                {partial ? ` Ya hay ${partial.next} leídas, podés seguir desde ahí.` : ''}
+              </p>
+            ) : null}
           </>
         )}
       </CardContent>

@@ -4,7 +4,7 @@ import { PrismaClient } from '@/generated/prisma/client';
 import type { ChannelListing } from '@/channels/listings-types';
 import { mercadolibre } from '@/channels/mercadolibre';
 import { applyRows, previewRows, undoImportRun } from '@/importers/apply';
-import { listingToRow } from '@/importers/channel-listings';
+import { codesFromText, listingToRow } from '@/importers/channel-listings';
 import { toRecord } from '@/importers/transform';
 import { latestMetrics } from '@/domain/measurements';
 
@@ -100,6 +100,27 @@ describe('del canal a una fila', () => {
       { sku: 'AROS-STD', measure: 'STD' },
       { sku: 'AROS-050', measure: '0.50' },
     ]);
+  });
+});
+
+describe('traer solo algunas, por su código', () => {
+  const normalize = (raw: string) => mercadolibre.normalizeExternalId(raw);
+
+  it('entiende códigos, links y el número con # del panel, sin repetir', () => {
+    const text = 'MLA1785452761, MLA-1785452923\n# 3304440286 #3304440284; https://articulo.mercadolibre.com.ar/MLA-1785452761-subconjunto-_JM';
+    expect(codesFromText(text, normalize)).toEqual({
+      ids: ['MLA1785452761', 'MLA1785452923', 'MLA3304440286', 'MLA3304440284'],
+      invalid: [],
+      hint: null,
+    });
+  });
+
+  it('lo que no es un código va aparte, con cómo tiene que ser', () => {
+    const r = codesFromText('MLA1785452761 SP-808 1785452923', normalize);
+    expect(r.ids).toEqual(['MLA1785452761']);
+    expect(r.invalid).toEqual(['SP-808', '1785452923']);
+    expect(r.hint).toContain('MLA1234567890');
+    expect(codesFromText('  \n ', normalize)).toEqual({ ids: [], invalid: [], hint: null });
   });
 });
 

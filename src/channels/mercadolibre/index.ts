@@ -14,6 +14,9 @@ import { MERCADOLIBRE_CLIPS } from './clips';
 // importa es el item_id. La expresión no toma MLAU porque después de MLA
 // exige un guion o un número.
 const ITEM_ID = /MLA-?(\d{6,})/i;
+// En el panel de ventas, Mercado Libre muestra el número solo, con un numeral:
+// #3304440284. Sin el numeral, un número suelto puede ser cualquier cosa.
+const PANEL_NUMBER = /^#\s*(\d{6,})$/;
 
 export const mercadolibre: ChannelAdapter = {
   kind: 'MERCADOLIBRE',
@@ -21,14 +24,14 @@ export const mercadolibre: ChannelAdapter = {
   externalId: {
     label: 'ID de la publicación',
     placeholder: 'MLA1234567890',
-    help: 'Pegá el ID o el link de la publicación, lo limpiamos solos.',
+    help: 'Pegá el ID, el número con # o el link de la publicación, lo limpiamos solos.',
   },
   titleMaxLength: 60,
   normalizeExternalId(raw) {
     const text = raw.trim();
-    const match = text.match(ITEM_ID);
+    const match = text.match(ITEM_ID) ?? text.match(PANEL_NUMBER);
     if (!match) {
-      return { ok: false, error: 'El ID tiene que empezar con MLA, por ejemplo MLA1234567890.' };
+      return { ok: false, error: 'El ID tiene que empezar con MLA, por ejemplo MLA1234567890, o ser el número con #, como #1234567890.' };
     }
     return { ok: true, value: `MLA${match[1]}` };
   },

@@ -134,6 +134,9 @@ export async function readOneAction(accountSlug: string, publicationId: string):
     if (!id.success) return { ok: false, error: 'La publicación no existe.' };
     try {
       const taken = await readOne(prisma, { accountId: account.id, publicationId: id.data });
+      // Si sigue al stock del producto y en el canal tiene otra cantidad, se sube
+      // ahora, como lo haría la tarea de cada hora: no es un cambio de la persona.
+      if (taken !== null) await syncStock(prisma, { publicationIds: [id.data], note: 'Al leerla del canal.' });
       refresh(accountSlug, id.data);
       return { ok: true, found: taken !== null };
     } catch (e) {

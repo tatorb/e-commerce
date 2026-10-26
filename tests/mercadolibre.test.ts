@@ -12,11 +12,14 @@ describe('ID de publicación de Mercado Libre', () => {
       'https://www.mercadolibre.com.ar/up/MLAU9876543210?pdp_filters=item_id:MLA1234567890',
       'MLA1234567890',
     ],
+    // Como lo muestra el panel de ventas.
+    ['#3304440284', 'MLA3304440284'],
+    [' # 3304440284 ', 'MLA3304440284'],
   ])('limpia %s', (raw, expected) => {
     expect(mercadolibre.normalizeExternalId(raw)).toEqual({ ok: true, value: expected });
   });
 
-  it.each(['', 'SP-000 STD', 'MLAU9876543210', '1234567890'])('rechaza %s', (raw) => {
+  it.each(['', 'SP-000 STD', 'MLAU9876543210', '1234567890', '#12', 'SP-808 #3304440284'])('rechaza %s', (raw) => {
     expect(mercadolibre.normalizeExternalId(raw).ok).toBe(false);
   });
 

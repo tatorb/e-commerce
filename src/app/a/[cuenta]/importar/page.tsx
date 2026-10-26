@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { ImportWizard } from '@/components/import/ImportWizard';
 import { UndoImportButton } from '@/components/import/UndoImportButton';
 import { ImportStatusBadge } from '@/components/stages/StageBadge';
+import { getChannelAdapter } from '@/channels';
 import { getChannelListings } from '@/channels/listings';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { formatDateTime, plural } from '@/lib/format';
@@ -52,7 +53,7 @@ export default async function ImportPage({ params }: { params: Promise<{ cuenta:
   // Las conectadas, de los canales que dejan leer sus publicaciones.
   const channelStores = stores
     .filter((s) => s.connection?.status === 'ACTIVE' && getChannelListings(s.channel.kind))
-    .map((s) => ({ id: s.id, name: s.name, channelName: s.channel.name }));
+    .map((s) => ({ id: s.id, name: s.name, channelName: s.channel.name, codeExample: getChannelAdapter(s.channel.kind, s.channel.name).externalId.placeholder }));
 
   return (
     <>

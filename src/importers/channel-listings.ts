@@ -21,6 +21,30 @@ const STATUS_WORD: Record<ChannelStatus, string> = {
   UNPUBLISHED: 'sin publicar',
 };
 
+/**
+ * Los códigos de publicación de un texto pegado, como los entiende el canal,
+ * sin repetir y en orden. Los que no se entienden van aparte, con cómo tienen
+ * que ser según el canal.
+ */
+export function codesFromText(
+  text: string,
+  normalize: ChannelAdapter['normalizeExternalId'],
+): { ids: string[]; invalid: string[]; hint: string | null } {
+  const ids: string[] = [];
+  const invalid: string[] = [];
+  let hint: string | null = null;
+  // Un numeral separado del número, como "# 123", va junto.
+  const tokens = text.replace(/#\s+/g, '#').split(/[\s,;]+/).map((t) => t.trim()).filter(Boolean);
+  for (const token of tokens) {
+    const code = normalize(token);
+    if (!code.ok) {
+      invalid.push(token);
+      hint ??= code.error;
+    } else if (!ids.includes(code.value)) ids.push(code.value);
+  }
+  return { ids, invalid, hint };
+}
+
 // Las celdas con varios datos se separan por línea o por punto y coma.
 const oneLine = (s: string) => s.replace(/[\r\n]+/g, ' ').replace(/;/g, ',').trim();
 

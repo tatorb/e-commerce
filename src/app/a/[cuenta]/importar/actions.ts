@@ -11,7 +11,7 @@ import { getChannelListings, LISTING_STATUSES, LISTINGS_BATCH, type ListingStatu
 import { withAccessToken } from '@/lib/connections';
 import { variantListingOwners } from '@/lib/variant-listings';
 import { applyRows, previewRows, rowsInputSchema, undoImportRun, type RowPreview } from '@/importers/apply';
-import { listingToRow } from '@/importers/channel-listings';
+import { codesFromText, listingToRow } from '@/importers/channel-listings';
 import type { ExistingKeys } from '@/importers/classify';
 import { isConfidentialHeader, isFieldKey } from '@/importers/fields';
 import type { RowInput } from '@/importers/mapping';
@@ -346,6 +346,36 @@ export async function listListingIdsAction(
     } catch (e) {
       return channelFailure(e);
     }
+  });
+}
+
+// Hasta cuántos códigos se pegan de una vez.
+const MAX_CODES = 200;
+
+/**
+ * Los códigos o links pegados, como los entiende el canal, para traer solo
+ * esas publicaciones, sin importar su estado. Los que no se entienden, aparte.
+ */
+export async function listingCodesAction(
+  accountSlug: string,
+  storeId: string,
+  text: unknown,
+): Promise<Result<{ ids: string[]; invalid: string[]; hint: string | null }>> {
+  return act(accountSlug, { section: 'importar', level: 'read' }, async () => {
+    await requireUser();
+    const found = await connectedStore(accountSlug, storeId);
+    if (!found.ok) return { ok: false, error: found.error };
+    const adapter = getChannelAdapter(found.store.channel.kind, found.store.channel.name);
+    const { ids, invalid, hint } = codesFromText(String(text ?? ''), (raw) => adapter.normalizeExternalId(raw));
+    if (ids.length === 0 && invalid.length === 0) return { ok: false, error: 'Pegá al menos un código o link.' };
+    if (ids.length > MAX_CODES) return { ok: false, error: `Son más de ${MAX_CODES} códigos: pegalos en partes.` };
+    // Las medidas que el canal guarda aparte ya están en la app, en su familia.
+    const owners = await variantListingOwners(prisma, found.store.id);
+    const wanted = ids.filter((id) => !owners.has(id));
+    if (wanted.length === 0 && invalid.length === 0) {
+      return { ok: false, error: 'Ya están en la app, dentro de la publicación que junta todas sus medidas.' };
+    }
+    return { ok: true, ids: wanted, invalid, hint };
   });
 }
 
