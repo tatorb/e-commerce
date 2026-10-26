@@ -193,7 +193,7 @@ export function parseItem(item: Obj): ChannelListing {
     origin,
     skus,
     measures,
-    variations: variations.map((v) => ({ sku: v.sku, measure: v.measure, photoIds: v.photoIds, quantity: v.quantity })),
+    variations: variations.map((v) => ({ sku: v.sku, measure: v.measure, photoIds: v.photoIds, variationId: String(v.id), quantity: v.quantity })),
     attributes,
     attributeCount: attributes.length + [brand, partNumber, origin].filter(Boolean).length + (skuAttr ? 1 : 0),
     updatedAt: str(item.last_updated),

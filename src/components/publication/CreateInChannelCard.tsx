@@ -20,8 +20,11 @@ const SELECT_CLASS =
 export function CreateInChannelCard({ accountSlug, publicationId, info }: { accountSlug: string; publicationId: string; info: CreateInfo }) {
   const router = useRouter();
   const [price, setPrice] = useState(info.price !== null ? String(info.price) : '');
-  const [quantity, setQuantity] = useState('1');
-  const [quantities, setQuantities] = useState<Record<string, string>>(() => Object.fromEntries(info.measures.map((m) => [m.key, '1'])));
+  // Si el producto lleva stock en la app, arranca con ese.
+  const [quantity, setQuantity] = useState(info.stock?.quantity != null ? String(info.stock.quantity) : '1');
+  const [quantities, setQuantities] = useState<Record<string, string>>(() =>
+    Object.fromEntries(info.measures.map((m) => [m.key, info.stock?.quantities[m.key] != null ? String(info.stock.quantities[m.key]) : '1'])),
+  );
   const [listingType, setListingType] = useState(info.listingTypes[0]?.value ?? '');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
@@ -106,6 +109,10 @@ export function CreateInChannelCard({ accountSlug, publicationId, info }: { acco
               ))}
             </div>
           </fieldset>
+        ) : null}
+
+        {!info.blocked && info.stock ? (
+          <p className="text-xs text-muted-foreground">La cantidad arranca con el stock del producto. Después de crearla, la app la mantiene con cada venta.</p>
         ) : null}
 
         {!info.blocked ? (

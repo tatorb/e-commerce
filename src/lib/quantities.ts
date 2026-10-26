@@ -3,10 +3,12 @@ import { getChannelAdapter } from '@/channels';
 import { channelFaceValues } from '@/domain/channel-sync';
 import { titleOrUntitled } from '@/domain/publication-title';
 import { applyQuantities, QuantityError, sameQuantities, parseQuantities, type QuantityChange } from '@/domain/quantities';
+import { plansFor, STOCK_MANAGED } from '@/lib/stock-plan';
 
 // Cambiar las cantidades disponibles en la app. Quedan como borrador, igual
 // que el precio, y se suben desde Por subir. Lo que el canal maneja solo, como
-// el stock en Full, no se toca. Recibe la base por parámetro para poder probarlo.
+// el stock en Full, no se toca, ni lo que sale del stock del producto. Recibe
+// la base por parámetro para poder probarlo.
 
 type Db = PrismaClient;
 
@@ -52,6 +54,7 @@ export async function saveQuantities(db: Db, args: { accountId: string; publicat
   });
   const result: QuantitiesResult = { saved: [], skipped: [] };
   const found = new Set(publications.map((p) => p.id));
+  const plans = await plansFor(db, publications.map((p) => p.id));
   for (const id of args.publicationIds) if (!found.has(id)) result.skipped.push({ id, title: '', reason: 'No está en la cuenta.' });
 
   for (const p of publications) {
@@ -64,6 +67,10 @@ export async function saveQuantities(db: Db, args: { accountId: string; publicat
     }
     if (copy?.stockInChannel) {
       skip(`El stock lo maneja ${channelName}, por ejemplo porque está en Full.`);
+      continue;
+    }
+    if (plans.get(p.id)?.managed) {
+      skip(STOCK_MANAGED);
       continue;
     }
     const inChannel = copy ? channelFaceValues(copy).quantity : null;

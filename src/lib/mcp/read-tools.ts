@@ -36,6 +36,9 @@ import { loadKnowledge, loadResearch } from '@/lib/queries/research';
 import { loadCombo } from '@/lib/queries/combos';
 import { comboForAi, comboParts, PRODUCT_KIND_LABEL } from '@/domain/combos';
 import { loadCatalogData } from '@/lib/catalog-data';
+import { plansFor } from '@/lib/stock-plan';
+import { quantityText } from '@/domain/quantities';
+import { stockText } from '@/domain/stock';
 import { catalogForClaude } from './catalog';
 import { loadTitleContext, RECEIVED_QUESTIONS } from '@/lib/queries/title-step';
 import {
@@ -397,7 +400,13 @@ const getPublication = defineTool({
       loadCatalogData(ctx.db, id),
     ]);
     const product = pub.product;
-    const [combo, knowledge] = await Promise.all([loadCombo(ctx.db, product.id), loadKnowledge(ctx.db, product.id)]);
+    const [combo, knowledge, plans, stock] = await Promise.all([
+      loadCombo(ctx.db, product.id),
+      loadKnowledge(ctx.db, product.id),
+      plansFor(ctx.db, [id]),
+      ctx.db.product.findUniqueOrThrow({ where: { id: product.id }, select: { stockSince: true, stock: { select: { label: true, quantity: true } } } }),
+    ]);
+    const plan = plans.get(id) ?? null;
     const r = research.research;
     const manufacturerText = withoutPrices(r?.manufacturerText ?? null);
     const measurement = pub.measurements[0] ?? null;
@@ -407,6 +416,9 @@ const getPublication = defineTool({
       descripcion: pub.description,
       atributos_en_el_canal: safeList(parseNameValueList(pub.attributes)),
       datos_de_catalogo: catalogForClaude(catalog),
+      cantidad_disponible: plan?.managed
+        ? { sale_del_stock_del_producto: true, cantidad: quantityText(plan.lines) }
+        : { sale_del_stock_del_producto: false, motivo: plan?.reason ?? null },
       ficha: {
         producto_id: product.id,
         nombre: product.name,
@@ -434,6 +446,7 @@ const getPublication = defineTool({
         contenido_del_kit: product.kitContents,
         ficha_tecnica: safeList(parseNameValueList(product.specs)),
         variantes: product.variants.map((v) => ({ medida: v.measure, sku: v.sku })),
+        stock: stock.stockSince ? stockText(stock.stock) : 'La app todavía no lleva el stock de este producto.',
         compatibilidades: product.compatibilities.map((c) => ({
           marca: c.vehicleBrand,
           modelo: c.model,

@@ -7,10 +7,12 @@ import { readAllQuestions } from '@/lib/buyer-questions';
 import { answerAlone } from '@/lib/answers';
 import { isAiConfigured } from '@/ai/claude';
 import { sendTaskMail } from '@/lib/task-mail';
+import { readSales, reconcileStock, startStock } from '@/lib/stock';
 
 // La tarea programada: lee las preguntas de los compradores y las
 // publicaciones de las tiendas conectadas, responde las preguntas de las
-// publicaciones en que Claude responde solo, manda los mails de las tareas y
+// publicaciones en que Claude responde solo, manda los mails de las tareas,
+// descuenta las ventas del stock de los productos y sube la cantidad nueva, y
 // renueva los descuentos que subió la app antes de que venzan. La llaman Vercel una vez por día
 // (vercel.json) y GitHub cada hora (.github/workflows/leer-canales.yml), con
 // la clave CRON_SECRET. Cada pedido lee lo que alcanza en su tiempo; pending
@@ -26,6 +28,9 @@ const BUDGET_MS = 35_000;
 const QUESTIONS_BUDGET_MS = 10_000;
 // Los mails de las tareas: cada uno es un pedido corto.
 const MAIL_BUDGET_MS = 5_000;
+// Las ventas, con la cantidad nueva de las publicaciones, y lo que quedó distinto del stock.
+const SALES_BUDGET_MS = 8_000;
+const STOCK_BUDGET_MS = 4_000;
 // Después, los descuentos por vencer: cada uno son unos pocos pedidos.
 const RENEW_BUDGET_MS = 6_000;
 
@@ -39,18 +44,25 @@ export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;
   if (!secret) return NextResponse.json({ error: 'Falta configurar CRON_SECRET.' }, { status: 503 });
   if (!authorized(request, secret)) return NextResponse.json({ error: 'No autorizado.' }, { status: 401 });
-  const started = Date.now();
+  const begun = Date.now();
   const questions = await readAllQuestions(prisma, { budgetMs: QUESTIONS_BUDGET_MS });
   // Las que llegaron sin el aviso del canal: una por pedido.
   const alone = await answerAlone(prisma, { aiReady: isAiConfigured() });
   const mails = await sendTaskMail(prisma, { budgetMs: MAIL_BUDGET_MS });
+  const sales = await readSales(prisma, { budgetMs: SALES_BUDGET_MS });
   const renewals = await renewDiscounts(prisma, { budgetMs: RENEW_BUDGET_MS });
-  const result = await syncAllStores(prisma, { budgetMs: BUDGET_MS - (Date.now() - started) });
+  const result = await syncAllStores(prisma, { budgetMs: BUDGET_MS - (Date.now() - begun) });
+  // Con lo recién leído: el stock de partida de los productos nuevos y lo que quedó distinto del stock.
+  const started = await startStock(prisma, { budgetMs: STOCK_BUDGET_MS });
+  const stock = await reconcileStock(prisma, { budgetMs: STOCK_BUDGET_MS });
   return NextResponse.json({
-    pending: result.pending || questions.pending || alone.pending || renewals.pending || mails.pending,
+    pending: result.pending || questions.pending || alone.pending || renewals.pending || mails.pending || sales.pending || started.pending || stock.pending,
     stores: result.stores.map((s) => ({ status: s.status, read: s.position, total: s.total })),
     renewed: renewals.renewed,
     answered: alone.sent,
     mails: mails.sent,
+    sales: sales.orders,
+    stockStarted: started.started,
+    stockSent: sales.sent + stock.sent,
   });
 }

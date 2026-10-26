@@ -29,7 +29,8 @@ describe('herramientas de escritura en la lista', () => {
     }
     expect(tools.get('create_task')).toMatchObject({ readOnlyHint: false, destructiveHint: false });
     expect(tools.get('update_task')).toMatchObject({ readOnlyHint: false, destructiveHint: false });
-    expect(tools.size).toBe(36);
+    expect(tools.get('set_product_stock')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+    expect(tools.size).toBe(37);
   });
 });
 

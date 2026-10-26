@@ -4,6 +4,8 @@ import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { CopyButton } from '@/components/apply/CopyButton';
+import { ReadSalesButton } from '@/components/settings/ReadSalesButton';
+import { getChannelSales } from '@/channels/sales';
 import { ProbeButton } from '@/components/settings/ProbeButton';
 import { AppCredentialsForm } from '@/components/settings/AppCredentialsForm';
 import { ConnectButtons } from '@/components/settings/ConnectButtons';
@@ -189,10 +191,24 @@ export default async function ConnectionPage({
                   )
                 ) : null}
 
+                {connector && keyReady && getChannelSales(store.channel.kind) ? (
+                  <div className="space-y-3">
+                    <p className="text-sm font-medium">3. Ventas y stock</p>
+                    <p className={cn('text-sm', store.salesError ? 'text-destructive' : 'text-muted-foreground')}>
+                      {store.salesError
+                        ? store.salesError
+                        : store.salesSince
+                          ? `Lee las ventas desde el ${formatDateTime(store.salesSince, account.timezone)}${store.salesCheckedAt ? `, la última vez el ${formatDateTime(store.salesCheckedAt, account.timezone)}` : ''}. Las publicaciones siguen al stock de sus productos.`
+                          : 'Todavía no lee las ventas: hasta que pueda, las publicaciones siguen a la cantidad de su canal y no al stock del producto.'}
+                    </p>
+                    {connected ? <ReadSalesButton accountSlug={account.slug} storeId={store.id} /> : null}
+                  </div>
+                ) : null}
+
                 {getChannelResearch(store.channel.kind) ? (
                   <div className="space-y-3">
                     <p className="text-sm font-medium">
-                      {connector ? '3. ' : ''}Prueba de conexión
+                      {connector ? (getChannelSales(store.channel.kind) ? '4. ' : '3. ') : ''}Prueba de conexión
                       <span className="font-normal text-muted-foreground">
                         {lastAt ? ` · última, ${formatDateTime(lastAt, account.timezone)}` : ' · todavía no se probó'}
                       </span>

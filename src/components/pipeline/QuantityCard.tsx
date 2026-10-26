@@ -1,9 +1,12 @@
 import { SectionBody, SectionCard } from '@/components/ui/section-card';
 import { QuantityEditor } from '@/components/publication/QuantityEditor';
 import type { PriceSides } from '@/components/pipeline/price/PriceDecisionCard';
+import Link from 'next/link';
 import { quantityText } from '@/domain/quantities';
+import type { StockPlan } from '@/lib/stock-plan';
 
-// En el paso Publicación: la cantidad disponible. Se cambia acá y queda en Por
+// En el paso Publicación: la cantidad disponible. Si sale del stock del
+// producto, se cambia allá y se sube sola; si no, se cambia acá y queda en Por
 // subir, igual que el precio.
 
 export function QuantityCard({
@@ -13,6 +16,7 @@ export function QuantityCard({
   published,
   sides,
   stockInChannel,
+  stock,
 }: {
   accountSlug: string;
   publicationId: string;
@@ -21,7 +25,28 @@ export function QuantityCard({
   // Las dos caras de la publicación; null si no se pudieron leer.
   sides: PriceSides | null;
   stockInChannel: boolean;
+  // Lo que le toca según el stock del producto, y dónde se cambia.
+  stock?: { plan: StockPlan; productHref: string } | null;
 }) {
+  if (stock?.plan.managed) {
+    const channel = stock.plan.channel;
+    return (
+      <SectionCard title="Cantidad disponible" description={channel ? `En ${channelName}: ${quantityText(channel)}.` : undefined}>
+        <SectionBody>
+          <p className="text-sm">
+            Sale del stock del producto: <span className="font-medium">{quantityText(stock.plan.lines)}</span>.
+            {stock.plan.pending ? ` Se sube a ${channelName} en la próxima pasada.` : ''}
+          </p>
+          <p className="text-sm text-muted-foreground">
+            Cada venta lo descuenta y la cantidad nueva se sube sola a todas sus publicaciones.{' '}
+            <Link href={stock.productHref} className="font-medium text-foreground underline-offset-4 hover:underline">
+              Cambiar el stock en el producto
+            </Link>
+          </p>
+        </SectionBody>
+      </SectionCard>
+    );
+  }
   const channel = sides?.channel?.quantity ?? null;
   const lines = sides?.app.quantity ?? channel;
   const state = sides?.states.quantity ?? 'unread';

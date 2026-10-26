@@ -12,6 +12,8 @@ import { loadCatalogData } from '@/lib/catalog-data';
 import { readOne } from '@/lib/channel-sync';
 import { withAccessToken } from '@/lib/connections';
 import { measuresOf, photosPerMeasure, picturesFor, type Measure } from '@/lib/media';
+import { available, isManaged } from '@/domain/stock';
+import { SOURCE_SELECT, sourceOf } from '@/lib/stock-plan';
 import { loadTitleRules } from '@/lib/title-rules';
 
 // Crear en el canal una publicación que todavía no está publicada, con lo que
@@ -162,6 +164,17 @@ export async function createChecks(db: Db, args: { accountId: string; publicatio
     blocking: false,
   });
 
+  // Si el producto lleva stock en la app, la cantidad para empezar sale de ahí.
+  const product = await db.product.findUnique({ where: { id: p.product.id }, select: SOURCE_SELECT });
+  const source = product ? sourceOf(product) : null;
+  const stock =
+    source && isManaged(source)
+      ? {
+          quantity: available(source, null),
+          quantities: Object.fromEntries(measures.map((m) => [m.key, available(source, { sku: m.sku, measure: m.measure })])),
+        }
+      : null;
+
   return {
     channelName,
     blocked,
@@ -171,6 +184,7 @@ export async function createChecks(db: Db, args: { accountId: string; publicatio
     price: p.price === null ? null : Number(p.price),
     // Con varias medidas, la cantidad se carga en cada una.
     measures: measures.length >= 2 ? measures.map((m) => ({ key: m.key, label: m.label })) : [],
+    stock,
   };
 }
 

@@ -102,9 +102,9 @@ describe('de Mercado Libre al formato neutro', () => {
     ]);
     // Cada variante con sus fotos, aunque le falte el SKU o la medida.
     expect(l.variations).toEqual([
-      { sku: 'AROS-STD', measure: 'STD', photoIds: ['F1', 'F3'], quantity: null },
-      { sku: 'AROS-050', measure: '0.50', photoIds: ['F2', 'F3'], quantity: null },
-      { sku: null, measure: null, photoIds: [], quantity: null },
+      { sku: 'AROS-STD', measure: 'STD', photoIds: ['F1', 'F3'], variationId: '1', quantity: null },
+      { sku: 'AROS-050', measure: '0.50', photoIds: ['F2', 'F3'], variationId: '2', quantity: null },
+      { sku: null, measure: null, photoIds: [], variationId: '3', quantity: null },
     ]);
     expect(parseItem({ id: 'MLA9', status: 'closed' }).status).toBe('CLOSED');
     expect(parseItem({ id: 'MLA9', status: 'under_review' }).status).toBe('UNDER_REVIEW');

@@ -88,8 +88,8 @@ export const mercadolibreConnector: ChannelConnector = {
       'Activá PKCE.',
       'En los flujos OAuth marcá Authorization Code y Refresh token. Client credentials no.',
       'En unidades de negocio elegí solo Mercado Libre, sin VIS.',
-      'En permisos elegí lectura y escritura de publicaciones, lectura y escritura de la comunicación con los compradores (preguntas), lectura de usuarios y de métricas, y acceso sin conexión ("offline access"). Ventas, facturación, pagos, promociones y publicidad, sin acceso.',
-      `En "Notificaciones callbacks URL" pegá: ${noticesUri}. En los tópicos marcá solo el de preguntas ("Questions").`,
+      'En permisos elegí lectura y escritura de publicaciones, lectura y escritura de la comunicación con los compradores (preguntas), lectura de ventas (para llevar el stock), lectura de usuarios y de métricas, y acceso sin conexión ("offline access"). Facturación, pagos, promociones y publicidad, sin acceso.',
+      `En "Notificaciones callbacks URL" pegá: ${noticesUri}. En los tópicos marcá el de preguntas ("Questions") y el de ventas ("Orders", orders_v2).`,
       'Guardá. Copiá el App ID y la Clave secreta y pegalos acá abajo.',
     ];
   },

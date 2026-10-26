@@ -78,6 +78,7 @@ model User {
   priceDecisions     PriceDecision[]      @relation("PriceDecidedBy")
   tasksCreated       Task[]               @relation("TaskCreatedBy")
   tasks              TaskAssignee[]
+  stockMoves         StockMovement[]
 
   @@map("users")
 }
@@ -265,6 +266,15 @@ model Store {
   buyerQuestions   BuyerQuestion[]
   questionReader   QuestionReader?
 
+  // Desde cuándo la app lee las ventas de la tienda. Sin esto, o con un error,
+  // sus publicaciones siguen a su canal y no al stock del producto.
+  salesSince     DateTime?
+  // Hasta dónde revisó las ventas la tarea de cada hora.
+  salesCheckedAt DateTime?
+  // Por qué no se pueden leer, por ejemplo porque falta el permiso.
+  salesError     String?
+  sales          ChannelSale[]
+
   @@unique([accountId, channelId, name])
   @@map("stores")
 }
@@ -325,6 +335,15 @@ model Product {
   inCombos         ComboItem[]      @relation("ComboComponent")
   photoEdits       PhotoEdit[]
   videos           ProductVideo[]
+
+  // Desde cuándo la app maneja su stock: sus publicaciones lo heredan. Null:
+  // cada publicación sigue a su canal (src/domain/stock.ts).
+  stockSince  DateTime?
+  // Algo para revisar del stock, por ejemplo que al empezar sus publicaciones
+  // tenían cantidades distintas.
+  stockReview String?
+  stock       ProductStock[]
+  stockMoves  StockMovement[]
 
   @@index([accountId])
   @@index([importRunId])
@@ -507,6 +526,7 @@ model Publication {
   clips             PublicationClip[]
   descriptionDraft  DescriptionDraft?
   tasks             TaskPublication[]
+  stockMoves        StockMovement[]
 
   @@unique([storeId, externalId])
   @@index([pipelineStatus])
@@ -1849,4 +1869,90 @@ model TaskPublication {
   @@id([taskId, publicationId])
   @@index([publicationId])
   @@map("task_publications")
+}
+
+// ───────────────────────────── Stock ─────────────────────────────
+// El stock es del producto: sus publicaciones lo heredan, y las ventas del
+// canal lo descuentan (src/domain/stock.ts, src/lib/stock.ts).
+
+model ProductStock {
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  // La medida: su clave (quantityKey en src/domain/quantities.ts), o vacía si
+  // el producto no tiene medidas. Así no se pierde si se vuelve a guardar la ficha.
+  key       String
+  // Cómo se llamaba la medida, para mostrarla aunque cambie la ficha.
+  label     String   @default("")
+  // Puede quedar negativo si se vendió más de lo que había.
+  quantity  Int
+  updatedAt DateTime @updatedAt
+
+  @@id([productId, key])
+  @@map("product_stock")
+}
+
+enum StockMoveKind {
+  // El de partida, tomado del canal.
+  INITIAL
+  SALE
+  // Una venta cancelada: las unidades vuelven.
+  CANCEL
+  // Un cambio a mano.
+  MANUAL
+}
+
+model StockMovement {
+  id            Int           @id @default(autoincrement())
+  productId     String
+  product       Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  key           String
+  kind          StockMoveKind
+  // Cuánto cambió y cuánto quedó.
+  delta         Int
+  after         Int
+  publicationId String?
+  publication   Publication?  @relation(fields: [publicationId], references: [id], onDelete: SetNull)
+  saleId        String?
+  sale          ChannelSale?  @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  userId        String?
+  user          User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  note          String?
+  createdAt     DateTime      @default(now())
+
+  @@index([productId, createdAt])
+  @@map("stock_movements")
+}
+
+enum SaleStatus {
+  // Se descontó del stock.
+  COUNTED
+  // Se canceló antes de entregarse: las unidades volvieron.
+  RETURNED
+  // Se canceló ya entregada: no vuelve sola.
+  KEPT
+  // No tocó el stock: Full, un producto sin stock en la app o una cancelada antes de contarse.
+  SKIPPED
+}
+
+// Una venta del canal, para no contarla dos veces y devolverla si se cancela.
+model ChannelSale {
+  id        String          @id @default(cuid())
+  storeId   String
+  store     Store           @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  // El código de la venta en el canal.
+  orderId   String
+  status    SaleStatus
+  // Lo de cada línea: { publicationId, productId, key, quantity, counted, reason }.
+  lines     Json            @default("[]")
+  orderedAt DateTime
+  delivered Boolean         @default(false)
+  // Cuándo se leyó del canal por última vez.
+  checkedAt DateTime
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  moves     StockMovement[]
+
+  @@unique([storeId, orderId])
+  @@index([status, checkedAt])
+  @@map("channel_sales")
 }

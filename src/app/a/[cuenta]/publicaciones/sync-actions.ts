@@ -17,6 +17,7 @@ import { CreateError, createInChannel } from '@/lib/channel-create';
 import { changeStatus, relistInChannel, StatusError, type StatusResult } from '@/lib/channel-status';
 import { MAX_QUANTITY } from '@/domain/quantities';
 import { saveQuantities, type QuantitiesResult } from '@/lib/quantities';
+import { syncStock } from '@/lib/stock';
 
 // Lo que se hace desde la página de una publicación y desde Por subir: cambiar
 // el borrador, subirlo al canal, descartarlo y volver a leer del canal.
@@ -202,6 +203,10 @@ export async function createInChannelAction(
     if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Revisá los datos.' };
     try {
       const created = await createInChannel(prisma, { accountId: account.id, publicationId: id.data, ...parsed.data, userId: user.id });
+      // Si el producto lleva stock en la app, queda con ese.
+      await syncStock(prisma, { publicationIds: [id.data], userId: user.id, note: 'Al crearla, con el stock del producto.' }).catch((e) =>
+        console.error('No se pudo subir el stock', e instanceof Error ? e.message : e),
+      );
       refresh(accountSlug, id.data);
       revalidatePath(`/a/${accountSlug}/pipeline/${id.data}`);
       return { ok: true, externalId: created.externalId, warnings: created.warnings };

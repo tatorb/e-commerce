@@ -9,6 +9,7 @@ import { ConnectError } from '@/channels/connect';
 import { CryptoError } from '@/lib/crypto';
 import { disconnect, saveAppCredentials, startAuthorization } from '@/lib/connections';
 import { runProbe } from '@/lib/research';
+import { readSales } from '@/lib/stock';
 
 type Result = { ok: true } | { ok: false; error: string };
 
@@ -89,5 +90,22 @@ export async function disconnectAction(accountSlug: string, storeId: string): Pr
     }
     revalidatePath(`/a/${accountSlug}`, 'layout');
     return { ok: true };
+  });
+}
+
+/** Lee ahora las ventas de la tienda, para ver si ya tiene el permiso. */
+export async function readSalesNowAction(accountSlug: string, storeId: string): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
+  return act(accountSlug, { section: 'conexion', does: 'Leyó las ventas de la tienda' }, async () => {
+    const store = await storeFor(accountSlug, storeId);
+    if (!store) return { ok: false as const, error: 'La tienda no es de esta cuenta.' };
+    const r = await readSales(prisma, { budgetMs: 20_000, storeId: store.id });
+    const after = await prisma.store.findUnique({ where: { id: store.id }, select: { salesError: true, salesSince: true } });
+    revalidatePath(`/a/${accountSlug}`, 'layout');
+    if (after?.salesError) return { ok: false, error: after.salesError };
+    if (!after?.salesSince) return { ok: false, error: 'No se pudo conectar con el canal. Probá de nuevo en un rato.' };
+    return {
+      ok: true,
+      message: `Listo, lee las ventas. ${r.orders === 1 ? 'Llegó 1 venta reciente' : `Llegaron ${r.orders} ventas recientes`}${r.sent > 0 ? ` y se subió la cantidad a ${r.sent === 1 ? '1 publicación' : `${r.sent} publicaciones`}` : ''}.`,
+    };
   });
 }

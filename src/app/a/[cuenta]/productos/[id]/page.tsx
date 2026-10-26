@@ -1,4 +1,6 @@
 import { notFound } from 'next/navigation';
+import { ProductStockPanel } from '@/components/products/ProductStockPanel';
+import { loadProductStock } from '@/lib/stock';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Breadcrumb } from '@/components/navigation/Breadcrumb';
@@ -64,7 +66,7 @@ function toFormValues(p: ProductDetail): ProductFormValues {
   };
 }
 
-const TAB_KEYS: ProductTabKey[] = ['publicaciones', 'ficha', 'compatibilidades', 'investigacion', 'fotos', 'combos'];
+const TAB_KEYS: ProductTabKey[] = ['publicaciones', 'stock', 'ficha', 'compatibilidades', 'investigacion', 'fotos', 'combos'];
 
 // El producto: lo que es la pieza, y lo comparten todas sus publicaciones. Sus
 // partes van en pestañas: las publicaciones, la ficha, las compatibilidades,
@@ -78,8 +80,8 @@ export default async function ProductPage({
   searchParams: Promise<{ seccion?: string }>;
 }) {
   const [{ cuenta, id }, { seccion }] = await Promise.all([params, searchParams]);
-  const { account } = await requireAccount(cuenta, 'productos');
-  const [product, stores, rules, combo, research, photos, videos] = await Promise.all([
+  const { account, canWrite } = await requireAccount(cuenta, 'productos');
+  const [product, stores, rules, combo, research, photos, videos, stock] = await Promise.all([
     getProduct(account.id, id),
     listStores(account.id),
     loadRulesByChannel(account.id),
@@ -91,8 +93,9 @@ export default async function ProductPage({
       orderBy: { createdAt: 'asc' },
       select: { id: true, name: true, durationMs: true, width: true, height: true },
     }),
+    loadProductStock(prisma, { accountId: account.id, productId: id }),
   ]);
-  if (!product || !combo) notFound();
+  if (!product || !combo || !stock) notFound();
 
   const base = `/a/${account.slug}/productos`;
   const storeOptions = stores.map((s) => ({ id: s.id, name: s.name, channel: channelInfo(s.channel.kind, s.channel.name) }));
@@ -117,6 +120,8 @@ export default async function ProductPage({
 
   const tabs: { key: ProductTabKey; label: string; count?: number | null }[] = [
     { key: 'publicaciones', label: 'Publicaciones', count: pubs.length },
+    // El total del producto; un combo no tiene stock propio.
+    { key: 'stock', label: 'Stock', count: !isCombo && stock.managed ? stock.lines.reduce((sum, l) => sum + (l.quantity ?? 0), 0) : null },
     { key: 'ficha', label: 'Ficha' },
     { key: 'compatibilidades', label: 'Compatibilidades', count: product.compatibilities.length },
     { key: 'investigacion', label: 'Investigación' },
@@ -165,6 +170,7 @@ export default async function ProductPage({
                   {newPublication('Agregar publicación')}
                 </div>
               ),
+            stock: <ProductStockPanel accountSlug={account.slug} view={stock} timeZone={account.timezone} canEdit={canWrite} />,
             investigacion: (
               <ProductResearchPanel
                 accountSlug={account.slug}

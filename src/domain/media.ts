@@ -129,9 +129,10 @@ export function parseMedia(raw: unknown): PhotoRef[] | null {
 /**
  * Una medida de la publicación en el canal, con el código de sus fotos y su
  * cantidad disponible. Si el canal la guarda como una publicación aparte,
- * también el código de esa.
+ * también el código de esa; si no, el código de la variante, para reconocerla
+ * en las ventas.
  */
-export type ChannelVariation = VariantLike & { photoIds: string[]; externalId?: string; quantity?: number | null };
+export type ChannelVariation = VariantLike & { photoIds: string[]; externalId?: string; variationId?: string; quantity?: number | null };
 
 const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v : null);
 
@@ -143,8 +144,18 @@ export function parseVariations(raw: unknown): ChannelVariation[] {
     const o = v as Record<string, unknown>;
     const photoIds = Array.isArray(o.photoIds) ? o.photoIds.filter((id): id is string => typeof id === 'string' && id !== '') : [];
     const externalId = text(o.externalId);
+    const variationId = text(o.variationId);
     const quantity = typeof o.quantity === 'number' && Number.isFinite(o.quantity) ? o.quantity : null;
-    return [{ sku: text(o.sku), measure: text(o.measure), photoIds, ...(externalId ? { externalId } : {}), ...(quantity !== null ? { quantity } : {}) }];
+    return [
+      {
+        sku: text(o.sku),
+        measure: text(o.measure),
+        photoIds,
+        ...(externalId ? { externalId } : {}),
+        ...(variationId ? { variationId } : {}),
+        ...(quantity !== null ? { quantity } : {}),
+      },
+    ];
   });
 }
 

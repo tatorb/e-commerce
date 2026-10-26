@@ -37,6 +37,7 @@ import { fieldLabel } from '@/domain/sync-log';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { PublicationTasksCard } from '@/components/tasks/PublicationTasksCard';
 import { assignablePeople, tasksOfPublication } from '@/lib/tasks';
+import { plansFor, STOCK_MANAGED } from '@/lib/stock-plan';
 import { can } from '@/domain/access';
 import { formatDateTime, plural } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
@@ -106,7 +107,7 @@ export default async function PublicationPage({
   const productHref = `/a/${account.slug}/productos/${p.product.id}`;
   // Las otras publicaciones del mismo producto, para pasar de una a otra.
   const canTask = can(user.access, 'tareas', 'write');
-  const [others, history, knowledge, qa, tasks, people] = await Promise.all([
+  const [others, history, knowledge, qa, tasks, people, stockPlans] = await Promise.all([
     prisma.publication.findMany({
       where: { productId: p.product.id, id: { not: p.id } },
       orderBy: { createdAt: 'asc' },
@@ -125,7 +126,10 @@ export default async function PublicationPage({
     face !== 'historial' ? loadQaStep(prisma, { accountId: account.id, publicationId: p.id }) : Promise.resolve(null),
     face !== 'historial' ? tasksOfPublication(prisma, { publicationId: p.id, viewer: user, timeZone: account.timezone }) : Promise.resolve([]),
     face !== 'historial' && canTask ? assignablePeople(prisma, account.id) : Promise.resolve([]),
+    // Si la cantidad sale del stock del producto.
+    plansFor(prisma, [p.id]),
   ]);
+  const stockPlan = stockPlans.get(p.id) ?? null;
   const pushable = summary.draft.filter((f) => data.publishable.includes(f));
 
   return (
@@ -302,7 +306,9 @@ export default async function PublicationPage({
                         : field === 'discount'
                           ? 'El descuento se decide en el paso Precio.'
                           : field === 'quantity'
-                            ? quantityReason(p.externalId, copy?.stockInChannel ?? false, quantities, channelName)
+                            ? stockPlan?.managed
+                              ? STOCK_MANAGED
+                              : quantityReason(p.externalId, copy?.stockInChannel ?? false, quantities, channelName)
                             : (true as const);
               return (
                 <SectionCard

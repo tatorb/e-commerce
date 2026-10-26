@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils/cn';
 // pestaña. La ficha es un solo formulario: cada pestaña muestra sus partes y
 // un solo Guardar guarda todo. La pestaña elegida queda en el link.
 
-export type ProductTabKey = 'publicaciones' | 'ficha' | 'compatibilidades' | 'investigacion' | 'fotos' | 'combos';
+export type ProductTabKey = 'publicaciones' | 'stock' | 'ficha' | 'compatibilidades' | 'investigacion' | 'fotos' | 'combos';
 
 const FORM_SECTIONS: Partial<Record<ProductTabKey, ProductFormSection[]>> = {
   ficha: ['general', 'variants', 'specs', 'kit', 'notes'],

@@ -41,6 +41,7 @@ import { photoOriginsOf, picturesFor } from '@/lib/media';
 import { withAccessToken } from '@/lib/connections';
 import { listingTargets } from '@/lib/variant-listings';
 import { loadTitleRules } from '@/lib/title-rules';
+import { STOCK_MANAGED, stockManaged } from '@/lib/stock-plan';
 
 // Subir al canal el borrador de una publicación: lo que cambió en la app y
 // todavía no está allá. Antes de subir se revisa lo mismo que en la app (el
@@ -203,6 +204,32 @@ function planAttributes(
     );
   }
   return plan;
+}
+
+/** Sube las cantidades: si el canal guarda cada medida aparte, cada una lleva la suya. */
+export async function sendQuantities(
+  db: Db,
+  p: { externalId: string | null; variantListings: unknown; store: { id: string } },
+  publisher: ChannelPublisher,
+  lines: QuantityLine[],
+): Promise<void> {
+  const family = parseVariantListings(p.variantListings);
+  await withAccessToken(db, p.store.id, async (token) => {
+    if (family.length >= 2) {
+      for (const [i, v] of family.entries()) {
+        const line = lines.find((l) => l.key === quantityKey(v, i));
+        if (line) await publisher.setQuantity(token, v.externalId, [{ key: '', quantity: line.quantity }]);
+      }
+    } else await publisher.setQuantity(token, p.externalId!, lines.map((l) => ({ key: l.key, quantity: l.quantity })));
+  });
+}
+
+/** La cara del canal después de subir las cantidades: el total y la de cada medida. */
+export function quantityCopy(rawVariations: unknown, lines: QuantityLine[]): Prisma.ChannelCopyUpdateInput {
+  const byKey = new Map(lines.map((l) => [l.key, l.quantity]));
+  const variations = parseVariations(rawVariations).map((v, i) => ({ ...v, quantity: byKey.get(quantityKey(v, i)) ?? v.quantity ?? null }));
+  const known = variations.every((v) => v.quantity !== null);
+  return variations.length > 0 ? { variations, quantity: known ? variations.reduce((sum, v) => sum + (v.quantity ?? 0), 0) : null } : { quantity: totalQuantity(lines) };
 }
 
 export type PushResult = {
@@ -371,23 +398,13 @@ export async function pushDrafts(
           result.rejected.push({ field, message: `El stock lo maneja ${channelName}, por ejemplo porque está en Full: la cantidad no se cambia desde la app.` });
           continue;
         }
+        if (await stockManaged(db, p.id)) {
+          result.rejected.push({ field, message: STOCK_MANAGED });
+          continue;
+        }
         value = lines;
-        const family = parseVariantListings(p.variantListings);
-        send = () =>
-          withAccessToken(db, p.store.id, async (token) => {
-            // Si el canal guarda cada medida aparte, cada una lleva la suya.
-            if (family.length >= 2) {
-              for (const [i, v] of family.entries()) {
-                const line = lines.find((l) => l.key === quantityKey(v, i));
-                if (line) await publisher.setQuantity(token, v.externalId, [{ key: '', quantity: line.quantity }]);
-              }
-            } else await publisher.setQuantity(token, p.externalId!, lines.map((l) => ({ key: l.key, quantity: l.quantity })));
-          });
-        // La cara del canal: el total y la de cada medida.
-        const byKey = new Map(lines.map((l) => [l.key, l.quantity]));
-        const variations = parseVariations(copy.variations).map((v, i) => ({ ...v, quantity: byKey.get(quantityKey(v, i)) ?? v.quantity ?? null }));
-        const known = variations.every((v) => v.quantity !== null);
-        extra = variations.length > 0 ? { variations, quantity: known ? variations.reduce((sum, v) => sum + (v.quantity ?? 0), 0) : null } : { quantity: totalQuantity(lines) };
+        send = () => sendQuantities(db, p, publisher, lines);
+        extra = quantityCopy(copy.variations, lines);
       } else {
         if (field === 'title' && titleLocked(p)) {
           result.rejected.push({ field, message: LOCKED_TITLE });

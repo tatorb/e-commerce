@@ -860,9 +860,9 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     const after = await db.publication.findUniqueOrThrow({ where: { id: pub.id }, include: { channelCopy: true } });
     expect(after.media).toBeNull();
     expect(after.channelCopy!.variations).toEqual([
-      // La lectura de confirmación trae también la cantidad de cada medida.
-      { sku: 'SP-413', measure: 'STD', photoIds: ['LINK-1', 'SUBIDA-1'], quantity: 2 },
-      { sku: 'SP-413', measure: '0,50', photoIds: ['SUBIDA-2', 'SUBIDA-1'], quantity: 5 },
+      // La lectura de confirmación trae también la cantidad de cada medida, y el código de la variante.
+      { sku: 'SP-413', measure: 'STD', photoIds: ['LINK-1', 'SUBIDA-1'], variationId: '100', quantity: 2 },
+      { sku: 'SP-413', measure: '0,50', photoIds: ['SUBIDA-2', 'SUBIDA-1'], variationId: '101', quantity: 5 },
     ]);
     const photos = channelPhotos(after.channelCopy!.photos, after.channelCopy!.photoIds, after.channelCopy!.variations);
     const ids = (key: string) => variantPhotos(photos, key).map((r) => (r.kind === 'channel' ? r.id : ''));

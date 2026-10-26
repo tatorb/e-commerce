@@ -58,6 +58,7 @@ import { QuantityCard } from '@/components/pipeline/QuantityCard';
 import { todayIn } from '@/domain/applications';
 import { PublicationTasksCard } from '@/components/tasks/PublicationTasksCard';
 import { assignablePeople, tasksOfPublication } from '@/lib/tasks';
+import { plansFor } from '@/lib/stock-plan';
 import { can } from '@/domain/access';
 
 export const dynamic = 'force-dynamic';
@@ -110,7 +111,7 @@ export default async function PipelineStepPage({
   // Lo que usa el paso que se mira, pedido todo junto: con la base lejos, cada
   // consulta en fila suma una ida y vuelta.
   const canTask = can(user.access, 'tareas', 'write');
-  const [ctx, info, images, channel, faces, media, create, videos, description, qa, price, decision, tasks, people] = await Promise.all([
+  const [ctx, info, images, channel, faces, media, create, videos, description, qa, price, decision, tasks, people, stockPlans] = await Promise.all([
     // Información y Título usan la ficha, la competencia y lo leído del buscador.
     viewing === 'INFO' || viewing === 'TITLE' ? loadTitleContext(prisma, account.id, pub.id) : null,
     viewing === 'INFO'
@@ -157,6 +158,7 @@ export default async function PipelineStepPage({
     // Las tareas de la publicación, en todos los pasos.
     tasksOfPublication(prisma, { publicationId: pub.id, viewer: user, timeZone: account.timezone }),
     canTask ? assignablePeople(prisma, account.id) : [],
+    viewing === 'PUBLISH' ? plansFor(prisma, [pub.id]) : null,
   ]);
   const auto = ctx && viewing === 'TITLE' ? await autoAvailable(prisma, ctx.channel, ctx.storeId) : null;
 
@@ -363,6 +365,7 @@ export default async function PipelineStepPage({
               published={Boolean(pub.externalId)}
               sides={faces ? { app: faces.app, channel: faces.channel, states: faces.states, rejected: faces.summary.rejected } : null}
               stockInChannel={faces?.copy?.stockInChannel ?? false}
+              stock={stockPlans?.get(pub.id) ? { plan: stockPlans.get(pub.id)!, productHref: `/a/${account.slug}/productos/${pub.productId}?seccion=stock` } : null}
             />
             {create ? <CreateInChannelCard accountSlug={account.slug} publicationId={pub.id} info={create} /> : null}
             <PublicationCodeCard
