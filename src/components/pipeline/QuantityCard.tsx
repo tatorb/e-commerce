@@ -3,7 +3,8 @@ import { QuantityEditor } from '@/components/publication/QuantityEditor';
 import type { PriceSides } from '@/components/pipeline/price/PriceDecisionCard';
 import Link from 'next/link';
 import { quantityText } from '@/domain/quantities';
-import type { StockPlan } from '@/lib/stock-plan';
+import { followsStockOf, type StockPlan } from '@/lib/stock-plan';
+import { FollowStockSwitch } from '@/components/publication/FollowStockSwitch';
 
 // En el paso Publicación: la cantidad disponible. Si sale del stock del
 // producto, se cambia allá y se sube sola; si no, se cambia acá y queda en Por
@@ -28,11 +29,13 @@ export function QuantityCard({
   // Lo que le toca según el stock del producto, y dónde se cambia.
   stock?: { plan: StockPlan; productHref: string } | null;
 }) {
+  const toggle = <FollowStockSwitch accountSlug={accountSlug} publicationId={publicationId} on={followsStockOf(stock?.plan)} />;
   if (stock?.plan.managed) {
     const channel = stock.plan.channel;
     return (
       <SectionCard title="Cantidad disponible" description={channel ? `En ${channelName}: ${quantityText(channel)}.` : undefined}>
         <SectionBody>
+          {toggle}
           <p className="text-sm">
             Sale del stock del producto{stock.plan.measure ? `, medida ${stock.plan.measure.label}` : ''}:{' '}
             <span className="font-medium">{quantityText(stock.plan.lines)}</span>.
@@ -68,9 +71,14 @@ export function QuantityCard({
   else if (state === 'choose') note = `Cambió también en ${channelName}: elegí cuál queda en Por subir, abajo.`;
   else note = `Ya está en ${channelName}. Cada venta la baja allá y la app la lee sola cada hora.`;
 
+  // Prendida pero sin seguir al stock todavía: por qué.
+  const why = stock && !stock.plan.managed && !stock.plan.off ? stock.plan.reason : null;
+
   return (
     <SectionCard title="Cantidad disponible" description={channel ? `En ${channelName}: ${quantityText(channel)}.` : undefined}>
       <SectionBody>
+        {toggle}
+        {why ? <p className="text-sm text-muted-foreground">{why}</p> : null}
         <p className={rejected ? 'text-sm text-destructive' : 'text-sm text-muted-foreground'}>{note}</p>
         {published && !stockInChannel && lines ? (
           <QuantityEditor accountSlug={accountSlug} publicationId={publicationId} lines={lines} channelLines={channel} channelName={channelName} />

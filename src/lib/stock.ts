@@ -8,9 +8,11 @@ import { parseVariantListings, parseVariations, type VariantLike } from '@/domai
 import { channelQuantities } from '@/domain/quantities';
 import { copySkus, initialStock, isManaged, listingMeasure, observedStock, parseStockChange, StockError, stockSlots, unitParts } from '@/domain/stock';
 import { titleOrUntitled } from '@/domain/publication-title';
+import { needsReactivation } from '@/domain/channel-status';
 import { quantityCopy, sendQuantities } from '@/lib/channel-push';
 import { withAccessToken } from '@/lib/connections';
 import { variantListingOwners } from '@/lib/variant-listings';
+import { afterRestock } from '@/lib/restock';
 import { PLAN_SELECT, planFor, SOURCE_SELECT, sourceOf, type PlanRow, type StockPlan } from '@/lib/stock-plan';
 
 // El stock de cada producto: cargarlo a mano, tomarlo del canal al empezar,
@@ -131,6 +133,8 @@ async function pushPlanned(
     // Sin borrador propio: la cantidad sale del stock.
     await tx.publication.update({ where: { id: row.id }, data: { quantities: Prisma.DbNull } });
   });
+  // Estaba frenada sin stock y ahora tiene: si el canal no la reactiva solo, una tarea.
+  if (needsReactivation(row.channelStatus, plan.channel, plan.lines)) await afterRestock(db, { publicationId: row.id, lines: plan.lines });
   return { ok: true };
 }
 
@@ -168,6 +172,7 @@ export async function reconcileStock(db: Db, opts: { budgetMs: number }): Promis
   const rows = await db.publication.findMany({
     where: {
       externalId: { not: null },
+      followsStock: true,
       store: { salesSince: { not: null }, salesError: null },
       channelCopy: { is: { missingSince: null, stockInChannel: false } },
       OR: [{ product: { stockSince: { not: null } } }, { product: { kind: 'COMBO' } }],
@@ -222,6 +227,23 @@ export async function setProductStock(
 /** Ya se revisó lo que había para revisar del stock. */
 export async function markStockReviewed(db: Db, args: { accountId: string; productId: string }): Promise<void> {
   await db.product.updateMany({ where: { id: args.productId, accountId: args.accountId }, data: { stockReview: null } });
+}
+
+/**
+ * Prende o apaga la cantidad automática de una publicación. Al prenderla, le
+ * sube enseguida la cantidad que le toca; apagada, la app no la toca más.
+ */
+export async function setFollowsStock(
+  db: Db,
+  args: { accountId: string; publicationId: string; on: boolean; userId: string | null },
+): Promise<{ plan: StockPlan; sync: SyncResult }> {
+  const r = await db.publication.updateMany({ where: { id: args.publicationId, product: { accountId: args.accountId } }, data: { followsStock: args.on } });
+  if (r.count === 0) throw new StockError('La publicación no está en la cuenta.');
+  const sync = args.on
+    ? await syncStock(db, { publicationIds: [args.publicationId], userId: args.userId, note: 'Se prendió la cantidad automática.' })
+    : { sent: 0, failed: [], pending: false };
+  const row = await db.publication.findUniqueOrThrow({ where: { id: args.publicationId }, select: PLAN_SELECT });
+  return { plan: planFor(row), sync };
 }
 
 // ───────────────────────────── Ventas ─────────────────────────────
@@ -520,8 +542,10 @@ export async function handleSalesNotice(db: Db, kind: ChannelKind, body: unknown
  */
 export async function startStock(db: Db, opts: { budgetMs?: number } = {}): Promise<{ started: number; pending: boolean }> {
   const begun = Date.now();
+  // Las que tienen la cantidad automática apagada se cambian a mano: su cantidad no dice el stock.
   const where = {
     externalId: { not: null },
+    followsStock: true,
     store: { salesSince: { not: null }, salesError: null },
     channelCopy: { is: { missingSince: null, stockInChannel: false } },
   } satisfies Prisma.PublicationWhereInput;

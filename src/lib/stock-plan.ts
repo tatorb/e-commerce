@@ -12,6 +12,9 @@ type Db = PrismaClient | Prisma.TransactionClient;
 
 export const STOCK_MANAGED = 'La cantidad sale del stock del producto: cambiala en el producto y se sube sola.';
 
+/** Con la actualización automática apagada. */
+export const STOCK_OFF = 'La cantidad automática está apagada: la cantidad se cambia a mano en la publicación. Sus ventas igual descuentan del stock del producto.';
+
 const STOCK_PRODUCT_SELECT = {
   id: true,
   name: true,
@@ -50,6 +53,8 @@ export const PLAN_SELECT = {
   title: true,
   externalId: true,
   variantListings: true,
+  followsStock: true,
+  channelStatus: true,
   store: { select: { id: true, name: true, salesSince: true, salesError: true, channel: { select: { kind: true, name: true } } } },
   channelCopy: { select: { quantity: true, variations: true, stockInChannel: true, missingSince: true, readAt: true, details: true } },
   product: { select: SOURCE_SELECT },
@@ -64,9 +69,13 @@ export type StockPlan =
   // Sigue al stock: lo que le toca, lo que tiene en el canal, si hay que subirlo
   // y, si vende una sola medida del producto, cuál.
   | { managed: true; lines: QuantityLine[]; channel: QuantityLine[] | null; pending: boolean; measure: ListingMeasure | null }
-  | { managed: false; reason: string };
+  // off: la cantidad automática está apagada en la publicación.
+  | { managed: false; reason: string; off?: boolean };
 
 type ManagedPlan = Extract<StockPlan, { managed: true }>;
+
+/** Si la publicación tiene prendida la cantidad automática. Sin plan, como viene de entrada. */
+export const followsStockOf = (plan: StockPlan | null | undefined): boolean => !(plan && !plan.managed && plan.off);
 
 /** Lo que le toca, en texto, con la medida si vende una sola: "0.50: 2". */
 export function plannedText(plan: ManagedPlan): string {
@@ -93,6 +102,7 @@ export function singleMeasure(product: { variants: VariantLike[] }, copy: { deta
 export function planFor(p: PlanRow): StockPlan {
   const channelName = getChannelAdapter(p.store.channel.kind, p.store.channel.name).name;
   const copy = p.channelCopy;
+  if (!p.followsStock) return { managed: false, reason: STOCK_OFF, off: true };
   const source = sourceOf(p.product);
   if (!isManaged(source)) {
     return {

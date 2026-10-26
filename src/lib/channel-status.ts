@@ -5,6 +5,7 @@ import { getChannelPublisher, PublishError } from '@/channels/publish';
 import { CHANNEL_STATUS_LABEL, STATUS_ACTIONS, type StatusAction } from '@/domain/channel-status';
 import { parseVariantListings, parseVariations, variantKey, type VariantLike } from '@/domain/media';
 import { readOne } from '@/lib/channel-sync';
+import { settleReactivations } from '@/lib/restock';
 import { withAccessToken } from '@/lib/connections';
 import { listingTargets } from '@/lib/variant-listings';
 
@@ -104,6 +105,8 @@ export async function changeStatus(
     ]);
     result.done.push({ id: p.id, title: p.title });
   }
+  // Las reactivadas ya no necesitan su tarea de reactivar.
+  if (args.action === 'activate' && result.done.length > 0) await settleReactivations(db, { publicationIds: result.done.map((d) => d.id) });
   return result;
 }
 

@@ -30,6 +30,7 @@ import {
 } from '@/domain/channel-sync';
 import { channelPhotos, parseVariantListings, parseVariations, variantKey, withMarks, type ChannelVariation, type PhotoRef } from '@/domain/media';
 import { quantityKey, totalQuantity, type QuantityLine } from '@/domain/quantities';
+import { needsReactivation } from '@/domain/channel-status';
 import type { NameValue } from '@/domain/name-value';
 import { writeContentField } from '@/domain/content';
 import { LATEST_MEASUREMENTS, latestMetrics } from '@/domain/measurements';
@@ -42,6 +43,7 @@ import { withAccessToken } from '@/lib/connections';
 import { listingTargets } from '@/lib/variant-listings';
 import { loadTitleRules } from '@/lib/title-rules';
 import { STOCK_MANAGED, stockManaged } from '@/lib/stock-plan';
+import { afterRestock } from '@/lib/restock';
 
 // Subir al canal el borrador de una publicación: lo que cambió en la app y
 // todavía no está allá. Antes de subir se revisa lo mismo que en la app (el
@@ -68,6 +70,7 @@ async function loadForPush(db: Db, accountId: string, publicationId: string) {
       productId: true,
       externalId: true,
       variantListings: true,
+      channelStatus: true,
       title: true,
       description: true,
       attributes: true,
@@ -334,6 +337,8 @@ export async function pushDrafts(
   // descuento que ya estaba se vuelve a subir.
   const fields = FACE_FIELDS.filter((f) => wanted.includes(f) || (f === 'discount' && wanted.includes('price')));
   let resendDiscount = false;
+  // La cantidad que repone stock a una publicación frenada sin stock, si se sube.
+  let restock: QuantityLine[] | null = null;
   let current: FaceField | null = null;
   try {
     for (const field of fields) {
@@ -405,6 +410,7 @@ export async function pushDrafts(
         value = lines;
         send = () => sendQuantities(db, p, publisher, lines);
         extra = quantityCopy(copy.variations, lines);
+        if (needsReactivation(p.channelStatus, channel.quantity, lines)) restock = lines;
       } else {
         if (field === 'title' && titleLocked(p)) {
           result.rejected.push({ field, message: LOCKED_TITLE });
@@ -455,6 +461,8 @@ export async function pushDrafts(
     } catch (e) {
       console.error('No se pudo volver a leer después de subir', e instanceof Error ? e.message : e);
     }
+    // Recién leída: si sigue frenada después de recibir stock, una tarea.
+    if (restock && result.sent.includes('quantity')) await afterRestock(db, { publicationId: p.id, lines: restock, read: false });
   }
   return result;
 }

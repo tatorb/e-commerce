@@ -55,6 +55,7 @@ import { PriceStep } from '@/components/pipeline/price/PriceStep';
 import { latestPriceDecision, loadPriceStep, productPricing } from '@/lib/pricing';
 import { PriceDecisionCard } from '@/components/pipeline/price/PriceDecisionCard';
 import { QuantityCard } from '@/components/pipeline/QuantityCard';
+import { StockFollowCard } from '@/components/publication/StockFollowCard';
 import { todayIn } from '@/domain/applications';
 import { PublicationTasksCard } from '@/components/tasks/PublicationTasksCard';
 import { assignablePeople, tasksOfPublication } from '@/lib/tasks';
@@ -158,7 +159,7 @@ export default async function PipelineStepPage({
     // Las tareas de la publicación, en todos los pasos.
     tasksOfPublication(prisma, { publicationId: pub.id, viewer: user, timeZone: account.timezone }),
     canTask ? assignablePeople(prisma, account.id) : [],
-    viewing === 'PUBLISH' ? plansFor(prisma, [pub.id]) : null,
+    viewing === 'PUBLISH' || viewing === 'INFO' ? plansFor(prisma, [pub.id]) : null,
   ]);
   const auto = ctx && viewing === 'TITLE' ? await autoAvailable(prisma, ctx.channel, ctx.storeId) : null;
 
@@ -269,16 +270,24 @@ export default async function PipelineStepPage({
         ) : null}
 
         {ctx && info && viewing === 'INFO' ? (
-          <InfoStep
-            accountSlug={account.slug}
-            timeZone={account.timezone}
-            ctx={ctx}
-            research={info[0]}
-            catalog={info[1]}
-            combo={info[2]}
-            driveReady={info[3] !== null}
-            shippingCost={info[4].shipping}
-          />
+          <>
+            <InfoStep
+              accountSlug={account.slug}
+              timeZone={account.timezone}
+              ctx={ctx}
+              research={info[0]}
+              catalog={info[1]}
+              combo={info[2]}
+              driveReady={info[3] !== null}
+              shippingCost={info[4].shipping}
+            />
+            <StockFollowCard
+              accountSlug={account.slug}
+              publicationId={pub.id}
+              plan={stockPlans?.get(pub.id) ?? null}
+              productHref={`/a/${account.slug}/productos/${pub.productId}?seccion=stock`}
+            />
+          </>
         ) : ctx && auto && viewing === 'TITLE' ? (
           <TitleStep
             accountSlug={account.slug}

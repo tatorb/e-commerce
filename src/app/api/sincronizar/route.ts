@@ -8,6 +8,7 @@ import { answerAlone } from '@/lib/answers';
 import { isAiConfigured } from '@/ai/claude';
 import { sendTaskMail } from '@/lib/task-mail';
 import { readSales, reconcileStock, startStock } from '@/lib/stock';
+import { settleReactivations } from '@/lib/restock';
 
 // La tarea programada: lee las preguntas de los compradores y las
 // publicaciones de las tiendas conectadas, responde las preguntas de las
@@ -55,6 +56,8 @@ export async function GET(request: Request) {
   // Con lo recién leído: el stock de partida de los productos nuevos y lo que quedó distinto del stock.
   const started = await startStock(prisma, { budgetMs: STOCK_BUDGET_MS });
   const stock = await reconcileStock(prisma, { budgetMs: STOCK_BUDGET_MS });
+  // Con lo recién leído: las tareas de reactivar de las que ya están activas se cierran.
+  const reactivated = await settleReactivations(prisma);
   return NextResponse.json({
     pending: result.pending || questions.pending || alone.pending || renewals.pending || mails.pending || sales.pending || started.pending || stock.pending,
     stores: result.stores.map((s) => ({ status: s.status, read: s.position, total: s.total })),
@@ -64,5 +67,6 @@ export async function GET(request: Request) {
     sales: sales.orders,
     stockStarted: started.started,
     stockSent: sales.sent + stock.sent,
+    reactivated,
   });
 }

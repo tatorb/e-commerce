@@ -349,6 +349,7 @@ const getPublication = defineTool({
           description: true,
           attributes: true,
           ownQuestions: true,
+          followsStock: true,
           faq: true,
           answerRules: true,
           autoAnswer: true,
@@ -415,9 +416,12 @@ const getPublication = defineTool({
       descripcion: pub.description,
       atributos_en_el_canal: safeList(parseNameValueList(pub.attributes)),
       datos_de_catalogo: catalogForClaude(catalog),
-      cantidad_disponible: plan?.managed
-        ? { sale_del_stock_del_producto: true, cantidad: plannedText(plan), ...(plan.measure ? { vende_solo_la_medida: plan.measure.label } : {}) }
-        : { sale_del_stock_del_producto: false, motivo: plan?.reason ?? null },
+      cantidad_disponible: {
+        actualizacion_automatica: pub.followsStock ? 'prendida' : 'apagada',
+        ...(plan?.managed
+          ? { sale_del_stock_del_producto: true, cantidad: plannedText(plan), ...(plan.measure ? { vende_solo_la_medida: plan.measure.label } : {}) }
+          : { sale_del_stock_del_producto: false, motivo: plan?.reason ?? null }),
+      },
       ficha: {
         producto_id: product.id,
         nombre: product.name,

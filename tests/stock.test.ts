@@ -6,7 +6,10 @@ import { PrismaClient } from '@/generated/prisma/client';
 import { mercadolibreSales, parseOrder } from '@/channels/mercadolibre/sales';
 import { available, copySkus, initialStock, listingMeasure, matchSlot, observedStock, parseStockChange, plannedQuantities, stockSlots, unitParts, type StockSource } from '@/domain/stock';
 import { encrypt } from '@/lib/crypto';
-import { handleSalesNotice, readSales, recordOrder, setProductStock, startStock, syncStock, affectedPublications, reconcileStock } from '@/lib/stock';
+import { handleSalesNotice, readSales, recordOrder, setFollowsStock, setProductStock, startStock, syncStock, affectedPublications, reconcileStock } from '@/lib/stock';
+import { afterRestock } from '@/lib/restock';
+import { STATUS_TOOLS } from '@/lib/mcp/status-tools';
+import type { McpContext } from '@/lib/mcp/tool';
 import { managedNote, plannedText, plansFor } from '@/lib/stock-plan';
 import { saveQuantities } from '@/lib/quantities';
 import type { ChannelOrder } from '@/channels/sales';
@@ -125,7 +128,14 @@ describe('el stock por medida y de los combos', () => {
 
 const url = process.env.TEST_DATABASE_URL;
 
-type Item = { quantity?: number; variations?: { id: number; sku: string; measure: string; quantity: number }[]; full?: boolean };
+// status: el estado en el canal. reactivates: el canal la reactiva solo al recibir stock.
+type Item = {
+  quantity?: number;
+  variations?: { id: number; sku: string; measure: string; quantity: number }[];
+  full?: boolean;
+  status?: string;
+  reactivates?: boolean;
+};
 
 describe.skipIf(!url)('el stock en la base', () => {
   const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: url! }) });
@@ -134,7 +144,7 @@ describe.skipIf(!url)('el stock en la base', () => {
   let orders: Record<string, unknown> = {};
   // El buscador de ventas: lo que devuelve, o "sin permiso".
   let search: unknown[] | 'forbidden' = [];
-  const writes: { path: string; body: { available_quantity?: number; variations?: { id: number; available_quantity?: number }[] } }[] = [];
+  const writes: { path: string; body: { available_quantity?: number; status?: string; variations?: { id: number; available_quantity?: number }[] } }[] = [];
   let storeId = '';
   let accountId = '';
   const ids: Record<string, string> = {};
@@ -148,28 +158,37 @@ describe.skipIf(!url)('el stock en la base', () => {
       let raw = '';
       for await (const chunk of req) raw += chunk;
       const body = raw ? JSON.parse(raw) : null;
+      const itemJson = (id: string, it: Item) => ({
+        id,
+        seller_id: 7,
+        title: `Publicación ${id}`,
+        status: it.status ?? 'active',
+        available_quantity: it.quantity,
+        shipping: { logistic_type: it.full ? 'fulfillment' : 'cross_docking' },
+        variations: (it.variations ?? []).map((v) => ({
+          id: v.id,
+          available_quantity: v.quantity,
+          attribute_combinations: [{ id: 'SIZE', value_name: v.measure }],
+          attributes: [{ id: 'SELLER_SKU', value_name: v.sku }],
+        })),
+      });
+      if (u.pathname === '/items/bulk') {
+        const ids = (u.searchParams.get('ids') ?? '').split(',');
+        return json(200, ids.map((id) => (items[id] ? { code: 200, body: itemJson(id, items[id]) } : { code: 404, body: {} })));
+      }
+      if (/^\/items\/\w+\/description$/.test(u.pathname)) return json(200, { plain_text: 'Descripción.' });
       const item = u.pathname.match(/^\/items\/(\w+)$/);
       if (item && items[item[1]]) {
         const it = items[item[1]];
-        if (req.method === 'GET') {
-          return json(200, {
-            id: item[1],
-            available_quantity: it.quantity,
-            shipping: { logistic_type: it.full ? 'fulfillment' : 'cross_docking' },
-            variations: (it.variations ?? []).map((v) => ({
-              id: v.id,
-              available_quantity: v.quantity,
-              attribute_combinations: [{ id: 'SIZE', value_name: v.measure }],
-              attributes: [{ id: 'SELLER_SKU', value_name: v.sku }],
-            })),
-          });
-        }
+        if (req.method === 'GET') return json(200, itemJson(item[1], it));
         writes.push({ path: u.pathname, body });
+        if (body.status) it.status = body.status;
         if (body.available_quantity !== undefined) it.quantity = body.available_quantity;
         for (const v of body.variations ?? []) {
           const mine = it.variations?.find((x) => x.id === v.id);
           if (mine && v.available_quantity !== undefined) mine.quantity = v.available_quantity;
         }
+        if (it.reactivates && it.status !== 'active' && (it.quantity ?? 0) > 0) it.status = 'active';
         return json(200, { id: item[1] });
       }
       const order = u.pathname.match(/^\/orders\/(\d+)$/);
@@ -200,7 +219,7 @@ describe.skipIf(!url)('el stock en la base', () => {
 
   beforeEach(async () => {
     await db.$executeRawUnsafe(
-      'TRUNCATE stock_movements, channel_sales, product_stock, channel_copies, channel_sync_changes, channel_connections, combo_items, product_variants, publications, products, stores, channels, accounts, users CASCADE',
+      'TRUNCATE tasks, stock_movements, channel_sales, product_stock, channel_copies, channel_sync_changes, channel_connections, combo_items, product_variants, publications, products, stores, channels, accounts, users CASCADE',
     );
     writes.length = 0;
     orders = {};
@@ -367,6 +386,62 @@ describe.skipIf(!url)('el stock en la base', () => {
     expect(await stockOf(ids.juego)).toEqual({ STD: 3, '0.50': 3 });
     await syncStock(db, { publicationIds: await affectedPublications(db, products) });
     expect(pushedTo().sort()).toEqual(['MLA1000003=3/3', 'MLA1000007=3']);
+  });
+
+  it('con la cantidad automática apagada no se le sube nada, se cambia a mano y sus ventas igual descuentan', async () => {
+    await startStock(db);
+    await reconcileStock(db, { budgetMs: 10_000 });
+    const off = await setFollowsStock(db, { accountId, publicationId: ids.p2, on: false, userId: 'ana' });
+    expect(off.plan).toMatchObject({ managed: false, off: true, reason: expect.stringContaining('apagada') });
+    writes.length = 0;
+    await setProductStock(db, { accountId, productId: ids.bulon, userId: 'ana', stock: { '': 9 } });
+    // El combo de 2 bulones: con 9 se arman 4.
+    expect(pushedTo().sort()).toEqual(['MLA1000001=9', 'MLA1000004=4']);
+    // A mano en la publicación, sí.
+    expect((await saveQuantities(db, { accountId, publicationIds: [ids.p2], change: { all: 3 } })).skipped).toEqual([]);
+    // Sus ventas igual descuentan del producto.
+    await recordOrder(db, { storeId, order: sale('3201', [{ listingId: 'MLA1000002', variationId: null, sku: null, quantity: 2 }]) });
+    expect(await stockOf(ids.bulon)).toEqual({ '-': 7 });
+    // Prendida otra vez: se sube enseguida lo que le toca.
+    writes.length = 0;
+    const on = await setFollowsStock(db, { accountId, publicationId: ids.p2, on: true, userId: 'ana' });
+    expect(on.sync.sent).toBe(1);
+    expect(pushedTo()).toContain('MLA1000002=7');
+  });
+
+  it('una pausada sin stock que recibe stock: tarea para los administradores, sin repetir, que se cierra al reactivarla', async () => {
+    await startStock(db);
+    await setProductStock(db, { accountId, productId: ids.bulon, userId: 'ana', stock: { '': 0 } });
+    // Mercado Libre las pausa por quedarse sin stock. La segunda la reactiva solo al recibir stock.
+    items.MLA1000001.status = 'paused';
+    items.MLA1000002.status = 'paused';
+    items.MLA1000002.reactivates = true;
+    await db.publication.updateMany({ where: { id: { in: [ids.p1, ids.p2] } }, data: { channelStatus: 'PAUSED' } });
+    await db.channelCopy.updateMany({ where: { publicationId: { in: [ids.p1, ids.p2] } }, data: { status: 'PAUSED' } });
+
+    await setProductStock(db, { accountId, productId: ids.bulon, userId: 'ana', stock: { '': 4 } });
+    const tasks = await db.task.findMany({ include: { assignees: true, publications: true } });
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]).toMatchObject({ autoKey: `reactivar:${ids.p1}`, status: 'PENDING', createdById: null });
+    expect(tasks[0].title).toContain('Reactivar en Mercado Libre');
+    expect(tasks[0].description).toContain('se cierra sola');
+    expect(tasks[0].assignees.map((a) => a.userId)).toEqual(['ana']);
+    expect(tasks[0].publications.map((p) => p.publicationId)).toEqual([ids.p1]);
+    expect((await db.publication.findUniqueOrThrow({ where: { id: ids.p2 } })).channelStatus).toBe('ACTIVE');
+
+    // No se repite, y una pausada que ya tenía stock no pide reactivar.
+    expect(await afterRestock(db, { publicationId: ids.p1, lines: [{ key: '', label: '', quantity: 4 }] })).toBeNull();
+    await setProductStock(db, { accountId, productId: ids.bulon, userId: 'ana', stock: { '': 6 } });
+    expect(await db.task.count()).toBe(1);
+
+    // Claude la reactiva: la tarea se cierra sola.
+    const tool = STATUS_TOOLS[0];
+    const ctx: McpContext = { db, userId: 'ana', access: { isAdmin: true, permissions: {}, accountIds: [] }, baseUrl: 'https://app.ejemplo.com' };
+    expect(await tool.run(ctx, { publicacion: 'MLA1000001', accion: 'reactivar' })).toMatchObject({ listo: true, estado: 'Activa' });
+    expect(items.MLA1000001.status).toBe('active');
+    expect(await db.task.findFirstOrThrow()).toMatchObject({ status: 'DONE', doneAt: expect.any(Date) });
+    await expect(tool.run(ctx, { publicacion: 'MLA1000001', accion: 'reactivar' })).rejects.toThrow('No se pudo reactivar');
+    expect(await tool.run(ctx, { publicacion: 'MLA1000001', accion: 'pausar' })).toMatchObject({ estado: 'Pausada' });
   });
 
   it('una venta cancelada antes de entregarse vuelve; entregada, no', async () => {

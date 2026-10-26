@@ -37,7 +37,8 @@ import { fieldLabel } from '@/domain/sync-log';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { PublicationTasksCard } from '@/components/tasks/PublicationTasksCard';
 import { assignablePeople, tasksOfPublication } from '@/lib/tasks';
-import { managedNote, plannedText, plansFor } from '@/lib/stock-plan';
+import { followsStockOf, managedNote, plannedText, plansFor } from '@/lib/stock-plan';
+import { FollowStockSwitch } from '@/components/publication/FollowStockSwitch';
 import { can } from '@/domain/access';
 import { formatDateTime, plural } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
@@ -317,6 +318,9 @@ export default async function PublicationPage({
                   action={state === 'unread' && !p.externalId ? null : <Badge variant={STATE[state].variant}>{STATE[state].label}</Badge>}
                 >
                   <SectionBody>
+                    {field === 'quantity' && p.externalId ? (
+                      <FollowStockSwitch accountSlug={account.slug} publicationId={p.id} on={followsStockOf(stockPlan)} />
+                    ) : null}
                     {field === 'attributes' && data.categoryMismatch ? (
                       <p className="text-sm text-muted-foreground">
                         En la app la categoría es {data.categoryMismatch.app} y en {channelName} es {data.categoryMismatch.channel}. Los datos se

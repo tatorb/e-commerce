@@ -17,7 +17,10 @@ import { CreateError, createInChannel } from '@/lib/channel-create';
 import { changeStatus, relistInChannel, StatusError, type StatusResult } from '@/lib/channel-status';
 import { MAX_QUANTITY } from '@/domain/quantities';
 import { saveQuantities, type QuantitiesResult } from '@/lib/quantities';
-import { syncStock } from '@/lib/stock';
+import { setFollowsStock, syncStock } from '@/lib/stock';
+import { StockError } from '@/domain/stock';
+import { plannedText } from '@/lib/stock-plan';
+import { settleReactivations } from '@/lib/restock';
 
 // Lo que se hace desde la página de una publicación y desde Por subir: cambiar
 // el borrador, subirlo al canal, descartarlo y volver a leer del canal.
@@ -137,6 +140,8 @@ export async function readOneAction(accountSlug: string, publicationId: string):
       // Si sigue al stock del producto y en el canal tiene otra cantidad, se sube
       // ahora, como lo haría la tarea de cada hora: no es un cambio de la persona.
       if (taken !== null) await syncStock(prisma, { publicationIds: [id.data], note: 'Al leerla del canal.' });
+      // Si ya está activa, su tarea de reactivar no hace falta.
+      await settleReactivations(prisma, { publicationIds: [id.data] });
       refresh(accountSlug, id.data);
       return { ok: true, found: taken !== null };
     } catch (e) {
@@ -273,6 +278,32 @@ export async function relistAction(
       return { ok: true, ...r };
     } catch (e) {
       if (e instanceof StatusError) return { ok: false, error: e.message };
+      return failure(e);
+    }
+  });
+}
+
+/**
+ * Prende o apaga la cantidad automática: si la cantidad en el canal se
+ * actualiza sola con el stock del producto. Al prenderla, se sube enseguida.
+ */
+export async function setFollowsStockAction(accountSlug: string, publicationId: string, on: boolean): Promise<Result<{ message: string }>> {
+  const does = on ? 'Prendió la cantidad automática' : 'Apagó la cantidad automática';
+  return act(accountSlug, { section: ['publicaciones', 'pipeline'], does, publicationId }, async () => {
+    const user = await requireUser();
+    const account = await getAccountBySlug(accountSlug);
+    if (!account) return { ok: false, error: 'La cuenta no existe.' };
+    const id = idSchema.safeParse(publicationId);
+    if (!id.success) return { ok: false, error: 'La publicación no existe.' };
+    try {
+      const r = await setFollowsStock(prisma, { accountId: account.id, publicationId: id.data, on: Boolean(on), userId: user.id });
+      refresh(accountSlug, id.data);
+      if (!on) return { ok: true, message: 'Apagada: la cantidad se cambia a mano en la publicación.' };
+      if (r.sync.failed.length > 0) return { ok: false, error: `Quedó prendida, pero no se pudo subir: ${r.sync.failed[0].error}` };
+      if (!r.plan.managed) return { ok: true, message: `Prendida. Todavía no sigue al stock: ${r.plan.reason}` };
+      return { ok: true, message: r.sync.sent > 0 ? `Prendida. Se subió ${plannedText(r.plan)}.` : `Prendida. Ya tenía ${plannedText(r.plan)}.` };
+    } catch (e) {
+      if (e instanceof StockError) return { ok: false, error: e.message };
       return failure(e);
     }
   });

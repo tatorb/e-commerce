@@ -503,6 +503,9 @@ model Publication {
   // en una familia: el código, el SKU y la medida de cada una, en el orden de
   // la ficha. La primera es externalId. Vacío: una sola publicación en el canal.
   variantListings   Json                 @default("[]")
+  // Si la cantidad en el canal se actualiza sola con el stock del producto.
+  // Apagado, se cambia a mano en la publicación; sus ventas igual descuentan.
+  followsStock      Boolean              @default(true)
   source            RecordSource         @default(MANUAL)
   // Importación que la creó, para poder deshacerla.
   importRunId       String?
@@ -1833,6 +1836,9 @@ model Task {
   doneAt            DateTime?
   createdById       String?
   createdBy         User?             @relation("TaskCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  // Las que crea la app sola, por ejemplo "reactivar:<id de la publicación>":
+  // no se repite una abierta con la misma clave y se cierra sola cuando ya no hace falta.
+  autoKey           String?
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
   assignees         TaskAssignee[]
@@ -1841,6 +1847,7 @@ model Task {
   @@index([accountId, status])
   @@index([remindAt])
   @@index([dueOn])
+  @@index([autoKey])
   @@map("tasks")
 }
 
