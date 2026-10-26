@@ -45,7 +45,7 @@ export default async function TaskPage({ params }: { params: Promise<{ cuenta: s
 
   return (
     <>
-      <PageHeader className="max-w-3xl">
+      <PageHeader>
         <div className="space-y-2">
           <Breadcrumb items={[{ label: 'Tareas', href: `/a/${account.slug}/tareas` }, { label: task.title }]} />
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -75,7 +75,7 @@ export default async function TaskPage({ params }: { params: Promise<{ cuenta: s
           </div>
         </div>
       </PageHeader>
-      <PageBody className="max-w-3xl">
+      <PageBody>
         <SectionCard title="La tarea">
           <SectionBody>
             {task.description ? (

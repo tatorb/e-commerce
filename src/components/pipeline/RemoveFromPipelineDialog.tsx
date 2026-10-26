@@ -67,10 +67,12 @@ export function RemoveFromPipelineDialog({
         size="sm"
         variant="ghost"
         className={compact ? 'h-7 px-2 text-xs text-muted-foreground' : undefined}
+        aria-label={compact ? 'Sacar del pipeline' : undefined}
+        title={compact ? 'Sacar del pipeline' : undefined}
         onClick={() => setOpen(true)}
       >
         <CircleSlash className={compact ? 'h-3.5 w-3.5' : 'h-4 w-4'} />
-        Sacar del pipeline
+        {compact ? 'Sacar' : 'Sacar del pipeline'}
       </Button>
       <DialogContent className="max-w-md">
         <DialogHeader>

@@ -6,11 +6,13 @@ import {
   advanceStep,
   backStep,
   completePipeline,
+  jumpToStep,
   PIPELINE_REMOVALS,
   PIPELINE_REMOVAL_LABEL,
   PIPELINE_STEPS,
   PIPELINE_STEP_LABEL,
   pipelineLabel,
+  PipelineError,
   removeFromPipeline,
 } from '@/domain/pipeline';
 import { productInfoSchema, updateProductInfo } from '@/domain/product-info';
@@ -166,14 +168,17 @@ const moveStepTool = defineTool({
   section: 'pipeline',
   title: 'Mover de paso',
   description:
-    'Avanza una publicación al paso siguiente, la vuelve al anterior o, en el último paso, la marca como corregida. Hay que decir en qué paso está ahora: si cambió mientras tanto, no se mueve.',
+    'Avanza una publicación al paso siguiente, la vuelve al anterior, la lleva a cualquier paso saltando los del medio o, en el último paso, la marca como corregida. Los pasos son una guía: no hace falta terminar uno para pasar a otro. Hay que decir en qué paso está ahora: si cambió mientras tanto, no se mueve.',
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg,
     desde_paso: stepArg,
     accion: z
-      .enum(['avanzar', 'volver', 'marcar_corregida'])
-      .describe('avanzar = al paso siguiente; volver = al anterior; marcar_corregida = solo en el último paso, termina el pipeline.'),
+      .enum(['avanzar', 'volver', 'mover', 'marcar_corregida'])
+      .describe(
+        'avanzar = al paso siguiente; volver = al anterior; mover = al paso de a_paso, saltando los del medio; marcar_corregida = solo en el último paso, termina el pipeline.',
+      ),
+    a_paso: asEnum(PIPELINE_STEPS).optional().describe('Solo con mover: el paso al que va.'),
   }),
   readOnly: false,
   destructive: false,
@@ -183,6 +188,10 @@ const moveStepTool = defineTool({
     await ctx.db.$transaction(async (tx) => {
       if (args.accion === 'avanzar') await advanceStep(tx, move);
       else if (args.accion === 'volver') await backStep(tx, move);
+      else if (args.accion === 'mover') {
+        if (!args.a_paso) throw new PipelineError('Para mover, decí a qué paso con a_paso.');
+        await jumpToStep(tx, { ...move, to: args.a_paso });
+      }
       else await completePipeline(tx, move);
     });
     return { listo: true, ...(await stateOf(ctx, account, id)) };

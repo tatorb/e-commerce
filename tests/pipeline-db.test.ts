@@ -6,6 +6,7 @@ import {
   advanceStep,
   backStep,
   completePipeline,
+  jumpToStep,
   removeFromPipeline,
 } from '@/domain/pipeline';
 import { createPipelinePublication } from '@/domain/pipeline-publications';
@@ -102,6 +103,26 @@ describe.skipIf(!url)('pipeline de una publicación', () => {
     ]);
     expect(all[0].exitedById).toBe(userId);
     expect((await state(a.id)).pipelineStep).toBe('INFO');
+  });
+
+  it('salta a cualquier paso, para adelante o para atrás, sin pasar por los del medio', async () => {
+    const a = await publication('Kit A', 'MLA1');
+    const t0 = new Date('2026-10-20T12:00:00Z');
+    const t1 = new Date('2026-10-20T13:00:00Z');
+    const t2 = new Date('2026-10-20T14:00:00Z');
+    await add([a.id], t0);
+    expect(await db.$transaction((tx) => jumpToStep(tx, { publicationId: a.id, expected: 'INFO', to: 'PRICE', userId, now: t1 }))).toEqual({ step: 'PRICE' });
+    await db.$transaction((tx) => jumpToStep(tx, { publicationId: a.id, expected: 'PRICE', to: 'TITLE', userId, now: t2 }));
+    const all = await db.pipelineMovement.findMany({ where: { publicationId: a.id }, orderBy: { enteredAt: 'asc' } });
+    expect(all.map((m) => [m.step, m.exitKind])).toEqual([
+      ['INFO', 'ADVANCED'],
+      ['PRICE', 'BACK'],
+      ['TITLE', null],
+    ]);
+    // Si mientras tanto se movió, o ya está ahí, no hace nada.
+    await expect(db.$transaction((tx) => jumpToStep(tx, { publicationId: a.id, expected: 'PRICE', to: 'PUBLISH', userId }))).rejects.toThrow('cambió de paso');
+    await expect(db.$transaction((tx) => jumpToStep(tx, { publicationId: a.id, expected: 'TITLE', to: 'TITLE', userId }))).rejects.toThrow('Ya está en Título');
+    expect((await state(a.id)).pipelineStep).toBe('TITLE');
   });
 
   it('no se mueve si el paso cambió mientras tanto, ni antes del primero', async () => {

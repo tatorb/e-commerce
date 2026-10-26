@@ -53,7 +53,7 @@ export default async function ApplyPage({ params }: { params: Promise<{ cuenta: 
 
   return (
     <>
-      <PageHeader staticOnMobile className="max-w-4xl">
+      <PageHeader staticOnMobile>
         <div className="space-y-2">
           <Breadcrumb
             items={[
@@ -84,7 +84,7 @@ export default async function ApplyPage({ params }: { params: Promise<{ cuenta: 
           </div>
         </div>
       </PageHeader>
-      <PageBody className="max-w-4xl">
+      <PageBody>
         {!isApproved && !isApplied ? (
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">

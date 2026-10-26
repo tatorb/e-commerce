@@ -13,7 +13,7 @@ export default async function NewProductPage({ params }: { params: Promise<{ cue
 
   return (
     <>
-      <PageHeader staticOnMobile className="max-w-5xl">
+      <PageHeader staticOnMobile>
         <div className="space-y-2">
           <Breadcrumb
             items={[{ label: account.name, href: base }, { label: 'Productos', href: base }, { label: 'Nuevo producto' }]}
@@ -26,7 +26,7 @@ export default async function NewProductPage({ params }: { params: Promise<{ cue
           </div>
         </div>
       </PageHeader>
-      <PageBody className="max-w-5xl">
+      <PageBody>
         <ProductForm accountSlug={account.slug} productId={null} initial={EMPTY_PRODUCT} />
       </PageBody>
     </>

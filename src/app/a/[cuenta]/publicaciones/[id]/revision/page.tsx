@@ -47,7 +47,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ cuenta:
   const title = titleOrUntitled(publication.title);
 
   const header = (
-    <PageHeader staticOnMobile className="max-w-5xl">
+    <PageHeader staticOnMobile>
       <div className="space-y-2">
         <Breadcrumb
           items={[
@@ -84,7 +84,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ cuenta:
     return (
       <>
         {header}
-        <PageBody className="max-w-5xl">
+        <PageBody>
           <p className="text-sm text-muted-foreground">
             Esta publicación no tiene una propuesta para revisar. Puede que ya se haya aprobado o rechazado.
           </p>
@@ -133,7 +133,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ cuenta:
   return (
     <>
       {header}
-      <PageBody className="max-w-5xl">
+      <PageBody>
         <div className="space-y-2">
           <p className="text-sm">{proposal.summary}</p>
           <p className="text-xs text-muted-foreground">

@@ -22,7 +22,7 @@ export default async function PhotoSettingsPage({ params }: { params: Promise<{ 
 
   return (
     <>
-      <PageHeader className="max-w-4xl">
+      <PageHeader>
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold tracking-tight">Imágenes</h1>
           <p className="text-sm text-muted-foreground">
@@ -31,7 +31,7 @@ export default async function PhotoSettingsPage({ params }: { params: Promise<{ 
           </p>
         </div>
       </PageHeader>
-      <PageBody className="max-w-4xl">
+      <PageBody>
         <Card>
           <CardHeader>
             <CardTitle>Ajustes de la línea</CardTitle>

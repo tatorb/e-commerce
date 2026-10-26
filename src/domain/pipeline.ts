@@ -258,25 +258,23 @@ async function moveTo(tx: Tx, args: MoveArgs, to: PipelineStep, exitKind: 'ADVAN
 
 /**
  * Pasa al paso siguiente. En el último paso se termina con completePipeline.
- * De Precio se pasa con un precio guardado: si deja un margen debajo del
- * mínimo, tiene que estar confirmado.
+ * Los pasos son una guía: nada obliga a terminar uno para pasar al otro, y lo
+ * que falta (por ejemplo el precio) lo avisa el paso Publicación.
  */
 export async function advanceStep(tx: Tx, args: MoveArgs): Promise<{ step: PipelineStep }> {
   await lockInPipeline(tx, args.publicationId, args.expected);
   const to = nextStep(args.expected);
   if (!to) throw new PipelineError('Es el último paso: marcala como corregida.');
-  if (args.expected === 'PRICE') {
-    const decision = await tx.priceDecision.findFirst({
-      where: { publicationId: args.publicationId },
-      orderBy: { decidedAt: 'desc' },
-      select: { marginPct: true, minMarginPct: true, belowMinConfirmed: true },
-    });
-    if (!decision) throw new PipelineError('Guardá el precio antes de avanzar a Publicación.');
-    if (Number(decision.marginPct) < Number(decision.minMarginPct) && !decision.belowMinConfirmed) {
-      throw new PipelineError('El precio guardado deja un margen debajo del mínimo: confirmalo al guardarlo para avanzar.');
-    }
-  }
   return moveTo(tx, args, to, 'ADVANCED');
+}
+
+/** Lleva la publicación a cualquier paso, saltando los del medio. */
+export async function jumpToStep(tx: Tx, args: MoveArgs & { to: PipelineStep }): Promise<{ step: PipelineStep }> {
+  await lockInPipeline(tx, args.publicationId, args.expected);
+  if (!PIPELINE_STEPS.includes(args.to)) throw new PipelineError('El paso no es válido.');
+  if (args.to === args.expected) throw new PipelineError(`Ya está en ${PIPELINE_STEP_LABEL[args.to]}.`);
+  const forward = PIPELINE_STEPS.indexOf(args.to) > PIPELINE_STEPS.indexOf(args.expected);
+  return moveTo(tx, args, args.to, forward ? 'ADVANCED' : 'BACK');
 }
 
 /** Vuelve al paso anterior. */

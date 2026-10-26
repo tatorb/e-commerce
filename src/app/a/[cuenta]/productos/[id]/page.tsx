@@ -141,7 +141,7 @@ export default async function ProductPage({
 
   return (
     <>
-      <PageHeader staticOnMobile className="max-w-5xl">
+      <PageHeader staticOnMobile>
         <div className="space-y-2">
           <Breadcrumb items={[{ label: account.name, href: base }, { label: 'Productos', href: base }, { label: product.name }]} />
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -158,7 +158,7 @@ export default async function ProductPage({
           </div>
         </div>
       </PageHeader>
-      <PageBody className="max-w-5xl">
+      <PageBody>
         <ProductTabs
           tabs={tabs}
           initial={initial}

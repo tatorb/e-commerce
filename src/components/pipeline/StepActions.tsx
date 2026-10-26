@@ -2,11 +2,11 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, ArrowRight, Check } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, MoveRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { nextStep, PIPELINE_STEP_LABEL, previousStep } from '@/domain/pipeline';
 import type { PipelineStep } from '@/generated/prisma/enums';
-import { moveStepAction } from '@/app/a/[cuenta]/pipeline/actions';
+import { jumpStepAction, moveStepAction } from '@/app/a/[cuenta]/pipeline/actions';
 import { RemoveFromPipelineDialog } from './RemoveFromPipelineDialog';
 
 // Los botones de abajo de cada paso: volver, avanzar o, en el último, marcarla como corregida.
@@ -66,5 +66,32 @@ export function StepActions({
       </div>
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
     </div>
+  );
+}
+
+/** Lleva la publicación al paso que se está mirando, saltando los del medio. */
+export function JumpHereButton({ accountSlug, publicationId, from, to }: { accountSlug: string; publicationId: string; from: PipelineStep; to: PipelineStep }) {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  function jump() {
+    setError(null);
+    startTransition(async () => {
+      const r = await jumpStepAction(accountSlug, publicationId, from, to).catch(() => null);
+      if (!r) return setError('Se cortó la conexión con la app.');
+      if (!r.ok) setError(r.error);
+      else router.refresh();
+    });
+  }
+
+  return (
+    <>
+      <Button size="sm" pending={pending} onClick={jump} disabled={pending}>
+        <MoveRight className="h-4 w-4" />
+        {pending ? 'Moviendo…' : `Mover la publicación a ${PIPELINE_STEP_LABEL[to]}`}
+      </Button>
+      {error ? <p className="w-full text-sm text-destructive">{error}</p> : null}
+    </>
   );
 }

@@ -78,7 +78,7 @@ export default async function ConnectionPage({
 
   return (
     <>
-      <PageHeader className="max-w-4xl">
+      <PageHeader>
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold tracking-tight">Conexión con los canales</h1>
           <p className="text-sm text-muted-foreground">
@@ -87,7 +87,7 @@ export default async function ConnectionPage({
           </p>
         </div>
       </PageHeader>
-      <PageBody className="max-w-4xl">
+      <PageBody>
         {resultado ? (
           <p
             role="status"

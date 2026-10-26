@@ -73,7 +73,7 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      <PageHeader className="max-w-5xl">
+      <PageHeader>
         <div className="space-y-2">
           <Breadcrumb items={[{ label: 'Equipo', href: '/equipo' }, { label: 'Actividad' }]} />
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -99,7 +99,7 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
           <UrlFilterDropdown label="Qué" paramKey="tipo" options={ACTIVITY_TYPES.map((t) => ({ value: t.value, label: t.label }))} selected={filters.types} />
         </div>
       </PageHeader>
-      <PageBody className="max-w-5xl">
+      <PageBody>
         <Card>
           <form className="flex flex-wrap items-end gap-3 p-4" action="" method="get">
             <label className="space-y-1">

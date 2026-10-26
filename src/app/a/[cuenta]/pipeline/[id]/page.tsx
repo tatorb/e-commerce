@@ -12,7 +12,7 @@ import { ScoreBadge } from '@/components/stages/ScoreBadge';
 import { KindBadge } from '@/components/products/KindBadge';
 import { loadCombo } from '@/lib/queries/combos';
 import { StepLine } from '@/components/pipeline/StepLine';
-import { StepActions } from '@/components/pipeline/StepActions';
+import { JumpHereButton, StepActions } from '@/components/pipeline/StepActions';
 import { PipelineHistory } from '@/components/pipeline/PipelineHistory';
 import { AddToPipelineButton } from '@/components/pipeline/AddToPipelineButton';
 import { PublicationCodeCard } from '@/components/pipeline/PublicationCodeCard';
@@ -165,7 +165,7 @@ export default async function PipelineStepPage({
 
   return (
     <>
-      <PageHeader staticOnMobile className="max-w-5xl">
+      <PageHeader staticOnMobile>
         <div className="space-y-2">
           <Breadcrumb items={[{ label: account.name, href: boardHref }, { label: 'Pipeline', href: boardHref }, { label: titleOrUntitled(pub.title) }]} />
           <div className="space-y-1.5">
@@ -219,12 +219,12 @@ export default async function PipelineStepPage({
         <StepLine
           current={pub.pipelineStep}
           active={inPipeline}
-          done={pub.pipelineStatus === 'CORRECTED'}
+          visited={pub.movements.map((m) => m.step)}
           viewing={viewing}
           baseHref={pageHref}
         />
       </PageHeader>
-      <PageBody className="max-w-5xl">
+      <PageBody>
         {!inPipeline ? (
           <Card>
             <CardContent className="flex flex-wrap items-center justify-between gap-3 p-6">
@@ -254,11 +254,13 @@ export default async function PipelineStepPage({
           <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/50 px-4 py-3">
             <p className="text-sm">
               Estás viendo <strong>{PIPELINE_STEP_LABEL[viewing]}</strong>. La publicación está en {PIPELINE_STEP_LABEL[current]}.
-              {viewing === 'TITLE' ? ' Podés trabajar el título; para aprobarlo, la publicación tiene que estar en Título.' : ''}
             </p>
-            <Button asChild variant="outline" size="sm">
-              <Link href={`${pageHref}?paso=${PIPELINE_STEP_SLUG[current]}`}>Ir a {PIPELINE_STEP_LABEL[current]}</Link>
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button asChild variant="outline" size="sm">
+                <Link href={`${pageHref}?paso=${PIPELINE_STEP_SLUG[current]}`}>Ir a {PIPELINE_STEP_LABEL[current]}</Link>
+              </Button>
+              <JumpHereButton accountSlug={account.slug} publicationId={pub.id} from={current} to={viewing} />
+            </div>
           </div>
         ) : null}
 

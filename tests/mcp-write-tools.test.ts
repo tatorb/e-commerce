@@ -152,6 +152,13 @@ describe.skipIf(!url)('herramientas de escritura', () => {
     expect(twice.isError).toBe(true);
     expect(twice.text).toContain('Volvé a consultarla');
     expect((await call('move_pipeline_step', { publicacion: 'MLA2220002', desde_paso: 'TITLE', accion: 'marcar_corregida' })).text).toContain('faltan pasos');
+    expect((await call('move_pipeline_step', { publicacion: 'MLA2220002', desde_paso: 'TITLE', accion: 'mover' })).text).toContain('a_paso');
+    expect((await call('move_pipeline_step', { publicacion: 'MLA2220002', desde_paso: 'TITLE', accion: 'mover', a_paso: 'PRICE' })).data.pipeline).toBe(
+      'En pipeline · Precio',
+    );
+    expect((await call('move_pipeline_step', { publicacion: 'MLA2220002', desde_paso: 'PRICE', accion: 'mover', a_paso: 'TITLE' })).data.pipeline).toBe(
+      'En pipeline · Título',
+    );
     expect((await call('move_pipeline_step', { publicacion: 'MLA2220002', desde_paso: 'TITLE', accion: 'volver' })).data.pipeline).toBe(
       'En pipeline · Información',
     );
@@ -296,7 +303,9 @@ describe.skipIf(!url)('herramientas de escritura', () => {
       edited: false,
       userId: 'u1',
     });
-    expect((await call('approve_title', { publicacion: 'MLA1110001', titulo: 'Otro' })).text).toContain('paso Título');
+    // Desde otro paso también se aprueba, sin mover la publicación.
+    const again = await call('approve_title', { publicacion: 'MLA1110001', titulo: 'Kit Embrague Gol 1.6 8v Sachs' });
+    expect(again.data).toMatchObject({ listo: true, pipeline: 'En pipeline · Imágenes' });
   });
 
   it('título bloqueado: no deja aprobar sin decidir; mantener completa el paso', async () => {

@@ -57,7 +57,7 @@ export default async function ImportPage({ params }: { params: Promise<{ cuenta:
 
   return (
     <>
-      <PageHeader className="max-w-5xl">
+      <PageHeader>
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold tracking-tight">Importar</h1>
           <p className="text-sm text-muted-foreground">
@@ -68,7 +68,7 @@ export default async function ImportPage({ params }: { params: Promise<{ cuenta:
           </p>
         </div>
       </PageHeader>
-      <PageBody className="max-w-5xl">
+      <PageBody>
         <ImportWizard
           accountSlug={account.slug}
           stores={stores.map((s) => ({ id: s.id, name: s.name, channelKind: s.channel.kind, channelName: s.channel.name }))}

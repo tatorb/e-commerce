@@ -706,17 +706,17 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     expect(r.skipped[0].reason).toContain('Full');
   });
 
-  it('debajo del margen mínimo hay que confirmarlo, y sin precio guardado no se avanza a Publicación', async () => {
+  it('debajo del margen mínimo hay que confirmarlo; sin precio guardado igual se avanza a Publicación', async () => {
     const p = await pub('MLA1');
-    await db.publication.update({ where: { id: p.id }, data: { pipelineStatus: 'IN_PIPELINE', pipelineStep: 'PRICE' } });
-    await db.pipelineMovement.create({ data: { publicationId: p.id, step: 'PRICE' } });
-    const advance = () => db.$transaction((tx) => advanceStep(tx, { publicationId: p.id, expected: 'PRICE', userId: null }));
-    await expect(advance()).rejects.toThrow('Guardá el precio');
-
     await expect(decide(p.id, 150_000)).rejects.toThrow(/debajo del mínimo/);
     await expect(decide(p.id, 150_000, { plan: 9, overrides: { installments9Pct: null } })).rejects.toThrow(/costo de 9 cuotas/);
     await decide(p.id, 150_000, { confirmBelowMin: true });
     expect(await db.priceDecision.findFirst({ where: { publicationId: p.id } })).toMatchObject({ belowMinConfirmed: true });
-    expect(await advance()).toEqual({ step: 'PUBLISH' });
+
+    // Los pasos son una guía: lo que falta lo avisa Publicación.
+    const q = await pub('MLA2');
+    await db.publication.update({ where: { id: q.id }, data: { pipelineStatus: 'IN_PIPELINE', pipelineStep: 'PRICE' } });
+    await db.pipelineMovement.create({ data: { publicationId: q.id, step: 'PRICE' } });
+    expect(await db.$transaction((tx) => advanceStep(tx, { publicationId: q.id, expected: 'PRICE', userId: null }))).toEqual({ step: 'PUBLISH' });
   });
 });

@@ -57,7 +57,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
 
   return (
     <>
-      <PageHeader className="max-w-3xl">
+      <PageHeader>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-1">
             <h1 className="text-2xl font-semibold tracking-tight">Equipo</h1>
@@ -85,7 +85,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
           ) : null}
         </div>
       </PageHeader>
-      <PageBody className="max-w-3xl">
+      <PageBody>
         {admin ? (
           <>
             <p className="text-muted-foreground text-sm">

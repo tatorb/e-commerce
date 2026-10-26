@@ -8,6 +8,7 @@ import {
   advanceStep,
   backStep,
   completePipeline,
+  jumpToStep,
   PIPELINE_REMOVALS,
   PIPELINE_STEPS,
   PipelineError,
@@ -47,6 +48,23 @@ export async function moveStepAction(
         else if (move === 'complete') await completePipeline(tx, args);
         else throw new PipelineError('No se entiende qué hacer.');
       });
+    } catch (e) {
+      if (e instanceof PipelineError) return { ok: false, error: e.message };
+      throw e;
+    }
+    revalidatePath(`/a/${accountSlug}`, 'layout');
+    return { ok: true };
+  });
+}
+
+/** Lleva la publicación a cualquier paso, saltando los del medio. "expected" es el paso en que estaba. */
+export async function jumpStepAction(accountSlug: string, publicationId: string, expected: PipelineStep, to: PipelineStep): Promise<Result> {
+  return act(accountSlug, { section: ['pipeline'], does: 'Movió la publicación en el pipeline', publicationId }, async () => {
+    const user = await requireUser();
+    if (!PIPELINE_STEPS.includes(expected) || !PIPELINE_STEPS.includes(to)) return { ok: false, error: 'El paso no es válido.' };
+    if (!(await belongs(accountSlug, publicationId))) return { ok: false, error: 'La publicación no existe en esta cuenta.' };
+    try {
+      await prisma.$transaction((tx) => jumpToStep(tx, { publicationId, expected, to, userId: user.id }));
     } catch (e) {
       if (e instanceof PipelineError) return { ok: false, error: e.message };
       throw e;

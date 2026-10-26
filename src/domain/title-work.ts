@@ -43,13 +43,26 @@ export async function ensureTitleWork(tx: Tx, publicationId: string) {
   return tx.titleWork.upsert({ where: { publicationId }, update: {}, create: { publicationId } });
 }
 
-/** Bloquea la publicación y confirma que está en el paso Título. */
-async function lockAtTitle(tx: Tx, publicationId: string) {
+/**
+ * Bloquea la publicación mientras se decide el título, y dice si está en el
+ * paso Título: el título se aprueba desde cualquier paso, pero solo desde
+ * Título pasa al siguiente.
+ */
+async function lockForTitle(tx: Tx, publicationId: string): Promise<{ atTitle: boolean }> {
   const [row] = await tx.$queryRaw<{ pipelineStatus: string; pipelineStep: string | null }[]>`
     SELECT "pipelineStatus", "pipelineStep" FROM publications WHERE id = ${publicationId} FOR UPDATE`;
   if (!row) throw new TitleError('La publicación no existe.');
-  if (row.pipelineStatus !== 'IN_PIPELINE' || row.pipelineStep !== 'TITLE') {
-    throw new TitleError('Para aprobar el título o decidir sobre el título bloqueado, la publicación tiene que estar en el paso Título.');
+  return { atTitle: row.pipelineStatus === 'IN_PIPELINE' && row.pipelineStep === 'TITLE' };
+}
+
+/** Si estaba en Título, pasa al paso siguiente. */
+async function leaveTitle(tx: Tx, atTitle: boolean, args: { publicationId: string; userId: string | null; at: Date }) {
+  if (!atTitle) return;
+  try {
+    await advanceStep(tx, { publicationId: args.publicationId, expected: 'TITLE', userId: args.userId, now: args.at });
+  } catch (e) {
+    if (e instanceof PipelineError) throw new TitleError(e.message);
+    throw e;
   }
 }
 
@@ -169,14 +182,14 @@ export async function savePosition(
 
 /**
  * Qué hacer con un título bloqueado. Mantenerlo completa el paso sin cambios
- * y pasa a Imágenes; probarlo en la copia sigue en el paso. Null deshace la
- * decisión de probar en la copia.
+ * y, si estaba en Título, pasa a Imágenes; probarlo en la copia sigue en el
+ * paso. Null deshace la decisión de probar en la copia.
  */
 export async function decideLock(
   tx: Tx,
   args: { publicationId: string; decision: TitleLockDecision | null; userId: string | null; now?: Date },
 ): Promise<void> {
-  await lockAtTitle(tx, args.publicationId);
+  const { atTitle } = await lockForTitle(tx, args.publicationId);
   const at = args.now ?? new Date();
   await tx.titleWork.upsert({
     where: { publicationId: args.publicationId },
@@ -193,13 +206,14 @@ export async function decideLock(
   await tx.titleApproval.create({
     data: { publicationId: args.publicationId, outcome: 'KEPT', before: pub.title, title: pub.title, userId: args.userId, createdAt: at },
   });
-  await advanceStep(tx, { publicationId: args.publicationId, expected: 'TITLE', userId: args.userId, now: at });
+  await leaveTitle(tx, atTitle, { publicationId: args.publicationId, userId: args.userId, at });
 }
 
 /**
  * Aprueba el título: guarda qué propuso la IA y qué quedó, lo escribe en la
- * publicación (o lo deja para la copia con cuotas) y pasa a Imágenes. No deja
- * aprobar un título que no cumple las reglas, ni uno bloqueado sin decidir.
+ * publicación (o lo deja para la copia con cuotas) y, si estaba en Título,
+ * pasa a Imágenes. No deja aprobar un título que no cumple las reglas, ni uno
+ * bloqueado sin decidir.
  */
 export async function approveTitle(
   tx: Tx,
@@ -214,7 +228,7 @@ export async function approveTitle(
     now?: Date;
   },
 ): Promise<{ outcome: 'WRITTEN' | 'COPY' }> {
-  await lockAtTitle(tx, args.publicationId);
+  const { atTitle } = await lockForTitle(tx, args.publicationId);
   const work = await ensureTitleWork(tx, args.publicationId);
   if (args.locked && !work.lockDecision) {
     throw new TitleError('El título está bloqueado: primero elegí si lo mantenés o lo probás en la copia con cuotas.');
@@ -246,11 +260,6 @@ export async function approveTitle(
   if (!copy) {
     await writeContentField(tx, { productId: pub.productId, publicationId: args.publicationId }, 'title', title);
   }
-  try {
-    await advanceStep(tx, { publicationId: args.publicationId, expected: 'TITLE', userId: args.userId, now: at });
-  } catch (e) {
-    if (e instanceof PipelineError) throw new TitleError(e.message);
-    throw e;
-  }
+  await leaveTitle(tx, atTitle, { publicationId: args.publicationId, userId: args.userId, at });
   return { outcome: copy ? 'COPY' : 'WRITTEN' };
 }

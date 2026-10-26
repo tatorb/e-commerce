@@ -49,7 +49,7 @@ export default async function UserPage({ params, searchParams }: { params: Promi
 
   return (
     <>
-      <PageHeader className="max-w-3xl">
+      <PageHeader>
         <div className="space-y-2">
           <Breadcrumb items={[{ label: 'Equipo', href: '/equipo' }, { label: user.name }]} />
           <h1 className="text-2xl font-semibold tracking-tight">{user.name}</h1>
@@ -60,7 +60,7 @@ export default async function UserPage({ params, searchParams }: { params: Promi
           </p>
         </div>
       </PageHeader>
-      <PageBody className="max-w-3xl">
+      <PageBody>
         {nuevo ? (
           <p role="status" className="rounded-md border px-3 py-2 text-sm">
             Listo, ya puede entrar con su email y la contraseña temporal. La primera vez le pide cambiarla.

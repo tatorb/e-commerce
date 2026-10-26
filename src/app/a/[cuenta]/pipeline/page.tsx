@@ -53,13 +53,13 @@ export default async function PipelinePage({
 
   return (
     <>
-      <PageHeader className="max-w-none">
+      <PageHeader>
         <div className="flex items-start justify-between gap-3">
           <div className="space-y-1">
             <h1 className="text-2xl font-semibold tracking-tight">Pipeline</h1>
             <p className="text-sm text-muted-foreground">
-              Las publicaciones de <strong>{account.name}</strong> que se están corrigiendo, paso por paso. Tocá una
-              para abrir su paso.
+              Las publicaciones de <strong>{account.name}</strong> que se están corrigiendo. Tocá una para abrir su paso, o
+              arrastrala a otro paso: no hace falta pasar por los del medio.
             </p>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
@@ -76,7 +76,7 @@ export default async function PipelinePage({
           </div>
         </div>
       </PageHeader>
-      <PageBody className="max-w-none">
+      <PageBody>
         <QuestionsNotice accountSlug={account.slug} count={questions.count} oldestAt={questions.oldestAt} />
         <div className="inline-flex w-full rounded-lg border bg-muted/50 p-1 sm:w-auto" role="tablist" aria-label="Vista del pipeline">
           {(

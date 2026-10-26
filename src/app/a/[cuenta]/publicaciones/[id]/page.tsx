@@ -136,7 +136,7 @@ export default async function PublicationPage({
 
   return (
     <>
-      <PageHeader staticOnMobile className="max-w-5xl">
+      <PageHeader staticOnMobile>
         <div className="space-y-2">
           <Breadcrumb
             items={[
@@ -215,7 +215,7 @@ export default async function PublicationPage({
         </div>
       </PageHeader>
 
-      <PageBody className="max-w-5xl">
+      <PageBody>
         {p.externalId ? (
           <ChannelStatusCard accountSlug={account.slug} publicationId={p.id} status={p.channelStatus} channelName={channelName} relist={relist} />
         ) : null}

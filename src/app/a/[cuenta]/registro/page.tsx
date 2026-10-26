@@ -152,7 +152,7 @@ export default async function SyncLogPage({ params, searchParams }: { params: Pr
 
   return (
     <>
-      <PageHeader className="max-w-5xl">
+      <PageHeader>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-1">
             <h1 className="text-2xl font-semibold tracking-tight">Registro</h1>
@@ -193,7 +193,7 @@ export default async function SyncLogPage({ params, searchParams }: { params: Pr
           ) : null}
         </div>
       </PageHeader>
-      <PageBody className="max-w-5xl">
+      <PageBody>
         <Card>
           <form className="flex flex-wrap items-end gap-3 p-4" action="" method="get">
             <label className="w-full space-y-1 sm:w-64">

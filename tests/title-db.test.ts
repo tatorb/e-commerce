@@ -6,7 +6,7 @@ import { writeContentField } from '@/domain/content';
 import { competitorsSchema, saveCompetitors } from '@/domain/competitors';
 import { addToPipeline, advanceStep } from '@/domain/pipeline';
 import { productInfoSchema, updateProductInfo } from '@/domain/product-info';
-import { approveTitle, decideLock, savePosition, setMainSearches, setWordStatus, TitleError } from '@/domain/title-work';
+import { approveTitle, decideLock, savePosition, setMainSearches, setWordStatus } from '@/domain/title-work';
 import { wordKey } from '@/domain/titles';
 
 // Datos inventados.
@@ -97,8 +97,9 @@ describe.skipIf(!url)('paso Título', () => {
     expect(await db.titleApproval.findFirstOrThrow({ where: { publicationId } })).toMatchObject({ outcome: 'KEPT', title: 'Kit viejo' });
     const work = await db.titleWork.findUniqueOrThrow({ where: { publicationId } });
     expect(work).toMatchObject({ lockDecision: 'KEEP', lockDecidedById: userId });
-    // Ya no está en Título.
-    await expect(approve('Kit Prueba')).rejects.toThrow(TitleError);
+    // Ya no está en Título: se puede aprobar igual, y no se mueve de paso.
+    await approve('Kit Prueba Modelo 3');
+    expect(await pub()).toMatchObject({ title: 'Kit Prueba Modelo 3', pipelineStep: 'IMAGES' });
   });
 
   it('las palabras se marcan de a una, aunque lleguen juntas', async () => {

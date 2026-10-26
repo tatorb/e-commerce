@@ -62,7 +62,7 @@ export default async function SyncPage({ params }: { params: Promise<{ cuenta: s
 
   return (
     <>
-      <PageHeader className="max-w-5xl">
+      <PageHeader>
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold tracking-tight">Sincronización</h1>
           <p className="text-sm text-muted-foreground">
@@ -71,7 +71,7 @@ export default async function SyncPage({ params }: { params: Promise<{ cuenta: s
           </p>
         </div>
       </PageHeader>
-      <PageBody className="max-w-5xl">
+      <PageBody>
         {!scheduled ? (
           <div className="rounded-lg border border-dashed px-4 py-3 text-sm">
             <p className="font-medium">La lectura automática todavía no está activada.</p>

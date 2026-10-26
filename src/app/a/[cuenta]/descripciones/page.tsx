@@ -22,7 +22,7 @@ export default async function DescriptionSettingsPage({ params }: { params: Prom
 
   return (
     <>
-      <PageHeader className="max-w-4xl">
+      <PageHeader>
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold tracking-tight">Descripciones</h1>
           <p className="text-sm text-muted-foreground">
@@ -31,7 +31,7 @@ export default async function DescriptionSettingsPage({ params }: { params: Prom
           </p>
         </div>
       </PageHeader>
-      <PageBody className="max-w-4xl">
+      <PageBody>
         <Card>
           <CardHeader>
             <CardTitle>Encabezado, pie e indicaciones</CardTitle>

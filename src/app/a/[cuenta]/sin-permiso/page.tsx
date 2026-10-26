@@ -15,10 +15,10 @@ export default async function NoAccessPage({ params, searchParams }: { params: P
   const name = isSection(seccion) ? SECTIONS[seccion].label : null;
   return (
     <>
-      <PageHeader className="max-w-3xl">
+      <PageHeader>
         <h1 className="text-2xl font-semibold tracking-tight">Sin permiso</h1>
       </PageHeader>
-      <PageBody className="max-w-3xl">
+      <PageBody>
         <Card className="space-y-2 p-6 text-sm">
           <p>{name ? `Tu usuario no puede ver ${name} en ${account.name}.` : `Tu usuario no puede ver ninguna sección de ${account.name}.`}</p>
           <p className="text-muted-foreground">Si lo necesitás, pedile el permiso a un administrador.</p>

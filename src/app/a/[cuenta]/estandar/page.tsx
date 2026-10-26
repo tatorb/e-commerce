@@ -32,7 +32,7 @@ export default async function StandardPage({ params }: { params: Promise<{ cuent
 
   return (
     <>
-      <PageHeader className="max-w-4xl">
+      <PageHeader>
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold tracking-tight">Estándar de publicación</h1>
           <p className="text-sm text-muted-foreground">
@@ -41,7 +41,7 @@ export default async function StandardPage({ params }: { params: Promise<{ cuent
           </p>
         </div>
       </PageHeader>
-      <PageBody className="max-w-4xl">
+      <PageBody>
         {channels.length === 0 ? (
           <p className="text-sm text-muted-foreground">Esta cuenta todavía no tiene tiendas en ningún canal.</p>
         ) : null}

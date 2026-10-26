@@ -49,7 +49,7 @@ export default async function TasksPage({ params, searchParams }: { params: Prom
 
   return (
     <>
-      <PageHeader className="max-w-5xl">
+      <PageHeader>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-1">
             <h1 className="text-2xl font-semibold tracking-tight">Tareas</h1>
@@ -89,7 +89,7 @@ export default async function TasksPage({ params, searchParams }: { params: Prom
           })}
         </div>
       </PageHeader>
-      <PageBody className="max-w-5xl">
+      <PageBody>
         {user.isAdmin && !isEmailConfigured() ? (
           <p role="note" className="flex items-start gap-2 rounded-md border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
             <MailWarning className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />

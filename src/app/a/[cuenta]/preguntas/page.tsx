@@ -240,7 +240,7 @@ export default async function QuestionsPage({ params, searchParams }: { params: 
 
   return (
     <>
-      <PageHeader className="max-w-5xl">
+      <PageHeader>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-1">
             <h1 className="text-2xl font-semibold tracking-tight">Preguntas</h1>
@@ -278,7 +278,7 @@ export default async function QuestionsPage({ params, searchParams }: { params: 
           ) : null}
         </div>
       </PageHeader>
-      <PageBody className="max-w-5xl">
+      <PageBody>
         {list.stores.length === 0 ? (
           <Card className="p-4 text-sm text-muted-foreground">
             Para recibir las preguntas, conectá la tienda en{' '}
