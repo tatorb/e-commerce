@@ -172,6 +172,7 @@ async function applyListing(
       installments: true,
       discount: true,
       quantities: true,
+      importRun: { select: { origin: true } },
       channelCopy: {
         select: {
           description: true,
@@ -205,6 +206,13 @@ async function applyListing(
   // Las cuotas y el descuento que se decidieron en la app antes de conocer los del canal quedan para subir.
   for (const field of ['installments', 'discount'] as const) {
     if (!lastAgreed[field] && app[field] !== null) lastAgreed[field] = channelPrints[field];
+  }
+  // Traída del canal: lo de la app salió del canal, así que lo que cambió antes
+  // de la primera lectura es un cambio de la app, para subir, y no algo para elegir.
+  if (p.importRun?.origin === 'CHANNEL_API') {
+    for (const field of FACE_FIELDS) {
+      if (lastAgreed[field] === undefined && appPrints[field]) lastAgreed[field] = channelPrints[field];
+    }
   }
   const plans = planFaces(appPrints, channelPrints, lastAgreed);
   const hold = heldDiscount(app.discount, channel.discount, p.channelCopy, ctx.now);
@@ -273,6 +281,7 @@ async function applyListing(
       skus: listing.skus,
       measures: listing.measures,
       categoryName: listing.categoryName,
+      channelProductId: listing.channelProductId ?? null,
     },
     categoryId: listing.categoryId,
     attributeIds: listingAttributeIds(listing, ctx.adapter),

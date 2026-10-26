@@ -38,7 +38,7 @@ import { resolveTitleLock } from '@/domain/title-lock';
 import { isInstallmentPlan } from '@/domain/pricing';
 import { checkTitle } from '@/domain/titles';
 import { readOne } from '@/lib/channel-sync';
-import { photoOriginsOf, picturesFor } from '@/lib/media';
+import { photoOriginsOf, photoSiblings, picturesFor } from '@/lib/media';
 import { withAccessToken } from '@/lib/connections';
 import { listingTargets } from '@/lib/variant-listings';
 import { loadTitleRules } from '@/lib/title-rules';
@@ -97,6 +97,7 @@ async function loadForPush(db: Db, accountId: string, publicationId: string) {
           photoIds: true,
           photoOrigins: true,
           variations: true,
+          details: true,
           price: true,
           installments: true,
           discount: true,
@@ -351,7 +352,7 @@ export async function pushDrafts(
       }
       if ((!summary.draft.includes(field) && !resend) || !isPublishable(field)) continue;
       if (field === 'photos') {
-        await pushPhotos(db, { p, publisher, refs: app.photos ?? [], before: channel.photos ?? [], userId: args.userId, reject });
+        await pushPhotos(db, { p, publisher, refs: app.photos ?? [], before: channel.photos ?? [], userId: args.userId, accountId: args.accountId, reject });
         if (!result.rejected.some((r) => r.field === 'photos')) result.sent.push('photos');
         continue;
       }
@@ -480,11 +481,12 @@ async function pushPhotos(
     refs: PhotoRef[];
     before: PhotoRef[];
     userId: string | null;
+    accountId: string;
     reject: (field: FaceField, message: string) => Promise<void>;
   },
 ): Promise<void> {
   const { p, refs } = args;
-  const { pictures, origins, problems, layout, sent } = await picturesFor(db, p.productId, refs);
+  const { pictures, origins, problems, layout, sent } = await picturesFor(db, p.productId, refs, p.channelCopy);
   if (problems.length > 0 || pictures.length === 0) return args.reject('photos', problems.join(' ') || 'Elegí al menos una foto.');
   let ids: string[] | null;
   // Si el canal guarda cada medida aparte, cada una lleva lo que ve el comprador en esa medida.
@@ -552,6 +554,13 @@ async function pushPhotos(
       },
     });
   });
+  // Las que comparten las fotos en el canal también cambiaron: se vuelven a leer.
+  const siblings = await photoSiblings(db, { id: p.id, productId: p.productId, storeId: p.store.id, copy: p.channelCopy });
+  for (const sibling of siblings) {
+    await readOne(db, { accountId: args.accountId, publicationId: sibling.id }).catch((e) =>
+      console.error('No se pudo volver a leer la que comparte las fotos', sibling.externalId, e instanceof Error ? e.message : e),
+    );
+  }
 }
 
 // ───────────────────────────── Renovar el descuento ─────────────────────────────

@@ -39,6 +39,7 @@ import { PublicationTasksCard } from '@/components/tasks/PublicationTasksCard';
 import { assignablePeople, tasksOfPublication } from '@/lib/tasks';
 import { followsStockOf, managedNote, plannedText, plansFor } from '@/lib/stock-plan';
 import { FollowStockSwitch } from '@/components/publication/FollowStockSwitch';
+import { SharedPhotosNote } from '@/components/publication/SharedPhotosNote';
 import { can } from '@/domain/access';
 import { formatDateTime, plural } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
@@ -277,15 +278,14 @@ export default async function PublicationPage({
                       {summary.draft.length > 0 ? `${plural(summary.draft.length, 'dato cambió', 'datos cambiaron')} en la app y todavía no está en ${channelName}. ` : ''}
                       {summary.choose.length > 0 ? `${plural(summary.choose.length, 'dato cambió', 'datos cambiaron')} en los dos lados: elegí cuál queda.` : ''}
                     </p>
-                    {summary.draft.length > 0 ? (
-                      <DraftBar
-                        accountSlug={account.slug}
-                        publicationId={p.id}
-                        channelName={channelName}
-                        canPush={!data.pushBlocked && pushable.length > 0}
-                        canDiscard
-                      />
-                    ) : null}
+                    {/* También con solo datos para elegir: así no se pierde lo que dijo la última subida. */}
+                    <DraftBar
+                      accountSlug={account.slug}
+                      publicationId={p.id}
+                      channelName={channelName}
+                      canPush={!data.pushBlocked && pushable.length > 0}
+                      canDiscard={summary.draft.length > 0}
+                    />
                   </div>
                 )}
               </div>
@@ -321,6 +321,7 @@ export default async function PublicationPage({
                     {field === 'quantity' && p.externalId ? (
                       <FollowStockSwitch accountSlug={account.slug} publicationId={p.id} on={followsStockOf(stockPlan)} />
                     ) : null}
+                    {field === 'photos' && media ? <SharedPhotosNote sources={media} /> : null}
                     {field === 'attributes' && data.categoryMismatch ? (
                       <p className="text-sm text-muted-foreground">
                         En la app la categoría es {data.categoryMismatch.app} y en {channelName} es {data.categoryMismatch.channel}. Los datos se

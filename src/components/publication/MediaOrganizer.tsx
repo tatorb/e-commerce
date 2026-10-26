@@ -10,6 +10,7 @@ import { ClipCheckLine, VideoFacts, VideoPlayer, VideoThumb } from '@/components
 import type { MediaItem, MediaSources, Measure } from '@/lib/media';
 import { cn } from '@/lib/utils/cn';
 import { saveMediaAction } from '@/app/a/[cuenta]/publicaciones/sync-actions';
+import { SharedPhotosNote } from './SharedPhotosNote';
 
 // Organización de multimedia. Arriba, todas las fotos y los videos que se
 // pueden usar, y en cada uno dónde va: en todas las medidas, en algunas o en
@@ -295,6 +296,7 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
 
   return (
     <div className="space-y-6">
+      <SharedPhotosNote sources={sources} />
       <section className="space-y-4">
         <div className="space-y-1">
           <h3 className="text-sm font-semibold">Fotos y videos</h3>

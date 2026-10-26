@@ -35,6 +35,7 @@ const ITEM_FIELDS = [
   'attributes',
   'variations',
   'seller_custom_field',
+  'user_product_id',
   'health',
   'last_updated',
 ];
@@ -197,6 +198,8 @@ export function parseItem(item: Obj): ChannelListing {
     attributes,
     attributeCount: attributes.length + [brand, partNumber, origin].filter(Boolean).length + (skuAttr ? 1 : 0),
     updatedAt: str(item.last_updated),
+    // En el modelo de producto de usuario: las publicaciones del mismo producto comparten sus fotos.
+    channelProductId: str(item.user_product_id),
   };
 }
 

@@ -18,6 +18,7 @@ import {
   type VariantLike,
 } from '@/domain/media';
 import { LAST_PHOTO_STEP } from '@/domain/photo-steps';
+import { copyChannelProduct, copySkus } from '@/domain/stock';
 import { checkClip } from '@/domain/videos';
 import { BY_BROWSER, setClips } from '@/lib/videos';
 import { photoFileHref } from '@/lib/photo-rules';
@@ -69,6 +70,63 @@ function knownMarks<T extends PhotoRef>(ref: T, measures: Measure[]): T {
   const positions =
     measures.length >= 2 ? Object.fromEntries(Object.entries(ref.positions ?? {}).filter(([k]) => measures.some((m) => m.key === k))) : {};
   return withMarks(ref, { ...ref, variants: knownVariants(photoVariants(ref), measures), positions });
+}
+
+/**
+ * La medida que vende una publicación que en el canal no tiene medidas, de un
+ * producto que sí las tiene: cuando cada medida se publica aparte. Sale de su
+ * SKU en el canal. Null si no es el caso.
+ */
+export function soleMeasureOf(measures: Measure[], copy: { variations: unknown; details: unknown } | null): Measure | null {
+  if (!copy || measures.length < 2 || parseVariations(copy.variations).length > 0) return null;
+  const skus = new Set(copySkus(copy.details).map((s) => s.trim().toUpperCase()));
+  const found = measures.filter((m) => m.sku && skus.has(m.sku.toUpperCase()));
+  return found.length === 1 ? found[0] : null;
+}
+
+/** Las fotos de una publicación que vende una sola medida: las de esa medida, en su orden, sin marcas. */
+function soleMeasurePhotos<T extends PhotoRef>(refs: T[], measures: Measure[], sole: Measure): T[] {
+  return variantPhotos(
+    refs.map((r) => knownMarks(r, measures)),
+    sole.key,
+  ).map((r) => withMarks(r, { ...r, variants: [], positions: {} }));
+}
+
+/**
+ * Las otras publicaciones de la tienda que comparten las fotos con esta en el
+ * canal: las del mismo producto del canal. Si de alguna de las dos todavía no
+ * se sabe cuál es, las del mismo producto que venden la misma medida sola.
+ */
+export async function photoSiblings(
+  db: Db,
+  p: { id: string; productId: string; storeId: string; copy: { variations: unknown; details: unknown } | null },
+): Promise<{ id: string; externalId: string }[]> {
+  const channelProduct = p.copy ? copyChannelProduct(p.copy.details) : null;
+  const measures = measuresOf(
+    await db.productVariant.findMany({ where: { productId: p.productId }, orderBy: { position: 'asc' }, select: { sku: true, measure: true } }),
+  );
+  const sole = soleMeasureOf(measures, p.copy);
+  if (!channelProduct && !sole) return [];
+  const rows = await db.publication.findMany({
+    where: {
+      storeId: p.storeId,
+      id: { not: p.id },
+      externalId: { not: null },
+      OR: [
+        ...(channelProduct ? [{ channelCopy: { details: { path: ['channelProductId'], equals: channelProduct } } }] : []),
+        ...(sole ? [{ productId: p.productId }] : []),
+      ],
+    },
+    orderBy: { externalId: 'asc' },
+    select: { id: true, externalId: true, productId: true, channelCopy: { select: { variations: true, details: true } } },
+  });
+  return rows
+    .filter((r) => {
+      const theirs = r.channelCopy ? copyChannelProduct(r.channelCopy.details) : null;
+      if (channelProduct && theirs) return theirs === channelProduct;
+      return sole !== null && r.productId === p.productId && soleMeasureOf(measures, r.channelCopy)?.key === sole.key;
+    })
+    .map((r) => ({ id: r.id, externalId: r.externalId! }));
 }
 
 /** Cuántas fotos ve el comprador en cada medida, con las marcas que valen. */
@@ -154,7 +212,7 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
       externalId: true,
       media: true,
       videoVariants: true,
-      store: { select: { channel: { select: { kind: true, name: true } } } },
+      store: { select: { id: true, channel: { select: { kind: true, name: true } } } },
       product: {
         select: {
           assets: { where: { kind: 'PHOTO' }, orderBy: { position: 'asc' }, select: { url: true } },
@@ -167,15 +225,18 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
         },
       },
       clips: { orderBy: [{ position: 'asc' }, { chosenAt: 'asc' }], select: { videoId: true } },
-      channelCopy: { select: { photos: true, photoIds: true, photoOrigins: true, variations: true, missingSince: true } },
+      channelCopy: { select: { photos: true, photoIds: true, photoOrigins: true, variations: true, details: true, missingSince: true } },
     },
   });
   if (!p) throw new MediaError('La publicación no está en la cuenta.');
   const adapter = getChannelAdapter(p.store.channel.kind, p.store.channel.name);
   const channelName = adapter.name;
-  const measures = measuresOf(p.product.variants);
-  const marks = (keys: string[]) => knownVariants(keys, measures);
   const copy = p.channelCopy && !p.channelCopy.missingSince ? p.channelCopy : null;
+  const allMeasures = measuresOf(p.product.variants);
+  // Si vende una sola medida, todas las fotos van a ella: no hay medidas para marcar.
+  const sole = soleMeasureOf(allMeasures, copy);
+  const measures = sole ? [] : allMeasures;
+  const marks = (keys: string[]) => knownVariants(keys, measures);
   const origins = photoOriginsOf(copy?.photoOrigins);
   const edits = await finishedEdits(db, p.productId);
   const editName = new Map(edits.map((e, i) => [e.id, editLabel(e, i + 1)]));
@@ -209,7 +270,8 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
     .map((a, i) => ({ ref: { kind: 'asset', url: a.url }, key: photoKey({ kind: 'asset', url: a.url }), thumb: a.url, label: `Del producto ${i + 1}`, note: null }));
 
   const all = new Map([...channel, ...corrected, ...assets].map((m) => [m.key, m]));
-  const media = parseMedia(p.media);
+  const saved = parseMedia(p.media);
+  const media = saved && sole ? soleMeasurePhotos(saved, allMeasures, sole) : saved;
   const current = (media ?? channel.map((c) => c.ref)).map((ref): MediaItem => {
     const found = all.get(photoKey(ref)) ?? {
       ref,
@@ -239,6 +301,12 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
     measures: measures.length >= 2 ? measures : [],
     // Leída del canal y sin variantes: allá todas las fotos se ven juntas.
     channelWithoutVariants: copy !== null && measures.length >= 2 && variations.length === 0,
+    // Vende una sola medida del producto, por su SKU: todas las fotos van a ella.
+    soleMeasure: sole ? { label: sole.label, sku: sole.sku } : null,
+    // Las otras publicaciones que comparten las fotos en el canal: cambian con estas.
+    sharedWith: (
+      await photoSiblings(db, { id: p.id, productId: p.productId, storeId: p.store.id, copy })
+    ).map((s) => s.externalId),
     // Los videos del producto, para mirarlos, elegir el clip y marcar sus medidas.
     videos: p.product.videos.map((v) => {
       const measure = { name: v.name, mimeType: v.mimeType, size: v.size === null ? null : Number(v.size), width: v.width, height: v.height, durationMs: v.durationMs };
@@ -319,12 +387,23 @@ export async function correctedPhotoFile(db: PrismaClient, productId: string, ed
  * Las fotos, como las pide el canal: las corregidas se suben como archivo. Con
  * varias medidas en la ficha, también qué fotos ve el comprador en cada una.
  */
-export async function picturesFor(db: PrismaClient, productId: string, refs: PhotoRef[]) {
+export async function picturesFor(
+  db: PrismaClient,
+  productId: string,
+  refs: PhotoRef[],
+  // Lo que se leyó del canal: si vende una sola medida, van las de esa medida, sin repartir.
+  copy: { variations: unknown; details: unknown } | null = null,
+) {
+  const variants = await db.productVariant.findMany({ where: { productId }, orderBy: { position: 'asc' }, select: { sku: true, measure: true } });
+  const allMeasures = measuresOf(variants);
+  const sole = soleMeasureOf(allMeasures, copy);
+  const measures = sole ? [] : allMeasures;
+  const chosen = sole ? soleMeasurePhotos(refs, allMeasures, sole) : refs;
   const pictures: ChannelPicture[] = [];
   const origins: (string | null)[] = [];
   const problems: string[] = [];
   const sent: PhotoRef[] = [];
-  for (const ref of refs) {
+  for (const ref of chosen) {
     if (ref.kind === 'channel') pictures.push({ kind: 'existing', id: ref.id });
     else if (ref.kind === 'asset') pictures.push({ kind: 'link', url: ref.url });
     else {
@@ -338,8 +417,6 @@ export async function picturesFor(db: PrismaClient, productId: string, refs: Pho
     origins.push(ref.kind === 'edit' ? ref.editId : null);
     sent.push(ref);
   }
-  const variants = await db.productVariant.findMany({ where: { productId }, orderBy: { position: 'asc' }, select: { sku: true, measure: true } });
-  const measures = measuresOf(variants);
   // Cada foto con las medidas que valen, y su lugar en la lista.
   const marked = sent.map((ref) => knownMarks(ref, measures));
   const placed = marked.map((ref, at) => ({ ...ref, at }));

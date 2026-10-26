@@ -59,6 +59,12 @@ export function copySkus(details: unknown): string[] {
   return Array.isArray(skus) ? skus.filter((s): s is string => typeof s === 'string') : [];
 }
 
+/** El producto del canal al que pertenece la publicación, guardado con su copia. Null si el canal no lo informa. */
+export function copyChannelProduct(details: unknown): string | null {
+  const id = details && typeof details === 'object' && !Array.isArray(details) ? (details as { channelProductId?: unknown }).channelProductId : null;
+  return typeof id === 'string' && id.trim() ? id.trim() : null;
+}
+
 /**
  * De qué medida es una publicación que en el canal no tiene medidas, de un
  * producto que sí las tiene: cuando cada medida se publica aparte. Sale de su

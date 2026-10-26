@@ -48,15 +48,14 @@ export function PendingChangesCard({ accountSlug, faces }: { accountSlug: string
                 {FACE_FIELD_LABEL[r.field]}: {r.message}
               </p>
             ))}
-            {summary.draft.length > 0 ? (
-              <DraftBar
-                accountSlug={accountSlug}
-                publicationId={p.id}
-                channelName={channelName}
-                canPush={!faces.pushBlocked && pushable.length > 0}
-                canDiscard={false}
-              />
-            ) : null}
+            {/* También con solo datos para elegir: así no se pierde lo que dijo la última subida. */}
+            <DraftBar
+              accountSlug={accountSlug}
+              publicationId={p.id}
+              channelName={channelName}
+              canPush={!faces.pushBlocked && pushable.length > 0}
+              canDiscard={false}
+            />
             {faces.pushBlocked ? <p className="text-xs text-muted-foreground">{faces.pushBlocked}</p> : null}
           </>
         )}

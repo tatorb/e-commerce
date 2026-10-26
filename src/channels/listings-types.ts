@@ -54,6 +54,9 @@ export type ChannelListing = {
   attributeCount: number;
   // Cuándo cambió por última vez en el canal, si lo informa.
   updatedAt: string | null;
+  // El producto del canal al que pertenece, cuando el canal agrupa varias
+  // publicaciones en un producto que es dueño de las fotos y los datos.
+  channelProductId?: string | null;
 };
 
 export interface ChannelListings {

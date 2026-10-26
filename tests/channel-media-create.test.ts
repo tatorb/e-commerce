@@ -160,6 +160,9 @@ type Item = {
   status?: 'active' | 'paused' | 'closed';
   deleted?: boolean;
   quantity?: number;
+  // Sin variantes: el SKU de la publicación y el producto de usuario al que pertenece.
+  sku?: string;
+  userProduct?: string;
 };
 
 describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
@@ -304,6 +307,8 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
                 pictures: it.pictures,
                 attributes: it.attributes,
                 variations: it.variations ?? [],
+                ...(it.sku ? { seller_custom_field: it.sku } : {}),
+                ...(it.userProduct ? { user_product_id: it.userProduct } : {}),
               },
             };
           }),
@@ -448,6 +453,20 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     expect(sources.current[0].note).toBe('Es la corregida 1');
   });
 
+  it('traída del canal: lo que se cambió en la app antes de la primera lectura queda para subir, no para elegir', async () => {
+    const run = await db.importRun.create({
+      data: { accountId, storeId, origin: 'CHANNEL_API', fileName: 'Mercado Libre', sheetName: 'Mercado Libre', dataDate: new Date(), rowsTotal: 1 },
+    });
+    const traida = await db.publication.create({ data: { productId, storeId, externalId: 'MLA1', title: 'Otro título', importRunId: run.id } });
+    const deArchivo = await db.publication.create({ data: { productId, storeId, externalId: 'MLA9', title: 'Otro título' } });
+    items.MLA9 = { ...items.MLA1 };
+    for (const id of [traida.id, deArchivo.id]) await db.publication.update({ where: { id }, data: { media: [{ kind: 'channel', id: 'P2', url: '' }] } });
+    await readAll();
+    expect(await state(traida.id)).toEqual({ draft: ['title', 'photos'], choose: [], rejected: [] });
+    // De una planilla no se sabe cuál es más nuevo: hay que elegir.
+    expect((await state(deArchivo.id)).choose).toEqual(['title', 'photos']);
+  });
+
   it('si las fotos cambian en el canal y la app no las tocó, las sigue; si las tocó, hay que elegir', async () => {
     const pub = await db.publication.create({ data: { productId, storeId, externalId: 'MLA1', title: 'Kit Embrague Ford Ka' } });
     await readAll();
@@ -482,6 +501,77 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
           { productId, sku: 'A-50', measure: '0.50', position: 1 },
         ],
       });
+    });
+
+    it('una publicación que vende una sola medida muestra solo esa, sube sus fotos sin repartir y avisa cuáles las comparten', async () => {
+      const sola = (sku: string, userProduct: string): Item => ({
+        title: 'Aros Ford Sigma',
+        price: 100,
+        sold: 0,
+        category_id: 'MLA999',
+        attributes: [],
+        pictures: [
+          { id: 'P1', secure_url: 'https://ml/P1.jpg' },
+          { id: 'P2', secure_url: 'https://ml/P2.jpg' },
+        ],
+        sku,
+        userProduct,
+      });
+      items.MLA3 = sola('A-00', 'UP-00');
+      items.MLA4 = sola('A-00', 'UP-00');
+      items.MLA5 = sola('A-50', 'UP-50');
+      const std = await db.publication.create({ data: { productId, storeId, externalId: 'MLA3', title: 'Aros Ford Sigma' } });
+      await db.publication.create({ data: { productId, storeId, externalId: 'MLA4', title: 'Aros Ford Sigma' } });
+      await db.publication.create({ data: { productId, storeId, externalId: 'MLA5', title: 'Aros Ford Sigma' } });
+      await readAll();
+
+      let sources = await loadMediaSources(db, accountId, std.id);
+      expect(sources.measures).toEqual([]);
+      expect(sources.soleMeasure).toEqual({ label: 'A-00', sku: 'A-00' });
+      expect(sources.sharedWith).toEqual(['MLA4']);
+      // Si de la otra todavía no se sabe su producto en el canal, cuenta por vender la misma medida.
+      const mla4 = await db.publication.findFirstOrThrow({ where: { externalId: 'MLA4' }, include: { channelCopy: true } });
+      const known = mla4.channelCopy!.details as Record<string, unknown>;
+      await db.channelCopy.update({ where: { publicationId: mla4.id }, data: { details: { ...known, channelProductId: null } as object } });
+      expect((await loadMediaSources(db, accountId, std.id)).sharedWith).toEqual(['MLA4']);
+      await db.channelCopy.update({ where: { publicationId: mla4.id }, data: { details: { ...known, channelProductId: 'OTRO' } as object } });
+      expect((await loadMediaSources(db, accountId, std.id)).sharedWith).toEqual([]);
+      await db.channelCopy.update({ where: { publicationId: mla4.id }, data: { details: known as object } });
+      expect(sources.channelWithoutVariants).toBe(false);
+
+      // Lo que se guardó cuando se repartía por medida: van las de su medida, en su orden.
+      const std00 = 'sku:A-00';
+      const half = 'sku:A-50 medida:0.50';
+      await db.publication.update({
+        where: { id: std.id },
+        data: {
+          media: [
+            { kind: 'channel', id: 'P1', url: '', variants: [half], positions: { [half]: 0 } },
+            { kind: 'channel', id: 'P2', url: '', positions: { [std00]: 1, [half]: 1 } },
+            { kind: 'asset', url: 'https://otra/foto.jpg', variants: [std00], positions: { [std00]: 0 } },
+          ],
+        },
+      });
+      sources = await loadMediaSources(db, accountId, std.id);
+      expect(sources.current.map((m) => m.ref)).toEqual([
+        { kind: 'asset', url: 'https://otra/foto.jpg' },
+        { kind: 'channel', id: 'P2', url: 'https://ml/P2.jpg' },
+      ]);
+      expect((await state(std.id)).draft).toEqual(['photos']);
+
+      // En el canal, las que comparten el producto cambian junto con esta.
+      items.MLA4.pictures = [{ id: 'P2', secure_url: 'https://ml/P2.jpg' }];
+      calls.length = 0;
+      expect(await pushDrafts(db, { accountId, publicationId: std.id, userId: null })).toEqual({ sent: ['photos'], rejected: [], confirmed: true });
+      const sibling = await db.publication.findFirstOrThrow({ where: { externalId: 'MLA4' }, include: { channelCopy: true } });
+      expect(sibling.channelCopy?.photos).toEqual(['https://ml/P2.jpg']);
+      // Todas a la publicación, sin variantes.
+      expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual(['PUT /items/MLA3']);
+      expect(calls[0].body).toEqual({ pictures: [{ source: 'https://otra/foto.jpg' }, { id: 'P2' }] });
+      expect(await state(std.id)).toEqual({ draft: [], choose: [], rejected: [] });
+      // Guardar con una sola medida guarda sin marcas.
+      await saveMedia(db, { accountId, publicationId: std.id, refs: [{ kind: 'channel', id: 'P2', url: '', variants: [half] }] });
+      expect((await db.publication.findUniqueOrThrow({ where: { id: std.id } })).media).toEqual([{ kind: 'channel', id: 'P2', url: 'https://ml/P2.jpg' }]);
     });
 
     it('lee las fotos de cada medida, guarda las que se marcan a mano y las sube con cada medida', async () => {
