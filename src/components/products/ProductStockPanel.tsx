@@ -2,10 +2,10 @@ import Link from 'next/link';
 import { AlertTriangle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { SectionBody, SectionCard } from '@/components/ui/section-card';
-import { quantityText } from '@/domain/quantities';
 import { available, STOCK_MOVE_LABEL, stockText } from '@/domain/stock';
 import { formatDateTime } from '@/lib/format';
 import type { ProductStockView } from '@/lib/stock';
+import { plannedText } from '@/lib/stock-plan';
 import { cn } from '@/lib/utils/cn';
 import { StockForm, StockReviewedButton } from './StockForm';
 
@@ -115,7 +115,7 @@ export function ProductStockPanel({
                 <div className={cn('shrink-0 text-xs sm:max-w-sm sm:text-right', !p.plan.managed && 'text-muted-foreground')}>
                   {p.plan.managed ? (
                     <span className="inline-flex flex-wrap items-center gap-1.5 sm:justify-end">
-                      <span className="font-medium">{quantityText(p.plan.lines)}</span>
+                      <span className="font-medium">{plannedText(p.plan)}</span>
                       {p.plan.pending ? <Badge variant="secondary">Se sube en la próxima pasada</Badge> : null}
                     </span>
                   ) : (

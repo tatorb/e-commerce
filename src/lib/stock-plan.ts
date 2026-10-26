@@ -1,7 +1,7 @@
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
 import { parseVariations, type VariantLike } from '@/domain/media';
-import { channelQuantities, sameQuantities, type QuantityLine } from '@/domain/quantities';
+import { channelQuantities, quantityText, sameQuantities, type QuantityLine } from '@/domain/quantities';
 import { copySkus, isManaged, listingMeasure, plannedQuantities, stockSlots, type StockProduct, type StockSource } from '@/domain/stock';
 
 // Qué cantidad le toca a cada publicación según el stock de su producto, o
@@ -57,10 +57,30 @@ export const PLAN_SELECT = {
 
 export type PlanRow = Prisma.PublicationGetPayload<{ select: typeof PLAN_SELECT }>;
 
+/** La medida que vende una publicación sin medidas en el canal, y el SKU por el que se sabe. */
+export type ListingMeasure = { label: string; sku: string | null };
+
 export type StockPlan =
-  // Sigue al stock: lo que le toca, lo que tiene en el canal y si hay que subirlo.
-  | { managed: true; lines: QuantityLine[]; channel: QuantityLine[] | null; pending: boolean }
+  // Sigue al stock: lo que le toca, lo que tiene en el canal, si hay que subirlo
+  // y, si vende una sola medida del producto, cuál.
+  | { managed: true; lines: QuantityLine[]; channel: QuantityLine[] | null; pending: boolean; measure: ListingMeasure | null }
   | { managed: false; reason: string };
+
+type ManagedPlan = Extract<StockPlan, { managed: true }>;
+
+/** Lo que le toca, en texto, con la medida si vende una sola: "0.50: 2". */
+export function plannedText(plan: ManagedPlan): string {
+  return plan.measure ? `${plan.measure.label}: ${quantityText(plan.lines)}` : quantityText(plan.lines);
+}
+
+/** Por qué la cantidad no se cambia en la publicación, con la medida que vende si es una sola. */
+export function managedNote(plan: ManagedPlan, channelName: string): string {
+  if (!plan.measure) return STOCK_MANAGED;
+  const { label, sku } = plan.measure;
+  // Sin medida cargada en la ficha, la medida se nombra por su SKU: no se repite.
+  const which = sku && sku !== label ? `la medida ${label} del producto, por su SKU ${sku} en ${channelName}` : `la medida ${label} del producto`;
+  return `Vende solo ${which}. ${STOCK_MANAGED}`;
+}
 
 /** Si la tienda lee las ventas: sin eso, el stock del producto no sabe lo que se vendió en ella. */
 export const readsSales = (store: { salesSince: Date | null; salesError: string | null }) => store.salesSince !== null && store.salesError === null;
@@ -87,10 +107,12 @@ export function planFor(p: PlanRow): StockPlan {
   }
   if (!copy || copy.missingSince) return { managed: false, reason: `Todavía no se leyó de ${channelName}.` };
   const variations = parseVariations(copy.variations);
-  const planned = plannedQuantities(variations, source, variations.length === 0 ? singleMeasure(p.product, copy) : null);
+  const single = variations.length === 0 ? singleMeasure(p.product, copy) : null;
+  const planned = plannedQuantities(variations, source, single);
   if ('reason' in planned) return { managed: false, reason: planned.reason };
   const channel = channelQuantities(copy.quantity, variations);
-  return { managed: true, lines: planned.lines, channel, pending: !sameQuantities(planned.lines, channel) };
+  const measure = single ? { label: single.measure ?? single.sku ?? '', sku: single.sku ?? null } : null;
+  return { managed: true, lines: planned.lines, channel, pending: !sameQuantities(planned.lines, channel), measure };
 }
 
 /** Si la cantidad de la publicación sale del stock del producto. */

@@ -36,8 +36,7 @@ import { loadKnowledge, loadResearch } from '@/lib/queries/research';
 import { loadCombo } from '@/lib/queries/combos';
 import { comboForAi, comboParts, PRODUCT_KIND_LABEL } from '@/domain/combos';
 import { loadCatalogData } from '@/lib/catalog-data';
-import { plansFor } from '@/lib/stock-plan';
-import { quantityText } from '@/domain/quantities';
+import { plannedText, plansFor } from '@/lib/stock-plan';
 import { stockText } from '@/domain/stock';
 import { catalogForClaude } from './catalog';
 import { loadTitleContext, RECEIVED_QUESTIONS } from '@/lib/queries/title-step';
@@ -417,7 +416,7 @@ const getPublication = defineTool({
       atributos_en_el_canal: safeList(parseNameValueList(pub.attributes)),
       datos_de_catalogo: catalogForClaude(catalog),
       cantidad_disponible: plan?.managed
-        ? { sale_del_stock_del_producto: true, cantidad: quantityText(plan.lines) }
+        ? { sale_del_stock_del_producto: true, cantidad: plannedText(plan), ...(plan.measure ? { vende_solo_la_medida: plan.measure.label } : {}) }
         : { sale_del_stock_del_producto: false, motivo: plan?.reason ?? null },
       ficha: {
         producto_id: product.id,

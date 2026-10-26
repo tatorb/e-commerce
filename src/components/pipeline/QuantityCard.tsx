@@ -34,9 +34,16 @@ export function QuantityCard({
       <SectionCard title="Cantidad disponible" description={channel ? `En ${channelName}: ${quantityText(channel)}.` : undefined}>
         <SectionBody>
           <p className="text-sm">
-            Sale del stock del producto: <span className="font-medium">{quantityText(stock.plan.lines)}</span>.
+            Sale del stock del producto{stock.plan.measure ? `, medida ${stock.plan.measure.label}` : ''}:{' '}
+            <span className="font-medium">{quantityText(stock.plan.lines)}</span>.
             {stock.plan.pending ? ` Se sube a ${channelName} en la próxima pasada.` : ''}
           </p>
+          {stock.plan.measure ? (
+            <p className="text-sm text-muted-foreground">
+              En {channelName} vende solo esa medida
+              {stock.plan.measure.sku && stock.plan.measure.sku !== stock.plan.measure.label ? `, por su SKU ${stock.plan.measure.sku}` : ''}.
+            </p>
+          ) : null}
           <p className="text-sm text-muted-foreground">
             Cada venta lo descuenta y la cantidad nueva se sube sola a todas sus publicaciones.{' '}
             <Link href={stock.productHref} className="font-medium text-foreground underline-offset-4 hover:underline">

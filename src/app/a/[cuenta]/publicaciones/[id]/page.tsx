@@ -37,7 +37,7 @@ import { fieldLabel } from '@/domain/sync-log';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { PublicationTasksCard } from '@/components/tasks/PublicationTasksCard';
 import { assignablePeople, tasksOfPublication } from '@/lib/tasks';
-import { plansFor, STOCK_MANAGED } from '@/lib/stock-plan';
+import { managedNote, plannedText, plansFor } from '@/lib/stock-plan';
 import { can } from '@/domain/access';
 import { formatDateTime, plural } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
@@ -307,7 +307,7 @@ export default async function PublicationPage({
                           ? 'El descuento se decide en el paso Precio.'
                           : field === 'quantity'
                             ? stockPlan?.managed
-                              ? STOCK_MANAGED
+                              ? managedNote(stockPlan, channelName)
                               : quantityReason(p.externalId, copy?.stockInChannel ?? false, quantities, channelName)
                             : (true as const);
               return (
@@ -328,7 +328,7 @@ export default async function PublicationPage({
                       publicationId={p.id}
                       field={field}
                       state={state}
-                      value={field === 'quantity' ? quantityText(quantities) : asText(app, field)}
+                      value={field === 'quantity' ? (stockPlan?.managed ? plannedText(stockPlan) : quantityText(quantities)) : asText(app, field)}
                       channelValue={channel ? asText(channel, field) : null}
                       channelName={channelName}
                       editable={editable}

@@ -7,7 +7,7 @@ import { mercadolibreSales, parseOrder } from '@/channels/mercadolibre/sales';
 import { available, copySkus, initialStock, listingMeasure, matchSlot, observedStock, parseStockChange, plannedQuantities, stockSlots, unitParts, type StockSource } from '@/domain/stock';
 import { encrypt } from '@/lib/crypto';
 import { handleSalesNotice, readSales, recordOrder, setProductStock, startStock, syncStock, affectedPublications, reconcileStock } from '@/lib/stock';
-import { plansFor } from '@/lib/stock-plan';
+import { managedNote, plannedText, plansFor } from '@/lib/stock-plan';
 import { saveQuantities } from '@/lib/quantities';
 import type { ChannelOrder } from '@/channels/sales';
 
@@ -350,7 +350,15 @@ describe.skipIf(!url)('el stock en la base', () => {
     expect(await stockOf(ids.juego)).toEqual({ STD: 3, '0.50': 4 });
     const plans = await plansFor(db, [std.id, half.id]);
     expect(plans.get(std.id)).toMatchObject({ managed: true, pending: true, lines: [{ quantity: 3 }] });
-    expect(plans.get(half.id)).toMatchObject({ managed: true, pending: true, lines: [{ quantity: 4 }] });
+    const halfPlan = plans.get(half.id)!;
+    expect(halfPlan).toMatchObject({ managed: true, pending: true, lines: [{ quantity: 4 }], measure: { label: '0.50', sku: 'AROS-050' } });
+    // La pantalla dice qué medida vende y por qué.
+    if (!halfPlan.managed) throw new Error('sigue al stock');
+    expect(plannedText(halfPlan)).toBe('0.50: 4');
+    expect(managedNote(halfPlan, 'Mercado Libre')).toBe(
+      'Vende solo la medida 0.50 del producto, por su SKU AROS-050 en Mercado Libre. La cantidad sale del stock del producto: cambiala en el producto y se sube sola.',
+    );
+    expect(managedNote({ ...halfPlan, measure: { label: 'AROS-050', sku: 'AROS-050' } }, 'Mercado Libre')).toMatch(/^Vende solo la medida AROS-050 del producto\. /);
 
     // Una venta de la 0.50 descuenta solo esa medida y se sube a las que la tienen.
     await reconcileStock(db, { budgetMs: 10_000 });
