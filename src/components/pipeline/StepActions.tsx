@@ -2,14 +2,17 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, ArrowRight, Check, MoveRight } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, ChevronDown, MoveRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { nextStep, PIPELINE_STEP_LABEL, previousStep } from '@/domain/pipeline';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { nextStep, PIPELINE_STEP_LABEL, PIPELINE_STEPS, previousStep } from '@/domain/pipeline';
 import type { PipelineStep } from '@/generated/prisma/enums';
 import { jumpStepAction, moveStepAction } from '@/app/a/[cuenta]/pipeline/actions';
 import { RemoveFromPipelineDialog } from './RemoveFromPipelineDialog';
 
-// Los botones de abajo de cada paso: volver, avanzar o, en el último, marcarla como corregida.
+// Los botones de abajo de cada paso: volver, avanzar o, en el último, marcarla
+// como corregida. Pegada al botón principal, una flecha abre la lista de los
+// pasos para llevarla a cualquier otro, saltando los del medio.
 export function StepActions({
   accountSlug,
   publicationId,
@@ -39,6 +42,45 @@ export function StepActions({
     });
   }
 
+  // Lleva a otro paso y abre ese paso.
+  function jump(to: PipelineStep) {
+    setError(null);
+    startTransition(async () => {
+      const r = await jumpStepAction(accountSlug, publicationId, step, to).catch(() => null);
+      if (!r) return setError('Se cortó la conexión con la app.');
+      if (!r.ok) return setError(r.error);
+      router.push(`/a/${accountSlug}/pipeline/${publicationId}`);
+      router.refresh();
+    });
+  }
+
+  const others = (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          disabled={pending}
+          aria-label="Elegir otro paso"
+          title="Elegir otro paso"
+          className="rounded-l-none border-l border-primary-foreground/25 px-2"
+        >
+          <ChevronDown className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">Mover a otro paso</DropdownMenuLabel>
+        {PIPELINE_STEPS.map((s, i) =>
+          s === step ? null : (
+            <DropdownMenuItem key={s} onSelect={() => jump(s)}>
+              <span className="w-4 text-right text-xs tabular-nums text-muted-foreground">{i + 1}</span>
+              {PIPELINE_STEP_LABEL[s]}
+              {s === next ? <span className="ml-auto text-xs text-muted-foreground">siguiente</span> : null}
+            </DropdownMenuItem>
+          ),
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -48,17 +90,20 @@ export function StepActions({
             Volver a {PIPELINE_STEP_LABEL[previous]}
           </Button>
         ) : null}
-        {next ? (
-          <Button pending={pending} onClick={() => move('advance')} disabled={pending}>
-            {pending ? 'Moviendo…' : `Avanzar a ${PIPELINE_STEP_LABEL[next]}`}
-            <ArrowRight className="h-4 w-4" />
-          </Button>
-        ) : (
-          <Button pending={pending} onClick={() => move('complete')} disabled={pending || completeBlocked !== null}>
-            <Check className="h-4 w-4" />
-            {pending ? 'Guardando…' : 'Marcar como corregida'}
-          </Button>
-        )}
+        <span className="inline-flex">
+          {next ? (
+            <Button className="rounded-r-none" pending={pending} onClick={() => move('advance')} disabled={pending}>
+              {pending ? 'Moviendo…' : `Avanzar a ${PIPELINE_STEP_LABEL[next]}`}
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          ) : (
+            <Button className="rounded-r-none" pending={pending} onClick={() => move('complete')} disabled={pending || completeBlocked !== null}>
+              <Check className="h-4 w-4" />
+              {pending ? 'Guardando…' : 'Marcar como corregida'}
+            </Button>
+          )}
+          {others}
+        </span>
         {!next && completeBlocked ? <span className="text-sm text-muted-foreground">{completeBlocked}</span> : null}
         <span className="sm:ml-auto">
           <RemoveFromPipelineDialog accountSlug={accountSlug} publicationId={publicationId} title={title} step={step} />
