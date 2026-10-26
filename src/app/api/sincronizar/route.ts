@@ -6,11 +6,12 @@ import { renewDiscounts } from '@/lib/channel-push';
 import { readAllQuestions } from '@/lib/buyer-questions';
 import { answerAlone } from '@/lib/answers';
 import { isAiConfigured } from '@/ai/claude';
+import { sendTaskMail } from '@/lib/task-mail';
 
 // La tarea programada: lee las preguntas de los compradores y las
 // publicaciones de las tiendas conectadas, responde las preguntas de las
-// publicaciones en que Claude responde solo, y renueva los descuentos que subió
-// la app antes de que venzan. La llaman Vercel una vez por día
+// publicaciones en que Claude responde solo, manda los mails de las tareas y
+// renueva los descuentos que subió la app antes de que venzan. La llaman Vercel una vez por día
 // (vercel.json) y GitHub cada hora (.github/workflows/leer-canales.yml), con
 // la clave CRON_SECRET. Cada pedido lee lo que alcanza en su tiempo; pending
 // dice si conviene llamar otra vez.
@@ -23,6 +24,8 @@ export const maxDuration = 60;
 const BUDGET_MS = 35_000;
 // Primero las preguntas, que esperan respuesta. La primera vez traen las anteriores por tandas.
 const QUESTIONS_BUDGET_MS = 10_000;
+// Los mails de las tareas: cada uno es un pedido corto.
+const MAIL_BUDGET_MS = 5_000;
 // Después, los descuentos por vencer: cada uno son unos pocos pedidos.
 const RENEW_BUDGET_MS = 6_000;
 
@@ -40,12 +43,14 @@ export async function GET(request: Request) {
   const questions = await readAllQuestions(prisma, { budgetMs: QUESTIONS_BUDGET_MS });
   // Las que llegaron sin el aviso del canal: una por pedido.
   const alone = await answerAlone(prisma, { aiReady: isAiConfigured() });
+  const mails = await sendTaskMail(prisma, { budgetMs: MAIL_BUDGET_MS });
   const renewals = await renewDiscounts(prisma, { budgetMs: RENEW_BUDGET_MS });
   const result = await syncAllStores(prisma, { budgetMs: BUDGET_MS - (Date.now() - started) });
   return NextResponse.json({
-    pending: result.pending || questions.pending || alone.pending || renewals.pending,
+    pending: result.pending || questions.pending || alone.pending || renewals.pending || mails.pending,
     stores: result.stores.map((s) => ({ status: s.status, read: s.position, total: s.total })),
     renewed: renewals.renewed,
     answered: alone.sent,
+    mails: mails.sent,
   });
 }

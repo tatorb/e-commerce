@@ -16,6 +16,7 @@ Conceptos:
 - Investigación del producto, en el paso Información: lo del fabricante, lo que sabe la tienda (contexto, preguntas frecuentes, condiciones y aclaraciones), aclaraciones para las imágenes, preguntas de los compradores, y sus dolores y objeciones. Es del producto: la comparten todas sus publicaciones, salvo las preguntas que recibió cada publicación.
 - Datos de catálogo, en el paso Información: los campos del formulario del canal para la categoría de la publicación, con las mismas opciones del canal. Son de la publicación. La categoría sale de la familia del producto o se elige a mano. Marca, número de pieza y origen salen de la ficha.
 - Paso Preguntas y respuestas: las preguntas frecuentes de la publicación con la respuesta de la tienda, y las reglas de cuándo responde la IA y cuándo una persona. Son de la publicación, no del producto, y las lee la IA que responde a los compradores. En cada publicación se puede prender que la IA mande sola las respuestas de las que está segura; las demás quedan en Preguntas, marcadas Para una persona.
+- Tareas: lo que tiene que hacer alguien del equipo en la cuenta, con una o varias personas, ninguna o varias publicaciones, fecha de aviso, fecha de finalización y estado (pendiente, en proceso, finalizada o suspendida). Sus personas reciben un mail al asignársela, al llegar el aviso y si vence sin terminar. Cada persona ve y mueve sus tareas; para ver las de todos, crearlas o editarlas hace falta el permiso de Tareas.
 - Paso Título: semillas, sugerencias del buscador del canal, mapa de palabras (se tildan las que se usan), búsquedas principales con su posición, propuestas y aprobación. Si la publicación tiene ventas, el título está bloqueado: se mantiene o se prueba en una copia con cuotas.
 
 Cómo trabajar:
@@ -29,6 +30,7 @@ Cómo trabajar:
 - Lo que cambia en la app queda como borrador: no llega solo al canal. La persona lo sube desde la página de la publicación o desde Por subir, en el Pipeline. Lo que cambia en el canal la app lo lee sola cada hora.
 - La ficha técnica (save_technical_sheet) y el contenido del kit (save_kit_contents) son del producto: cargá solo datos de la ficha, del fabricante o que te dio la persona, nunca supuestos.
 - Para no cargar dos veces lo mismo en publicaciones del mismo producto, copialo con copy_publication_data.
+- Para crear una tarea, confirmá con la persona el título, quiénes, las publicaciones y las fechas. Las fechas van en la zona horaria de la cuenta. Para cambiarle el estado o algo más, buscala antes con list_tasks.
 - Para mover de paso, consultá antes en qué paso está la publicación y pasalo en desde_paso.
 - Antes de crear una publicación, aprobar o cambiar un título, decidir sobre un título bloqueado, sacar algo del pipeline, cambiar la ficha, reemplazar la ficha técnica, copiar datos entre publicaciones, cambiar un código del canal ya cargado, editar las reglas o cambiar muchas publicaciones a la vez, mostrale a la persona qué vas a hacer y esperá que confirme.
 - Cada cambio queda a nombre de la persona que conectó a Claude, igual que si lo hiciera en la app.

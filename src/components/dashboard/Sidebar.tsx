@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { cookies } from 'next/headers';
-import { AlignLeft, DollarSign, History, Image as ImageIcon, KanbanSquare, ListChecks, MessageCircleQuestion, MessageSquareText, Package, PlugZap, RefreshCw, SlidersHorizontal, Type, Upload, Users } from 'lucide-react';
+import { AlignLeft, DollarSign, History, Image as ImageIcon, KanbanSquare, ListChecks, ListTodo, MessageCircleQuestion, MessageSquareText, Package, PlugZap, RefreshCw, SlidersHorizontal, Type, Upload, Users } from 'lucide-react';
 import { NavLink } from '@/components/dashboard/NavLink';
 import { SidebarShell } from '@/components/dashboard/SidebarShell';
 import { SidebarToggle } from '@/components/dashboard/SidebarToggle';
@@ -11,7 +11,7 @@ import {
 import { SessionFooter } from '@/components/auth/SessionFooter';
 import { Separator } from '@/components/ui/separator';
 import type { CurrentUser } from '@/lib/auth/session';
-import { can, SETTINGS_SECTIONS, type Section } from '@/domain/access';
+import { can, isOwnSection, SETTINGS_SECTIONS, type Section } from '@/domain/access';
 import { BRAND_ICON, BRAND_LOGO } from '@/lib/brand';
 
 // Menú lateral con la misma estructura que app.studiomrb.com: cabecera fija
@@ -22,6 +22,7 @@ export async function Sidebar({
   account,
   accounts,
   questions = 0,
+  tasks = 0,
   className,
 }: {
   user: CurrentUser;
@@ -30,12 +31,15 @@ export async function Sidebar({
   accounts: AccountOption[];
   // Preguntas de los compradores sin responder.
   questions?: number;
+  // Tareas suyas que ya llegaron al aviso o vencieron.
+  tasks?: number;
   className?: string;
 }) {
   const accountHome = account ? `/a/${account.slug}` : null;
   const logoHref = accountHome ?? '/equipo';
-  // Cada sección se ve en el menú solo si la persona la puede ver.
-  const sees = (section: Section) => accountHome !== null && can(user.access, section, 'read');
+  // Cada sección se ve en el menú solo si la persona la puede ver. Tareas se ve
+  // siempre: cada uno ve las suyas.
+  const sees = (section: Section) => accountHome !== null && (isOwnSection(section) || can(user.access, section, 'read'));
   const settings = SETTINGS_SECTIONS.some(sees);
   const collapsed = (await cookies()).get('sidebar_collapsed')?.value === '1';
 
@@ -87,6 +91,11 @@ export async function Sidebar({
           {sees('preguntas') ? (
             <NavLink href={`${accountHome}/preguntas`} label="Preguntas" badge={questions}>
               <MessageCircleQuestion className="h-4 w-4" />
+            </NavLink>
+          ) : null}
+          {sees('tareas') ? (
+            <NavLink href={`${accountHome}/tareas`} label="Tareas" badge={tasks}>
+              <ListTodo className="h-4 w-4" />
             </NavLink>
           ) : null}
           {sees('importar') ? (

@@ -6,6 +6,7 @@ import { visibleAccounts } from '@/lib/queries/accounts';
 import { can } from '@/domain/access';
 import { AccessProvider } from '@/components/access/AccessProvider';
 import { prisma } from '@/lib/db';
+import { attentionCount } from '@/lib/tasks';
 
 // Arma la pantalla con sesión: menú lateral con la cuenta y el área central.
 // Sin cuenta en la dirección (por ejemplo en Equipo), muestra la primera que
@@ -25,12 +26,21 @@ export async function AppFrame({
 
   const options = accounts.map((a) => ({ slug: a.slug, name: a.name }));
   // Las preguntas sin responder, para verlas apenas se entra.
-  const questions =
+  // Y sus tareas que ya llegaron al aviso o vencieron.
+  const [questions, tasks] = await Promise.all([
     account && can(user.access, 'preguntas', 'read')
-      ? await prisma.buyerQuestion.count({ where: { status: 'UNANSWERED', store: { accountId: account.id } } })
-      : 0;
+      ? prisma.buyerQuestion.count({ where: { status: 'UNANSWERED', store: { accountId: account.id } } })
+      : 0,
+    account ? attentionCount(prisma, { accountId: account.id, userId: user.id, timeZone: account.timezone }) : 0,
+  ]);
   const sidebar = (
-    <Sidebar user={user} account={account ? { slug: account.slug, name: account.name } : null} accounts={options} questions={questions} />
+    <Sidebar
+      user={user}
+      account={account ? { slug: account.slug, name: account.name } : null}
+      accounts={options}
+      questions={questions}
+      tasks={tasks}
+    />
   );
   return (
     <AppShell sidebar={sidebar} homeHref={account ? `/a/${account.slug}` : '/equipo'}>

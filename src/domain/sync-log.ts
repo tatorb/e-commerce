@@ -92,7 +92,8 @@ export function logReads(f: LogFilters): 'none' | 'problems' | 'all' {
   return f.types.includes('fallidas') ? 'problems' : 'none';
 }
 
-function offsetMs(at: Date, timeZone: string): number {
+/** Cuánto adelanta o atrasa la zona horaria respecto de UTC en ese momento. */
+export function offsetMs(at: Date, timeZone: string): number {
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat('en-US', {
       timeZone,

@@ -16,6 +16,8 @@ import { listToPush } from '@/lib/queries/sync';
 import { unansweredSummary } from '@/lib/queries/questions';
 import { plural } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
+import { prisma } from '@/lib/db';
+import { openTasksByPublication } from '@/lib/tasks';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,7 +35,7 @@ export default async function PipelinePage({
   searchParams: Promise<{ tipo?: string; vista?: string }>;
 }) {
   const [{ cuenta }, { tipo, vista }] = await Promise.all([params, searchParams]);
-  const { account } = await requireAccount(cuenta, 'pipeline');
+  const { user, account } = await requireAccount(cuenta, 'pipeline');
 
   const kinds = parseKinds(tipo);
   const toPushView = vista === 'por-subir';
@@ -45,6 +47,8 @@ export default async function PipelinePage({
     unansweredSummary(account.id),
   ]);
   const items = kinds.length > 0 ? all.filter((i) => kinds.includes(i.kind)) : all;
+  // Cuántas tareas abiertas tiene cada tarjeta.
+  const tasks = Object.fromEntries(await openTasksByPublication(prisma, { publicationIds: items.map((i) => i.id), viewer: user }));
   const catalogHref = `/a/${account.slug}/publicaciones?pipeline=UNTOUCHED,DISCARDED`;
 
   return (
@@ -136,7 +140,7 @@ export default async function PipelinePage({
                 En cada paso, las que esperan hace más tiempo van primero.
               </p>
             </div>
-            <PipelineBoard accountSlug={account.slug} items={items} showStore={stores.length > 1} />
+            <PipelineBoard accountSlug={account.slug} items={items} showStore={stores.length > 1} openTasks={tasks} />
           </>
         )}
       </PageBody>

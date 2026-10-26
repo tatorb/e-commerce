@@ -27,7 +27,9 @@ describe('herramientas de escritura en la lista', () => {
     for (const name of ['save_technical_sheet', 'save_kit_contents', 'set_publication_title', 'copy_publication_data', 'save_store_knowledge', 'save_publication_qa']) {
       expect(tools.get(name)).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     }
-    expect(tools.size).toBe(33);
+    expect(tools.get('create_task')).toMatchObject({ readOnlyHint: false, destructiveHint: false });
+    expect(tools.get('update_task')).toMatchObject({ readOnlyHint: false, destructiveHint: false });
+    expect(tools.size).toBe(36);
   });
 });
 

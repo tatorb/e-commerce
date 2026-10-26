@@ -12,6 +12,7 @@ import { CryptoError } from '@/lib/crypto';
 import { DriveError, disconnectDrive, saveDriveCredentials, startDriveAuthorization } from '@/lib/drive';
 import { deleteVercelBatch, moveBatch, type MoveResult } from '@/lib/move-to-drive';
 import { storageError } from '@/lib/stored-files';
+import { sendEmail } from '@/lib/email';
 
 // Cortar las conexiones de Claude, cada persona solo las suyas, la llave del
 // trabajador de imágenes y la conexión con el Drive, que son del estudio y solo
@@ -136,5 +137,21 @@ export async function deleteVercelFilesAction(): Promise<{ ok: true; deleted: nu
       if (message) return { ok: false, error: message };
       throw e;
     }
+  });
+}
+
+// ───────────────────────────── Mails ─────────────────────────────
+
+/** Un mail de prueba al administrador, para ver que Resend quedó bien configurado. */
+export async function sendTestEmailAction(): Promise<Result> {
+  return actAsAdmin({ does: 'Mandó un mail de prueba' }, async (user) => {
+    const r = await sendEmail({
+      to: user.email,
+      subject: 'Prueba de E-commerce Studio MRB',
+      text: `Hola ${user.name},\n\nSi te llegó este mail, los avisos de las tareas ya pueden salir.`,
+      html: `<p>Hola ${user.name.replace(/[<>&]/g, '')},</p><p>Si te llegó este mail, los avisos de las tareas ya pueden salir.</p>`,
+      key: `prueba-${user.id}-${Date.now()}`,
+    });
+    return r.ok ? { ok: true as const } : { ok: false as const, error: r.error };
   });
 }

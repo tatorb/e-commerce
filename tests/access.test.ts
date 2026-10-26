@@ -42,7 +42,9 @@ describe('permisos', () => {
     expect(accessSummary({ isAdmin: false, permissions: { pipeline: 'write', registro: 'read' } })).toBe('Ve 2 secciones y cambia en 1');
     expect(accessSummary({ isAdmin: false, permissions: { preguntas: 'read' } })).toBe('Solo ve 1 sección');
     expect(firstSection({ isAdmin: false, permissions: { subir: 'write', preguntas: 'read' } })).toBe('preguntas');
-    expect(firstSection({ isAdmin: false, permissions: { subir: 'write' } })).toBeNull();
+    // Sin nada más, sus tareas, que se ven siempre.
+    expect(firstSection({ isAdmin: false, permissions: { subir: 'write' } })).toBe('tareas');
+    expect(firstSection({ isAdmin: false, permissions: { importar: 'read' } })).toBe('importar');
     expect(sectionLabel('reglas')).toBe('Reglas de título');
     expect(sectionLabel('equipo')).toBe('Equipo');
   });

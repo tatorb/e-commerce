@@ -1,6 +1,6 @@
 import { cache } from 'react';
 import { notFound, redirect } from 'next/navigation';
-import { can, canSeeAccount, type Section } from '@/domain/access';
+import { can, canSeeAccount, isOwnSection, type Section } from '@/domain/access';
 import { getCurrentUser, requireUser } from '@/lib/auth/session';
 import { getAccountBySlug } from '@/lib/queries/accounts';
 
@@ -11,12 +11,13 @@ import { getAccountBySlug } from '@/lib/queries/accounts';
 
 /**
  * La cuenta de la dirección, solo con sesión y si la persona la ve. Con una
- * sección, también tiene que poder verla: si no, va al aviso de que no tiene permiso.
+ * sección, también tiene que poder verla: si no, va al aviso de que no tiene
+ * permiso. Donde cada uno ve lo suyo, como Tareas, entra igual.
  */
 export const requireAccount = cache(async (slug: string, section?: Section) => {
   const [user, account] = await Promise.all([requireUser(), getAccountBySlug(slug)]);
   if (!account || !canSeeAccount(user.access, account.id)) notFound();
-  if (section && !can(user.access, section, 'read')) redirect(`/a/${account.slug}/sin-permiso?seccion=${section}`);
+  if (section && !isOwnSection(section) && !can(user.access, section, 'read')) redirect(`/a/${account.slug}/sin-permiso?seccion=${section}`);
   return { user, account, canWrite: section ? can(user.access, section, 'write') : false };
 });
 

@@ -56,6 +56,9 @@ import { latestPriceDecision, loadPriceStep, productPricing } from '@/lib/pricin
 import { PriceDecisionCard } from '@/components/pipeline/price/PriceDecisionCard';
 import { QuantityCard } from '@/components/pipeline/QuantityCard';
 import { todayIn } from '@/domain/applications';
+import { PublicationTasksCard } from '@/components/tasks/PublicationTasksCard';
+import { assignablePeople, tasksOfPublication } from '@/lib/tasks';
+import { can } from '@/domain/access';
 
 export const dynamic = 'force-dynamic';
 // Leer el buscador letra por letra o pedir títulos a la IA puede tardar.
@@ -89,7 +92,7 @@ export default async function PipelineStepPage({
 }) {
   const { cuenta, id } = await params;
   const { paso, foto, fotos } = await searchParams;
-  const { account } = await requireAccount(cuenta, 'pipeline');
+  const { user, account } = await requireAccount(cuenta, 'pipeline');
   const pub = await getPipelinePublication(account.id, id);
   if (!pub) notFound();
 
@@ -106,7 +109,8 @@ export default async function PipelineStepPage({
   const lock = pub.titleLock.locked ? titleLockText(pub.titleLock) : null;
   // Lo que usa el paso que se mira, pedido todo junto: con la base lejos, cada
   // consulta en fila suma una ida y vuelta.
-  const [ctx, info, images, channel, faces, media, create, videos, description, qa, price, decision] = await Promise.all([
+  const canTask = can(user.access, 'tareas', 'write');
+  const [ctx, info, images, channel, faces, media, create, videos, description, qa, price, decision, tasks, people] = await Promise.all([
     // Información y Título usan la ficha, la competencia y lo leído del buscador.
     viewing === 'INFO' || viewing === 'TITLE' ? loadTitleContext(prisma, account.id, pub.id) : null,
     viewing === 'INFO'
@@ -150,6 +154,9 @@ export default async function PipelineStepPage({
     // Precio usa el costo, los parámetros y la competencia; Información, el envío; Publicación, el precio decidido.
     viewing === 'PRICE' ? loadPriceStep(prisma, account.id, pub.id) : null,
     viewing === 'PUBLISH' ? latestPriceDecision(prisma, pub.id) : null,
+    // Las tareas de la publicación, en todos los pasos.
+    tasksOfPublication(prisma, { publicationId: pub.id, viewer: user, timeZone: account.timezone }),
+    canTask ? assignablePeople(prisma, account.id) : [],
   ]);
   const auto = ctx && viewing === 'TITLE' ? await autoAvailable(prisma, ctx.channel, ctx.storeId) : null;
 
@@ -385,6 +392,16 @@ export default async function PipelineStepPage({
             completeBlocked={pub.externalId ? null : 'Para marcarla como corregida, cargá antes su ID.'}
           />
         ) : null}
+
+        <PublicationTasksCard
+          accountSlug={account.slug}
+          publication={{ id: pub.id, title: titleOrUntitled(pub.title), externalId: pub.externalId }}
+          tasks={tasks}
+          people={people}
+          meId={user.id}
+          canCreate={canTask}
+          timeZone={account.timezone}
+        />
 
         {pub.movements.length > 0 ? (
           <SectionCard title="Historial del pipeline" description="Cuánto estuvo en cada paso, quién la movió y por qué salió.">

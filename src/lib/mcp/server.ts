@@ -5,8 +5,10 @@ import { PipelineError } from '@/domain/pipeline';
 import { ResearchError } from '@/domain/research';
 import { TitleError } from '@/domain/title-work';
 import { TechnicalSheetError } from '@/domain/technical-sheet';
+import { TaskError } from '@/domain/tasks';
 import { READ_TOOLS } from './read-tools';
 import { WRITE_TOOLS } from './write-tools';
+import { TASK_TOOLS } from './task-tools';
 import { MCP_INSTRUCTIONS } from './instructions';
 import { McpToolError, type McpContext, type McpTool } from './tool';
 import { can, SECTIONS } from '@/domain/access';
@@ -18,7 +20,7 @@ import { logActivity } from '@/lib/activity';
 const SUPPORTED_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 const SERVER_INFO = { name: 'ecommerce-studio-mrb', title: 'E-commerce Studio MRB', version: '1.0.0' };
 
-export const TOOLS: McpTool[] = [...READ_TOOLS, ...WRITE_TOOLS];
+export const TOOLS: McpTool[] = [...READ_TOOLS, ...WRITE_TOOLS, ...TASK_TOOLS];
 
 export type RpcMessage = {
   jsonrpc?: string;
@@ -36,7 +38,7 @@ export const rpcError = (id: RpcMessage['id'], code: number, message: string) =>
 
 /** Si la persona puede usar la herramienta: ver en su sección para las que leen, cambiar para las demás. */
 export function allowed(ctx: Pick<McpContext, 'access'>, t: McpTool): boolean {
-  return !t.section || can(ctx.access, t.section, t.readOnly ? 'read' : 'write');
+  return !t.section || t.own === true || can(ctx.access, t.section, t.readOnly ? 'read' : 'write');
 }
 
 /** Las herramientas que la persona puede usar. */
@@ -99,7 +101,8 @@ async function callTool(ctx: McpContext, name: string, rawArgs: unknown) {
       e instanceof ResearchError ||
       e instanceof CatalogError ||
       e instanceof ComboError ||
-      e instanceof TechnicalSheetError
+      e instanceof TechnicalSheetError ||
+      e instanceof TaskError
     ) {
       return text(e.message.replace(/Recargá la página\./g, 'Volvé a consultarla antes de seguir.'), true);
     }

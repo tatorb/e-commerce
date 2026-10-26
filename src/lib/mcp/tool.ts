@@ -34,6 +34,9 @@ export type McpTool<S extends z.ZodType = z.ZodType> = {
   // La sección, o las secciones, donde la persona tiene que poder ver (las que
   // leen) o cambiar (las demás). Sin sección, alcanza con tener sesión.
   section?: Section | readonly Section[];
+  // La puede usar cualquiera: la herramienta mira ella misma qué puede la
+  // persona, como con sus tareas. La sección queda para la actividad.
+  own?: boolean;
   run: (ctx: McpContext, args: z.output<S>) => Promise<unknown>;
 };
 

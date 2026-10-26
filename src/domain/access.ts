@@ -9,6 +9,8 @@ type SectionSpec = {
   // los canales solo se hace.
   levels: readonly Level[];
   hint?: string;
+  // Cada persona ve y mueve lo suyo aunque no tenga el permiso, como sus tareas.
+  own?: boolean;
 };
 
 export const SECTIONS = {
@@ -21,6 +23,12 @@ export const SECTIONS = {
     hint: 'Mandar los cambios desde Por subir, crear publicaciones en el canal, pausarlas, finalizarlas y republicarlas.',
   },
   preguntas: { label: 'Preguntas', levels: ['read', 'write'], hint: 'Ver y responder las preguntas de los compradores.' },
+  tareas: {
+    label: 'Tareas',
+    levels: ['read', 'write'],
+    hint: 'Ver las tareas de todos, y crearlas y editarlas. Las que tiene asignadas las ve y les cambia el estado siempre.',
+    own: true,
+  },
   importar: { label: 'Importar', levels: ['read', 'write'] },
   sincronizacion: { label: 'Sincronización', levels: ['read', 'write'] },
   registro: { label: 'Registro', levels: ['read'] },
@@ -128,6 +136,7 @@ export const SECTION_PATH: Record<Section, string> = {
   publicaciones: 'publicaciones',
   subir: 'publicaciones',
   preguntas: 'preguntas',
+  tareas: 'tareas',
   importar: 'importar',
   sincronizacion: 'sincronizacion',
   registro: 'registro',
@@ -147,7 +156,10 @@ export function sectionFromPath(pathname: string | null): Section | null {
   return SECTION_KEYS.find((s) => s !== 'subir' && SECTION_PATH[s] === segment) ?? null;
 }
 
-/** El primer lugar que puede ver dentro de una cuenta, para la portada. Null si no ve ninguno. */
-export function firstSection(access: Pick<Access, 'isAdmin' | 'permissions'>): Section | null {
-  return SECTION_KEYS.find((s) => s !== 'subir' && can(access, s, 'read')) ?? null;
+/** Si cada persona ve lo suyo en la sección aunque no tenga el permiso. */
+export const isOwnSection = (section: Section) => (SECTIONS[section] as SectionSpec).own === true;
+
+/** El primer lugar que puede ver dentro de una cuenta, para la portada. Sin permisos, sus tareas. */
+export function firstSection(access: Pick<Access, 'isAdmin' | 'permissions'>): Section {
+  return SECTION_KEYS.find((s) => s !== 'subir' && can(access, s, 'read')) ?? 'tareas';
 }

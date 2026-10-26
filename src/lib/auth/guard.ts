@@ -12,11 +12,14 @@ export type Denied = { ok: false; error: string };
 
 type AccountRow = NonNullable<Awaited<ReturnType<typeof getAccountBySlug>>>;
 
-export type ActSpec = {
+export type ActSpec<R = unknown> = {
   // La sección, o las secciones desde donde se puede hacer: alcanza con poder en una.
   section: Section | readonly Section[];
   // Cambiar, salvo que se diga que solo lee.
   level?: Level;
+  // Lo puede intentar cualquiera que vea la cuenta: la acción mira ella misma
+  // si le toca, como mover una tarea propia. La sección queda para la actividad.
+  own?: boolean;
   // Qué hizo, para la actividad: "Aprobó el título". Sin esto no se anota, como en lo que solo lee.
   does?: string;
   publicationId?: string | null;
@@ -25,6 +28,8 @@ export type ActSpec = {
   questionId?: string | null;
   // Cómo se llamaba, para lo que se borra en la acción.
   targetLabel?: string | null;
+  // Sobre qué, cuando se sabe al terminar: por ejemplo el título de la tarea.
+  targetOf?: (r: R) => string | null | undefined;
   detail?: string | null;
 };
 
@@ -45,12 +50,12 @@ export function deniedFor(section: ActSpec['section'], level: Level): Denied {
 const succeeded = (r: unknown) => !(r && typeof r === 'object' && 'ok' in r && (r as { ok: unknown }).ok === false);
 
 /** Corre la acción de una cuenta con sus permisos, y la anota si salió bien. */
-export async function act<R>(accountSlug: string, spec: ActSpec, run: (ctx: ActContext) => Promise<R>): Promise<R | Denied> {
+export async function act<R>(accountSlug: string, spec: ActSpec<R>, run: (ctx: ActContext) => Promise<R>): Promise<R | Denied> {
   const user = await requireUser();
   const account = await getAccountBySlug(String(accountSlug ?? ''));
   if (!account || !canSeeAccount(user.access, account.id)) return { ok: false, error: 'La cuenta no existe.' };
   const level = spec.level ?? 'write';
-  if (!can(user.access, spec.section, level)) return deniedFor(spec.section, level);
+  if (!spec.own && !can(user.access, spec.section, level)) return deniedFor(spec.section, level);
   const r = await run({ user, account });
   if (spec.does && succeeded(r)) {
     const fromQuestion = spec.questionId && !spec.publicationId
@@ -63,7 +68,7 @@ export async function act<R>(accountSlug: string, spec: ActSpec, run: (ctx: ActC
       summary: spec.does,
       publicationId: spec.publicationId ?? fromQuestion,
       productId: spec.productId ?? null,
-      targetLabel: spec.targetLabel ?? null,
+      targetLabel: spec.targetOf?.(r) ?? spec.targetLabel ?? null,
       detail: spec.detail ?? null,
     });
   }

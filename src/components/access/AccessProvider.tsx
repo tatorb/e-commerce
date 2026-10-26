@@ -3,7 +3,7 @@
 import { createContext, useContext } from 'react';
 import { usePathname } from 'next/navigation';
 import { Eye } from 'lucide-react';
-import { can, sectionFromPath, SECTIONS, type Permissions, type Section } from '@/domain/access';
+import { can, isOwnSection, sectionFromPath, SECTIONS, type Permissions, type Section } from '@/domain/access';
 
 // Lo que puede la persona, para la pantalla: en una sección que solo puede
 // ver, los botones que guardan quedan apagados y arriba se avisa. Lo que
@@ -32,7 +32,8 @@ function ReadOnlyBanner() {
   const access = useContext(AccessContext);
   const pathname = usePathname();
   const section = sectionFromPath(pathname);
-  if (!access || !section || can(access, section, 'write')) return null;
+  // Donde cada persona mueve lo suyo, la pantalla dice ella misma qué puede.
+  if (!access || !section || isOwnSection(section) || can(access, section, 'write')) return null;
   return (
     <p role="note" className="flex items-center gap-2 border-b bg-muted px-4 py-2 text-xs text-muted-foreground md:px-8">
       <Eye className="h-3.5 w-3.5 shrink-0" aria-hidden />

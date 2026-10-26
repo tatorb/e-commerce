@@ -76,6 +76,8 @@ model User {
   descriptionDrafts  DescriptionDraft[]
   pricingSettings    PricingSettings[]    @relation("PricingSettingsUpdatedBy")
   priceDecisions     PriceDecision[]      @relation("PriceDecidedBy")
+  tasksCreated       Task[]               @relation("TaskCreatedBy")
+  tasks              TaskAssignee[]
 
   @@map("users")
 }
@@ -209,6 +211,7 @@ model Account {
   members             UserAccount[]
   activity            ActivityLog[]
   pricingSettings     PricingSettings?
+  tasks               Task[]
 
   @@map("accounts")
 }
@@ -503,6 +506,7 @@ model Publication {
   priceDecisions    PriceDecision[]
   clips             PublicationClip[]
   descriptionDraft  DescriptionDraft?
+  tasks             TaskPublication[]
 
   @@unique([storeId, externalId])
   @@index([pipelineStatus])
@@ -1776,4 +1780,73 @@ model PriceDecision {
 
   @@index([publicationId, decidedAt])
   @@map("price_decisions")
+}
+
+// ───────────────────────────── Tareas ─────────────────────────────
+// Lo que tiene que hacer alguien del equipo en una cuenta, sobre ninguna, una
+// o varias publicaciones (src/domain/tasks.ts).
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  DONE
+  SUSPENDED
+}
+
+model Task {
+  id                String            @id @default(cuid())
+  accountId         String
+  account           Account           @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  title             String
+  description       String            @default("")
+  status            TaskStatus        @default(PENDING)
+  // Cuándo avisarles a sus personas, en la app y por mail.
+  remindAt          DateTime?
+  // El día en que tiene que estar terminada. Vence al terminar ese día, en la
+  // zona horaria de la cuenta.
+  dueOn             DateTime?         @db.Date
+  // Cuándo salió el mail del aviso y el de vencida. Cambiar la fecha los
+  // vuelve a programar.
+  remindedAt        DateTime?
+  overdueNotifiedAt DateTime?
+  // Cuándo pasó a finalizada.
+  doneAt            DateTime?
+  createdById       String?
+  createdBy         User?             @relation("TaskCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  assignees         TaskAssignee[]
+  publications      TaskPublication[]
+
+  @@index([accountId, status])
+  @@index([remindAt])
+  @@index([dueOn])
+  @@map("tasks")
+}
+
+// Las personas de una tarea. Al menos una.
+model TaskAssignee {
+  taskId     String
+  task       Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Cuándo salió el mail de que se la asignaron.
+  notifiedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@id([taskId, userId])
+  @@index([userId])
+  @@map("task_assignees")
+}
+
+// Las publicaciones de una tarea. Puede no tener ninguna.
+model TaskPublication {
+  taskId        String
+  task          Task        @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  publicationId String
+  publication   Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, publicationId])
+  @@index([publicationId])
+  @@map("task_publications")
 }

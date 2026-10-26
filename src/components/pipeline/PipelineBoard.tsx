@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Clock, Lock } from 'lucide-react';
+import { Clock, ListTodo, Lock } from 'lucide-react';
 import { ScoreBadge } from '@/components/stages/ScoreBadge';
 import { KindBadge } from '@/components/products/KindBadge';
 import { codeOrUnpublished } from '@/domain/channel-status';
@@ -13,7 +13,20 @@ import { cn } from '@/lib/utils/cn';
 
 // Tablero del pipeline: una columna por paso. En el celular se desliza de costado.
 
-function BoardCard({ accountSlug, item, now, showStore }: { accountSlug: string; item: BoardItem; now: Date; showStore: boolean }) {
+function BoardCard({
+  accountSlug,
+  item,
+  now,
+  showStore,
+  tasks,
+}: {
+  accountSlug: string;
+  item: BoardItem;
+  now: Date;
+  showStore: boolean;
+  // Sus tareas abiertas.
+  tasks: number;
+}) {
   const lock = item.titleLock.locked ? titleLockText(item.titleLock) : null;
   return (
     <li className="rounded-lg border bg-card text-card-foreground shadow-sm transition-colors hover:border-foreground/25">
@@ -40,6 +53,12 @@ function BoardCard({ accountSlug, item, now, showStore }: { accountSlug: string;
               {formatDuration(item.stepSince, now)}
             </span>
           ) : null}
+          {tasks > 0 ? (
+            <span className="inline-flex items-center gap-1 font-medium text-foreground" title={plural(tasks, 'tarea abierta', 'tareas abiertas')}>
+              <ListTodo className="h-3 w-3" />
+              {tasks}
+            </span>
+          ) : null}
         </div>
       </Link>
       {item.pipelineStep ? (
@@ -61,11 +80,14 @@ export function PipelineBoard({
   accountSlug,
   items,
   showStore = false,
+  openTasks = {},
 }: {
   accountSlug: string;
   items: BoardItem[];
   // La tienda de cada tarjeta, cuando la cuenta tiene más de una.
   showStore?: boolean;
+  // Las tareas abiertas de cada publicación, por su id.
+  openTasks?: Record<string, number>;
 }) {
   const now = new Date();
   return (
@@ -91,7 +113,7 @@ export function PipelineBoard({
             ) : (
               <ul className="space-y-2 px-2 pb-2">
                 {cards.map((item) => (
-                  <BoardCard key={item.id} accountSlug={accountSlug} item={item} now={now} showStore={showStore} />
+                  <BoardCard key={item.id} accountSlug={accountSlug} item={item} now={now} showStore={showStore} tasks={openTasks[item.id] ?? 0} />
                 ))}
               </ul>
             )}

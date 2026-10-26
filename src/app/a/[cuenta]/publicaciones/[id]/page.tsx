@@ -35,6 +35,9 @@ import { loadQaStep } from '@/lib/publication-qa';
 import { titleOrUntitled } from '@/domain/publication-title';
 import { fieldLabel } from '@/domain/sync-log';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
+import { PublicationTasksCard } from '@/components/tasks/PublicationTasksCard';
+import { assignablePeople, tasksOfPublication } from '@/lib/tasks';
+import { can } from '@/domain/access';
 import { formatDateTime, plural } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
 import { loadPublicationFaces, type PublicationFaces } from '@/lib/queries/publication-faces';
@@ -85,7 +88,7 @@ export default async function PublicationPage({
   searchParams: Promise<{ cara?: string }>;
 }) {
   const [{ cuenta, id }, { cara }] = await Promise.all([params, searchParams]);
-  const { account } = await requireAccount(cuenta, 'publicaciones');
+  const { user, account } = await requireAccount(cuenta, 'publicaciones');
   const [data, media] = await Promise.all([loadPublicationFaces(account.id, id), loadMediaSources(prisma, account.id, id).catch(() => null)]);
   // Sin publicar: lo que hace falta para crearla en el canal.
   const create = data && !data.publication.externalId ? await createChecks(prisma, { accountId: account.id, publicationId: id }) : null;
@@ -102,7 +105,8 @@ export default async function PublicationPage({
   const channelOf = channelInfo(p.store.channel.kind, p.store.channel.name);
   const productHref = `/a/${account.slug}/productos/${p.product.id}`;
   // Las otras publicaciones del mismo producto, para pasar de una a otra.
-  const [others, history, knowledge, qa] = await Promise.all([
+  const canTask = can(user.access, 'tareas', 'write');
+  const [others, history, knowledge, qa, tasks, people] = await Promise.all([
     prisma.publication.findMany({
       where: { productId: p.product.id, id: { not: p.id } },
       orderBy: { createdAt: 'asc' },
@@ -119,6 +123,8 @@ export default async function PublicationPage({
     loadKnowledge(prisma, p.product.id),
     // Preguntas y respuestas: es de la publicación.
     face !== 'historial' ? loadQaStep(prisma, { accountId: account.id, publicationId: p.id }) : Promise.resolve(null),
+    face !== 'historial' ? tasksOfPublication(prisma, { publicationId: p.id, viewer: user, timeZone: account.timezone }) : Promise.resolve([]),
+    face !== 'historial' && canTask ? assignablePeople(prisma, account.id) : Promise.resolve([]),
   ]);
   const pushable = summary.draft.filter((f) => data.publishable.includes(f));
 
@@ -390,6 +396,16 @@ export default async function PublicationPage({
 
         {face !== 'historial' ? (
           <>
+        <PublicationTasksCard
+          accountSlug={account.slug}
+          publication={{ id: p.id, title, externalId: p.externalId }}
+          tasks={tasks}
+          people={people}
+          meId={user.id}
+          canCreate={canTask}
+          timeZone={tz}
+        />
+
         <SectionCard
           title="Lo que sabe la tienda"
           description={`Es del producto${others.length > 0 ? ` y lo comparten sus ${others.length + 1} publicaciones` : ''}. Lo usan las respuestas a los compradores y la descripción.`}

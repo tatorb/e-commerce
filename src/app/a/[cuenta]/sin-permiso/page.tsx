@@ -22,13 +22,11 @@ export default async function NoAccessPage({ params, searchParams }: { params: P
         <Card className="space-y-2 p-6 text-sm">
           <p>{name ? `Tu usuario no puede ver ${name} en ${account.name}.` : `Tu usuario no puede ver ninguna sección de ${account.name}.`}</p>
           <p className="text-muted-foreground">Si lo necesitás, pedile el permiso a un administrador.</p>
-          {first ? (
-            <p>
-              <Link href={`/a/${account.slug}/${SECTION_PATH[first]}`} className="font-medium underline-offset-4 hover:underline">
-                Ir a {SECTIONS[first].label}
-              </Link>
-            </p>
-          ) : null}
+          <p>
+            <Link href={`/a/${account.slug}/${SECTION_PATH[first]}`} className="font-medium underline-offset-4 hover:underline">
+              Ir a {SECTIONS[first].label}
+            </Link>
+          </p>
         </Card>
       </PageBody>
     </>

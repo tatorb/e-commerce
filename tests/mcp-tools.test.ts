@@ -29,6 +29,7 @@ describe('lista de herramientas', () => {
       'get_publication',
       'get_title_workspace',
       'check_title',
+      'list_tasks',
     ]);
     for (const t of tools) {
       expect(t.inputSchema.type).toBe('object');

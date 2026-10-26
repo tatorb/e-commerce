@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { headers } from 'next/headers';
 import { History, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { accessSummary, can, parsePermissions, SECTION_KEYS, SECTIONS } from '@/domain/access';
+import { accessSummary, can, isOwnSection, parsePermissions, SECTION_KEYS, SECTIONS } from '@/domain/access';
 import { listUsers } from '@/lib/users';
 import { visibleAccounts } from '@/lib/queries/accounts';
 import { prisma } from '@/lib/db';
@@ -27,6 +27,8 @@ import { isCryptoConfigured, KEY_NOT_CONFIGURED } from '@/lib/crypto';
 import { VercelFilesCard } from '@/components/team/VercelFilesCard';
 import { vercelLeft } from '@/lib/move-to-drive';
 import { isBlobConfigured } from '@/lib/files';
+import { emailFrom, isEmailConfigured } from '@/lib/email';
+import { TestEmailButton } from '@/components/team/TestEmailButton';
 
 export const metadata = { title: 'Equipo' };
 
@@ -134,12 +136,18 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
                 {myAccounts.length > 0 ? myAccounts.map((a) => a.name).join(', ') : 'ninguna.'}
               </p>
               <ul className="space-y-0.5">
-                {SECTION_KEYS.filter((s) => can(me.access, s, 'read') || can(me.access, s, 'write')).map((s) => (
+                {SECTION_KEYS.filter((s) => can(me.access, s, 'read') || can(me.access, s, 'write') || isOwnSection(s)).map((s) => (
                   <li key={s}>
                     {SECTIONS[s].label}
                     <span className="text-muted-foreground">
                       {' · '}
-                      {s === 'subir' ? 'puede' : can(me.access, s, 'write') ? 've y cambia' : 'solo ve'}
+                      {s === 'subir'
+                        ? 'puede'
+                        : can(me.access, s, 'write')
+                          ? 've y cambia'
+                          : can(me.access, s, 'read')
+                            ? 'solo ve'
+                            : 've y mueve las suyas'}
                     </span>
                   </li>
                 ))}
@@ -234,6 +242,28 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
                   />
                 ) : (
                   <p className="text-sm text-muted-foreground">{KEY_NOT_CONFIGURED}</p>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card id="mails">
+              <CardHeader>
+                <CardTitle>Mails de las tareas</CardTitle>
+                <CardDescription>
+                  Los avisos por mail de las tareas: al asignarla, al llegar la fecha de aviso y si vence sin terminar. Salen con Resend.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                {isEmailConfigured() ? (
+                  <>
+                    <p>Prendidos. Salen desde {emailFrom()}.</p>
+                    <TestEmailButton email={me.email} />
+                  </>
+                ) : (
+                  <p className="text-muted-foreground">
+                    Apagados. Para prenderlos, cargá la clave de Resend en Vercel como RESEND_API_KEY y quién los manda como EMAIL_FROM. Mientras
+                    tanto, los avisos se ven en la app.
+                  </p>
                 )}
               </CardContent>
             </Card>
