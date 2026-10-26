@@ -27,6 +27,7 @@ import { getProduct, listStores, type ProductDetail } from '@/lib/queries/produc
 import { loadResearch } from '@/lib/queries/research';
 import { loadRulesByChannel, toScoreInput } from '@/lib/queries/scoring';
 import { publicationFigures } from '@/lib/publication-figures';
+import { publicationFacts } from '@/lib/publication-facts';
 import { plansFor } from '@/lib/stock-plan';
 
 export const dynamic = 'force-dynamic';
@@ -107,6 +108,7 @@ export default async function ProductPage({
   const channels = new Map(pubs.map((p) => [p.id, channelInfo(p.store.channel.kind, p.store.channel.name)]));
   const scores = new Map(pubs.map((p) => [p.id, scorePublication(rules.get(p.store.channelId) ?? [], toScoreInput(product, p)).score]));
   const figures = new Map(pubs.map((p) => [p.id, publicationFigures(p, product, plans.get(p.id) ?? null)]));
+  const facts = new Map(pubs.map((p) => [p.id, publicationFacts(p, product)]));
   const known = [...scores.values()].filter((s): s is number => s !== null);
   const inPipeline = pubs.filter((p) => p.pipelineStatus === 'IN_PIPELINE').length;
   const measures = product.variants.map((v) => v.measure?.trim()).filter(Boolean);
@@ -166,7 +168,7 @@ export default async function ProductPage({
           panels={{
             publicaciones:
               pubs.length > 0 ? (
-                <ProductPublications accountSlug={account.slug} publications={pubs} channels={channels} scores={scores} figures={figures} />
+                <ProductPublications accountSlug={account.slug} publications={pubs} channels={channels} scores={scores} figures={figures} facts={facts} />
               ) : (
                 <div className="space-y-3 rounded-lg border border-dashed p-8 text-center">
                   <p className="text-sm text-muted-foreground">

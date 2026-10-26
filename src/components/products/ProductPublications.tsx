@@ -8,10 +8,11 @@ import { ScoreBadge } from '@/components/stages/ScoreBadge';
 import { ChannelStatusBadge, PipelineBadge } from '@/components/stages/StageBadge';
 import { codeOrUnpublished } from '@/domain/channel-status';
 import { faceSummary, faceValues, fingerprintsOf } from '@/domain/channel-sync';
-import { parseVariantListings } from '@/domain/media';
 import { titleOrUntitled } from '@/domain/publication-title';
 import type { ChannelInfo } from '@/channels';
 import type { PublicationFigures } from '@/lib/publication-figures';
+import type { PublicationFacts } from '@/lib/publication-facts';
+import { PublicationFactsRow } from '@/components/publication/PublicationFactsRow';
 import type { ProductDetail } from '@/lib/queries/products';
 import { cn } from '@/lib/utils/cn';
 
@@ -88,19 +89,20 @@ export function ProductPublications({
   channels,
   scores,
   figures,
+  facts,
 }: {
   accountSlug: string;
   publications: Publication[];
   channels: Map<string, ChannelInfo>;
   scores: Map<string, number | null>;
   figures: Map<string, PublicationFigures>;
+  facts: Map<string, PublicationFacts>;
 }) {
   return (
     <ul className="space-y-3">
       {publications.map((pub) => {
         const channel = channels.get(pub.id)!;
         const summary = faceSummary(fingerprintsOf(faceValues(pub)), pub.channelCopy);
-        const family = parseVariantListings(pub.variantListings);
         const href = `/a/${accountSlug}/publicaciones/${pub.id}`;
         return (
           <li key={pub.id} className="space-y-3 rounded-lg border bg-card p-3 shadow-sm md:p-4">
@@ -112,8 +114,8 @@ export function ProductPublications({
                 </Link>
                 <p className="text-xs text-muted-foreground">
                   {pub.store.name} · {codeOrUnpublished(pub.externalId)}
-                  {family.length >= 2 ? ` · ${family.length} medidas en publicaciones aparte` : ''}
                 </p>
+                <PublicationFactsRow facts={facts.get(pub.id)!} />
               </div>
               <ScoreBadge score={scores.get(pub.id) ?? null} className="shrink-0" />
             </div>

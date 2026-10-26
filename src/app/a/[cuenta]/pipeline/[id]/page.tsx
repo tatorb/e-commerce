@@ -13,6 +13,8 @@ import { KindBadge } from '@/components/products/KindBadge';
 import { loadCombo } from '@/lib/queries/combos';
 import { StepLine } from '@/components/pipeline/StepLine';
 import { JumpHereButton, StepActions } from '@/components/pipeline/StepActions';
+import { PublicationFactsRow } from '@/components/publication/PublicationFactsRow';
+import { loadPublicationFacts } from '@/lib/publication-facts';
 import { PipelineHistory } from '@/components/pipeline/PipelineHistory';
 import { AddToPipelineButton } from '@/components/pipeline/AddToPipelineButton';
 import { PublicationCodeCard } from '@/components/pipeline/PublicationCodeCard';
@@ -112,7 +114,7 @@ export default async function PipelineStepPage({
   // Lo que usa el paso que se mira, pedido todo junto: con la base lejos, cada
   // consulta en fila suma una ida y vuelta.
   const canTask = can(user.access, 'tareas', 'write');
-  const [ctx, info, images, channel, faces, media, create, videos, description, qa, price, decision, tasks, people, stockPlans] = await Promise.all([
+  const [ctx, info, images, channel, faces, media, create, videos, description, qa, price, decision, tasks, people, stockPlans, factsOf] = await Promise.all([
     // Información y Título usan la ficha, la competencia y lo leído del buscador.
     viewing === 'INFO' || viewing === 'TITLE' ? loadTitleContext(prisma, account.id, pub.id) : null,
     viewing === 'INFO'
@@ -160,7 +162,10 @@ export default async function PipelineStepPage({
     tasksOfPublication(prisma, { publicationId: pub.id, viewer: user, timeZone: account.timezone }),
     canTask ? assignablePeople(prisma, account.id) : [],
     viewing === 'PUBLISH' || viewing === 'INFO' ? plansFor(prisma, [pub.id]) : null,
+    // El código, las medidas y la respuesta automática, para el encabezado.
+    loadPublicationFacts(prisma, [pub.id]),
   ]);
+  const facts = factsOf.get(pub.id) ?? null;
   const auto = ctx && viewing === 'TITLE' ? await autoAvailable(prisma, ctx.channel, ctx.storeId) : null;
 
   return (
@@ -185,6 +190,7 @@ export default async function PipelineStepPage({
               <span>{pub.sales === null ? 'Ventas sin dato' : `${plural(pub.sales, 'venta')} en 90 días`}</span>
               <PipelineBadge state={pub} />
             </div>
+            {facts ? <PublicationFactsRow facts={facts} /> : null}
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
               <Link
                 href={`/a/${account.slug}/productos/${pub.productId}`}

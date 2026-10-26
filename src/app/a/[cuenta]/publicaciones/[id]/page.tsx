@@ -40,6 +40,8 @@ import { assignablePeople, tasksOfPublication } from '@/lib/tasks';
 import { followsStockOf, managedNote, plannedText, plansFor } from '@/lib/stock-plan';
 import { FollowStockSwitch } from '@/components/publication/FollowStockSwitch';
 import { SharedPhotosNote } from '@/components/publication/SharedPhotosNote';
+import { PublicationFactsRow } from '@/components/publication/PublicationFactsRow';
+import { loadPublicationFacts } from '@/lib/publication-facts';
 import { can } from '@/domain/access';
 import { formatDateTime, plural } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
@@ -109,7 +111,7 @@ export default async function PublicationPage({
   const productHref = `/a/${account.slug}/productos/${p.product.id}`;
   // Las otras publicaciones del mismo producto, para pasar de una a otra.
   const canTask = can(user.access, 'tareas', 'write');
-  const [others, history, knowledge, qa, tasks, people, stockPlans] = await Promise.all([
+  const [others, history, knowledge, qa, tasks, people, stockPlans, factsOf] = await Promise.all([
     prisma.publication.findMany({
       where: { productId: p.product.id, id: { not: p.id } },
       orderBy: { createdAt: 'asc' },
@@ -130,7 +132,10 @@ export default async function PublicationPage({
     face !== 'historial' && canTask ? assignablePeople(prisma, account.id) : Promise.resolve([]),
     // Si la cantidad sale del stock del producto.
     plansFor(prisma, [p.id]),
+    // El código, las medidas y la respuesta automática, para el encabezado.
+    loadPublicationFacts(prisma, [p.id]),
   ]);
+  const facts = factsOf.get(p.id) ?? null;
   const stockPlan = stockPlans.get(p.id) ?? null;
   const pushable = summary.draft.filter((f) => data.publishable.includes(f));
 
@@ -153,6 +158,7 @@ export default async function PublicationPage({
               <p className="text-sm text-muted-foreground">
                 {p.store.name} · {codeOrUnpublished(p.externalId)}
               </p>
+              {facts ? <PublicationFactsRow facts={facts} /> : null}
               <div className="flex flex-wrap gap-1.5">
                 <ChannelStatusBadge status={p.channelStatus} />
                 <PipelineBadge state={p} />
