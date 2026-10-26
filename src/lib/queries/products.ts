@@ -71,8 +71,22 @@ export async function getProduct(accountId: string, productId: string) {
             take: 1,
             include: { createdBy: { select: { name: true } } },
           },
-          // Para saber si tiene cambios sin subir o datos para elegir.
-          channelCopy: { select: { fingerprints: true, agreed: true, rejections: true, missingSince: true, price: true, installments: true, discount: true } },
+          // Para saber si tiene cambios sin subir o datos para elegir, y su precio y su cantidad en el canal.
+          channelCopy: {
+            select: {
+              fingerprints: true,
+              agreed: true,
+              rejections: true,
+              missingSince: true,
+              price: true,
+              installments: true,
+              discount: true,
+              quantity: true,
+              variations: true,
+              details: true,
+              stockInChannel: true,
+            },
+          },
         },
       },
     },

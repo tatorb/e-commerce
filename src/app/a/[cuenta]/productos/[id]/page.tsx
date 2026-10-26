@@ -26,6 +26,8 @@ import { loadCombo } from '@/lib/queries/combos';
 import { getProduct, listStores, type ProductDetail } from '@/lib/queries/products';
 import { loadResearch } from '@/lib/queries/research';
 import { loadRulesByChannel, toScoreInput } from '@/lib/queries/scoring';
+import { publicationFigures } from '@/lib/publication-figures';
+import { plansFor } from '@/lib/stock-plan';
 
 export const dynamic = 'force-dynamic';
 
@@ -96,12 +98,15 @@ export default async function ProductPage({
     loadProductStock(prisma, { accountId: account.id, productId: id }),
   ]);
   if (!product || !combo || !stock) notFound();
+  // Lo que le toca a cada publicación del stock del producto, para su cantidad.
+  const plans = await plansFor(prisma, product.publications.map((p) => p.id));
 
   const base = `/a/${account.slug}/productos`;
   const storeOptions = stores.map((s) => ({ id: s.id, name: s.name, channel: channelInfo(s.channel.kind, s.channel.name) }));
   const pubs = product.publications;
   const channels = new Map(pubs.map((p) => [p.id, channelInfo(p.store.channel.kind, p.store.channel.name)]));
   const scores = new Map(pubs.map((p) => [p.id, scorePublication(rules.get(p.store.channelId) ?? [], toScoreInput(product, p)).score]));
+  const figures = new Map(pubs.map((p) => [p.id, publicationFigures(p, product, plans.get(p.id) ?? null)]));
   const known = [...scores.values()].filter((s): s is number => s !== null);
   const inPipeline = pubs.filter((p) => p.pipelineStatus === 'IN_PIPELINE').length;
   const measures = product.variants.map((v) => v.measure?.trim()).filter(Boolean);
@@ -161,7 +166,7 @@ export default async function ProductPage({
           panels={{
             publicaciones:
               pubs.length > 0 ? (
-                <ProductPublications accountSlug={account.slug} publications={pubs} channels={channels} scores={scores} />
+                <ProductPublications accountSlug={account.slug} publications={pubs} channels={channels} scores={scores} figures={figures} />
               ) : (
                 <div className="space-y-3 rounded-lg border border-dashed p-8 text-center">
                   <p className="text-sm text-muted-foreground">
