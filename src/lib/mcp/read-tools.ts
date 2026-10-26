@@ -38,6 +38,7 @@ import { comboForAi, comboParts, PRODUCT_KIND_LABEL } from '@/domain/combos';
 import { loadCatalogData } from '@/lib/catalog-data';
 import { plannedText, plansFor } from '@/lib/stock-plan';
 import { stockText } from '@/domain/stock';
+import { fieldLabel, kindLabel } from '@/domain/sync-log';
 import { catalogForClaude } from './catalog';
 import { loadTitleContext, RECEIVED_QUESTIONS } from '@/lib/queries/title-step';
 import {
@@ -53,6 +54,9 @@ import {
   type AccountRef,
   type McpContext,
 } from './tool';
+
+// Cuántos movimientos del Registro ve Claude en una publicación.
+const LOG_SHOWN = 15;
 
 // Las herramientas que solo leen. Son una capa fina sobre las mismas
 // consultas que usan las pantallas. Nunca devuelven precios ni nada de las
@@ -350,6 +354,13 @@ const getPublication = defineTool({
           attributes: true,
           ownQuestions: true,
           followsStock: true,
+          // Lo último del Registro: lo que se subió, se tomó o no se pudo, con el motivo.
+          syncChanges: {
+            orderBy: { createdAt: 'desc' },
+            take: LOG_SHOWN,
+            select: { createdAt: true, field: true, kind: true, message: true, user: { select: { name: true } } },
+          },
+          channelCopy: { select: { readAt: true, photos: true } },
           faq: true,
           answerRules: true,
           autoAnswer: true,
@@ -416,6 +427,14 @@ const getPublication = defineTool({
       descripcion: pub.description,
       atributos_en_el_canal: safeList(parseNameValueList(pub.attributes)),
       datos_de_catalogo: catalogForClaude(catalog),
+      fotos_en_el_canal: pub.channelCopy ? { cantidad: Array.isArray(pub.channelCopy.photos) ? pub.channelCopy.photos.length : 0, leidas: when(pub.channelCopy.readAt, account) } : null,
+      registro: pub.syncChanges.map((c) => ({
+        fecha: when(c.createdAt, account),
+        dato: fieldLabel(c.field),
+        que_paso: kindLabel(c.kind),
+        ...(c.message ? { motivo: c.message } : {}),
+        quien: c.user?.name ?? 'Automático',
+      })),
       cantidad_disponible: {
         actualizacion_automatica: pub.followsStock ? 'prendida' : 'apagada',
         ...(plan?.managed
