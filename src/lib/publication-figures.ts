@@ -21,6 +21,8 @@ type Numeric = { toString(): string } | number | string;
 export type FiguresInput = {
   price: Numeric | null;
   quantities: unknown;
+  // La medida elegida, si vende una sola.
+  variantKey?: string | null;
   measurements: { metrics: unknown }[];
   channelCopy: {
     price: Numeric | null;
@@ -50,7 +52,7 @@ export function publicationFigures(pub: FiguresInput, product: { variants: Varia
 
   const variations = copy ? parseVariations(copy.variations) : [];
   // Si vende una sola medida del producto, se nombra: "STD: 2".
-  const sole = variations.length === 0 ? singleMeasure(product, copy) : null;
+  const sole = variations.length === 0 ? singleMeasure(product, copy, pub.variantKey) : null;
   const soleLabel = sole ? (sole.measure ?? sole.sku ?? null) : null;
   const text = (lines: QuantityLine[]) => (soleLabel ? `${soleLabel}: ${quantityText(lines)}` : quantityText(lines));
   const channel = copy ? channelQuantities(copy.quantity, variations) : null;

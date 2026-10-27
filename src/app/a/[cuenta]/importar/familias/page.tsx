@@ -15,8 +15,8 @@ export async function generateMetadata({ params }: { params: Promise<{ cuenta: s
   return { title: account ? `Familias · ${account.name}` : 'Familias' };
 }
 
-// Las familias del canal: cómo quedarían agrupadas las publicaciones de cada
-// medida. Por ahora solo se ven, sin cambiar nada.
+// Las familias del canal: cómo quedan agrupadas las publicaciones de cada
+// medida. Se ven antes, y se aplican por tienda con su botón.
 export default async function FamiliesPage({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
   const { account } = await requireAccount(cuenta, 'importar');
@@ -31,7 +31,7 @@ export default async function FamiliesPage({ params }: { params: Promise<{ cuent
           <p className="text-sm text-muted-foreground">
             En Mercado Libre cada medida de un producto es una publicación aparte, con su propio código, y las medidas del mismo producto quedan
             juntas en una familia. Acá ves cómo quedarían agrupadas en la app las publicaciones de <strong>{account.name}</strong>: cuáles se juntan,
-            qué medidas faltan traer y qué hay que revisar. Todavía no cambia nada.
+            qué medidas faltan traer y qué hay que revisar. Nada cambia hasta que toques Aplicar.
           </p>
         </div>
       </PageHeader>

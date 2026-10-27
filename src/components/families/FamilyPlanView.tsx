@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
 import { CopyButton } from '@/components/apply/CopyButton';
+import { ApplyFamiliesButton, MeasureSelect } from '@/components/families/FamilyActions';
 import { SectionBody, SectionCard, SubHeader } from '@/components/ui/section-card';
 import { titleOrUntitled } from '@/domain/publication-title';
 import type { PlannedFamily, StorePlan } from '@/lib/families';
@@ -9,7 +10,8 @@ import { cn } from '@/lib/utils/cn';
 
 // La vista previa de las familias de una tienda: los números, las familias
 // con algo para revisar arriba y después las demás. Cada familia se abre para
-// ver sus medidas, las que faltan traer y lo que pasa al juntarlas.
+// ver sus medidas, las que faltan traer y lo que pasa al juntarlas. Arriba,
+// el botón para aplicar; la medida que no se sabe se elige en su fila.
 
 const STATE_LABEL: Record<PlannedFamily['state'], string> = {
   new: 'Se arma',
@@ -49,9 +51,13 @@ function FamilyItem({ f, accountSlug }: { f: PlannedFamily; accountSlug: string 
         <ul className="divide-y rounded-md border text-sm">
           {f.members.map((m, i) => (
             <li key={m.id ?? m.externalId ?? i} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-2">
-              <span className={cn('w-32 shrink-0 whitespace-nowrap font-medium', m.measure === null && 'text-amber-700 dark:text-amber-400')}>
-                {m.measure ? `Medida ${m.measure}` : 'Medida a elegir'}
-              </span>
+              {m.measure === null && m.id && f.measureOptions.length >= 2 ? (
+                <MeasureSelect accountSlug={accountSlug} publicationId={m.id} options={f.measureOptions} />
+              ) : (
+                <span className={cn('w-32 shrink-0 whitespace-nowrap font-medium', m.measure === null && 'text-amber-700 dark:text-amber-400')}>
+                  {m.measure ? `Medida ${m.measure}` : 'Medida a elegir'}
+                </span>
+              )}
               <span className="text-xs tabular-nums text-muted-foreground">{m.externalId ?? 'Sin publicar'}</span>
               {m.id ? (
                 <Link href={`/a/${accountSlug}/publicaciones/${m.id}`} className="min-w-0 truncate underline-offset-4 hover:underline">
@@ -90,7 +96,11 @@ export function FamilyPlanView({ plan, accountSlug }: { plan: StorePlan; account
   const rest = plan.families.filter((f) => !needsReview(f));
   const missing = plan.families.filter((f) => f.state !== 'conflict').flatMap((f) => f.missing);
   return (
-    <SectionCard title={`${plan.channelName} · ${plan.storeName}`} description="Lo que cambiaría al aplicar. Todavía no cambia nada.">
+    <SectionCard
+      title={`${plan.channelName} · ${plan.storeName}`}
+      description="Lo que cambia al aplicar. Hasta que toques Aplicar, no cambia nada."
+      action={<ApplyFamiliesButton accountSlug={accountSlug} storeId={plan.storeId} changes={counts.families} />}
+    >
       <SectionBody>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <Stat value={counts.families} label="Familias que cambian" hint="Se arman, se completan o se separan" />

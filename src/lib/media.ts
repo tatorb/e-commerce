@@ -62,14 +62,14 @@ export function measuresOf(variants: VariantLike[]): Measure[] {
 }
 
 /** Las marcas que valen: de medidas de la ficha y, si están todas, ninguna, porque es de todas. */
-function knownVariants(keys: string[], measures: Measure[]): string[] {
+export function knownVariants(keys: string[], measures: Measure[]): string[] {
   if (measures.length < 2) return [];
   const known = keys.filter((k) => measures.some((m) => m.key === k));
   return new Set(known).size >= measures.length ? [] : known;
 }
 
 /** La foto con las marcas que valen: medidas y orden de medidas de la ficha. */
-function knownMarks<T extends PhotoRef>(ref: T, measures: Measure[]): T {
+export function knownMarks<T extends PhotoRef>(ref: T, measures: Measure[]): T {
   const positions =
     measures.length >= 2 ? Object.fromEntries(Object.entries(ref.positions ?? {}).filter(([k]) => measures.some((m) => m.key === k))) : {};
   return withMarks(ref, { ...ref, variants: knownVariants(photoVariants(ref), measures), positions });
@@ -77,10 +77,12 @@ function knownMarks<T extends PhotoRef>(ref: T, measures: Measure[]): T {
 
 /**
  * La medida que vende una publicación que en el canal no tiene medidas, de un
- * producto que sí las tiene: cuando cada medida se publica aparte. Sale de su
- * SKU en el canal. Null si no es el caso.
+ * producto que sí las tiene: cuando cada medida se publica aparte. La elegida
+ * en la publicación (variantKey) y, si no hay, la de su SKU en el canal. Null
+ * si no es el caso.
  */
-export function soleMeasureOf(measures: Measure[], copy: { variations: unknown; details: unknown } | null): Measure | null {
+export function soleMeasureOf(measures: Measure[], copy: { variations: unknown; details: unknown } | null, chosen?: string | null): Measure | null {
+  if (chosen && measures.length >= 2) return measures.find((m) => m.key === chosen) ?? null;
   if (!copy || measures.length < 2 || parseVariations(copy.variations).length > 0) return null;
   const skus = new Set(copySkus(copy.details).map((s) => s.trim().toUpperCase()));
   const found = measures.filter((m) => m.sku && skus.has(m.sku.toUpperCase()));
@@ -102,13 +104,13 @@ export function soleMeasurePhotos<T extends PhotoRef>(refs: T[], measures: Measu
  */
 export async function photoSiblings(
   db: Db,
-  p: { id: string; productId: string; storeId: string; copy: { variations: unknown; details: unknown } | null },
+  p: { id: string; productId: string; storeId: string; variantKey?: string | null; copy: { variations: unknown; details: unknown } | null },
 ): Promise<{ id: string; externalId: string }[]> {
   const channelProduct = p.copy ? copyChannelProduct(p.copy.details) : null;
   const measures = measuresOf(
     await db.productVariant.findMany({ where: { productId: p.productId }, orderBy: { position: 'asc' }, select: { sku: true, measure: true } }),
   );
-  const sole = soleMeasureOf(measures, p.copy);
+  const sole = soleMeasureOf(measures, p.copy, p.variantKey);
   if (!channelProduct && !sole) return [];
   const rows = await db.publication.findMany({
     where: {
@@ -121,13 +123,13 @@ export async function photoSiblings(
       ],
     },
     orderBy: { externalId: 'asc' },
-    select: { id: true, externalId: true, productId: true, channelCopy: { select: { variations: true, details: true } } },
+    select: { id: true, externalId: true, productId: true, variantKey: true, channelCopy: { select: { variations: true, details: true } } },
   });
   return rows
     .filter((r) => {
       const theirs = r.channelCopy ? copyChannelProduct(r.channelCopy.details) : null;
       if (channelProduct && theirs) return theirs === channelProduct;
-      return sole !== null && r.productId === p.productId && soleMeasureOf(measures, r.channelCopy)?.key === sole.key;
+      return sole !== null && r.productId === p.productId && soleMeasureOf(measures, r.channelCopy, r.variantKey)?.key === sole.key;
     })
     .map((r) => ({ id: r.id, externalId: r.externalId! }));
 }
@@ -232,6 +234,7 @@ export async function productPublicationsMedia(db: Db, productId: string) {
       select: {
         id: true,
         videoVariants: true,
+        variantKey: true,
         channelCopy: { select: { photos: true, photoIds: true, variations: true, details: true, missingSince: true } },
       },
     }),
@@ -239,7 +242,7 @@ export async function productPublicationsMedia(db: Db, productId: string) {
   const allMeasures = measuresOf(variants);
   return pubs.map((p) => {
     const copy = p.channelCopy && !p.channelCopy.missingSince ? p.channelCopy : null;
-    const sole = soleMeasureOf(allMeasures, copy);
+    const sole = soleMeasureOf(allMeasures, copy, p.variantKey);
     const measures: PublicationMeasures = { measures: sole || allMeasures.length < 2 ? [] : allMeasures.map((m) => m.key), sole: sole?.key ?? null };
     return {
       id: p.id,
@@ -259,6 +262,7 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
       externalId: true,
       media: true,
       videoVariants: true,
+      variantKey: true,
       store: { select: { id: true, channel: { select: { kind: true, name: true } } } },
       product: {
         select: {
@@ -281,7 +285,7 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
   const copy = p.channelCopy && !p.channelCopy.missingSince ? p.channelCopy : null;
   const allMeasures = measuresOf(p.product.variants);
   // Si vende una sola medida, todas las fotos van a ella: no hay medidas para marcar.
-  const sole = soleMeasureOf(allMeasures, copy);
+  const sole = soleMeasureOf(allMeasures, copy, p.variantKey);
   const measures = sole ? [] : allMeasures;
   const marks = (keys: string[]) => knownVariants(keys, measures);
   const origins = photoOriginsOf(copy?.photoOrigins);
@@ -341,6 +345,8 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
   return {
     publication: { id: p.id, productId: p.productId, externalId: p.externalId },
     channelName,
+    // Las fotos de una sola publicación; family, las de todas las medidas de su familia (src/lib/family-media.ts).
+    family: false,
     // Sin elegir: usa las del canal.
     following: media === null,
     current,
@@ -353,7 +359,7 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
     soleMeasure: sole ? { label: sole.label, sku: sole.sku } : null,
     // Las otras publicaciones que comparten las fotos en el canal: cambian con estas.
     sharedWith: (
-      await photoSiblings(db, { id: p.id, productId: p.productId, storeId: p.store.id, copy })
+      await photoSiblings(db, { id: p.id, productId: p.productId, storeId: p.store.id, variantKey: p.variantKey, copy })
     ).map((s) => s.externalId),
     // Los videos del producto, para mirarlos, elegir el clip y marcar sus medidas.
     videos: p.product.videos.map((v) => {
@@ -441,10 +447,12 @@ export async function picturesFor(
   refs: PhotoRef[],
   // Lo que se leyó del canal: si vende una sola medida, van las de esa medida, sin repartir.
   copy: { variations: unknown; details: unknown } | null = null,
+  // La medida elegida en la publicación, si vende una sola.
+  soldMeasure: string | null = null,
 ) {
   const variants = await db.productVariant.findMany({ where: { productId }, orderBy: { position: 'asc' }, select: { sku: true, measure: true } });
   const allMeasures = measuresOf(variants);
-  const sole = soleMeasureOf(allMeasures, copy);
+  const sole = soleMeasureOf(allMeasures, copy, soldMeasure);
   const measures = sole ? [] : allMeasures;
   const chosen = sole ? soleMeasurePhotos(refs, allMeasures, sole) : refs;
   const pictures: ChannelPicture[] = [];

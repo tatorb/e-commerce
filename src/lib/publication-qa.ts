@@ -1,7 +1,7 @@
 import type { PrismaClient } from '@/generated/prisma/client';
 import { getChannelQuestions } from '@/channels/questions';
 import { cleanRichText } from '@/domain/research';
-import { writeToFamily } from '@/domain/family-members';
+import { familyMemberIds, writeToFamily } from '@/domain/family-members';
 
 // El paso Preguntas y respuestas: las preguntas frecuentes de la publicación con
 // su respuesta, las reglas de cuándo responde Claude y cuándo una persona, y si
@@ -28,11 +28,13 @@ export async function loadQaStep(db: Db, args: { accountId: string; publicationI
       product: { select: { research: { select: { storeKnowledge: true } } } },
     },
   });
-  const unanswered = { publicationId: args.publicationId, status: 'UNANSWERED' as const };
+  // En una familia, las preguntas que recibieron todas sus medidas: las responde el bot con lo de la familia.
+  const ids = await familyMemberIds(db, args.publicationId);
+  const unanswered = { publicationId: { in: ids }, status: 'UNANSWERED' as const };
   const [settings, recent, waiting, forPerson] = await Promise.all([
     db.questionSettings.findUnique({ where: { accountId: args.accountId }, select: { autoDraft: true } }),
     db.buyerQuestion.findMany({
-      where: { publicationId: args.publicationId, text: { not: '' } },
+      where: { publicationId: { in: ids }, text: { not: '' } },
       orderBy: { askedAt: 'desc' },
       take: RECENT,
       select: {

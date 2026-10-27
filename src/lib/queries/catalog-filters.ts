@@ -13,7 +13,7 @@ export type PublicationSearch = {
   puntaje?: string;
   estado?: string;
   pipeline?: string;
-  familia?: string;
+  tipoProducto?: string;
   tipo?: string;
   visitas?: string;
   ventas?: string;
@@ -109,10 +109,10 @@ export const PROPOSAL_SHORTCUTS = {
   aplicar: { label: 'Propuestas para aplicar', stages: ['APPROVED'] as Stage[] },
 };
 
-// La familia es texto libre de la ficha y puede tener comas: en la dirección
-// se escapan, porque los filtros se separan con comas.
-export const encodeFamily = (family: string) => family.replace(/%/g, '%25').replace(/,/g, '%2C');
-function decodeFamily(raw: string): string | null {
+// El tipo de producto es texto libre de la ficha y puede tener comas: en la
+// dirección se escapan, porque los filtros se separan con comas.
+export const encodeProductType = (type: string) => type.replace(/%/g, '%25').replace(/,/g, '%2C');
+function decodeProductType(raw: string): string | null {
   try {
     return decodeURIComponent(raw);
   } catch {
@@ -124,7 +124,7 @@ export type CatalogFilters = {
   band: keyof typeof BAND_KEY | '';
   statuses: ChannelStatus[];
   pipeline: PipelineStatus[];
-  families: string[];
+  productTypes: string[];
   kinds: ProductKind[];
   visits: string[];
   sales: string[];
@@ -145,10 +145,10 @@ export function parsePublicationSearch(search: PublicationSearch): CatalogFilter
     band: search.puntaje && search.puntaje in BAND_KEY ? (search.puntaje as keyof typeof BAND_KEY) : '',
     statuses: list(search.estado, CHANNEL_STATUSES) as ChannelStatus[],
     pipeline: list(search.pipeline, PIPELINE_STATUSES) as PipelineStatus[],
-    families: (search.familia ?? '')
+    productTypes: (search.tipoProducto ?? '')
       .split(',')
       .filter(Boolean)
-      .map(decodeFamily)
+      .map(decodeProductType)
       .filter((f): f is string => Boolean(f)),
     kinds: parseKinds(search.tipo),
     visits: list(search.visitas, VISIT_RANGES.map((r) => r.value)),
@@ -167,7 +167,7 @@ export function isFiltered(f: CatalogFilters): boolean {
     f.band ||
       f.statuses.length ||
       f.pipeline.length ||
-      f.families.length ||
+      f.productTypes.length ||
       f.kinds.length ||
       f.visits.length ||
       f.sales.length ||
@@ -188,7 +188,7 @@ export type Filterable = {
   stage: Stage;
   channelStatus: ChannelStatus;
   pipelineStatus: PipelineStatus;
-  family: string | null;
+  productType: string | null;
   kind: ProductKind;
   visits: number | null;
   sales: number | null;
@@ -216,15 +216,15 @@ function lockOption(lock: TitleLock): string {
 }
 
 export function filterPublications<T extends Filterable>(all: T[], f: CatalogFilters): T[] {
-  const { band, statuses, pipeline, families, kinds, visits, sales, locked, proposal, sync, stock, sort, q } = f;
+  const { band, statuses, pipeline, productTypes, kinds, visits, sales, locked, proposal, sync, stock, sort, q } = f;
   const proposalStages = proposal ? PROPOSAL_SHORTCUTS[proposal].stages : null;
-  const familySet = new Set(families.map((x) => x.toLowerCase()));
+  const typeSet = new Set(productTypes.map((x) => x.toLowerCase()));
   return all
     .filter((p) => !band || scoreBand(p.score) === BAND_KEY[band])
     // Las eliminadas quedan archivadas: solo se ven si se filtra por ese estado.
     .filter((p) => (statuses.length === 0 ? p.channelStatus !== 'DELETED' : statuses.includes(p.channelStatus)))
     .filter((p) => pipeline.length === 0 || pipeline.includes(p.pipelineStatus))
-    .filter((p) => familySet.size === 0 || familySet.has((p.family ?? '').toLowerCase()))
+    .filter((p) => typeSet.size === 0 || typeSet.has((p.productType ?? '').toLowerCase()))
     .filter((p) => kinds.length === 0 || kinds.includes(p.kind))
     .filter((p) => visits.length === 0 || visits.includes(visitRange(p.visits)))
     .filter((p) => sales.length === 0 || sales.includes(salesOption(p.sales)))
@@ -255,11 +255,11 @@ export function filterPublications<T extends Filterable>(all: T[], f: CatalogFil
     });
 }
 
-/** Las familias que hay, con cuántas publicaciones cada una, de la más común a la menos. */
-export function familyOptions(all: { family: string | null }[]): { value: string; label: string }[] {
+/** Los tipos de producto que hay, con cuántas publicaciones cada uno, del más común al menos. */
+export function productTypeOptions(all: { productType: string | null }[]): { value: string; label: string }[] {
   const counts = new Map<string, number>();
-  for (const p of all) if (p.family) counts.set(p.family, (counts.get(p.family) ?? 0) + 1);
+  for (const p of all) if (p.productType) counts.set(p.productType, (counts.get(p.productType) ?? 0) + 1);
   return [...counts.entries()]
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'es'))
-    .map(([family, n]) => ({ value: encodeFamily(family), label: `${family} · ${n}` }));
+    .map(([type, n]) => ({ value: encodeProductType(type), label: `${type} · ${n}` }));
 }

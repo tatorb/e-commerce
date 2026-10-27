@@ -65,8 +65,9 @@ export type PlannedFamily = {
   members: PlanMember[];
   // Los códigos en el canal de las medidas que la app no tiene.
   missing: string[];
-  // Cuántas medidas hay que elegir a mano.
+  // Cuántas medidas hay que elegir a mano, y las medidas de la ficha para elegir.
   unknownMeasures: number;
+  measureOptions: { key: string; label: string }[];
   // Lo que pasa al juntar, en palabras.
   notes: string[];
 };
@@ -184,6 +185,7 @@ export function planStore(
       members: inside.map((v, i) => ({ id: i === 0 ? p.id : null, externalId: v.externalId, title: p.title, measure: label(v), pipeline, lead: i === 0 })),
       missing: [],
       unknownMeasures: 0,
+      measureOptions: [],
       notes: [`Hoy es una sola publicación con ${inside.length} códigos: se separa en ${inside.length} publicaciones, una por medida, con lo que ya tiene.`],
     });
     counts.splits++;
@@ -261,6 +263,7 @@ export function planStore(
       members,
       missing,
       unknownMeasures,
+      measureOptions: measures.map((m) => ({ key: m.key, label: m.label })),
       notes,
     });
     if (state === 'conflict') {

@@ -49,6 +49,8 @@ export async function getProduct(accountId: string, productId: string) {
         orderBy: { createdAt: 'asc' },
         include: {
           store: { include: { channel: true } },
+          // La familia de medidas, para mostrar sus publicaciones juntas.
+          family: { select: { id: true, leadId: true, _count: { select: { members: true } } } },
           stageMovements: {
             orderBy: { enteredAt: 'desc' },
             include: { user: { select: { name: true } } },

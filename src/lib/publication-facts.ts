@@ -17,6 +17,8 @@ export type MeasuresFact =
   | { kind: 'family'; labels: string[] }
   // Una publicación que vende una sola medida de un producto que tiene varias.
   | { kind: 'sole'; label: string }
+  // Una medida de una familia: cada medida es una publicación y se trabajan juntas.
+  | { kind: 'member'; label: string | null; size: number }
   | { kind: 'none' };
 
 export type PublicationFacts = { code: string | null; status: ChannelStatus; measures: MeasuresFact; autoAnswer: boolean };
@@ -26,6 +28,9 @@ export type FactsInput = {
   channelStatus: ChannelStatus;
   externalId: string | null;
   variantListings: unknown;
+  // La medida elegida y la familia, si es una medida de una familia.
+  variantKey?: string | null;
+  family?: { _count: { members: number } } | null;
   channelCopy: { variations: unknown; details: unknown; missingSince: Date | null } | null;
 };
 
@@ -64,10 +69,14 @@ function measuresOf(pub: FactsInput, product: { variants: VariantLike[] }): Meas
   const family = parseVariantListings(pub.variantListings);
   if (family.length >= 2) return { kind: 'family', labels: family.map(labelOf) };
   const copy = pub.channelCopy && !pub.channelCopy.missingSince ? pub.channelCopy : null;
+  if (pub.family) {
+    const sole = singleMeasure(product, copy, pub.variantKey);
+    return { kind: 'member', label: sole ? labelOf(sole, 0) : null, size: pub.family._count.members };
+  }
   if (copy) {
     const variations = parseVariations(copy.variations);
     if (variations.length >= 2) return { kind: 'variants', labels: variations.map(labelOf) };
-    const sole = variations.length === 0 ? singleMeasure(product, copy) : null;
+    const sole = variations.length === 0 ? singleMeasure(product, copy, pub.variantKey) : null;
     if (sole) return { kind: 'sole', label: labelOf(sole, 0) };
     return { kind: 'none' };
   }
@@ -76,9 +85,10 @@ function measuresOf(pub: FactsInput, product: { variants: VariantLike[] }): Meas
   return { kind: 'none' };
 }
 
-/** Las medidas en palabras: "2 medidas: STD y 0.50", "Solo la medida STD" o "Sin medidas". */
+/** Las medidas en palabras: "2 medidas: STD y 0.50", "Solo la medida STD", "Medida 0.50 de una familia de 2" o "Sin medidas". */
 export function measuresText(m: MeasuresFact): string {
   if (m.kind === 'sole') return `Solo la medida ${m.label}`;
+  if (m.kind === 'member') return `${m.label ? `Medida ${m.label}` : 'Medida sin elegir'} de una familia de ${m.size}`;
   if (m.kind === 'none') return 'Sin medidas';
   const list = m.labels.length > 1 ? `${m.labels.slice(0, -1).join(', ')} y ${m.labels[m.labels.length - 1]}` : m.labels[0];
   return `${m.labels.length} medidas: ${list}${m.kind === 'family' ? ', una publicación por medida' : ''}`;
@@ -90,6 +100,8 @@ const FACTS_SELECT = {
   channelStatus: true,
   externalId: true,
   variantListings: true,
+  variantKey: true,
+  family: { select: { _count: { select: { members: true } } } },
   channelCopy: { select: { variations: true, details: true, missingSince: true } },
   product: { select: { partNumber: true, variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } } } },
 } satisfies Prisma.PublicationSelect;

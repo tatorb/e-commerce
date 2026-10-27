@@ -1,6 +1,6 @@
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
-import { parseVariations, type VariantLike } from '@/domain/media';
+import { parseVariations, variantKey, type VariantLike } from '@/domain/media';
 import { channelQuantities, quantityText, sameQuantities, type QuantityLine } from '@/domain/quantities';
 import { copySkus, isManaged, listingMeasure, plannedQuantities, stockSlots, type StockProduct, type StockSource } from '@/domain/stock';
 
@@ -53,6 +53,7 @@ export const PLAN_SELECT = {
   title: true,
   externalId: true,
   variantListings: true,
+  variantKey: true,
   followsStock: true,
   channelStatus: true,
   store: { select: { id: true, name: true, salesSince: true, salesError: true, channel: { select: { kind: true, name: true } } } },
@@ -94,9 +95,17 @@ export function managedNote(plan: ManagedPlan, channelName: string): string {
 /** Si la tienda lee las ventas: sin eso, el stock del producto no sabe lo que se vendió en ella. */
 export const readsSales = (store: { salesSince: Date | null; salesError: string | null }) => store.salesSince !== null && store.salesError === null;
 
-/** La medida de una publicación que se publica sola, sin medidas en el canal: por su SKU. */
-export function singleMeasure(product: { variants: VariantLike[] }, copy: { details: unknown } | null): VariantLike | null {
-  return copy ? listingMeasure(stockSlots(product.variants), copySkus(copy.details)) : null;
+/**
+ * La medida de una publicación que se publica sola, sin medidas en el canal:
+ * la elegida en la publicación (variantKey) o, si no hay, la de su SKU.
+ */
+export function singleMeasure(product: { variants: VariantLike[] }, copy: { details: unknown } | null, chosen?: string | null): VariantLike | null {
+  const slots = stockSlots(product.variants);
+  if (chosen && slots.length >= 2) {
+    const found = product.variants.find((v) => variantKey(v) === chosen);
+    return found ? { sku: found.sku, measure: found.measure } : null;
+  }
+  return copy ? listingMeasure(slots, copySkus(copy.details)) : null;
 }
 
 export function planFor(p: PlanRow): StockPlan {
@@ -117,7 +126,7 @@ export function planFor(p: PlanRow): StockPlan {
   }
   if (!copy || copy.missingSince) return { managed: false, reason: `Todavía no se leyó de ${channelName}.` };
   const variations = parseVariations(copy.variations);
-  const single = variations.length === 0 ? singleMeasure(p.product, copy) : null;
+  const single = variations.length === 0 ? singleMeasure(p.product, copy, p.variantKey) : null;
   const planned = plannedQuantities(variations, source, single);
   if ('reason' in planned) return { managed: false, reason: planned.reason };
   const channel = channelQuantities(copy.quantity, variations);

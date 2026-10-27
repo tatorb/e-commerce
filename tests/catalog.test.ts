@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  encodeFamily,
-  familyOptions,
+  encodeProductType,
+  productTypeOptions,
   filterPublications,
   isFiltered,
   parsePublicationSearch,
@@ -19,7 +19,7 @@ const base: Filterable & { id: string } = {
   stage: 'IMPORTED',
   channelStatus: 'ACTIVE',
   pipelineStatus: 'UNTOUCHED',
-  family: null,
+  productType: null,
   kind: 'INDIVIDUAL',
   visits: null,
   sales: null,
@@ -29,9 +29,9 @@ const base: Filterable & { id: string } = {
 };
 
 const items = [
-  { ...base, id: 'a', title: 'Kit embrague', family: 'Kit de embrague', visits: 0, sales: 0, stock: 0, titleLock: { locked: false, source: 'data' as const } },
-  { ...base, id: 'b', title: 'Pistones', family: 'Subconjunto (pistones + aros)', visits: 30, sales: 2, stock: 12, titleLock: { locked: true, source: 'data' as const }, pipelineStatus: 'IN_PIPELINE' as const, sync: { read: true, draft: true, choose: true, rejected: true } },
-  { ...base, id: 'c', title: 'Juntas', family: 'Juntas, varias', visits: 120, sales: null, stock: 3, stage: 'APPROVED' as const, kind: 'COMBO' as const, sync: { read: true, draft: true, choose: false, rejected: false } },
+  { ...base, id: 'a', title: 'Kit embrague', productType: 'Kit de embrague', visits: 0, sales: 0, stock: 0, titleLock: { locked: false, source: 'data' as const } },
+  { ...base, id: 'b', title: 'Pistones', productType: 'Subconjunto (pistones + aros)', visits: 30, sales: 2, stock: 12, titleLock: { locked: true, source: 'data' as const }, pipelineStatus: 'IN_PIPELINE' as const, sync: { read: true, draft: true, choose: true, rejected: true } },
+  { ...base, id: 'c', title: 'Juntas', productType: 'Juntas, varias', visits: 120, sales: null, stock: 3, stage: 'APPROVED' as const, kind: 'COMBO' as const, sync: { read: true, draft: true, choose: false, rejected: false } },
   { ...base, id: 'd', title: 'Sin datos', sync: { read: false, draft: false, choose: false, rejected: false } },
 ];
 
@@ -52,9 +52,9 @@ describe('filtros de Publicaciones', () => {
     expect(isFiltered(parsePublicationSearch({ tipo: 'combo' }))).toBe(true);
   });
 
-  it('por familia, aunque tenga comas', () => {
-    expect(ids({ familia: encodeFamily('Juntas, varias') })).toEqual(['c']);
-    expect(ids({ familia: [encodeFamily('Kit de embrague'), encodeFamily('Juntas, varias')].join(',') }).sort()).toEqual(['a', 'c']);
+  it('por tipo de producto, aunque tenga comas', () => {
+    expect(ids({ tipoProducto: encodeProductType('Juntas, varias') })).toEqual(['c']);
+    expect(ids({ tipoProducto: [encodeProductType('Kit de embrague'), encodeProductType('Juntas, varias')].join(',') }).sort()).toEqual(['a', 'c']);
   });
 
   it('por rango de visitas, con "sin dato" aparte', () => {
@@ -104,8 +104,8 @@ describe('filtros de Publicaciones', () => {
     expect(isFiltered(parsePublicationSearch({ stock: 'sin' }))).toBe(true);
   });
 
-  it('las familias, de la más común a la menos', () => {
-    const opts = familyOptions([{ family: 'B' }, { family: 'A' }, { family: 'B' }, { family: null }]);
+  it('los tipos de producto, del más común al menos', () => {
+    const opts = productTypeOptions([{ productType: 'B' }, { productType: 'A' }, { productType: 'B' }, { productType: null }]);
     expect(opts.map((o) => o.label)).toEqual(['B · 2', 'A · 1']);
   });
 });

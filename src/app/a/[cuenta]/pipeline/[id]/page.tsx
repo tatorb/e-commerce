@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { AppWindow, ExternalLink, Lock, Package, Tag } from 'lucide-react';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
@@ -14,6 +14,10 @@ import { loadCombo } from '@/lib/queries/combos';
 import { StepLine } from '@/components/pipeline/StepLine';
 import { JumpHereButton, StepActions } from '@/components/pipeline/StepActions';
 import { PublicationFactsRow } from '@/components/publication/PublicationFactsRow';
+import { FamilyMembersRow } from '@/components/families/FamilyMembersRow';
+import { FamilyPublishCard, type FamilyPublishRow } from '@/components/families/FamilyPublishCard';
+import { listScoredPublications } from '@/lib/queries/scoring';
+import { familyLeadId, familyOf } from '@/lib/families';
 import { loadPublicationFacts } from '@/lib/publication-facts';
 import { PipelineHistory } from '@/components/pipeline/PipelineHistory';
 import { AddToPipelineButton } from '@/components/pipeline/AddToPipelineButton';
@@ -21,6 +25,7 @@ import { PublicationCodeCard } from '@/components/pipeline/PublicationCodeCard';
 import { PendingChangesCard } from '@/components/publication/PendingChangesCard';
 import { MediaOrganizer } from '@/components/publication/MediaOrganizer';
 import { loadMediaSources } from '@/lib/media';
+import { loadFamilyMedia } from '@/lib/family-media';
 import { CreateInChannelCard } from '@/components/publication/CreateInChannelCard';
 import { createChecks } from '@/lib/channel-create';
 import { loadPublicationFaces } from '@/lib/queries/publication-faces';
@@ -54,6 +59,7 @@ import { loadDescriptionStep } from '@/lib/descriptions';
 import { QaPanel } from '@/components/pipeline/qa/QaPanel';
 import { loadQaStep } from '@/lib/publication-qa';
 import { PriceStep } from '@/components/pipeline/price/PriceStep';
+import { FamilyPricesCard } from '@/components/pipeline/price/FamilyPricesCard';
 import { latestPriceDecision, loadPriceStep, productPricing } from '@/lib/pricing';
 import { PriceDecisionCard } from '@/components/pipeline/price/PriceDecisionCard';
 import { QuantityCard } from '@/components/pipeline/QuantityCard';
@@ -97,6 +103,12 @@ export default async function PipelineStepPage({
   const { cuenta, id } = await params;
   const { paso, foto, fotos } = await searchParams;
   const { user, account } = await requireAccount(cuenta, 'pipeline');
+  // Una familia se trabaja desde su principal: las demás medidas llevan ahí.
+  const leadId = await familyLeadId(prisma, id);
+  if (leadId !== id) {
+    const step = typeof paso === 'string' ? paso : null;
+    redirect(`/a/${account.slug}/pipeline/${leadId}${step ? `?paso=${encodeURIComponent(step)}` : ''}`);
+  }
   const pub = await getPipelinePublication(account.id, id);
   if (!pub) notFound();
 
@@ -114,7 +126,7 @@ export default async function PipelineStepPage({
   // Lo que usa el paso que se mira, pedido todo junto: con la base lejos, cada
   // consulta en fila suma una ida y vuelta.
   const canTask = can(user.access, 'tareas', 'write');
-  const [ctx, info, images, channel, faces, media, create, videos, description, qa, price, decision, tasks, people, stockPlans, factsOf] = await Promise.all([
+  const [ctx, info, images, channel, faces, media, create, videos, description, qa, price, decision, tasks, people, stockPlans, factsOf, family] = await Promise.all([
     // Información y Título usan la ficha, la competencia y lo leído del buscador.
     viewing === 'INFO' || viewing === 'TITLE' ? loadTitleContext(prisma, account.id, pub.id) : null,
     viewing === 'INFO'
@@ -149,7 +161,8 @@ export default async function PipelineStepPage({
           .then((p) => p.store.channel)
       : null,
     viewing === 'PUBLISH' ? loadPublicationFaces(account.id, pub.id) : null,
-    viewing === 'MEDIA' ? loadMediaSources(prisma, account.id, pub.id) : null,
+    // Una familia ordena las fotos de todas sus medidas juntas, una ventana por medida.
+    viewing === 'MEDIA' ? loadFamilyMedia(prisma, account.id, pub.id).then((f) => f ?? loadMediaSources(prisma, account.id, pub.id)) : null,
     // Sin publicar: lo que hace falta para crearla en el canal.
     viewing === 'PUBLISH' && !pub.externalId ? createChecks(prisma, { accountId: account.id, publicationId: pub.id }) : null,
     viewing === 'VIDEOS' ? loadVideosStep(prisma, { accountId: account.id, publicationId: pub.id }) : null,
@@ -164,9 +177,27 @@ export default async function PipelineStepPage({
     viewing === 'PUBLISH' || viewing === 'INFO' ? plansFor(prisma, [pub.id]) : null,
     // El código, las medidas y la respuesta automática, para el encabezado.
     loadPublicationFacts(prisma, [pub.id]),
+    // Las medidas de su familia, que se trabajan juntas.
+    familyOf(prisma, pub.id),
   ]);
   const facts = factsOf.get(pub.id) ?? null;
   const auto = ctx && viewing === 'TITLE' ? await autoAvailable(prisma, ctx.channel, ctx.storeId) : null;
+  // En Publicación, cada medida de la familia con su código, su estado y sus cambios sin subir.
+  const familyRows: FamilyPublishRow[] | null =
+    family && viewing === 'PUBLISH'
+      ? (await listScoredPublications(account.id, { familyId: family.id }, prisma))
+          .map((r) => ({
+            id: r.id,
+            measure: family.members.find((m) => m.id === r.id)?.measure ?? null,
+            externalId: r.externalId,
+            url: r.url,
+            channelStatus: r.channelStatus,
+            draft: r.sync.draft,
+            choose: r.sync.choose,
+            quantity: r.quantity.channel,
+          }))
+          .sort((a, b) => family.members.findIndex((m) => m.id === a.id) - family.members.findIndex((m) => m.id === b.id))
+      : null;
 
   return (
     <>
@@ -191,6 +222,14 @@ export default async function PipelineStepPage({
               <PipelineBadge state={pub} />
             </div>
             {facts ? <PublicationFactsRow facts={facts} /> : null}
+            {family ? (
+              <FamilyMembersRow
+                members={family.members}
+                accountSlug={account.slug}
+                channelName={pub.channelName}
+                linkToApp={can(user.access, 'publicaciones', 'read')}
+              />
+            ) : null}
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
               <Link
                 href={`/a/${account.slug}/productos/${pub.productId}`}
@@ -365,16 +404,20 @@ export default async function PipelineStepPage({
             knowledgeHref={`${pageHref}?paso=${PIPELINE_STEP_SLUG.INFO}`}
           />
         ) : price && viewing === 'PRICE' ? (
-          <PriceStep
-            accountSlug={account.slug}
-            data={price}
-            today={todayIn(account.timezone)}
-            timeZone={account.timezone}
-            infoHref={`${pageHref}?paso=${PIPELINE_STEP_SLUG.INFO}`}
-            settingsHref={`/a/${account.slug}/precios`}
-          />
+          <>
+            <PriceStep
+              accountSlug={account.slug}
+              data={price}
+              today={todayIn(account.timezone)}
+              timeZone={account.timezone}
+              infoHref={`${pageHref}?paso=${PIPELINE_STEP_SLUG.INFO}`}
+              settingsHref={`/a/${account.slug}/precios`}
+            />
+            {family ? <FamilyPricesCard accountSlug={account.slug} members={family.members} /> : null}
+          </>
         ) : channel && viewing === 'PUBLISH' ? (
           <>
+            {familyRows ? <FamilyPublishCard accountSlug={account.slug} channelName={pub.channelName} rows={familyRows} /> : null}
             <PriceDecisionCard
               decision={decision}
               channelName={pub.channelName}

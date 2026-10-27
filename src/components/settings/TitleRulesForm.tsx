@@ -123,10 +123,10 @@ export function TitleRulesForm({
         <p className="text-xs text-muted-foreground">Una por línea. También pueden ser frases.</p>
       </div>
       <div className="space-y-1.5">
-        <p className="text-sm font-medium">Estructura sugerida por familia</p>
+        <p className="text-sm font-medium">Estructura sugerida por tipo de producto</p>
         <p className="text-xs text-muted-foreground">
-          En qué orden van los datos en el título. Con la familia vacía vale para todas.
-          {families.length > 0 ? ` Familias de la cuenta: ${families.join(', ')}.` : ''}
+          En qué orden van los datos en el título. Con el tipo vacío vale para todos.
+          {families.length > 0 ? ` Tipos de producto de la cuenta: ${families.join(', ')}.` : ''}
         </p>
         <RowList
           idPrefix={`structure-${channelId}`}
@@ -134,7 +134,7 @@ export function TitleRulesForm({
           onChange={(rows) => set('structures', rows)}
           template={{ family: '', structure: '' }}
           columns={[
-            { key: 'family', label: 'Familia', placeholder: 'Vacía = todas' },
+            { key: 'family', label: 'Tipo de producto', placeholder: 'Vacío = todos' },
             { key: 'structure', label: 'Estructura', placeholder: 'Tipo de producto + Modelo + Motor…' },
           ]}
           gridClassName="sm:grid-cols-[14rem_1fr]"

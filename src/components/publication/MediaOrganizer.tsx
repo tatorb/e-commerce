@@ -214,7 +214,7 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
   async function save(input: Parameters<typeof saveMediaAction>[2], key: string, ok: string) {
     setBusy(key);
     setMessage(null);
-    const r = await saveMediaAction(accountSlug, publicationId, input).catch(() => null);
+    const r = await saveMediaAction(accountSlug, publicationId, { ...input, family: sources.family }).catch(() => null);
     setBusy(null);
     if (!r) return setMessage({ kind: 'error', text: 'Se cortó la conexión con la app. Probá de nuevo.' });
     if (!r.ok) return setMessage({ kind: 'error', text: r.error });

@@ -62,7 +62,8 @@ export async function listScoredPublications(
         updatedAt: true,
         store: { select: { name: true, channelId: true, channel: { select: { kind: true, name: true } } } },
         measurements: { orderBy: { takenAt: 'desc' }, take: LATEST_MEASUREMENTS, select: { takenAt: true, metrics: true } },
-        family: FAMILY_LOCK_SELECT,
+        // La familia de medidas: su principal, sus medidas y sus ventas, para el candado del título.
+        family: { select: { leadId: true, ...FAMILY_LOCK_SELECT.select } },
         channelCopy: {
           select: {
             fingerprints: true,
@@ -123,7 +124,10 @@ export async function listScoredPublications(
       pipelineStep: p.pipelineStep,
       pipelineRemoval: p.pipelineRemoval,
       titleLock: resolveTitleLock(titleLockFromData(channel, p), p.titleLockedManual, Boolean(p.externalId)),
-      family: p.product.productType?.trim() || null,
+      // La familia de medidas: la principal, que la representa en el tablero, y cuántas medidas tiene.
+      familyLeadId: p.family?.leadId ?? null,
+      familySize: p.family?.members.length ?? 0,
+      productType: p.product.productType?.trim() || null,
       kind: p.product.kind,
       visits: typeof metrics.visits_90d === 'number' ? metrics.visits_90d : null,
       sales: typeof metrics.sales_90d === 'number' ? metrics.sales_90d : null,

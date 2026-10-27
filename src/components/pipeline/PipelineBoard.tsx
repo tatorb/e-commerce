@@ -33,6 +33,7 @@ export function PipelineBoard({
             stepSince: i.stepSince?.toISOString() ?? null,
             lock: i.titleLock.locked ? titleLockText(i.titleLock) : null,
             step: i.pipelineStep,
+            familySize: i.familySize,
           },
         ]
       : [],

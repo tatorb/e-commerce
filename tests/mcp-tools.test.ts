@@ -38,7 +38,7 @@ describe('lista de herramientas', () => {
     }
     const search = tools.find((t) => t.name === 'search_catalog')!.inputSchema as { required?: string[]; properties: Record<string, unknown> };
     expect(search.required ?? []).toEqual([]);
-    expect(Object.keys(search.properties)).toContain('familia');
+    expect(Object.keys(search.properties)).toContain('tipo_de_producto');
   });
 });
 
@@ -160,27 +160,27 @@ describe.skipIf(!url)('herramientas para Claude', () => {
     expect((await call('get_pipeline_board', { cuenta: 'nada' })).isError).toBe(true);
   });
 
-  it('search_catalog: filtros de la pantalla, paso y familia aproximada', async () => {
+  it('search_catalog: filtros de la pantalla, paso y tipo de producto aproximado', async () => {
     expect((await call('search_catalog')).data.total).toBe(2);
     const byStep = (await call('search_catalog', { paso: ['TITLE'] })).data;
     expect(byStep.publicaciones.map((p: { codigo: string }) => p.codigo)).toEqual(['MLA1110001']);
     expect(byStep.publicaciones[0]).toMatchObject({
-      familia: 'Kit de embrague',
+      tipo_de_producto: 'Kit de embrague',
       visitas_90d: 120,
       ventas_90d: 3,
       titulo_bloqueado: 'sí',
       pipeline: 'En pipeline · Título',
       link_app: `https://app.ejemplo.com/a/prueba/pipeline/${kitId}`,
     });
-    expect((await call('search_catalog', { familia: ['embrague'] })).data.total).toBe(1);
-    expect((await call('search_catalog', { familia: ['no existe'] })).isError).toBe(true);
+    expect((await call('search_catalog', { tipo_de_producto: ['embrague'] })).data.total).toBe(1);
+    expect((await call('search_catalog', { tipo_de_producto: ['no existe'] })).isError).toBe(true);
     expect((await call('search_catalog', { ventas: ['con'] })).data.total).toBe(1);
     expect((await call('search_catalog', { texto: 'sku-1' })).data.total).toBe(1);
     const page = (await call('search_catalog', { limite: 1, desde: 1, orden: 'titulo' })).data;
     expect(page).toMatchObject({ total: 2, mostrando: '2 a 2' });
     expect(page.publicaciones[0].codigo).toBe('MLA1110001');
-    const fams = (await call('search_catalog', { incluir_familias: true })).data.familias;
-    expect(fams).toHaveLength(2);
+    const types = (await call('search_catalog', { incluir_tipos: true })).data.tipos_de_producto;
+    expect(types).toHaveLength(2);
     expect((await call('search_catalog', { pipeline: ['NADA'] })).isError).toBe(true);
   });
 

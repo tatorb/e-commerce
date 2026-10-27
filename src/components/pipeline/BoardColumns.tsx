@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Clock, GripVertical, ListTodo, Lock } from 'lucide-react';
+import { Clock, GripVertical, Layers, ListTodo, Lock } from 'lucide-react';
 import { ScoreBadge } from '@/components/stages/ScoreBadge';
 import { KindBadge } from '@/components/products/KindBadge';
 import { codeOrUnpublished } from '@/domain/channel-status';
@@ -35,6 +35,8 @@ export type BoardCardData = {
   stepSince: string | null;
   lock: string | null;
   step: PipelineStep;
+  // Cuántas medidas tiene su familia; 0 si no es de una familia.
+  familySize?: number;
 };
 
 export function BoardColumns({
@@ -227,7 +229,14 @@ function BoardCard({
               {card.code}
             </span>
           ) : null}
-          {codeOrUnpublished(card.externalId)}
+          {card.familySize && card.familySize > 1 ? (
+            <span title="Las medidas de la familia se mueven juntas" className="inline-flex items-center gap-1 font-medium text-foreground">
+              <Layers className="h-3 w-3" />
+              Familia de {card.familySize} medidas
+            </span>
+          ) : (
+            codeOrUnpublished(card.externalId)
+          )}
           {showStore ? <span>· {card.storeName}</span> : null}
           <KindBadge kind={card.kind} />
         </p>

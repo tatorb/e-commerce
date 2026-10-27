@@ -403,7 +403,7 @@ describe.skipIf(!url)('herramientas de escritura', () => {
     expect(before.data.datos_de_catalogo).toMatchObject({
       canal: 'Mercado Libre',
       categoria: 'Kits de Embrague (MLA373460)',
-      categoria_elegida: 'por la familia',
+      categoria_elegida: 'por el tipo de producto',
       de_la_ficha: [
         { nombre: 'Marca', valor: 'Marca Uno' },
         { nombre: 'Número de pieza', valor: 'P-100' },
@@ -431,11 +431,11 @@ describe.skipIf(!url)('herramientas de escritura', () => {
     expect((await call('save_catalog_data', { publicacion: 'MLA1110001', valores: { BRAND: 'Otra' } })).text).toContain('sale de la ficha');
     expect((await call('save_catalog_data', { publicacion: 'MLA1110001' })).isError).toBe(true);
 
-    // La bomba de agua tiene la suya; se puede cambiar a mano y volver a la de la familia.
+    // La bomba de agua tiene la suya; se puede cambiar a mano y volver a la del tipo de producto.
     const bomba = await call('save_catalog_data', { publicacion: 'MLA2220002', categoria: 'Bombas de Aceite' });
     expect(bomba.data.datos_de_catalogo).toMatchObject({ categoria: 'Bombas de Aceite (MLA60626)', categoria_elegida: 'a mano' });
     const back = await call('save_catalog_data', { publicacion: 'MLA2220002', categoria: null });
-    expect(back.data.datos_de_catalogo).toMatchObject({ categoria: 'Bombas de Agua (MLA60598)', categoria_elegida: 'por la familia' });
+    expect(back.data.datos_de_catalogo).toMatchObject({ categoria: 'Bombas de Agua (MLA60598)', categoria_elegida: 'por el tipo de producto' });
   });
 
   it('combos: armar un combo con individuales y verlo en las publicaciones', async () => {
@@ -475,7 +475,7 @@ describe.skipIf(!url)('herramientas de escritura', () => {
     expect(board.isError).toBeFalsy();
   });
 
-  it('save_technical_sheet: completa por nombre, borra con vacío y dice qué campos de la familia faltan', async () => {
+  it('save_technical_sheet: completa por nombre, borra con vacío y dice qué campos del tipo de producto faltan', async () => {
     const first = await call('save_technical_sheet', {
       publicacion: 'MLA1110001',
       datos: [
@@ -497,7 +497,7 @@ describe.skipIf(!url)('herramientas de escritura', () => {
       { nombre: 'diametro del DISCO', valor: '210 mm' },
       { nombre: 'Material', valor: 'Acero' },
     ]);
-    const expected = other.data.campos_esperados_por_la_familia;
+    const expected = other.data.campos_esperados_por_el_tipo;
     expect(Array.isArray(expected)).toBe(true);
     expect(expected[0]).toMatchObject({ canal: 'Mercado Libre' });
     expect(expected[0].faltan.length).toBeGreaterThan(0);
@@ -509,10 +509,10 @@ describe.skipIf(!url)('herramientas de escritura', () => {
     expect((await call('save_technical_sheet', { publicacion: 'MLA1110001', datos: [{ nombre: '  ', valor: 'x' }] })).text).toContain('necesita un nombre');
     expect((await call('save_technical_sheet', { publicacion: 'MLA1110001', datos: [] })).isError).toBe(true);
 
-    // Sin tipo de producto no hay familia: lo dice en lugar de inventar campos.
+    // Sin tipo de producto no hay campos esperados: lo dice en lugar de inventarlos.
     await db.product.updateMany({ where: { name: 'Bomba de agua' }, data: { productType: null } });
     const bomba = await call('save_technical_sheet', { publicacion: 'MLA2220002', datos: [{ nombre: 'Caudal', valor: '40 l/min' }] });
-    expect(typeof bomba.data.campos_esperados_por_la_familia).toBe('string');
+    expect(typeof bomba.data.campos_esperados_por_el_tipo).toBe('string');
   });
 
   it('save_kit_contents: es del producto, reemplaza el texto y vacío lo borra', async () => {

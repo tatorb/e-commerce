@@ -71,6 +71,7 @@ async function loadForPush(db: Db, accountId: string, publicationId: string) {
       productId: true,
       externalId: true,
       variantListings: true,
+      variantKey: true,
       channelStatus: true,
       title: true,
       description: true,
@@ -488,7 +489,7 @@ async function pushPhotos(
   },
 ): Promise<void> {
   const { p, refs } = args;
-  const { pictures, origins, problems, layout, sent } = await picturesFor(db, p.productId, refs, p.channelCopy);
+  const { pictures, origins, problems, layout, sent } = await picturesFor(db, p.productId, refs, p.channelCopy, p.variantKey);
   if (problems.length > 0 || pictures.length === 0) return args.reject('photos', problems.join(' ') || 'Elegí al menos una foto.');
   let ids: string[] | null;
   // Si el canal guarda cada medida aparte, cada una lleva lo que ve el comprador en esa medida.
@@ -557,7 +558,7 @@ async function pushPhotos(
     });
   });
   // Las que comparten las fotos en el canal también cambiaron: se vuelven a leer.
-  const siblings = await photoSiblings(db, { id: p.id, productId: p.productId, storeId: p.store.id, copy: p.channelCopy });
+  const siblings = await photoSiblings(db, { id: p.id, productId: p.productId, storeId: p.store.id, variantKey: p.variantKey, copy: p.channelCopy });
   for (const sibling of siblings) {
     await readOne(db, { accountId: args.accountId, publicationId: sibling.id }).catch((e) =>
       console.error('No se pudo volver a leer la que comparte las fotos', sibling.externalId, e instanceof Error ? e.message : e),

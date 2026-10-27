@@ -46,6 +46,8 @@ import { can } from '@/domain/access';
 import { formatDateTime, plural } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
 import { loadPublicationFaces, type PublicationFaces } from '@/lib/queries/publication-faces';
+import { FamilyMembersRow } from '@/components/families/FamilyMembersRow';
+import { familyOf } from '@/lib/families';
 
 export const dynamic = 'force-dynamic';
 // Subir al canal hace varios pedidos y vuelve a leer la publicación, y generar
@@ -111,7 +113,7 @@ export default async function PublicationPage({
   const productHref = `/a/${account.slug}/productos/${p.product.id}`;
   // Las otras publicaciones del mismo producto, para pasar de una a otra.
   const canTask = can(user.access, 'tareas', 'write');
-  const [others, history, knowledge, qa, tasks, people, stockPlans, factsOf] = await Promise.all([
+  const [others, history, knowledge, qa, tasks, people, stockPlans, factsOf, family] = await Promise.all([
     prisma.publication.findMany({
       where: { productId: p.product.id, id: { not: p.id } },
       orderBy: { createdAt: 'asc' },
@@ -134,6 +136,8 @@ export default async function PublicationPage({
     plansFor(prisma, [p.id]),
     // El código, las medidas y la respuesta automática, para el encabezado.
     loadPublicationFacts(prisma, [p.id]),
+    // Las demás medidas de su familia, que se trabajan juntas.
+    familyOf(prisma, p.id),
   ]);
   const facts = factsOf.get(p.id) ?? null;
   const stockPlan = stockPlans.get(p.id) ?? null;
@@ -159,6 +163,7 @@ export default async function PublicationPage({
                 {p.store.name} · {codeOrUnpublished(p.externalId)}
               </p>
               {facts ? <PublicationFactsRow facts={facts} /> : null}
+              {family ? <FamilyMembersRow members={family.members} accountSlug={account.slug} channelName={data.channelName} currentId={p.id} /> : null}
               <div className="flex flex-wrap gap-1.5">
                 <PipelineBadge state={p} />
                 {copy && !data.missing && pending === 0 ? <Badge variant="outline">Al día con {channelName}</Badge> : null}

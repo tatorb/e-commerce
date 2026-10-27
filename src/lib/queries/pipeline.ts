@@ -9,7 +9,11 @@ import { listScoredPublications } from './scoring';
 
 export type BoardItem = Awaited<ReturnType<typeof listBoard>>[number];
 
-/** Las publicaciones que están en el pipeline, con desde cuándo están en su paso. Las que esperan hace más, primero. */
+/**
+ * Las publicaciones que están en el pipeline, con desde cuándo están en su
+ * paso. Las que esperan hace más, primero. Una familia es una sola tarjeta: la
+ * de su principal.
+ */
 export async function listBoard(accountId: string, db: PrismaClient = prisma) {
   const [items, open] = await Promise.all([
     listScoredPublications(accountId, { pipelineStatus: 'IN_PIPELINE' }, db),
@@ -20,6 +24,7 @@ export async function listBoard(accountId: string, db: PrismaClient = prisma) {
   ]);
   const since = new Map(open.map((m) => [m.publicationId, m.enteredAt]));
   return items
+    .filter((i) => !i.familyLeadId || i.familyLeadId === i.id)
     .map((i) => ({ ...i, stepSince: since.get(i.id) ?? null }))
     .sort((a, b) => (a.stepSince?.getTime() ?? 0) - (b.stepSince?.getTime() ?? 0));
 }

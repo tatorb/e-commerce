@@ -7,7 +7,7 @@ import { requireUser } from '@/lib/auth/session';
 import { parsePrice } from '@/domain/money';
 import { pricingInputSchema } from '@/domain/pricing';
 import { getAccountBySlug } from '@/lib/queries/accounts';
-import { PricingError, savePriceDecision, savePricingSettings } from '@/lib/pricing';
+import { PricingError, savePriceDecision, savePricingSettings, setMeasurePrice } from '@/lib/pricing';
 
 // Lo que se hace desde el paso Precio y desde Ajustes > Precios.
 
@@ -68,5 +68,25 @@ export async function savePriceDecisionAction(accountSlug: string, publicationId
     }
     revalidatePath(`/a/${accountSlug}`, 'layout');
     return { ok: true, message: 'Precio guardado.' };
+  });
+}
+
+/** El precio de una medida de una familia: el suyo, o vuelve al de la familia. */
+export async function setMeasurePriceAction(accountSlug: string, publicationId: string, input: { own: boolean; price: string }): Promise<Result> {
+  const does = input?.own ? 'Le puso precio propio a una medida' : 'Volvió una medida al precio de la familia';
+  return act(accountSlug, { section: ['pipeline'], does, publicationId }, async () => {
+      const account = await getAccountBySlug(accountSlug);
+      if (!account) return NO_ACCOUNT;
+      const own = input?.own === true;
+      const price = own ? parsePrice(String(input?.price ?? '')) : null;
+      if (own && (typeof price !== 'number' || price <= 0)) return { ok: false, error: 'El precio tiene que ser un monto, por ejemplo 99.627,50.' };
+      try {
+        await setMeasurePrice(prisma, { accountId: account.id, publicationId: String(publicationId), own, price: typeof price === 'number' ? price : null });
+      } catch (e) {
+        if (e instanceof PricingError) return { ok: false, error: e.message };
+        throw e;
+      }
+      revalidatePath(`/a/${accountSlug}`, 'layout');
+      return { ok: true, message: own ? 'Precio de la medida guardado.' : 'La medida vuelve al precio de la familia.' };
   });
 }

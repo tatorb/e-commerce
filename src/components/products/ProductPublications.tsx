@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ArrowRight, KanbanSquare } from 'lucide-react';
+import { ArrowRight, KanbanSquare, Layers } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { AddToPipelineButton } from '@/components/pipeline/AddToPipelineButton';
@@ -15,6 +15,7 @@ import type { PublicationFacts } from '@/lib/publication-facts';
 import { PublicationFactsRow } from '@/components/publication/PublicationFactsRow';
 import type { ProductDetail } from '@/lib/queries/products';
 import { cn } from '@/lib/utils/cn';
+import { plural } from '@/lib/format';
 
 // Las publicaciones del producto, una tarjeta corta por cada una: qué es, en
 // qué tienda, su precio, su cantidad y sus ventas, en qué estado está y a
@@ -98,9 +99,39 @@ export function ProductPublications({
   figures: Map<string, PublicationFigures>;
   facts: Map<string, PublicationFacts>;
 }) {
+  // Las medidas de una familia van juntas, en un recuadro, donde aparece la primera.
+  const groups: Publication[][] = [];
+  const seen = new Map<string, Publication[]>();
+  for (const pub of publications) {
+    const familyId = pub.family?.id ?? null;
+    const group = familyId ? seen.get(familyId) : undefined;
+    if (group) group.push(pub);
+    else {
+      const fresh = [pub];
+      if (familyId) seen.set(familyId, fresh);
+      groups.push(fresh);
+    }
+  }
   return (
     <ul className="space-y-3">
-      {publications.map((pub) => {
+      {groups.map((group) =>
+        group.length > 1 || group[0].family ? (
+          <li key={`familia-${group[0].family!.id}`} className="space-y-2 rounded-xl border border-dashed p-2 md:p-3">
+            <p className="flex items-center gap-1.5 px-1 text-sm font-medium">
+              <Layers className="h-4 w-4 text-muted-foreground" />
+              Familia de {plural(group[0].family!._count.members, 'medida', 'medidas')}
+              <span className="font-normal text-muted-foreground">· se trabajan juntas en el pipeline</span>
+            </p>
+            <ul className="space-y-2">{group.map((pub) => card(pub))}</ul>
+          </li>
+        ) : (
+          card(group[0])
+        ),
+      )}
+    </ul>
+  );
+
+  function card(pub: Publication) {
         const channel = channels.get(pub.id)!;
         const summary = faceSummary(fingerprintsOf(faceValues(pub)), pub.channelCopy);
         const href = `/a/${accountSlug}/publicaciones/${pub.id}`;
@@ -156,7 +187,5 @@ export function ProductPublications({
             </div>
           </li>
         );
-      })}
-    </ul>
-  );
+  }
 }

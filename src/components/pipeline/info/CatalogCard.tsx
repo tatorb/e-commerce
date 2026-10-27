@@ -84,7 +84,7 @@ export function CatalogCard({
           onChange={(e) => changeCategory(e.target.value)}
         >
           {familyCategory ? (
-            <option value="">{familyCategory.name}, por la familia</option>
+            <option value="">{familyCategory.name}, por el tipo de producto</option>
           ) : (
             <option value="" disabled>
               Elegí una categoría
@@ -98,14 +98,14 @@ export function CatalogCard({
         </select>
         <p className="text-xs text-muted-foreground">
           {data.source === 'family'
-            ? `Sale de la familia «${family}».`
+            ? `Sale del tipo de producto «${family}».`
             : data.source === 'manual'
               ? familyCategory
-                ? `Elegida a mano. A la familia «${family}» le toca ${familyCategory.name}.`
+                ? `Elegida a mano. Al tipo de producto «${family}» le toca ${familyCategory.name}.`
                 : 'Elegida a mano.'
               : family
-                ? `La familia «${family}» no tiene una categoría asignada: elegila acá.`
-                : 'El producto no tiene familia en la ficha: elegí la categoría acá.'}
+                ? `El tipo de producto «${family}» no tiene una categoría asignada: elegila acá.`
+                : 'El producto no tiene tipo de producto en la ficha: elegí la categoría acá.'}
         </p>
       </div>
 

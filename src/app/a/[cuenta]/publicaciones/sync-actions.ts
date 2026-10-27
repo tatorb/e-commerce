@@ -21,6 +21,7 @@ import { setFollowsStock, syncStock } from '@/lib/stock';
 import { StockError } from '@/domain/stock';
 import { plannedText } from '@/lib/stock-plan';
 import { settleReactivations } from '@/lib/restock';
+import { saveFamilyMedia } from '@/lib/family-media';
 
 // Lo que se hace desde la página de una publicación y desde Por subir: cambiar
 // el borrador, subirlo al canal, descartarlo y volver a leer del canal.
@@ -158,7 +159,7 @@ export async function readOneAction(accountSlug: string, publicationId: string):
 export async function saveMediaAction(
   accountSlug: string,
   publicationId: string,
-  input: { refs?: unknown; videos?: unknown; clips?: unknown },
+  input: { refs?: unknown; videos?: unknown; clips?: unknown; family?: boolean },
 ): Promise<Result> {
   return act(accountSlug, { section: ['pipeline', 'publicaciones'], does: 'Ordenó las fotos y los videos', publicationId }, async () => {
     const user = await requireUser();
@@ -174,7 +175,9 @@ export async function saveMediaAction(
       .safeParse({ id: publicationId, refs: input?.refs, videos: input?.videos, clips: input?.clips });
     if (!parsed.success) return { ok: false, error: 'Las fotos que llegaron no tienen la forma esperada.' };
     try {
-      await saveMedia(prisma, { accountId: account.id, publicationId: parsed.data.id, ...parsed.data, userId: user.id });
+      // Desde la familia: cada medida queda con las fotos de su ventana.
+      const save = input?.family === true ? saveFamilyMedia : saveMedia;
+      await save(prisma, { accountId: account.id, publicationId: parsed.data.id, ...parsed.data, userId: user.id });
     } catch (e) {
       if (e instanceof MediaError || e instanceof VideoError) return { ok: false, error: e.message };
       throw e;

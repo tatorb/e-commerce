@@ -24,7 +24,7 @@ import {
   SALES_OPTIONS,
   SORTS,
   VISIT_RANGES,
-  encodeFamily,
+  encodeProductType,
   filterPublications,
   parsePublicationSearch,
 } from '@/lib/queries/catalog-filters';
@@ -41,6 +41,7 @@ import { stockText } from '@/domain/stock';
 import { fieldLabel, kindLabel } from '@/domain/sync-log';
 import { catalogForClaude } from './catalog';
 import { loadTitleContext, RECEIVED_QUESTIONS } from '@/lib/queries/title-step';
+import { familyOf } from '@/lib/families';
 import {
   McpToolError,
   accountArg,
@@ -110,7 +111,7 @@ function summary(ctx: McpContext, account: AccountRef, p: ScoredPublication) {
     titulo: p.title,
     tienda: `${p.channelName} · ${p.storeName}`,
     individual_o_combo: PRODUCT_KIND_LABEL[p.kind],
-    familia: p.family,
+    tipo_de_producto: p.productType,
     puntaje: p.score,
     visitas_90d: p.visits,
     ventas_90d: p.sales,
@@ -198,10 +199,10 @@ const searchCatalog = defineTool({
       .array(asEnum(KIND_OPTIONS.map((o) => o.value)))
       .optional()
       .describe('individual = productos individuales; combo = combos armados con productos individuales.'),
-    familia: z
+    tipo_de_producto: z
       .array(z.string())
       .optional()
-      .describe('Familia de producto, por ejemplo "Kit de embrague". Si no coincide exacto, busca las familias que la contienen.'),
+      .describe('Tipo de producto, por ejemplo "Kit de embrague". Si no coincide exacto, busca los tipos que lo contienen.'),
     visitas: z
       .array(asEnum(VISIT_RANGES.map((r) => r.value)))
       .optional()
@@ -226,31 +227,31 @@ const searchCatalog = defineTool({
       .describe(`Orden: ${labels(SORTS.map((s) => [s.value, s.label]))}. Sin orden, menor puntaje primero.`),
     limite: z.number().int().min(1).max(200).optional().describe('Cuántas devolver, hasta 200. Sin límite, 50.'),
     desde: z.number().int().min(0).optional().describe('Cuántas saltear, para ver las siguientes.'),
-    incluir_familias: z.boolean().optional().describe('Suma la lista de familias de la cuenta con cuántas publicaciones tiene cada una.'),
+    incluir_tipos: z.boolean().optional().describe('Suma la lista de tipos de producto de la cuenta con cuántas publicaciones tiene cada uno.'),
   }),
   readOnly: true,
   async run(ctx, args) {
     const account = await resolveAccount(ctx, args.cuenta);
     const all = await listScoredPublications(account.id, {}, ctx.db);
     const counts = new Map<string, number>();
-    for (const p of all) if (p.family) counts.set(p.family, (counts.get(p.family) ?? 0) + 1);
-    const families = [...counts.keys()];
+    for (const p of all) if (p.productType) counts.set(p.productType, (counts.get(p.productType) ?? 0) + 1);
+    const types = [...counts.keys()];
 
-    // Cada familia pedida: la exacta o, si no hay, las que la contienen.
-    const wantedFamilies = (args.familia ?? []).flatMap((raw) => {
+    // Cada tipo pedido: el exacto o, si no hay, los que lo contienen.
+    const wantedTypes = (args.tipo_de_producto ?? []).flatMap((raw) => {
       const f = raw.trim().toLowerCase();
-      const exact = families.filter((x) => x.toLowerCase() === f);
-      return exact.length > 0 ? exact : families.filter((x) => x.toLowerCase().includes(f));
+      const exact = types.filter((x) => x.toLowerCase() === f);
+      return exact.length > 0 ? exact : types.filter((x) => x.toLowerCase().includes(f));
     });
-    if ((args.familia ?? []).length > 0 && wantedFamilies.length === 0) {
-      throw new McpToolError(`No hay publicaciones con la familia ${args.familia!.join(', ')}. Usá incluir_familias para ver cuáles hay.`);
+    if ((args.tipo_de_producto ?? []).length > 0 && wantedTypes.length === 0) {
+      throw new McpToolError(`No hay publicaciones del tipo ${args.tipo_de_producto!.join(', ')}. Usá incluir_tipos para ver cuáles hay.`);
     }
 
     const join = (list: string[] | undefined) => (list && list.length > 0 ? list.join(',') : undefined);
     const filters = parsePublicationSearch({
       q: args.texto,
       pipeline: join(args.pipeline),
-      familia: join(wantedFamilies.map(encodeFamily)),
+      tipoProducto: join(wantedTypes.map(encodeProductType)),
       tipo: join(args.individual_o_combo),
       visitas: join(args.visitas),
       ventas: join(args.ventas),
@@ -270,11 +271,11 @@ const searchCatalog = defineTool({
       total: found.length,
       mostrando: page.length > 0 ? `${from + 1} a ${from + page.length}` : 'ninguna',
       publicaciones: page.map((p) => summary(ctx, account, p)),
-      ...(args.incluir_familias
+      ...(args.incluir_tipos
         ? {
-            familias: [...counts.entries()]
+            tipos_de_producto: [...counts.entries()]
               .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'es'))
-              .map(([familia, publicaciones]) => ({ familia, publicaciones })),
+              .map(([tipo, publicaciones]) => ({ tipo, publicaciones })),
           }
         : {}),
     };
@@ -422,8 +423,25 @@ const getPublication = defineTool({
     const r = research.research;
     const manufacturerText = withoutPrices(r?.manufacturerText ?? null);
     const measurement = pub.measurements[0] ?? null;
+    const family = await familyOf(ctx.db, id);
     return {
       ...summary(ctx, account, scored),
+      // Las medidas de su familia: lo que es de la familia se guarda en todas.
+      ...(family
+        ? {
+            familia: {
+              medidas: family.members.map((m) => ({
+                medida: m.measure ?? 'sin elegir',
+                codigo: m.externalId,
+                principal: m.lead,
+                precio_propio: m.ownPrice,
+                es_esta: m.id === id,
+              })),
+              que_es_de_la_familia:
+                'El paso del pipeline, el título, la descripción, los datos de catálogo, las preguntas frecuentes, las reglas del bot, responder solo y el precio (salvo las medidas con precio propio). Se guardan en todas las medidas a la vez.',
+            },
+          }
+        : {}),
       titulo: pub.title,
       descripcion: pub.description,
       atributos_en_el_canal: safeList(parseNameValueList(pub.attributes)),

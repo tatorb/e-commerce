@@ -12,7 +12,7 @@ const TYPE_LABEL: Record<CatalogFieldType, string> = {
   number_unit: 'número con unidad',
 };
 
-const SOURCE_LABEL = { family: 'por la familia', manual: 'a mano' } as const;
+const SOURCE_LABEL = { family: 'por el tipo de producto', manual: 'a mano' } as const;
 
 export function catalogForClaude(data: CatalogData | null) {
   if (!data) return null;

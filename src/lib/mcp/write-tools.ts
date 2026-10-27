@@ -756,7 +756,7 @@ const saveCatalogTool = defineTool({
       .string()
       .nullable()
       .optional()
-      .describe('Para cambiar la categoría: su código o su nombre. null vuelve a la que le toca por la familia. Si la familia no tiene una, hay que elegirla antes de cargar los campos.'),
+      .describe('Para cambiar la categoría: su código o su nombre. null vuelve a la que le toca por el tipo de producto. Si el tipo no tiene una, hay que elegirla antes de cargar los campos.'),
     valores: z
       .record(z.string(), z.union([z.string(), z.array(z.string()), z.null()]))
       .optional()
@@ -783,12 +783,12 @@ async function sheetResult(ctx: McpContext, account: AccountRef, productId: stri
     ficha_tecnica: state.specs.map((s) => ({ nombre: s.name, valor: s.value })),
     datos_cargados: state.specs.length,
     ...(state.minimum !== null ? { minimo_del_estandar: state.minimum } : {}),
-    campos_esperados_por_la_familia:
+    campos_esperados_por_el_tipo:
       state.expected.length > 0
         ? state.expected
         : state.family
-          ? `La familia «${state.family}» no tiene campos esperados en los canales de la cuenta.`
-          : 'El producto no tiene tipo cargado: sin familia no hay campos esperados.',
+          ? `El tipo de producto «${state.family}» no tiene campos esperados en los canales de la cuenta.`
+          : 'El producto no tiene tipo cargado: sin tipo no hay campos esperados.',
     link_app: appLink(ctx, account, publicationId),
   };
 }
@@ -1219,7 +1219,7 @@ const updateTitleRulesTool = defineTool({
   section: 'reglas',
   title: 'Editar las reglas de título',
   description:
-    'Edita las reglas de título de la cuenta para un canal: largo máximo, signos y palabras no permitidas, y la estructura sugerida por familia. Lo que no se manda queda como está; las listas reemplazan la lista entera. restablecer vuelve a las reglas del canal. Confirmalo con la persona antes.',
+    'Edita las reglas de título de la cuenta para un canal: largo máximo, signos y palabras no permitidas, y la estructura sugerida por tipo de producto. Lo que no se manda queda como está; las listas reemplazan la lista entera. restablecer vuelve a las reglas del canal. Confirmalo con la persona antes.',
   input: z.object({
     cuenta: accountArg,
     canal: z.string().optional().describe('El canal, por ejemplo "Mercado Libre". Si la cuenta tiene uno solo, se puede omitir.'),
@@ -1227,7 +1227,7 @@ const updateTitleRulesTool = defineTool({
     signos_no_permitidos: z.string().optional().describe('Todos juntos, por ejemplo "!¡*$".'),
     palabras_no_permitidas: z.array(z.string()).max(300).optional(),
     estructuras: z
-      .array(z.object({ familia: z.string().describe('Vacía vale para todas las familias.'), estructura: z.string() }))
+      .array(z.object({ tipo_de_producto: z.string().describe('Vacío vale para todos los tipos.'), estructura: z.string() }))
       .max(100)
       .optional(),
     restablecer: z.boolean().optional().describe('Borra las reglas de la cuenta y vuelve a las del canal.'),
@@ -1257,7 +1257,7 @@ const updateTitleRulesTool = defineTool({
         maxLength: args.largo_maximo === undefined ? rules.maxLength : args.largo_maximo,
         forbiddenChars: args.signos_no_permitidos ?? rules.forbiddenChars,
         forbiddenWords: args.palabras_no_permitidas ?? rules.forbiddenWords,
-        structures: args.estructuras ? args.estructuras.map((s) => ({ family: s.familia, structure: s.estructura })) : rules.structures,
+        structures: args.estructuras ? args.estructuras.map((s) => ({ family: s.tipo_de_producto, structure: s.estructura })) : rules.structures,
       });
       if (!parsed.success) throw new McpToolError(parsed.error.issues[0]?.message ?? 'Revisá los datos.');
       const data = { ...parsed.data, updatedById: ctx.userId };
@@ -1275,7 +1275,7 @@ const updateTitleRulesTool = defineTool({
         largo_maximo: rules.maxLength,
         signos_no_permitidos: rules.forbiddenChars,
         palabras_no_permitidas: rules.forbiddenWords,
-        estructuras: rules.structures.map((s) => ({ familia: s.family, estructura: s.structure })),
+        estructuras: rules.structures.map((s) => ({ tipo_de_producto: s.family, estructura: s.structure })),
         son_de_la_cuenta: custom,
       },
     };

@@ -29,8 +29,8 @@ import {
   SALES_OPTIONS,
   SORTS,
   VISIT_RANGES,
-  encodeFamily,
-  familyOptions,
+  encodeProductType,
+  productTypeOptions,
   KIND_OPTIONS,
   filterPublications,
   isFiltered,
@@ -105,6 +105,7 @@ export default async function PublicationsPage({
     missing: p.missing.map((m) => m.name),
     sync: p.sync,
     quantity: p.quantity,
+    familySize: p.familySize,
   }));
   const ready = items.filter((p) => needsProposal(p.stage));
   const toReview = all.filter((p) => p.stage === 'PROPOSAL_GENERATED' || p.stage === 'IN_REVIEW').length;
@@ -205,10 +206,10 @@ export default async function PublicationsPage({
             selected={KIND_OPTIONS.filter((o) => filters.kinds.includes(o.kind)).map((o) => o.value)}
           />
           <UrlFilterDropdown
-            label="Familia"
-            paramKey="familia"
-            options={familyOptions(all)}
-            selected={filters.families.map(encodeFamily)}
+            label="Tipo de producto"
+            paramKey="tipoProducto"
+            options={productTypeOptions(all)}
+            selected={filters.productTypes.map(encodeProductType)}
           />
           <UrlFilterDropdown
             label="Visitas"

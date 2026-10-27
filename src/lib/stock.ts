@@ -13,7 +13,7 @@ import { quantityCopy, sendQuantities } from '@/lib/channel-push';
 import { withAccessToken } from '@/lib/connections';
 import { variantListingOwners } from '@/lib/variant-listings';
 import { afterRestock } from '@/lib/restock';
-import { PLAN_SELECT, planFor, SOURCE_SELECT, sourceOf, type PlanRow, type StockPlan } from '@/lib/stock-plan';
+import { PLAN_SELECT, planFor, singleMeasure, SOURCE_SELECT, sourceOf, type PlanRow, type StockPlan } from '@/lib/stock-plan';
 
 // El stock de cada producto: cargarlo a mano, tomarlo del canal al empezar,
 // descontar las ventas, devolver las canceladas y subir la cantidad que le
@@ -287,9 +287,12 @@ async function resolveLine(db: Db | Tx, storeId: string, line: ChannelOrderLine,
   else if (line.variationId) measure = variations.find((v) => v.variationId === line.variationId) ?? (line.sku ? { sku: line.sku, measure: null } : null);
   else if (line.sku && variations.length > 0) measure = { sku: line.sku, measure: null };
   else if (variations.length === 0) {
-    // Una medida publicada sola: por el SKU de lo vendido o el de la publicación.
+    // Una medida publicada sola: la elegida en la publicación, o por el SKU de lo vendido o el de la publicación.
     const slots = stockSlots(pub.product.variants);
-    measure = (line.sku ? listingMeasure(slots, [line.sku]) : null) ?? listingMeasure(slots, copySkus(pub.channelCopy?.details));
+    measure =
+      singleMeasure(pub.product, null, pub.variantKey) ??
+      (line.sku ? listingMeasure(slots, [line.sku]) : null) ??
+      listingMeasure(slots, copySkus(pub.channelCopy?.details));
   }
   const unit = unitParts(source, measure);
   if (!unit) return skip('No se sabe de qué medida del producto es.');
@@ -562,7 +565,7 @@ export async function startStock(db: Db, opts: { budgetMs?: number } = {}): Prom
         variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } },
         publications: {
           where,
-          select: { id: true, store: { select: { salesSince: true } }, channelCopy: { select: { quantity: true, variations: true, readAt: true, details: true } } },
+          select: { id: true, variantKey: true, store: { select: { salesSince: true } }, channelCopy: { select: { quantity: true, variations: true, readAt: true, details: true } } },
         },
       },
     });
@@ -580,7 +583,11 @@ const START_PAGE = 200;
 type StartRow = {
   id: string;
   variants: VariantLike[];
-  publications: { store: { salesSince: Date | null }; channelCopy: { quantity: number | null; variations: unknown; readAt: Date; details: unknown } | null }[];
+  publications: {
+    variantKey: string | null;
+    store: { salesSince: Date | null };
+    channelCopy: { quantity: number | null; variations: unknown; readAt: Date; details: unknown } | null;
+  }[];
 };
 
 /** El stock de partida de un producto. False si todavía no se puede saber o alguien ya lo cargó. */
@@ -591,7 +598,8 @@ async function startOne(db: Db, product: StartRow): Promise<boolean> {
     .map((p) => {
       const variations = parseVariations(p.channelCopy!.variations);
       const channel = channelQuantities(p.channelCopy!.quantity, variations) ?? [];
-      return observedStock(slots, channel, variations, listingMeasure(slots, copySkus(p.channelCopy!.details)));
+      const sole = singleMeasure(product, null, p.variantKey) ?? listingMeasure(slots, copySkus(p.channelCopy!.details));
+      return observedStock(slots, channel, variations, sole);
     })
     .filter((o) => Object.keys(o).length > 0);
   if (observed.length === 0) return false;

@@ -43,7 +43,19 @@ export type CatalogRow = PipelineState & {
   sync: SyncState;
   // La cantidad: la del canal, la que falta subir, en cuántas medidas y si la maneja el canal.
   quantity: { channel: number | null; draft: number | null; measures: number; inChannel: boolean };
+  // Cuántas medidas tiene su familia; 0 si no es de una familia.
+  familySize: number;
 };
+
+/** La marca de una medida de una familia: se trabaja junta con las demás. */
+function FamilyChip({ size }: { size: number }) {
+  if (size < 2) return null;
+  return (
+    <Badge variant="outline" title="Cada medida es una publicación en el canal; se trabajan juntas en el pipeline">
+      Familia de {size} medidas
+    </Badge>
+  );
+}
 
 /** Si tiene cambios de la app sin subir, o datos distintos en los dos lados para elegir. */
 function SyncBadges({ sync }: { sync: SyncState }) {
@@ -502,6 +514,7 @@ export function CatalogTable({ accountSlug, rows, channelName }: { accountSlug: 
                   <PipelineCell accountSlug={accountSlug} row={p} />
                   <ChannelStatusBadge status={p.channelStatus} />
                   <SyncBadges sync={p.sync} />
+                  <FamilyChip size={p.familySize} />
                 </div>
                 <div className="text-xs text-muted-foreground truncate">
                   {[codeOrUnpublished(p.externalId), p.skus.join(' / ')].filter(Boolean).join(' · ')}
@@ -562,6 +575,7 @@ export function CatalogTable({ accountSlug, rows, channelName }: { accountSlug: 
                         <LockIcon lock={p.titleLock} />
                       </span>
                       <KindBadge kind={p.kind} className="mt-0.5" />
+                      <FamilyChip size={p.familySize} />
                     </div>
                     <div className="text-xs text-muted-foreground truncate">
                       {[codeOrUnpublished(p.externalId), p.skus.join(' / ')].filter(Boolean).join(' · ')}
