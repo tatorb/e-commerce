@@ -33,8 +33,9 @@ import { quantityKey, totalQuantity, type QuantityLine } from '@/domain/quantiti
 import { needsReactivation } from '@/domain/channel-status';
 import type { NameValue } from '@/domain/name-value';
 import { writeContentField } from '@/domain/content';
-import { LATEST_MEASUREMENTS, latestMetrics } from '@/domain/measurements';
+import { LATEST_MEASUREMENTS } from '@/domain/measurements';
 import { resolveTitleLock } from '@/domain/title-lock';
+import { FAMILY_LOCK_SELECT, titleLockFromData } from '@/lib/family-lock';
 import { isInstallmentPlan } from '@/domain/pricing';
 import { checkTitle } from '@/domain/titles';
 import { readOne } from '@/lib/channel-sync';
@@ -82,6 +83,7 @@ async function loadForPush(db: Db, accountId: string, publicationId: string) {
       titleLockedManual: true,
       store: { select: { id: true, channel: { select: { id: true, kind: true, name: true } }, connection: { select: { status: true } } } },
       measurements: { orderBy: { takenAt: 'desc' }, take: LATEST_MEASUREMENTS, select: { metrics: true } },
+      family: FAMILY_LOCK_SELECT,
       channelCopy: {
         select: {
           title: true,
@@ -116,7 +118,7 @@ type Loaded = Awaited<ReturnType<typeof loadForPush>>;
 
 function titleLocked(p: Loaded): boolean {
   const adapter = getChannelAdapter(p.store.channel.kind, p.store.channel.name);
-  return resolveTitleLock(adapter.titleLock(latestMetrics(p.measurements)), p.titleLockedManual, Boolean(p.externalId)).locked === true;
+  return resolveTitleLock(titleLockFromData(adapter, p), p.titleLockedManual, Boolean(p.externalId)).locked === true;
 }
 
 /** Hace lo mismo en cada publicación del canal, en orden. Si una no lo acepta, se corta ahí. */
@@ -430,7 +432,7 @@ export async function pushDrafts(
         }
         const text = (app[field] ?? '').trim();
         value = text;
-        send = () => withAccessToken(db, p.store.id, (token) => eachTarget(p, (id) => publisher.update(token, id, field, text)));
+        send = () => withAccessToken(db, p.store.id, (token) => eachTarget(p, (id) => publisher.update(token, id, field, text, { family: Boolean(p.family) })));
       }
       try {
         await send();

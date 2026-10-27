@@ -88,7 +88,7 @@ export function soleMeasureOf(measures: Measure[], copy: { variations: unknown; 
 }
 
 /** Las fotos de una publicación que vende una sola medida: las de esa medida, en su orden, sin marcas. */
-function soleMeasurePhotos<T extends PhotoRef>(refs: T[], measures: Measure[], sole: Measure): T[] {
+export function soleMeasurePhotos<T extends PhotoRef>(refs: T[], measures: Measure[], sole: Measure): T[] {
   return variantPhotos(
     refs.map((r) => knownMarks(r, measures)),
     sole.key,

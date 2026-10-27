@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@/generated/prisma/client';
 import { getChannelQuestions } from '@/channels/questions';
 import { cleanRichText } from '@/domain/research';
+import { writeToFamily } from '@/domain/family-members';
 
 // El paso Preguntas y respuestas: las preguntas frecuentes de la publicación con
 // su respuesta, las reglas de cuándo responde Claude y cuándo una persona, y si
@@ -65,9 +66,11 @@ export async function loadQaStep(db: Db, args: { accountId: string; publicationI
 
 export type QaStepData = Awaited<ReturnType<typeof loadQaStep>>;
 
+/** Guarda en la publicación y en las demás medidas de su familia: las preguntas frecuentes y las reglas son de la familia. */
 async function update(db: Db, accountId: string, publicationId: string, data: { faq?: string | null; answerRules?: string | null; autoAnswer?: boolean }) {
-  const done = await db.publication.updateMany({ where: { id: publicationId, product: { accountId } }, data });
-  if (done.count === 0) throw new QaError('La publicación no existe en esta cuenta.');
+  const found = await db.publication.count({ where: { id: publicationId, product: { accountId } } });
+  if (found === 0) throw new QaError('La publicación no existe en esta cuenta.');
+  await writeToFamily(db, publicationId, data);
 }
 
 const clean = (html: string | undefined) => {

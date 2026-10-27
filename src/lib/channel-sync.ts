@@ -28,6 +28,7 @@ import type { NameValue } from '@/domain/name-value';
 import { isUniqueViolation } from '@/domain/publications';
 import { listingAttributeIds, listingAttributes } from '@/importers/channel-listings';
 import { withAccessToken } from '@/lib/connections';
+import { joinKnownFamilies } from '@/lib/families';
 import { familyListing, readVariantListings, variantListingOwners } from '@/lib/variant-listings';
 
 // La lectura automática del canal: recorre las publicaciones de cada tienda
@@ -167,6 +168,7 @@ async function applyListing(
   const p = await tx.publication.findUniqueOrThrow({
     where: { id: publicationId },
     select: {
+      familyId: true,
       title: true,
       description: true,
       attributes: true,
@@ -194,7 +196,8 @@ async function applyListing(
   });
   const app = faceValues(p);
   const channel: FaceValues = {
-    title: listing.title,
+    // En una familia, el título que se edita es el nombre de la familia: cada medida lo muestra con su medida.
+    title: (p.familyId && listing.channelFamilyName) || listing.title,
     description: descriptionRead ? listing.description : (p.channelCopy?.description ?? null),
     attributes: listingAttributes(listing, ctx.adapter),
     photos: channelPhotos(listing.photos, listing.photoIds, listing.variations),
@@ -454,6 +457,12 @@ export async function runSyncStep(
           data: { missingSince: now },
         });
         for (const id of missing) addError(`${id}: el canal no la devolvió. Puede estar borrada o ser de otra cuenta.`);
+      }
+      // Las que llegaron después a una familia que ya está en la app se suman solas.
+      try {
+        await joinKnownFamilies(db, run.store.id, publications.map((p) => p.id));
+      } catch (e) {
+        console.error('Error al sumar medidas a su familia', e instanceof Error ? e.message : e);
       }
       position += batch.length;
       await db.channelSync.update({

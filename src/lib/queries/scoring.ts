@@ -7,6 +7,7 @@ import { LATEST_MEASUREMENTS, latestMetrics } from '@/domain/measurements';
 import { parseVariations } from '@/domain/media';
 import { channelQuantities, totalQuantity } from '@/domain/quantities';
 import { resolveTitleLock } from '@/domain/title-lock';
+import { FAMILY_LOCK_SELECT, titleLockFromData } from '@/lib/family-lock';
 import { scorePublication, type RuleConfig, type ScoreResult } from '@/domain/standard';
 import { toScoreInput } from './score-input';
 
@@ -61,6 +62,7 @@ export async function listScoredPublications(
         updatedAt: true,
         store: { select: { name: true, channelId: true, channel: { select: { kind: true, name: true } } } },
         measurements: { orderBy: { takenAt: 'desc' }, take: LATEST_MEASUREMENTS, select: { takenAt: true, metrics: true } },
+        family: FAMILY_LOCK_SELECT,
         channelCopy: {
           select: {
             fingerprints: true,
@@ -120,7 +122,7 @@ export async function listScoredPublications(
       pipelineStatus: p.pipelineStatus,
       pipelineStep: p.pipelineStep,
       pipelineRemoval: p.pipelineRemoval,
-      titleLock: resolveTitleLock(channel.titleLock(metrics), p.titleLockedManual, Boolean(p.externalId)),
+      titleLock: resolveTitleLock(titleLockFromData(channel, p), p.titleLockedManual, Boolean(p.externalId)),
       family: p.product.productType?.trim() || null,
       kind: p.product.kind,
       visits: typeof metrics.visits_90d === 'number' ? metrics.visits_90d : null,

@@ -7,6 +7,7 @@ import { requireUser } from '@/lib/auth/session';
 import { getAccountBySlug } from '@/lib/queries/accounts';
 import { resolveExternalIds } from '@/lib/catalog';
 import { addToPipeline, PipelineError, type Duplicate } from '@/domain/pipeline';
+import { writeToFamily } from '@/domain/family-members';
 
 export type AddOutcome =
   | {
@@ -67,11 +68,10 @@ export async function setTitleLockAction(
   return act(accountSlug, { section: ['publicaciones', 'pipeline'], does: 'Cambió el candado del título', publicationId }, async () => {
     await requireUser();
     const value = locked === true || locked === false ? locked : null;
-    const r = await prisma.publication.updateMany({
-      where: { id: publicationId, product: { account: { slug: accountSlug } } },
-      data: { titleLockedManual: value },
-    });
-    if (r.count === 0) return { ok: false, error: 'La publicación no existe en esta cuenta.' };
+    const found = await prisma.publication.count({ where: { id: publicationId, product: { account: { slug: accountSlug } } } });
+    if (found === 0) return { ok: false, error: 'La publicación no existe en esta cuenta.' };
+    // El título es de la familia: el candado también.
+    await writeToFamily(prisma, publicationId, { titleLockedManual: value });
     revalidatePath(`/a/${accountSlug}`, 'layout');
     return { ok: true };
   });

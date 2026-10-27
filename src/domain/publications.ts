@@ -4,6 +4,7 @@ import { Prisma } from '@/generated/prisma/client';
 import { RecordSource, Stage } from '@/generated/prisma/enums';
 import { compactNameValues, nameValueSchema } from './name-value';
 import { moveToStage } from './stages';
+import { writeToFamily } from './family-members';
 
 // Publicación: el producto armado para una tienda. Este módulo no conoce el
 // formato de ningún canal: el ID externo y el link llegan ya limpios.
@@ -118,13 +119,20 @@ export async function setPublicationCode(
   }
 }
 
-/** Actualiza los datos de la publicación. No cambia la etapa. */
+/**
+ * Actualiza los datos de la publicación. No cambia la etapa. El título, la
+ * descripción y los datos de catálogo son de la familia: van a todas sus medidas.
+ */
 export async function updatePublication(
   db: PrismaClient,
   args: { publicationId: string; data: PublicationData },
 ): Promise<void> {
+  const { title, description, attributes, ...own } = toRow(args.data);
   try {
-    await db.publication.update({ where: { id: args.publicationId }, data: toRow(args.data) });
+    await db.$transaction(async (tx) => {
+      await tx.publication.update({ where: { id: args.publicationId }, data: own });
+      await writeToFamily(tx, args.publicationId, { title, description, attributes });
+    });
   } catch (e) {
     if (isUniqueViolation(e)) throw new DuplicateExternalIdError();
     throw e;

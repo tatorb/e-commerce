@@ -1,6 +1,7 @@
 import type { Prisma } from '@/generated/prisma/client';
 import { parseEngine } from './engine';
 import { parseNameValueList, type NameValue } from './name-value';
+import { writeToFamily } from './family-members';
 
 // Contenido de una publicación y de su ficha maestra, campo por campo. Lo usan
 // las importaciones, y más adelante la lectura por API, para completar o
@@ -316,7 +317,8 @@ export async function writeContentField(
   const { productId, publicationId } = target;
   if (isPublicationField(field)) {
     if (!publicationId) throw new Error(`Falta la publicación para cambiar ${field}.`);
-    await tx.publication.update({ where: { id: publicationId }, data: { [field]: value as string | null } });
+    // El título y la descripción son de la familia: van iguales a todas sus medidas.
+    await writeToFamily(tx, publicationId, { [field]: value as string | null });
     return;
   }
   switch (field) {

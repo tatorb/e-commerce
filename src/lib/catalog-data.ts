@@ -12,6 +12,7 @@ import {
   type CatalogField,
 } from '@/domain/catalog-data';
 import { parseNameValueList } from '@/domain/name-value';
+import { lockFamily } from '@/domain/family-members';
 
 // Los datos de catálogo de una publicación: busca el canal de su tienda y la
 // categoría que le toca, y lee o guarda los valores. Recibe la base por
@@ -126,6 +127,8 @@ export async function saveCatalogData(
   return db.$transaction(async (tx) => {
     // De a un cambio por publicación a la vez, así no se pisan los atributos.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`attributes:${args.publicationId}`}))`;
+    // Las demás medidas de la familia llevan los mismos datos de catálogo.
+    const members = await lockFamily(tx, args.publicationId);
     const { pub, channelName, catalog } = await load(tx, args.publicationId);
     if (!catalog) throw new CatalogError(`${channelName} todavía no tiene datos de catálogo en la app.`);
     const family = pub.product.productType?.trim() || null;
@@ -139,9 +142,8 @@ export async function saveCatalogData(
       }
       // Si es la misma que la de la familia, no queda fijada: sigue a la familia.
       chosen = wanted && wanted.id !== catalog.categoryForFamily(family) ? wanted.id : null;
-      if (chosen !== pub.channelCategory) {
-        await tx.publication.update({ where: { id: pub.id }, data: { channelCategory: chosen } });
-      }
+      // La categoría es de toda la familia de medidas.
+      if (chosen !== pub.channelCategory) await tx.publication.updateMany({ where: { id: { in: members } }, data: { channelCategory: chosen } });
     }
 
     const { category, source } = resolveCatalog(catalog, family, chosen);
@@ -151,8 +153,16 @@ export async function saveCatalogData(
     const attributes = parseNameValueList(pub.attributes);
     if (Object.keys(args.values).length > 0) {
       if (!category) throw new CatalogError('La publicación no tiene categoría: elegí una primero.');
-      const merged = mergeCatalogAttributes(attributes, category.fields, cleanCatalogValues(category.fields, args.values));
+      const values = cleanCatalogValues(category.fields, args.values);
+      const merged = mergeCatalogAttributes(attributes, category.fields, values);
       await tx.publication.update({ where: { id: pub.id }, data: { attributes: merged } });
+      // En cada medida cambian los mismos campos; lo demás de cada una queda como estaba.
+      for (const other of await tx.publication.findMany({ where: { id: { in: members.filter((id) => id !== pub.id) } }, select: { id: true, attributes: true } })) {
+        await tx.publication.update({
+          where: { id: other.id },
+          data: { attributes: mergeCatalogAttributes(parseNameValueList(other.attributes), category.fields, values) },
+        });
+      }
       return { category: ref(category), source, values: readCatalogValues(editableFields(category), merged) };
     }
     return { category: ref(category), source, values: category ? readCatalogValues(editableFields(category), attributes) : {} };

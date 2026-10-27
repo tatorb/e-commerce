@@ -1,5 +1,6 @@
 import type { Prisma } from '@/generated/prisma/client';
 import type { PipelineExit, PipelineRemoval, PipelineStatus, PipelineStep } from '@/generated/prisma/enums';
+import { lockFamily } from '@/domain/family-members';
 
 // Pipeline: el recorrido por pasos para corregir una publicación de punta a
 // punta. Es por publicación y no sabe nada de ningún canal.
@@ -104,7 +105,7 @@ export function normalizeTitle(title: string | null | undefined): string {
     .trim();
 }
 
-export type DuplicateCandidate = { id: string; productId: string; title: string | null; externalId?: string | null };
+export type DuplicateCandidate = { id: string; productId: string; title: string | null; externalId?: string | null; familyId?: string | null };
 
 export type Duplicate = {
   id: string;
@@ -118,23 +119,25 @@ export type Duplicate = {
 /**
  * Las que son del mismo producto que otra que ya está en el pipeline, o que
  * otra anterior de la misma tanda, o que tienen el mismo título. Es solo un
- * aviso: varias publicaciones del mismo producto son un caso normal.
+ * aviso: varias publicaciones del mismo producto son un caso normal. Las
+ * medidas de una misma familia no se avisan entre ellas: van juntas.
  */
 export function findDuplicates(candidates: DuplicateCandidate[], inPipeline: DuplicateCandidate[]): Duplicate[] {
   const already = new Set(inPipeline.map((o) => o.id));
   const seen = [...inPipeline];
   const out: Duplicate[] = [];
+  const other = (c: DuplicateCandidate, o: DuplicateCandidate) => o.id !== c.id && !(c.familyId && o.familyId === c.familyId);
   for (const c of candidates) {
     const title = normalizeTitle(c.title);
-    const sameProduct = seen.find((o) => o.id !== c.id && o.productId === c.productId);
-    const sameTitle = title ? seen.find((o) => o.id !== c.id && normalizeTitle(o.title) === title) : undefined;
-    const other = sameProduct ?? sameTitle;
-    if (other) {
+    const sameProduct = seen.find((o) => other(c, o) && o.productId === c.productId);
+    const sameTitle = title ? seen.find((o) => other(c, o) && normalizeTitle(o.title) === title) : undefined;
+    const found = sameProduct ?? sameTitle;
+    if (found) {
       out.push({
         id: c.id,
         title: c.title,
         externalId: c.externalId ?? null,
-        other: { id: other.id, title: other.title, externalId: other.externalId ?? null, inPipeline: already.has(other.id) },
+        other: { id: found.id, title: found.title, externalId: found.externalId ?? null, inPipeline: already.has(found.id) },
         reason: sameProduct ? 'product' : 'title',
       });
     }
@@ -174,23 +177,27 @@ export async function addToPipeline(
   // producto al mismo tiempo sin enterarse.
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`pipeline:${args.accountId}`}))`;
 
-  const rows = await tx.publication.findMany({
-    where: { id: { in: ids }, product: { accountId: args.accountId } },
-    select: {
-      id: true,
-      productId: true,
-      title: true,
-      externalId: true,
-      pipelineStatus: true,
-      pipelineStep: true,
-      pipelineRemoval: true,
-      product: { select: { name: true } },
-    },
-  });
+  const select = {
+    id: true,
+    productId: true,
+    title: true,
+    externalId: true,
+    familyId: true,
+    pipelineStatus: true,
+    pipelineStep: true,
+    pipelineRemoval: true,
+    product: { select: { name: true } },
+  } as const;
+  const rows = await tx.publication.findMany({ where: { id: { in: ids }, product: { accountId: args.accountId } }, select });
   if (rows.length !== ids.length) throw new PipelineError('Alguna publicación ya no existe. Recargá la página.');
-  // En el orden en que se eligieron.
-  const byId = new Map(rows.map((r) => [r.id, r]));
-  const ordered = ids.map((id) => byId.get(id)!);
+  // Una familia entra entera: sus medidas van juntas, después de la elegida.
+  const families = [...new Set(rows.flatMap((r) => (r.familyId ? [r.familyId] : [])))];
+  const siblings = families.length > 0 ? await tx.publication.findMany({ where: { familyId: { in: families }, id: { notIn: ids } }, select, orderBy: { id: 'asc' } }) : [];
+  const byId = new Map([...rows, ...siblings].map((r) => [r.id, r]));
+  const ordered = ids.flatMap((id) => {
+    const r = byId.get(id)!;
+    return [r, ...siblings.filter((s) => r.familyId && s.familyId === r.familyId && !ids.includes(s.id))];
+  }).filter((r, i, all) => all.findIndex((x) => x.id === r.id) === i);
 
   const alreadyIn = ordered.filter((r) => r.pipelineStatus === 'IN_PIPELINE');
   const toAdd = ordered.filter((r) => r.pipelineStatus !== 'IN_PIPELINE');
@@ -199,7 +206,7 @@ export async function addToPipeline(
   if (toAdd.length > 0) {
     const inPipeline = await tx.publication.findMany({
       where: { pipelineStatus: 'IN_PIPELINE', product: { accountId: args.accountId } },
-      select: { id: true, productId: true, title: true, externalId: true, product: { select: { name: true } } },
+      select: { id: true, productId: true, title: true, externalId: true, familyId: true, product: { select: { name: true } } },
     });
     const asCandidate = (r: {
       id: string;
@@ -207,14 +214,18 @@ export async function addToPipeline(
       title: string | null;
       externalId: string | null;
       product: { name: string };
-    }) => ({ id: r.id, productId: r.productId, title: r.title, externalId: r.externalId });
+      familyId?: string | null;
+    }) => ({ id: r.id, productId: r.productId, title: r.title, externalId: r.externalId, familyId: r.familyId ?? null });
     related = findDuplicates(toAdd.map(asCandidate), inPipeline.map(asCandidate));
   }
 
   const at = args.now ?? new Date();
   let resumed = 0;
+  // Las medidas de una familia entran en el mismo paso: el de la primera.
+  const familyStep = new Map<string, PipelineStep>();
   for (const r of toAdd) {
-    const step = entryStep(r);
+    const step = (r.familyId && familyStep.get(r.familyId)) || entryStep(r);
+    if (r.familyId && !familyStep.has(r.familyId)) familyStep.set(r.familyId, step);
     if (r.pipelineStatus === 'DISCARDED' && r.pipelineStep) resumed++;
     await tx.pipelineMovement.create({ data: { publicationId: r.id, step, enteredAt: at, userId: args.userId } });
     await tx.publication.update({
@@ -225,34 +236,39 @@ export async function addToPipeline(
   return { added: toAdd.length - resumed, resumed, alreadyIn: alreadyIn.length, related };
 }
 
-async function lockInPipeline(tx: Tx, publicationId: string, expected: PipelineStep) {
+/**
+ * Bloquea la publicación y las demás medidas de su familia, que se mueven
+ * juntas, y controla que siga en el paso que se ve. Devuelve todas.
+ */
+async function lockInPipeline(tx: Tx, publicationId: string, expected: PipelineStep): Promise<string[]> {
+  const members = await lockFamily(tx, publicationId);
   const [row] = await tx.$queryRaw<{ pipelineStatus: PipelineStatus; pipelineStep: PipelineStep | null }[]>`
-    SELECT "pipelineStatus", "pipelineStep" FROM publications WHERE id = ${publicationId} FOR UPDATE`;
+    SELECT "pipelineStatus", "pipelineStep" FROM publications WHERE id = ${publicationId}`;
   if (!row) throw new PipelineError('La publicación no existe.');
   if (row.pipelineStatus !== 'IN_PIPELINE') throw new PipelineError('La publicación no está en el pipeline.');
   // Evita que un doble clic, o dos personas a la vez, la muevan dos veces.
   if (row.pipelineStep !== expected) throw new PipelineError('La publicación cambió de paso mientras tanto. Recargá la página.');
-  return row;
+  return members;
 }
 
-/** Cierra el paso abierto con su motivo de salida. */
+/** Cierra el paso abierto de cada una con su motivo de salida. */
 async function closeOpen(
   tx: Tx,
-  args: { publicationId: string; at: Date; exitKind: PipelineExit; removal?: PipelineRemoval; userId: string | null },
+  args: { publicationIds: string[]; at: Date; exitKind: PipelineExit; removal?: PipelineRemoval; userId: string | null },
 ) {
   await tx.pipelineMovement.updateMany({
-    where: { publicationId: args.publicationId, exitedAt: null },
+    where: { publicationId: { in: args.publicationIds }, exitedAt: null },
     data: { exitedAt: args.at, exitKind: args.exitKind, removal: args.removal ?? null, exitedById: args.userId },
   });
 }
 
 type MoveArgs = { publicationId: string; expected: PipelineStep; userId: string | null; now?: Date };
 
-async function moveTo(tx: Tx, args: MoveArgs, to: PipelineStep, exitKind: 'ADVANCED' | 'BACK'): Promise<{ step: PipelineStep }> {
+async function moveTo(tx: Tx, args: MoveArgs, members: string[], to: PipelineStep, exitKind: 'ADVANCED' | 'BACK'): Promise<{ step: PipelineStep }> {
   const at = args.now ?? new Date();
-  await closeOpen(tx, { publicationId: args.publicationId, at, exitKind, userId: args.userId });
-  await tx.pipelineMovement.create({ data: { publicationId: args.publicationId, step: to, enteredAt: at, userId: args.userId } });
-  await tx.publication.update({ where: { id: args.publicationId }, data: { pipelineStep: to } });
+  await closeOpen(tx, { publicationIds: members, at, exitKind, userId: args.userId });
+  await tx.pipelineMovement.createMany({ data: members.map((publicationId) => ({ publicationId, step: to, enteredAt: at, userId: args.userId })) });
+  await tx.publication.updateMany({ where: { id: { in: members } }, data: { pipelineStatus: 'IN_PIPELINE', pipelineStep: to, pipelineRemoval: null } });
   return { step: to };
 }
 
@@ -262,56 +278,63 @@ async function moveTo(tx: Tx, args: MoveArgs, to: PipelineStep, exitKind: 'ADVAN
  * que falta (por ejemplo el precio) lo avisa el paso Publicación.
  */
 export async function advanceStep(tx: Tx, args: MoveArgs): Promise<{ step: PipelineStep }> {
-  await lockInPipeline(tx, args.publicationId, args.expected);
+  const members = await lockInPipeline(tx, args.publicationId, args.expected);
   const to = nextStep(args.expected);
   if (!to) throw new PipelineError('Es el último paso: marcala como corregida.');
-  return moveTo(tx, args, to, 'ADVANCED');
+  return moveTo(tx, args, members, to, 'ADVANCED');
 }
 
 /** Lleva la publicación a cualquier paso, saltando los del medio. */
 export async function jumpToStep(tx: Tx, args: MoveArgs & { to: PipelineStep }): Promise<{ step: PipelineStep }> {
-  await lockInPipeline(tx, args.publicationId, args.expected);
+  const members = await lockInPipeline(tx, args.publicationId, args.expected);
   if (!PIPELINE_STEPS.includes(args.to)) throw new PipelineError('El paso no es válido.');
   if (args.to === args.expected) throw new PipelineError(`Ya está en ${PIPELINE_STEP_LABEL[args.to]}.`);
   const forward = PIPELINE_STEPS.indexOf(args.to) > PIPELINE_STEPS.indexOf(args.expected);
-  return moveTo(tx, args, args.to, forward ? 'ADVANCED' : 'BACK');
+  return moveTo(tx, args, members, args.to, forward ? 'ADVANCED' : 'BACK');
 }
 
 /** Vuelve al paso anterior. */
 export async function backStep(tx: Tx, args: MoveArgs): Promise<{ step: PipelineStep }> {
-  await lockInPipeline(tx, args.publicationId, args.expected);
+  const members = await lockInPipeline(tx, args.publicationId, args.expected);
   const to = previousStep(args.expected);
   if (!to) throw new PipelineError('Es el primer paso: no hay uno anterior.');
-  return moveTo(tx, args, to, 'BACK');
+  return moveTo(tx, args, members, to, 'BACK');
 }
 
-/** Termina el último paso: la publicación queda corregida. Para eso tiene que estar publicada. */
+/**
+ * Termina el último paso: la publicación queda corregida, con las demás
+ * medidas de su familia. Para eso todas tienen que estar publicadas.
+ */
 export async function completePipeline(tx: Tx, args: MoveArgs): Promise<void> {
-  await lockInPipeline(tx, args.publicationId, args.expected);
+  const members = await lockInPipeline(tx, args.publicationId, args.expected);
   if (nextStep(args.expected)) throw new PipelineError('Todavía faltan pasos.');
-  const pub = await tx.publication.findUniqueOrThrow({ where: { id: args.publicationId }, select: { externalId: true } });
-  if (!pub.externalId?.trim()) {
-    throw new PipelineError('Falta el ID de la publicación en el canal. Cargalo en este paso para marcarla como corregida.');
+  const pubs = await tx.publication.findMany({ where: { id: { in: members } }, select: { externalId: true } });
+  if (pubs.some((p) => !p.externalId?.trim())) {
+    throw new PipelineError(
+      members.length > 1
+        ? 'A alguna medida de la familia le falta el ID de la publicación en el canal. Cargalo en este paso para marcarla como corregida.'
+        : 'Falta el ID de la publicación en el canal. Cargalo en este paso para marcarla como corregida.',
+    );
   }
-  await closeOpen(tx, { publicationId: args.publicationId, at: args.now ?? new Date(), exitKind: 'COMPLETED', userId: args.userId });
-  await tx.publication.update({
-    where: { id: args.publicationId },
+  await closeOpen(tx, { publicationIds: members, at: args.now ?? new Date(), exitKind: 'COMPLETED', userId: args.userId });
+  await tx.publication.updateMany({
+    where: { id: { in: members } },
     data: { pipelineStatus: 'CORRECTED', pipelineStep: null, pipelineRemoval: null },
   });
 }
 
-/** Saca la publicación del pipeline con un motivo. No borra nada: conserva el paso para retomar. */
+/** Saca la publicación del pipeline con un motivo, con su familia. No borra nada: conserva el paso para retomar. */
 export async function removeFromPipeline(tx: Tx, args: MoveArgs & { reason: PipelineRemoval }): Promise<void> {
-  await lockInPipeline(tx, args.publicationId, args.expected);
+  const members = await lockInPipeline(tx, args.publicationId, args.expected);
   await closeOpen(tx, {
-    publicationId: args.publicationId,
+    publicationIds: members,
     at: args.now ?? new Date(),
     exitKind: 'REMOVED',
     removal: args.reason,
     userId: args.userId,
   });
-  await tx.publication.update({
-    where: { id: args.publicationId },
+  await tx.publication.updateMany({
+    where: { id: { in: members } },
     data: { pipelineStatus: 'DISCARDED', pipelineRemoval: args.reason },
   });
 }

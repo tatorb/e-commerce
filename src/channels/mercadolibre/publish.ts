@@ -547,10 +547,11 @@ export const mercadolibrePublisher: ChannelPublisher = {
     await send('PUT', `/items/${encodeURIComponent(externalId)}`, accessToken, { attributes: attributes.map(attributeBody) });
   },
 
-  async update(accessToken, externalId, field, value) {
+  async update(accessToken, externalId, field, value, opts) {
     const id = encodeURIComponent(externalId);
     if (field === 'title') {
-      await send('PUT', `/items/${id}`, accessToken, { title: value });
+      // En una familia el título lo arma Mercado Libre con el nombre de la familia y la medida: se cambia el nombre.
+      await send('PUT', `/items/${id}`, accessToken, opts?.family ? { family_name: value } : { title: value });
       return;
     }
     // La descripción: se reemplaza; si la publicación no tenía, se crea.

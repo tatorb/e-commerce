@@ -17,6 +17,7 @@ import {
 } from '@/domain/channel-sync';
 import { LATEST_MEASUREMENTS, latestMetrics } from '@/domain/measurements';
 import { resolveTitleLock } from '@/domain/title-lock';
+import { FAMILY_LOCK_SELECT, titleLockFromData } from '@/lib/family-lock';
 
 // La página de una publicación: sus dos caras, lo que está en el canal y el
 // borrador de la app, dato por dato, con lo que se puede hacer con cada uno.
@@ -47,6 +48,7 @@ export async function loadPublicationFaces(accountId: string, publicationId: str
       product: { select: { id: true, name: true, kind: true } },
       store: { select: { name: true, channel: { select: { kind: true, name: true } }, connection: { select: { status: true } } } },
       measurements: { orderBy: { takenAt: 'desc' }, take: LATEST_MEASUREMENTS, select: { metrics: true } },
+      family: FAMILY_LOCK_SELECT,
       channelCopy: true,
       syncChanges: { orderBy: { createdAt: 'desc' }, take: HISTORY, include: { user: { select: { name: true } } } },
       buyerQuestions: {
@@ -91,7 +93,7 @@ export async function loadPublicationFaces(accountId: string, publicationId: str
     states,
     summary,
     metrics,
-    titleLock: resolveTitleLock(adapter.titleLock(metrics), p.titleLockedManual, Boolean(p.externalId)),
+    titleLock: resolveTitleLock(titleLockFromData(adapter, p), p.titleLockedManual, Boolean(p.externalId)),
     // Lo que se puede subir desde la app y por qué no, si no se puede.
     canRead: connected && Boolean(p.externalId),
     pushBlocked: !p.externalId

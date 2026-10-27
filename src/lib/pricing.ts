@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
+import { lockFamily } from '@/domain/family-members';
 import { getChannelPublisher } from '@/channels/publish';
 import { dayOf, offerOf } from '@/domain/competitors';
 import { discountText, fingerprint, installmentsText, priceText, storedPrints } from '@/domain/channel-sync';
@@ -150,10 +151,38 @@ export async function latestPriceDecision(db: Db, publicationId: string) {
 export type LatestPriceDecision = Awaited<ReturnType<typeof latestPriceDecision>>;
 
 /**
+ * Lo acordado con el canal para el precio, las cuotas y el descuento: si no
+ * tenía su huella, se guarda la de lo leído. Así lo que cambia la app queda
+ * como un cambio para subir, y no como algo para elegir.
+ */
+async function seedPriceAgreed(tx: Prisma.TransactionClient, publicationId: string) {
+  const c = await tx.channelCopy.findUnique({
+    where: { publicationId },
+    select: { fingerprints: true, agreed: true, price: true, installments: true, discount: true },
+  });
+  if (!c) return;
+  const { channel, agreed } = storedPrints(c);
+  await tx.channelCopy.update({
+    where: { publicationId },
+    data: {
+      fingerprints: { ...channel },
+      agreed: {
+        ...agreed,
+        price: agreed.price ?? fingerprint('price', priceText(c.price)),
+        installments: agreed.installments ?? fingerprint('installments', installmentsText(c.installments)),
+        discount: agreed.discount ?? fingerprint('discount', discountText(c.discount)),
+      },
+    },
+  });
+}
+
+/**
  * Guarda el precio: el costo y los parámetros propios del producto, la
  * decisión con el margen que deja, y el precio publicado en el borrador de la
  * publicación, para subirlo desde Por subir. Si el margen queda debajo del
- * mínimo, hay que confirmarlo.
+ * mínimo, hay que confirmarlo. En una familia, la decisión es de la familia y
+ * queda en su principal: el precio va a las medidas sin precio propio, y las
+ * cuotas y el descuento a todas.
  */
 export async function savePriceDecision(
   db: PrismaClient,
@@ -179,16 +208,16 @@ export async function savePriceDecision(
   const discountPct = Math.round(args.discountPct * 100) / 100;
 
   return db.$transaction(async (tx) => {
-    const p = await tx.publication.findFirst({
+    const found = await tx.publication.findFirst({
       where: { id: args.publicationId, product: { accountId: args.accountId } },
-      select: {
-        id: true,
-        productId: true,
-        store: { select: { channel: { select: { kind: true, name: true } } } },
-        channelCopy: { select: { fingerprints: true, agreed: true, price: true, installments: true, discount: true } },
-      },
+      select: { id: true, family: { select: { leadId: true } } },
     });
-    if (!p) throw new PricingError('La publicación no existe en esta cuenta.');
+    if (!found) throw new PricingError('La publicación no existe en esta cuenta.');
+    const members = await lockFamily(tx, found.id);
+    const p = await tx.publication.findUniqueOrThrow({
+      where: { id: found.family?.leadId ?? found.id },
+      select: { id: true, productId: true, store: { select: { channel: { select: { kind: true, name: true } } } } },
+    });
     const range = getChannelPublisher(p.store.channel.kind)?.discountRange;
     if (range && discountPct > 0 && (discountPct < range.min || discountPct > range.max)) {
       throw new PricingError(`${getChannelAdapter(p.store.channel.kind, p.store.channel.name).name} acepta descuentos de ${range.min} a ${range.max} %, o sin descuento.`);
@@ -225,26 +254,40 @@ export async function savePriceDecision(
       },
       select: { id: true, decidedAt: true },
     });
-    // El precio, las cuotas y el descuento pasan al borrador. Si lo acordado
-    // con el canal no tenía su huella, se guarda la de lo leído: así quedan
-    // como cambios de la app para subir, y no como algo para elegir.
-    if (p.channelCopy) {
-      const c = p.channelCopy;
-      const { channel, agreed } = storedPrints(c);
-      await tx.channelCopy.update({
-        where: { publicationId: p.id },
-        data: {
-          fingerprints: { ...channel },
-          agreed: {
-            ...agreed,
-            price: agreed.price ?? fingerprint('price', priceText(c.price)),
-            installments: agreed.installments ?? fingerprint('installments', installmentsText(c.installments)),
-            discount: agreed.discount ?? fingerprint('discount', discountText(c.discount)),
-          },
-        },
-      });
-    }
-    await tx.publication.update({ where: { id: p.id }, data: { price: listPrice, installments: plan, discount: discountPct } });
+    // El precio, las cuotas y el descuento pasan al borrador de cada medida.
+    for (const id of members) await seedPriceAgreed(tx, id);
+    await tx.publication.updateMany({ where: { id: { in: members } }, data: { installments: plan, discount: discountPct } });
+    await tx.publication.updateMany({ where: { id: { in: members }, OR: [{ ownPrice: false }, { id: p.id }] }, data: { price: listPrice } });
     return { id: decision.id, decidedAt: decision.decidedAt, simulation: s, belowMin: below };
+  });
+}
+
+/**
+ * El precio de una medida de una familia: con own, su propio precio; sin own,
+ * vuelve al de la familia, el de la principal. Queda en el borrador para subir.
+ */
+export async function setMeasurePrice(
+  db: PrismaClient,
+  args: { accountId: string; publicationId: string; own: boolean; price?: number | null },
+): Promise<void> {
+  await db.$transaction(async (tx) => {
+    const p = await tx.publication.findFirst({
+      where: { id: args.publicationId, product: { accountId: args.accountId } },
+      select: { id: true, family: { select: { leadId: true } } },
+    });
+    if (!p) throw new PricingError('La publicación no existe en esta cuenta.');
+    if (!p.family) throw new PricingError('La publicación no es parte de una familia: su precio se decide en el paso Precio.');
+    await lockFamily(tx, p.id);
+    if (p.family.leadId === p.id) throw new PricingError('La principal lleva el precio de la familia.');
+    let price: number | null;
+    if (args.own) {
+      if (!(args.price && args.price > 0)) throw new PricingError('Cargá el precio de la medida.');
+      price = Math.round(args.price);
+    } else {
+      const lead = p.family.leadId ? await tx.publication.findUnique({ where: { id: p.family.leadId }, select: { price: true } }) : null;
+      price = lead?.price === null || lead?.price === undefined ? null : Number(lead.price);
+    }
+    await seedPriceAgreed(tx, p.id);
+    await tx.publication.update({ where: { id: p.id }, data: { ownPrice: args.own, ...(price !== null ? { price } : {}) } });
   });
 }

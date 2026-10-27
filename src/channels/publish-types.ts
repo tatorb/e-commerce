@@ -96,8 +96,12 @@ export interface ChannelPublisher {
    * cada una, si el canal lo informa.
    */
   updateSeparatePictures(accessToken: string, listings: { externalId: string; pictures: number[] }[], pictures: ChannelPicture[]): Promise<(string[] | null)[]>;
-  /** Cambia el título o la descripción de una publicación propia. Lanza PublishError si el canal no lo acepta. */
-  update(accessToken: string, externalId: string, field: 'title' | 'description', value: string): Promise<void>;
+  /**
+   * Cambia el título o la descripción de una publicación propia. Con family,
+   * la publicación es una medida de una familia y el título es el nombre que
+   * comparten todas. Lanza PublishError si el canal no lo acepta.
+   */
+  update(accessToken: string, externalId: string, field: 'title' | 'description', value: string, opts?: { family?: boolean }): Promise<void>;
   /** Cambia el precio publicado; con medidas, el de todas. Lanza PublishError si el canal no lo acepta. */
   updatePrice(accessToken: string, externalId: string, price: number): Promise<void>;
   /**

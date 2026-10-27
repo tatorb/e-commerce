@@ -1,9 +1,11 @@
-import type { Prisma, PrismaClient } from '@/generated/prisma/client';
+import { Prisma, type PrismaClient } from '@/generated/prisma/client';
+import type { ChannelStatus, PipelineExit } from '@/generated/prisma/enums';
 import { getChannelAdapter } from '@/channels';
-import { distinctTexts, familyRead, pipelineRank } from '@/domain/families';
-import { parseVariantListings, variantKey } from '@/domain/media';
-import { PIPELINE_STEP_LABEL, pipelineLabel } from '@/domain/pipeline';
-import { measuresOf, soleMeasureOf, type Measure } from '@/lib/media';
+import { fingerprint } from '@/domain/channel-sync';
+import { comparableText, distinctTexts, familyRead, pipelineRank } from '@/domain/families';
+import { parseMedia, parseVariantListings, variantKey } from '@/domain/media';
+import { PIPELINE_STEP_LABEL, PIPELINE_STEPS, pipelineLabel } from '@/domain/pipeline';
+import { measuresOf, soleMeasureOf, soleMeasurePhotos, type Measure } from '@/lib/media';
 import { productCode } from '@/lib/publication-facts';
 
 // Las familias en la app: cuando el canal guarda cada medida como una
@@ -312,4 +314,347 @@ export async function planFamilies(db: Db, accountId: string): Promise<StorePlan
       ),
     )
     .filter((s) => s.families.length > 0 || s.unread > 0 || s.counts.done > 0);
+}
+
+// ───────────────────────────── La familia de una publicación ─────────────────────────────
+
+/** Una medida de la familia, como la muestran las pantallas. */
+export type FamilyMember = {
+  id: string;
+  externalId: string | null;
+  url: string | null;
+  title: string | null;
+  variantKey: string | null;
+  // La medida, como se llama en la ficha. Null si no se sabe.
+  measure: string | null;
+  channelStatus: ChannelStatus;
+  price: number | null;
+  ownPrice: boolean;
+  lead: boolean;
+};
+
+export type FamilyInfo = { id: string; leadId: string | null; members: FamilyMember[] };
+
+/** La familia de una publicación con sus medidas en el orden de la ficha, la principal primero si empatan. Null sin familia. */
+export async function familyOf(db: Db, publicationId: string): Promise<FamilyInfo | null> {
+  const p = await db.publication.findUnique({
+    where: { id: publicationId },
+    select: {
+      family: {
+        select: {
+          id: true,
+          leadId: true,
+          product: { select: { variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } } } },
+          members: {
+            select: { id: true, externalId: true, url: true, title: true, variantKey: true, channelStatus: true, price: true, ownPrice: true },
+          },
+        },
+      },
+    },
+  });
+  if (!p?.family) return null;
+  const f = p.family;
+  const measures = measuresOf(f.product.variants);
+  const index = (key: string | null) => {
+    const i = key ? measures.findIndex((m) => m.key === key) : -1;
+    return i < 0 ? measures.length : i;
+  };
+  const members = f.members
+    .map((m) => ({
+      id: m.id,
+      externalId: m.externalId,
+      url: m.url,
+      title: m.title,
+      variantKey: m.variantKey,
+      measure: measures.find((x) => x.key === m.variantKey)?.label ?? null,
+      channelStatus: m.channelStatus,
+      price: m.price === null ? null : Number(m.price),
+      ownPrice: m.ownPrice,
+      lead: m.id === f.leadId,
+    }))
+    .sort((a, b) => index(a.variantKey) - index(b.variantKey) || Number(b.lead) - Number(a.lead) || (a.externalId ?? '').localeCompare(b.externalId ?? ''));
+  return { id: f.id, leadId: f.leadId, members };
+}
+
+/** La principal de la familia de una publicación, o ella misma si no tiene familia. */
+export async function familyLeadId(db: Db, publicationId: string): Promise<string> {
+  const p = await db.publication.findUnique({ where: { id: publicationId }, select: { family: { select: { leadId: true } } } });
+  return p?.family?.leadId ?? publicationId;
+}
+
+// ───────────────────────────── Juntar y separar ─────────────────────────────
+
+export class FamilyError extends Error {}
+
+const JOIN_SELECT = {
+  id: true,
+  productId: true,
+  storeId: true,
+  externalId: true,
+  title: true,
+  description: true,
+  faq: true,
+  answerRules: true,
+  autoAnswer: true,
+  channelCategory: true,
+  titleLockedManual: true,
+  price: true,
+  ownPrice: true,
+  familyId: true,
+  variantKey: true,
+  variantListings: true,
+  pipelineStatus: true,
+  pipelineStep: true,
+  pipelineRemoval: true,
+  createdAt: true,
+  channelCopy: { select: { details: true, variations: true, fingerprints: true, agreed: true } },
+} satisfies Prisma.PublicationSelect;
+
+type JoinRow = Prisma.PublicationGetPayload<{ select: typeof JOIN_SELECT }>;
+type Tx = Prisma.TransactionClient;
+
+const json = (v: unknown) => (v === null || v === undefined ? Prisma.DbNull : (v as Prisma.InputJsonValue));
+
+/** El nombre de la familia en el canal, si lo dio. */
+function channelFamilyName(details: unknown): string | null {
+  const name = details && typeof details === 'object' && !Array.isArray(details) ? (details as Record<string, unknown>).channelFamilyName : null;
+  return typeof name === 'string' && name.trim() ? name.trim() : null;
+}
+
+/** Los textos distintos de las medidas, uno debajo del otro, el de la principal primero. Null si no hay ninguno. */
+function joinedTexts(values: (string | null)[]): string | null {
+  const texts = distinctTexts(values);
+  return texts.length > 0 ? texts.join('\n') : null;
+}
+
+/** Lleva una medida al lugar del pipeline de la principal, con su historial. */
+async function alignPipeline(tx: Tx, member: JoinRow, lead: JoinRow, userId: string | null, at: Date) {
+  if (member.pipelineStatus === lead.pipelineStatus && member.pipelineStep === lead.pipelineStep && member.pipelineRemoval === lead.pipelineRemoval) return;
+  if (member.pipelineStatus === 'IN_PIPELINE') {
+    const exitKind: PipelineExit =
+      lead.pipelineStatus === 'CORRECTED'
+        ? 'COMPLETED'
+        : lead.pipelineStatus === 'IN_PIPELINE' && lead.pipelineStep && member.pipelineStep
+          ? PIPELINE_STEPS.indexOf(lead.pipelineStep) >= PIPELINE_STEPS.indexOf(member.pipelineStep)
+            ? 'ADVANCED'
+            : 'BACK'
+          : 'REMOVED';
+    await tx.pipelineMovement.updateMany({
+      where: { publicationId: member.id, exitedAt: null },
+      data: { exitedAt: at, exitKind, removal: exitKind === 'REMOVED' ? lead.pipelineRemoval : null, exitedById: userId },
+    });
+  }
+  if (lead.pipelineStatus === 'IN_PIPELINE' && lead.pipelineStep) {
+    await tx.pipelineMovement.create({ data: { publicationId: member.id, step: lead.pipelineStep, enteredAt: at, userId } });
+  }
+  await tx.publication.update({
+    where: { id: member.id },
+    data: { pipelineStatus: lead.pipelineStatus, pipelineStep: lead.pipelineStep, pipelineRemoval: lead.pipelineRemoval },
+  });
+}
+
+/**
+ * Junta publicaciones de un producto en su familia, o las suma a la que ya
+ * existe con ese código del canal. Lo que es de la familia queda igual en
+ * todas, tomado de la principal: el título (el nombre de la familia en el
+ * canal, si lo dio), la descripción, la categoría, el candado del título, las
+ * preguntas frecuentes y las reglas del bot (si eran distintas, se juntan) y
+ * el lugar en el pipeline. Si tenían precios distintos, cada una conserva el
+ * suyo. Cada una necesita saber qué medida vende.
+ */
+export async function joinFamily(
+  tx: Tx,
+  args: { storeId: string; productId: string; channelFamilyId: string | null; publicationIds: string[]; userId: string | null; now?: Date },
+): Promise<{ familyId: string; joined: number }> {
+  const at = args.now ?? new Date();
+  const existing = args.channelFamilyId
+    ? await tx.listingFamily.findUnique({
+        where: { storeId_channelFamilyId: { storeId: args.storeId, channelFamilyId: args.channelFamilyId } },
+        select: { id: true, leadId: true, productId: true, members: { select: { id: true } } },
+      })
+    : null;
+  if (existing && existing.productId !== args.productId) throw new FamilyError('La familia es de otro producto.');
+  const ids = [...new Set([...(existing?.members.map((m) => m.id) ?? []), ...args.publicationIds])].sort();
+  await tx.$queryRaw`SELECT id FROM publications WHERE id = ANY(${ids}) ORDER BY id FOR UPDATE`;
+  const rows = await tx.publication.findMany({ where: { id: { in: ids } }, select: JOIN_SELECT });
+  if (rows.length !== ids.length) throw new FamilyError('Alguna publicación cambió mientras tanto. Recargá la página.');
+  if (rows.some((r) => r.storeId !== args.storeId || r.productId !== args.productId)) {
+    throw new FamilyError('Las medidas de una familia tienen que ser del mismo producto y de la misma tienda.');
+  }
+  if (rows.some((r) => r.familyId && r.familyId !== existing?.id)) throw new FamilyError('Alguna publicación ya está en otra familia.');
+  if (rows.some((r) => parseVariantListings(r.variantListings).length >= 2)) {
+    throw new FamilyError('Alguna publicación junta varios códigos del canal: primero se separa.');
+  }
+  const product = await tx.product.findUniqueOrThrow({
+    where: { id: args.productId },
+    select: { variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } } },
+  });
+  const measures = measuresOf(product.variants);
+  const measureOf = new Map(rows.map((r) => [r.id, memberMeasure(r, measures)]));
+  if ([...measureOf.values()].some((m) => m === null)) throw new FamilyError('Falta elegir qué medida vende alguna publicación.');
+
+  const lead = rows.find((r) => r.id === existing?.leadId) ?? leadOf(rows, measures);
+  const name = channelFamilyName(lead.channelCopy?.details) ?? rows.map((r) => channelFamilyName(r.channelCopy?.details)).find(Boolean) ?? null;
+  const ordered = [lead, ...rows.filter((r) => r.id !== lead.id)];
+  const shared = {
+    title: name ?? lead.title,
+    description: lead.description,
+    faq: joinedTexts(ordered.map((r) => r.faq)),
+    answerRules: joinedTexts(ordered.map((r) => r.answerRules)),
+    autoAnswer: lead.autoAnswer,
+    channelCategory: lead.channelCategory,
+    titleLockedManual: lead.titleLockedManual,
+  };
+  const family = existing ?? (await tx.listingFamily.create({ data: { storeId: args.storeId, productId: args.productId, channelFamilyId: args.channelFamilyId, leadId: lead.id }, select: { id: true } }));
+  if (existing && !existing.leadId) await tx.listingFamily.update({ where: { id: existing.id }, data: { leadId: lead.id } });
+  const leadPrice = lead.price === null ? null : Number(lead.price);
+
+  for (const r of rows) {
+    const price = r.price === null ? null : Number(r.price);
+    // Con un precio distinto del de la familia, la medida conserva el suyo.
+    const ownPrice = r.id !== lead.id && (r.ownPrice || (price !== null && leadPrice !== null && price !== leadPrice));
+    await tx.publication.update({ where: { id: r.id }, data: { ...shared, familyId: family.id, variantKey: measureOf.get(r.id)!.key, ownPrice } });
+    // El título en el canal es el nombre de la familia: la cara del canal queda con ese, así no aparece como un cambio.
+    const copy = r.channelCopy;
+    const own = channelFamilyName(copy?.details);
+    if (copy && own && comparableText(own) === comparableText(shared.title)) {
+      const print = fingerprint('title', own);
+      const prints = (v: unknown) => ({ ...(v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {}), title: print });
+      await tx.channelCopy.update({ where: { publicationId: r.id }, data: { title: own, fingerprints: prints(copy.fingerprints), agreed: prints(copy.agreed) } });
+    }
+    if (r.id !== lead.id) await alignPipeline(tx, r, lead, args.userId, at);
+  }
+  return { familyId: family.id, joined: rows.filter((r) => r.familyId !== family.id).length };
+}
+
+/**
+ * Separa una publicación que la app creó con un código del canal por medida
+ * (variantListings) en una publicación por medida, en su familia. La primera
+ * queda como principal, con su historial; cada una nueva lleva lo mismo, las
+ * fotos de su medida, su lugar en el pipeline y las preguntas que recibió su
+ * código. Devuelve las publicaciones nuevas.
+ */
+export async function splitFamily(tx: Tx, args: { publicationId: string; userId: string | null; now?: Date }): Promise<string[]> {
+  const at = args.now ?? new Date();
+  await tx.$queryRaw`SELECT id FROM publications WHERE id = ${args.publicationId} FOR UPDATE`;
+  const head = await tx.publication.findUniqueOrThrow({
+    where: { id: args.publicationId },
+    include: { product: { select: { variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } } } }, channelCopy: { select: { details: true } } },
+  });
+  const inside = parseVariantListings(head.variantListings);
+  if (inside.length < 2) return [];
+  if (head.familyId) throw new FamilyError('La publicación ya está en una familia.');
+  const measures = measuresOf(head.product.variants);
+  const measureOf = (v: { sku: string | null; measure: string | null }) =>
+    measures.find((m) => m.key === variantKey(v)) ?? measures.find((m) => m.sku && v.sku && m.sku.toUpperCase() === v.sku.trim().toUpperCase()) ?? null;
+  const media = parseMedia(head.media);
+  const mediaFor = (m: Measure | null) => (media === null ? null : m ? soleMeasurePhotos(media, measures, m) : media);
+
+  // El código de la familia en el canal, si se leyó y no lo tiene otra.
+  const read = familyRead(head.channelCopy?.details)?.channelFamilyId ?? null;
+  const taken = read ? await tx.listingFamily.count({ where: { storeId: head.storeId, channelFamilyId: read } }) : 0;
+  const family = await tx.listingFamily.create({
+    data: { storeId: head.storeId, productId: head.productId, channelFamilyId: taken > 0 ? null : read, leadId: head.id },
+    select: { id: true },
+  });
+  const created: string[] = [];
+  for (const [i, v] of inside.entries()) {
+    const m = measureOf(v);
+    if (i === 0) {
+      await tx.publication.update({
+        where: { id: head.id },
+        data: { familyId: family.id, variantKey: m?.key ?? null, variantListings: [], media: json(mediaFor(m)) },
+      });
+      continue;
+    }
+    const p = await tx.publication.create({
+      data: {
+        productId: head.productId,
+        storeId: head.storeId,
+        externalId: v.externalId,
+        title: head.title,
+        description: head.description,
+        attributes: head.attributes as Prisma.InputJsonValue,
+        ownQuestions: null,
+        faq: head.faq,
+        answerRules: head.answerRules,
+        autoAnswer: head.autoAnswer,
+        price: head.price,
+        installments: head.installments,
+        discount: head.discount,
+        currency: head.currency,
+        channelStatus: head.channelStatus,
+        stage: head.stage,
+        pipelineStatus: head.pipelineStatus,
+        pipelineStep: head.pipelineStep,
+        pipelineRemoval: head.pipelineRemoval,
+        titleLockedManual: head.titleLockedManual,
+        channelCategory: head.channelCategory,
+        media: json(mediaFor(m)),
+        videoVariants: head.videoVariants as Prisma.InputJsonValue,
+        followsStock: head.followsStock,
+        source: head.source,
+        familyId: family.id,
+        variantKey: m?.key ?? null,
+      },
+      select: { id: true },
+    });
+    await tx.stageMovement.create({ data: { publicationId: p.id, stage: head.stage, enteredAt: at, userId: args.userId } });
+    if (head.pipelineStatus === 'IN_PIPELINE' && head.pipelineStep) {
+      await tx.pipelineMovement.create({ data: { publicationId: p.id, step: head.pipelineStep, enteredAt: at, userId: args.userId } });
+    }
+    // Las preguntas que recibió el código de esta medida pasan a su publicación.
+    await tx.buyerQuestion.updateMany({ where: { storeId: head.storeId, listingId: v.externalId }, data: { publicationId: p.id } });
+    created.push(p.id);
+  }
+  return created;
+}
+
+/**
+ * Suma a su familia las publicaciones que llegaron después: las que el canal
+ * dice que son de una familia que ya está en la app, del mismo producto y con
+ * su medida conocida. Las demás quedan para la pantalla Familias.
+ */
+export async function joinKnownFamilies(db: PrismaClient, storeId: string, publicationIds: string[]): Promise<number> {
+  if (publicationIds.length === 0) return 0;
+  const rows = await db.publication.findMany({
+    where: { id: { in: publicationIds }, storeId, familyId: null },
+    select: {
+      id: true,
+      productId: true,
+      variantKey: true,
+      variantListings: true,
+      channelCopy: { select: { details: true, variations: true } },
+      product: { select: { variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } } } },
+    },
+  });
+  let joined = 0;
+  for (const r of rows) {
+    if (parseVariantListings(r.variantListings).length >= 2) continue;
+    const channelFamilyId = familyRead(r.channelCopy?.details)?.channelFamilyId;
+    if (!channelFamilyId) continue;
+    const family = await db.listingFamily.findUnique({ where: { storeId_channelFamilyId: { storeId, channelFamilyId } }, select: { productId: true } });
+    if (!family || family.productId !== r.productId) continue;
+    const measures = measuresOf(r.product.variants);
+    const known = r.variantKey ? measures.some((m) => m.key === r.variantKey) : soleMeasureOf(measures, r.channelCopy) !== null;
+    if (!known) continue;
+    try {
+      await db.$transaction((tx) => joinFamily(tx, { storeId, productId: r.productId, channelFamilyId, publicationIds: [r.id], userId: null }));
+      joined++;
+    } catch (e) {
+      if (!(e instanceof FamilyError)) throw e;
+    }
+  }
+  return joined;
+}
+
+/** Elige a mano qué medida vende una publicación, para las que no se sabe por su SKU. */
+export async function setPublicationMeasure(db: PrismaClient, args: { accountId: string; publicationId: string; variantKey: string }): Promise<void> {
+  const p = await db.publication.findFirst({
+    where: { id: args.publicationId, product: { accountId: args.accountId } },
+    select: { id: true, product: { select: { variants: { select: { sku: true, measure: true } } } } },
+  });
+  if (!p) throw new FamilyError('La publicación no existe en esta cuenta.');
+  if (!measuresOf(p.product.variants).some((m) => m.key === args.variantKey)) throw new FamilyError('Esa medida no está en la ficha del producto.');
+  await db.publication.update({ where: { id: p.id }, data: { variantKey: args.variantKey } });
 }

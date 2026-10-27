@@ -1,7 +1,8 @@
 import type { PrismaClient } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
-import { LATEST_MEASUREMENTS, latestMetrics } from '@/domain/measurements';
+import { LATEST_MEASUREMENTS } from '@/domain/measurements';
 import { resolveTitleLock } from '@/domain/title-lock';
+import { FAMILY_LOCK_SELECT, titleLockFromData } from '@/lib/family-lock';
 import { buildSeeds, buildWordMap, sameText } from '@/domain/titles';
 import { parseProposals, parseStrings, parseWordStatuses } from '@/domain/title-work';
 import { loadTitleRules } from '@/lib/title-rules';
@@ -59,6 +60,7 @@ export async function loadTitleContext(db: PrismaClient, accountId: string, publ
       },
       store: { select: { id: true, channel: { select: { id: true, kind: true, name: true } } } },
       measurements: { orderBy: { takenAt: 'desc' }, take: LATEST_MEASUREMENTS, select: { metrics: true } },
+      family: FAMILY_LOCK_SELECT,
       product: {
         select: {
           name: true,
@@ -119,7 +121,6 @@ export async function loadTitleContext(db: PrismaClient, accountId: string, publ
     pub.competitors.map((c) => c.title),
     statuses,
   );
-  const metrics = latestMetrics(pub.measurements);
 
   return {
     publication: {
@@ -137,7 +138,7 @@ export async function loadTitleContext(db: PrismaClient, accountId: string, publ
     product,
     // Cuántas publicaciones comparten la ficha y la investigación del producto.
     sharedWith: _count.publications,
-    titleLock: resolveTitleLock(adapter.titleLock(metrics), pub.titleLockedManual, Boolean(pub.externalId)),
+    titleLock: resolveTitleLock(titleLockFromData(adapter, pub), pub.titleLockedManual, Boolean(pub.externalId)),
     rules,
     customRules: custom,
     seeds,

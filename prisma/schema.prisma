@@ -572,8 +572,6 @@ model ListingFamily {
   // se copia a las demás.
   leadId          String?       @unique
   lead            Publication?  @relation("FamilyLead", fields: [leadId], references: [id], onDelete: SetNull)
-  // El mismo precio para todas las medidas, salvo las que tienen el suyo (ownPrice).
-  samePrice       Boolean       @default(true)
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
   members         Publication[] @relation("FamilyMembers")
