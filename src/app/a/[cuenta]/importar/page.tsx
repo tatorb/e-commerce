@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { prisma } from '@/lib/db';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
@@ -85,6 +86,23 @@ export default async function ImportPage({ params }: { params: Promise<{ cuenta:
           }))}
           defaultDate={todayIn(account.timezone)}
         />
+
+        {channelStores.length > 0 ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Familias</CardTitle>
+              <CardDescription>
+                Cuando el canal guarda cada medida como una publicación aparte, las medidas del mismo producto quedan juntas en una familia. Mirá
+                cuáles se juntan en la app y qué medidas faltan traer.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Link href={`/a/${account.slug}/importar/familias`} className="text-sm font-medium underline-offset-4 hover:underline">
+                Ver las familias
+              </Link>
+            </CardContent>
+          </Card>
+        ) : null}
 
         <Card>
           <CardHeader>

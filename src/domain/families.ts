@@ -1,7 +1,10 @@
-// Las familias del canal tal como se leyeron: el canal guarda cada medida como
-// una publicación aparte y las agrupa. Lo leído se guarda en la cara del canal
-// de cada publicación (ChannelCopy.details), con los códigos tal cual los da
-// el canal. Este módulo no usa la base.
+import type { PipelineStatus, PipelineStep } from '@/generated/prisma/enums';
+import { PIPELINE_STEPS } from '@/domain/pipeline';
+
+// Las familias del canal: el canal guarda cada medida como una publicación
+// aparte y las agrupa. Lo leído se guarda en la cara del canal de cada
+// publicación (ChannelCopy.details), con los códigos tal cual los da el canal.
+// También las reglas para juntarlas en la app. Este módulo no usa la base.
 
 /**
  * Una familia del canal: las medidas de un producto que el canal guarda como
@@ -67,4 +70,34 @@ export function familyDetails(read: ChannelFamily | null | undefined, before: un
     familyListingIds: read?.listingIds ?? [],
     familyReadAt: now.toISOString(),
   };
+}
+
+// ───────────────────────────── Juntar ─────────────────────────────
+
+/**
+ * Qué tan avanzada está una publicación en el pipeline, para elegir la
+ * principal de una familia: corregida, después en el pipeline según su paso,
+ * descartada y sin tocar.
+ */
+export function pipelineRank(s: { pipelineStatus: PipelineStatus; pipelineStep: PipelineStep | null }): number {
+  if (s.pipelineStatus === 'CORRECTED') return 1000;
+  if (s.pipelineStatus === 'IN_PIPELINE') return 100 + (s.pipelineStep ? PIPELINE_STEPS.indexOf(s.pipelineStep) : 0);
+  if (s.pipelineStatus === 'DISCARDED') return 10;
+  return 0;
+}
+
+/** Un texto como se compara entre medidas: sin espacios de más ni mayúsculas. */
+export const comparableText = (v: string | null | undefined): string => (v ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+/** Los textos distintos que no están vacíos, en orden y sin repetir. */
+export function distinctTexts(values: (string | null | undefined)[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const v of values) {
+    const key = comparableText(v);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(v!.trim());
+  }
+  return out;
 }
