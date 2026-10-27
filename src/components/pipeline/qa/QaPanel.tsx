@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { Sparkles } from 'lucide-react';
+import { useReadOnly } from '@/components/access/AccessProvider';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { RichTextEditor } from '@/components/ui/rich-text-editor';
@@ -10,6 +11,7 @@ import { SectionBody, SectionCard } from '@/components/ui/section-card';
 import { Textarea } from '@/components/ui/textarea';
 import { StatusText } from '@/components/pipeline/StatusText';
 import { useStepAction } from '@/components/pipeline/useStepAction';
+import { TRAIN_BOT } from '@/domain/access';
 import { answerKindLabel } from '@/domain/answers';
 import { formatDateTime, formatUsd, plural } from '@/lib/format';
 import type { TryResult } from '@/lib/answers';
@@ -90,11 +92,13 @@ function TextBlock({
   children?: React.ReactNode;
 }) {
   const { run, pending, status } = useStepAction();
+  const cannotTrain = useReadOnly(TRAIN_BOT);
   return (
     <Block variant={variant} title={title} description={description}>
-      <RichTextEditor initial={initial} onChange={onChange} label={title} placeholder={placeholder} disabled={pending} />
+      <RichTextEditor initial={initial} onChange={onChange} label={title} placeholder={placeholder} disabled={pending || cannotTrain} />
       <div className="flex flex-wrap items-center gap-3">
         <Button
+          access={TRAIN_BOT}
           pending={pending}
           disabled={pending || value === saved}
           onClick={() => {
@@ -140,6 +144,7 @@ function TryBlock({
   channelName: string;
 }) {
   const [question, setQuestion] = useState('');
+  const cannotTrain = useReadOnly(TRAIN_BOT);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tries, setTries] = useState<Tried[]>([]);
@@ -181,11 +186,11 @@ function TryBlock({
                 }
               }}
               placeholder="Por ejemplo, ¿le sirve a mi motor 6CTA?"
-              disabled={pending}
+              disabled={pending || cannotTrain}
             />
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            <Button onClick={() => test(question)} pending={pending} disabled={pending || !question.trim()}>
+            <Button access={TRAIN_BOT} onClick={() => test(question)} pending={pending} disabled={pending || !question.trim()}>
               {pending ? 'Claude está respondiendo…' : 'Probar'}
             </Button>
             {unsaved ? <span className="text-xs text-muted-foreground">Prueba con lo escrito arriba, que todavía no guardaste.</span> : null}
@@ -198,7 +203,7 @@ function TryBlock({
                   <button
                     key={q}
                     type="button"
-                    disabled={pending}
+                    disabled={pending || cannotTrain}
                     onClick={() => {
                       setQuestion(q);
                       test(q);
@@ -283,6 +288,8 @@ export function QaPanel({
   stepHref?: string;
 }) {
   const auto = useStepAction();
+  // Que Claude mande solo es de la publicación: pide poder cambiar en la pantalla, no alcanza con entrenar.
+  const cannotSwitch = useReadOnly();
   // Lo que se tocó, mientras se guarda.
   const [wanted, setWanted] = useState(data.autoAnswer);
   // Lo guardado se compara con lo que escribe el editor: al guardar se limpia y
@@ -362,7 +369,7 @@ export function QaPanel({
             type="checkbox"
             className="mt-0.5 h-4 w-4"
             checked={auto.pending ? wanted : data.autoAnswer}
-            disabled={auto.pending}
+            disabled={auto.pending || cannotSwitch}
             onChange={(e) => {
               const on = e.target.checked;
               setWanted(on);

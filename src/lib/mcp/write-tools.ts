@@ -16,6 +16,7 @@ import {
   removeFromPipeline,
 } from '@/domain/pipeline';
 import { productInfoSchema, updateProductInfo } from '@/domain/product-info';
+import { TRAIN_BOT } from '@/domain/access';
 import { MediaError } from '@/lib/media';
 import { VideoError } from '@/lib/videos';
 import { copyMedia } from './media-tools';
@@ -654,7 +655,7 @@ const saveKnowledgeTool = defineTool({
 
 const savePublicationQaTool = defineTool({
   name: 'save_publication_qa',
-  section: ['pipeline', 'publicaciones'],
+  section: TRAIN_BOT,
   title: 'Guardar las preguntas frecuentes y las reglas de la publicación',
   description:
     'Guarda el paso Preguntas y respuestas de la publicación: las preguntas frecuentes con la respuesta de la tienda, y las reglas de cuándo responde Claude y cuándo una persona. Son de esta publicación, no del producto, y las lee la IA que responde a los compradores. Lo que no se manda queda como está; vacío lo borra. Reemplaza cada texto entero: si querés sumar algo, leé antes lo que hay con get_publication. Se escribe en Markdown simple: **negrita**, _cursiva_, listas con "- " o "1. ". Usá solo lo que te dijo la persona. Si Claude responde solo se prende y se apaga desde la app.',

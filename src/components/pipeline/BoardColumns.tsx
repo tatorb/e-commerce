@@ -12,6 +12,7 @@ import { titleOrUntitled } from '@/domain/publication-title';
 import type { PipelineStep, ProductKind } from '@/generated/prisma/enums';
 import { formatDuration, plural } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
+import { READ_ONLY_HINT, useReadOnly } from '@/components/access/AccessProvider';
 import { jumpStepAction } from '@/app/a/[cuenta]/pipeline/actions';
 import { RemoveFromPipelineDialog } from './RemoveFromPipelineDialog';
 
@@ -50,6 +51,8 @@ export function BoardColumns({
   openTasks: Record<string, number>;
 }) {
   const router = useRouter();
+  // Sin permiso para cambiar en el Pipeline, las tarjetas no se arrastran ni se mueven.
+  const readOnly = useReadOnly();
   // Las que se movieron y la página todavía no volvió a cargar.
   const [moved, setMoved] = useState<Record<string, PipelineStep>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -142,6 +145,7 @@ export function BoardColumns({
                       showStore={showStore}
                       tasks={openTasks[card.id] ?? 0}
                       busy={busy === card.id}
+                      readOnly={readOnly}
                       dragging={dragging === card.id}
                       onDragStart={() => setDragging(card.id)}
                       onDragEnd={() => {
@@ -169,6 +173,7 @@ function BoardCard({
   showStore,
   tasks,
   busy,
+  readOnly,
   dragging,
   onDragStart,
   onDragEnd,
@@ -183,6 +188,7 @@ function BoardCard({
   // Sus tareas abiertas.
   tasks: number;
   busy: boolean;
+  readOnly: boolean;
   dragging: boolean;
   onDragStart: () => void;
   onDragEnd: () => void;
@@ -191,7 +197,7 @@ function BoardCard({
   const title = titleOrUntitled(card.title);
   return (
     <li
-      draggable={!busy}
+      draggable={!busy && !readOnly}
       onDragStart={(e) => {
         e.dataTransfer.setData('text/plain', card.id);
         e.dataTransfer.effectAllowed = 'move';
@@ -200,7 +206,8 @@ function BoardCard({
       onDragEnd={onDragEnd}
       aria-busy={busy || undefined}
       className={cn(
-        'rounded-lg border bg-card text-card-foreground shadow-sm transition-colors hover:border-foreground/25 md:cursor-grab',
+        'rounded-lg border bg-card text-card-foreground shadow-sm transition-colors hover:border-foreground/25',
+        !readOnly && 'md:cursor-grab',
         dragging && 'opacity-50',
         busy && 'opacity-70',
       )}
@@ -243,10 +250,11 @@ function BoardCard({
       </Link>
       <div className="flex items-center justify-between gap-1 border-t px-1 py-1">
         <span className="flex min-w-0 items-center gap-0.5">
-          <GripVertical className="hidden h-3.5 w-3.5 shrink-0 cursor-grab text-muted-foreground md:block" aria-hidden />
+          {!readOnly ? <GripVertical className="hidden h-3.5 w-3.5 shrink-0 cursor-grab text-muted-foreground md:block" aria-hidden /> : null}
           <select
             value=""
-            disabled={busy}
+            disabled={busy || readOnly}
+            title={readOnly ? READ_ONLY_HINT : undefined}
             onChange={(e) => {
               if (e.target.value) onMove(e.target.value as PipelineStep);
             }}

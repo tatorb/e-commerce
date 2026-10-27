@@ -9,6 +9,7 @@ import { QaError, saveQaTexts, setAutoAnswer } from '@/lib/publication-qa';
 import { ReplyError, tryAnswer, type TryResult } from '@/lib/answers';
 import { AI_NOT_CONFIGURED, isAiConfigured } from '@/ai/claude';
 import { ResearchError } from '@/domain/research';
+import { TRAIN_BOT } from '@/domain/access';
 
 // Lo que se guarda y se prueba desde Preguntas y respuestas, en el paso del
 // Pipeline y en la página de la publicación.
@@ -31,7 +32,7 @@ async function guard(accountSlug: string, run: (accountId: string) => Promise<st
 
 /** Las preguntas frecuentes o las reglas, en HTML. */
 export async function saveQaTextAction(accountSlug: string, publicationId: string, field: 'faq' | 'rules', html: string): Promise<Result> {
-  return act(accountSlug, { section: ['pipeline', 'publicaciones'], does: (field === 'rules' ? 'Guardó cuándo responde una persona' : 'Guardó las preguntas frecuentes'), publicationId }, async () => {
+  return act(accountSlug, { section: TRAIN_BOT, does: (field === 'rules' ? 'Guardó cuándo responde una persona' : 'Guardó las preguntas frecuentes'), publicationId }, async () => {
     if (field !== 'faq' && field !== 'rules') return { ok: false, error: 'El campo no es válido.' };
     return guard(accountSlug, async (accountId) => {
       await saveQaTexts(prisma, { accountId, publicationId: String(publicationId), [field]: String(html ?? '') });
@@ -58,7 +59,7 @@ export async function tryAnswerAction(
   publicationId: string,
   input: { question: string; faq: string; rules: string },
 ): Promise<{ ok: true; result: TryResult } | { ok: false; error: string }> {
-  return act(accountSlug, { section: ['pipeline', 'publicaciones'], does: 'Probó una respuesta de Claude', publicationId, detail: String(input?.question ?? '') }, async () => {
+  return act(accountSlug, { section: TRAIN_BOT, does: 'Probó una respuesta de Claude', publicationId, detail: String(input?.question ?? '') }, async () => {
     await requireUser();
     const account = await getAccountBySlug(accountSlug);
     if (!account) return { ok: false, error: 'La cuenta no existe.' };

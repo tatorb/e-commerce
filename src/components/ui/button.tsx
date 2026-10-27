@@ -46,7 +46,7 @@ export interface ButtonProps
   // El permiso que pide: "view" si solo mira, como buscar; una sección si es
   // otra que la de la pantalla, como subir a los canales. Sin esto, cambiar
   // en la sección de la pantalla. Sin el permiso, queda apagado.
-  access?: 'view' | Section;
+  access?: 'view' | Section | readonly Section[];
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(

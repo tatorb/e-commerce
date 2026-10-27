@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { accessSummary, can, canSeeAccount, firstSection, parsePermissions, PRESETS, sectionLabel } from '@/domain/access';
+import { accessSummary, can, canSeeAccount, firstSection, parsePermissions, PRESETS, sectionFromPath, sectionLabel, TRAIN_BOT } from '@/domain/access';
 
 // Permisos por sección y cuentas que ve cada usuario.
 
@@ -25,6 +25,21 @@ describe('permisos', () => {
     expect(can(editor, ['publicaciones', 'pipeline'], 'write')).toBe(true);
     expect(can(editor, 'conexion', 'read')).toBe(false);
     expect(can({ isAdmin: true, permissions: {} }, 'conexion', 'write')).toBe(true);
+  });
+
+  it('entrenar al bot: alcanza con el permiso propio, aunque solo vea el Pipeline', () => {
+    expect(parsePermissions({ entrenar: 'read' })).toEqual({});
+    const trainer = { isAdmin: false, permissions: { pipeline: 'read', entrenar: 'write' } as const };
+    expect(can(trainer, TRAIN_BOT, 'write')).toBe(true);
+    expect(can(trainer, 'pipeline', 'write')).toBe(false);
+    // Quien cambia en el Pipeline o en Publicaciones ya puede.
+    expect(can({ isAdmin: false, permissions: { publicaciones: 'write' } }, TRAIN_BOT, 'write')).toBe(true);
+    expect(can({ isAdmin: false, permissions: { pipeline: 'read' } }, TRAIN_BOT, 'write')).toBe(false);
+    // No tiene pantalla propia: no es el Pipeline ni el primer lugar que ve.
+    expect(sectionFromPath('/a/prueba/pipeline/p1')).toBe('pipeline');
+    expect(firstSection({ isAdmin: false, permissions: { entrenar: 'write' } })).toBe('tareas');
+    expect(PRESETS.todo.permissions.entrenar).toBe('write');
+    expect(PRESETS.ver.permissions.entrenar).toBeUndefined();
   });
 
   it('cada usuario ve solo sus cuentas; el administrador, todas', () => {

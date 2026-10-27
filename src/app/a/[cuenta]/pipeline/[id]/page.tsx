@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { AppWindow, ExternalLink, Lock, Package } from 'lucide-react';
+import { AppWindow, ExternalLink, Lock, Package, Tag } from 'lucide-react';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Breadcrumb } from '@/components/navigation/Breadcrumb';
@@ -209,6 +209,15 @@ export default async function PipelineStepPage({
                   <ExternalLink className="h-3.5 w-3.5" />
                   Ver en {pub.channelName}
                 </a>
+              ) : null}
+              {can(user.access, 'publicaciones', 'read') ? (
+                <Link
+                  href={`/a/${account.slug}/publicaciones/${pub.id}`}
+                  className="inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline"
+                >
+                  <Tag className="h-3.5 w-3.5" />
+                  Ver la publicación fuera del pipeline
+                </Link>
               ) : null}
               <a
                 href={viewHref}

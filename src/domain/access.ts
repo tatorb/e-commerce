@@ -23,6 +23,11 @@ export const SECTIONS = {
     hint: 'Mandar los cambios desde Por subir, crear publicaciones en el canal, pausarlas, finalizarlas y republicarlas.',
   },
   preguntas: { label: 'Preguntas', levels: ['read', 'write'], hint: 'Ver y responder las preguntas de los compradores.' },
+  entrenar: {
+    label: 'Entrenar al bot',
+    levels: ['write'],
+    hint: 'En el paso Preguntas y respuestas y en la página de cada publicación: probar preguntas y corregir las preguntas frecuentes y cuándo responde una persona. Para llegar a esas pantallas hace falta ver el Pipeline o Publicaciones.',
+  },
   tareas: {
     label: 'Tareas',
     levels: ['read', 'write'],
@@ -129,13 +134,15 @@ export function sectionLabel(section: string | null): string {
   return isSection(section) ? SECTIONS[section].label : section;
 }
 
-// La dirección de cada sección dentro de una cuenta. Subir no tiene pantalla propia.
+// La dirección de cada sección dentro de una cuenta. Subir y Entrenar al bot no tienen pantalla propia.
+const WITHOUT_SCREEN: readonly Section[] = ['subir', 'entrenar'];
 export const SECTION_PATH: Record<Section, string> = {
   pipeline: 'pipeline',
   productos: 'productos',
   publicaciones: 'publicaciones',
   subir: 'publicaciones',
   preguntas: 'preguntas',
+  entrenar: 'pipeline',
   tareas: 'tareas',
   importar: 'importar',
   sincronizacion: 'sincronizacion',
@@ -153,13 +160,20 @@ export const SECTION_PATH: Record<Section, string> = {
 export function sectionFromPath(pathname: string | null): Section | null {
   const segment = pathname?.match(/^\/a\/[^/]+\/([^/?#]+)/)?.[1];
   if (!segment) return null;
-  return SECTION_KEYS.find((s) => s !== 'subir' && SECTION_PATH[s] === segment) ?? null;
+  return SECTION_KEYS.find((s) => !WITHOUT_SCREEN.includes(s) && SECTION_PATH[s] === segment) ?? null;
 }
+
+/**
+ * Quién puede entrenar al bot de una publicación (las preguntas frecuentes,
+ * cuándo responde una persona y las pruebas): quien cambia en el Pipeline o
+ * en Publicaciones, o quien tiene Entrenar al bot.
+ */
+export const TRAIN_BOT: readonly Section[] = ['pipeline', 'publicaciones', 'entrenar'];
 
 /** Si cada persona ve lo suyo en la sección aunque no tenga el permiso. */
 export const isOwnSection = (section: Section) => (SECTIONS[section] as SectionSpec).own === true;
 
 /** El primer lugar que puede ver dentro de una cuenta, para la portada. Sin permisos, sus tareas. */
 export function firstSection(access: Pick<Access, 'isAdmin' | 'permissions'>): Section {
-  return SECTION_KEYS.find((s) => s !== 'subir' && can(access, s, 'read')) ?? 'tareas';
+  return SECTION_KEYS.find((s) => !WITHOUT_SCREEN.includes(s) && can(access, s, 'read')) ?? 'tareas';
 }
