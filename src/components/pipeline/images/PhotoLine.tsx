@@ -274,7 +274,13 @@ function RunPanel({ accountSlug, run, photo, compact }: { accountSlug: string; r
               <LivePreview href={run.liveHref} macHref={run.afterHref} parts={run.parts} background={run.background} edits={liveEdits} />
             </div>
           ) : (
-            <CompareView before={run.beforeHref} after={run.afterHref} canOverlay={!step.reframes} />
+            <CompareView
+              before={run.beforeHref}
+              after={run.afterHref}
+              canOverlay={!step.reframes}
+              beforeZoom={run.step === 0 ? photo.originalViewHref : null}
+              afterZoom={run.jpgHref}
+            />
           )}
           {run.requested ? <p className="text-xs text-muted-foreground">Rehecho con los valores que pediste.</p> : null}
           {run.liveHref && step.parts.some(isLive) ? (

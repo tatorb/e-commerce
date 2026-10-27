@@ -9,6 +9,7 @@ import { photoKey, photoVariants, variantPhotos, withMarks, type PhotoRef } from
 import { ClipCheckLine, VideoFacts, VideoPlayer, VideoThumb } from '@/components/pipeline/videos/VideoCard';
 import type { MediaItem, MediaSources, Measure } from '@/lib/media';
 import { cn } from '@/lib/utils/cn';
+import { ZoomImage } from '@/components/ui/zoom-image';
 import { saveMediaAction } from '@/app/a/[cuenta]/publicaciones/sync-actions';
 import { SharedPhotosNote } from './SharedPhotosNote';
 
@@ -19,10 +20,17 @@ import { SharedPhotosNote } from './SharedPhotosNote';
 // clips: en el canal tienen un solo orden para toda la publicación. Lo que se
 // guarda queda en el borrador hasta que se sube; los clips se suben a mano.
 
-export function PhotoThumb({ item, className }: { item: Pick<MediaItem, 'thumb' | 'label'>; className?: string }) {
+export function PhotoThumb({ item, className }: { item: Pick<MediaItem, 'thumb' | 'label'> & Pick<Partial<MediaItem>, 'zoom'>; className?: string }) {
   return item.thumb ? (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img src={item.thumb} alt={item.label} loading="lazy" className={cn('aspect-square w-full rounded-md border bg-white object-contain', className)} />
+    // Con lupa al pasar el mouse, sobre la foto más grande que haya.
+    <ZoomImage
+      src={item.thumb}
+      zoomSrc={item.zoom}
+      alt={item.label}
+      loading="lazy"
+      draggable={false}
+      className={cn('aspect-square w-full rounded-md border bg-white object-contain', className)}
+    />
   ) : (
     <div className={cn('flex aspect-square w-full items-center justify-center rounded-md border bg-muted text-muted-foreground', className)}>
       <ImageOff className="h-5 w-5" aria-hidden />

@@ -39,6 +39,8 @@ export type MediaItem = {
   key: string;
   // Cómo se ve: el link de la foto, o la vista liviana de la corregida.
   thumb: string | null;
+  // La foto más grande, para la lupa. Sin esto, la misma de la vista.
+  zoom?: string | null;
   label: string;
   note: string | null;
   // Por qué no se puede elegir para este canal, por ejemplo un original que no acepta tal cual.
@@ -147,7 +149,12 @@ type FinishedEdit = {
   asIs: boolean;
   file: { url: string; type: string; name: string; size: number | null };
   thumb: string | null;
+  // La foto en su tamaño más grande que el navegador puede mostrar, para la lupa.
+  zoom: string;
 };
+
+// Los originales que el navegador muestra; los demás, como las HEIC, se ven por la vista que armó la Mac.
+const SHOWABLE = ['image/jpeg', 'image/png', 'image/webp'];
 
 async function finishedEdits(db: Db, productId: string): Promise<FinishedEdit[]> {
   const edits = await db.photoEdit.findMany({
@@ -178,6 +185,7 @@ async function finishedEdits(db: Db, productId: string): Promise<FinishedEdit[]>
           // Va el mismo archivo que se subió, con su nombre.
           file: { url: e.originalUrl, type: e.originalType, name: e.originalName, size: e.originalSize },
           thumb: photoFileHref(e.previewUrl ? 'antes' : 'original', { foto: e.id }),
+          zoom: photoFileHref(SHOWABLE.includes(e.originalType) || !e.previewUrl ? 'original' : 'antes', { foto: e.id }),
         },
       ];
     }
@@ -190,6 +198,7 @@ async function finishedEdits(db: Db, productId: string): Promise<FinishedEdit[]>
         // Del Drive: si se retocó a mano desde la Mac, va la versión retocada.
         file: { url: run.jpgUrl, type: 'image/jpeg', name: `${e.originalName.replace(/\.[^.]+$/, '')}.jpg`, size: null },
         thumb: run.previewUrl ? viewUrl(run.id) : null,
+        zoom: photoFileHref('jpg', { paso: run.id }),
       },
     ];
   });
@@ -297,6 +306,7 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
       ref: { kind: 'edit', editId: e.id },
       key: photoKey({ kind: 'edit', editId: e.id }),
       thumb: e.thumb,
+      zoom: e.zoom,
       label: editLabel(e, i + 1),
       note: blocked ?? (inChannel.has(e.id) ? `Ya está en ${channelName}` : null),
       ...(blocked ? { blocked } : {}),

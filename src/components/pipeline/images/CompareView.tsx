@@ -2,12 +2,26 @@
 
 import { useState } from 'react';
 import { cn } from '@/lib/utils/cn';
+import { ZoomImage } from '@/components/ui/zoom-image';
 
 // El antes y el después de un paso: lado a lado, o superpuestos con un
 // deslizador. Los pasos que cambian el encuadre no calzan superpuestos, así
 // que esos se ven solo lado a lado.
 
-export function CompareView({ before, after, canOverlay }: { before: string | null; after: string | null; canOverlay: boolean }) {
+export function CompareView({
+  before,
+  after,
+  canOverlay,
+  beforeZoom,
+  afterZoom,
+}: {
+  before: string | null;
+  after: string | null;
+  canOverlay: boolean;
+  // Las mismas en su tamaño más grande, para la lupa de lado a lado.
+  beforeZoom?: string | null;
+  afterZoom?: string | null;
+}) {
   const [mode, setMode] = useState<'side' | 'overlay'>(canOverlay ? 'overlay' : 'side');
   const [split, setSplit] = useState(50);
   const overlay = canOverlay && mode === 'overlay' && before && after;
@@ -62,13 +76,12 @@ export function CompareView({ before, after, canOverlay }: { before: string | nu
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
           {[
-            { src: before, label: 'Antes' },
-            { src: after, label: 'Después' },
-          ].map(({ src, label }) => (
+            { src: before, zoom: beforeZoom, label: 'Antes' },
+            { src: after, zoom: afterZoom, label: 'Después' },
+          ].map(({ src, zoom, label }) => (
             <figure key={label} className="space-y-1">
               {src ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={src} alt={label} className="mx-auto block max-h-[55vh] w-auto max-w-full rounded-md border bg-muted" />
+                <ZoomImage src={src} zoomSrc={zoom} alt={label} className="mx-auto block max-h-[55vh] w-auto max-w-full rounded-md border bg-muted" />
               ) : (
                 <div className="flex aspect-[4/3] items-center justify-center rounded-md border bg-muted text-xs text-muted-foreground">
                   Sin vista

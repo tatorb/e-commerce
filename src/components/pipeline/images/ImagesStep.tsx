@@ -19,6 +19,7 @@ import { photoTone, type PhotoTone } from '@/domain/photo-steps';
 import { PHOTO_TONE as TONE } from './tone';
 import { WorkerStatusLine } from './WorkerStatusLine';
 import { BrandMark } from '@/components/ui/brand-loader';
+import { ZoomImage } from '@/components/ui/zoom-image';
 
 
 // El paso Imágenes: las fotos del producto, cada una con su línea de
@@ -166,8 +167,8 @@ export function ImagesStep({
                         {isOpen ? <Check className="h-3.5 w-3.5" /> : null}
                       </span>
                       {p.thumbHref ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={p.thumbHref} alt="" className="h-16 w-16 shrink-0 rounded border bg-muted object-contain" />
+                        // Con lupa sobre el original, para leer la etiqueta y la medida.
+                        <ZoomImage src={p.thumbHref} zoomSrc={p.originalViewHref} alt="" className="h-16 w-16 shrink-0 rounded border bg-muted object-contain" />
                       ) : (
                         <div className="flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-1 rounded border bg-muted text-center text-[10px] leading-tight text-muted-foreground">
                           <BrandMark />
@@ -230,8 +231,7 @@ export function ImagesStep({
             {photo.asIs ? (
               <div className="space-y-3">
                 {photo.originalViewHref ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
+                  <ZoomImage
                     src={photo.originalViewHref}
                     alt={photo.name}
                     className="mx-auto block h-[30vh] w-auto max-w-full rounded-md border bg-muted object-contain sm:h-[46vh]"
