@@ -45,6 +45,8 @@ export type PhotoView = {
   originalHref: string;
   progress: PhotoProgress;
   progressText: string;
+  // Sacada en Registro de productos: la medida y el paso, por ejemplo "Registro: medida 0.50, Frente".
+  shot: string | null;
   // El intento vigente de cada paso, o null si todavía no se hizo.
   steps: (RunView | null)[];
   costUsd: number;

@@ -180,7 +180,7 @@ export function ImagesStep({
                           <span className="sr-only">{tone.label}: </span>
                           {p.progressText}
                         </p>
-                        <p className="text-xs text-muted-foreground">{p.source === 'CHANNEL' ? `Publicada en ${channelName}` : 'Original subido'}</p>
+                        <p className="text-xs text-muted-foreground">{p.shot ?? (p.source === 'CHANNEL' ? `Publicada en ${channelName}` : 'Original subido')}</p>
                       </div>
                     </Link>
                   </li>

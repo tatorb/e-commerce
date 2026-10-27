@@ -9,12 +9,14 @@ import { isAiConfigured } from '@/ai/claude';
 import { sendTaskMail } from '@/lib/task-mail';
 import { readSales, reconcileStock, startStock } from '@/lib/stock';
 import { settleReactivations } from '@/lib/restock';
+import { placeAllShotPhotos } from '@/lib/shoot';
 
 // La tarea programada: lee las preguntas de los compradores y las
 // publicaciones de las tiendas conectadas, responde las preguntas de las
 // publicaciones en que Claude responde solo, manda los mails de las tareas,
 // descuenta las ventas del stock de los productos y sube la cantidad nueva, y
-// renueva los descuentos que subió la app antes de que venzan. La llaman Vercel una vez por día
+// renueva los descuentos que subió la app antes de que venzan, y suma a sus
+// publicaciones las fotos de Registro de productos que quedaron listas. La llaman Vercel una vez por día
 // (vercel.json) y GitHub cada hora (.github/workflows/leer-canales.yml), con
 // la clave CRON_SECRET. Cada pedido lee lo que alcanza en su tiempo; pending
 // dice si conviene llamar otra vez.
@@ -34,6 +36,8 @@ const SALES_BUDGET_MS = 8_000;
 const STOCK_BUDGET_MS = 4_000;
 // Después, los descuentos por vencer: cada uno son unos pocos pedidos.
 const RENEW_BUDGET_MS = 6_000;
+// Las fotos de Registro de productos que quedaron listas sin sumarse a sus publicaciones.
+const SHOTS_BUDGET_MS = 3_000;
 
 const digest = (s: string) => createHash('sha256').update(s).digest();
 
@@ -58,8 +62,10 @@ export async function GET(request: Request) {
   const stock = await reconcileStock(prisma, { budgetMs: STOCK_BUDGET_MS });
   // Con lo recién leído: las tareas de reactivar de las que ya están activas se cierran.
   const reactivated = await settleReactivations(prisma);
+  const shots = await placeAllShotPhotos(prisma, { budgetMs: SHOTS_BUDGET_MS });
   return NextResponse.json({
-    pending: result.pending || questions.pending || alone.pending || renewals.pending || mails.pending || sales.pending || started.pending || stock.pending,
+    pending:
+      result.pending || questions.pending || alone.pending || renewals.pending || mails.pending || sales.pending || started.pending || stock.pending || shots.pending,
     stores: result.stores.map((s) => ({ status: s.status, read: s.position, total: s.total })),
     renewed: renewals.renewed,
     answered: alone.sent,
@@ -68,5 +74,6 @@ export async function GET(request: Request) {
     stockStarted: started.started,
     stockSent: sales.sent + stock.sent,
     reactivated,
+    shotPhotosPlaced: shots.placed,
   });
 }

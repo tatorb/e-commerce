@@ -42,6 +42,17 @@ describe('permisos', () => {
     expect(PRESETS.ver.permissions.entrenar).toBeUndefined();
   });
 
+  it('Registro de productos y sus protocolos: cada uno con su pantalla, y el operario entra directo', () => {
+    const operator = { isAdmin: false, permissions: { captura: 'write' } as const };
+    expect(can(operator, 'captura', 'write')).toBe(true);
+    expect(can(operator, 'protocolos', 'read')).toBe(false);
+    expect(firstSection(operator)).toBe('captura');
+    expect(sectionFromPath('/a/prueba/registro-productos')).toBe('captura');
+    expect(sectionFromPath('/a/prueba/protocolos')).toBe('protocolos');
+    expect(sectionLabel('captura')).toBe('Registro de productos');
+    expect(PRESETS.todo.permissions).toMatchObject({ captura: 'write', protocolos: 'write' });
+  });
+
   it('cada usuario ve solo sus cuentas; el administrador, todas', () => {
     expect(canSeeAccount({ isAdmin: false, accountIds: ['a1'] }, 'a1')).toBe(true);
     expect(canSeeAccount({ isAdmin: false, accountIds: ['a1'] }, 'a2')).toBe(false);

@@ -336,10 +336,19 @@ export async function folderOwner(db: PrismaClient, productId: string): Promise<
   return { account: p.account, product: { id: p.id, name: p.name } };
 }
 
+/** E-commerce Studio MRB / cuenta. */
+function accountFolder(account: Named): FolderSpec {
+  return { key: `cuenta:${account.id}`, name: account.name.trim() || 'Cuenta', parent: ROOT };
+}
+
 /** E-commerce Studio MRB / cuenta / producto. */
 function productFolder(account: Named, product: Named): FolderSpec {
-  const accountFolder: FolderSpec = { key: `cuenta:${account.id}`, name: account.name.trim() || 'Cuenta', parent: ROOT };
-  return { key: `producto:${product.id}`, name: product.name.trim() || 'Producto', parent: accountFolder };
+  return { key: `producto:${product.id}`, name: product.name.trim() || 'Producto', parent: accountFolder(account) };
+}
+
+/** E-commerce Studio MRB / cuenta / Protocolos de fotos: las ilustraciones de los pasos. */
+export function protocolsFolder(account: Named): FolderSpec {
+  return { key: `protocolos:${account.id}`, name: 'Protocolos de fotos', parent: accountFolder(account) };
 }
 
 /** E-commerce Studio MRB / cuenta / producto / Videos. */

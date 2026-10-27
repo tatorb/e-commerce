@@ -20,6 +20,7 @@ import {
 import { LAST_PHOTO_STEP } from '@/domain/photo-steps';
 import { copyChannelProduct, copySkus } from '@/domain/stock';
 import { checkClip } from '@/domain/videos';
+import type { PublicationMeasures } from '@/domain/shoot';
 import { BY_BROWSER, setClips } from '@/lib/videos';
 import { photoFileHref } from '@/lib/photo-rules';
 import { readStored } from '@/lib/stored-files';
@@ -201,6 +202,43 @@ const editLabel = (e: { asIs: boolean }, n: number) => (e.asIs ? `Original ${n},
 export function photoOriginsOf(raw: unknown): Record<string, string> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
   return Object.fromEntries(Object.entries(raw as Record<string, unknown>).filter((e): e is [string, string] => typeof e[1] === 'string'));
+}
+
+/** Las fotos del paso Imágenes que ya pueden ir a una publicación: las corregidas aprobadas y las que se usan tal cual. */
+export async function readyPhotoIds(db: Db, productId: string): Promise<Set<string>> {
+  return new Set((await finishedEdits(db, productId)).map((e) => e.id));
+}
+
+/**
+ * Las publicaciones del producto, con sus fotos elegidas (o null si siguen a
+ * las del canal), las del canal, y cómo ve las medidas cada una: las que se
+ * pueden marcar y la que vende sola, igual que en Organización de multimedia.
+ */
+export async function productPublicationsMedia(db: Db, productId: string) {
+  const [variants, pubs] = await Promise.all([
+    db.productVariant.findMany({ where: { productId }, orderBy: { position: 'asc' }, select: { sku: true, measure: true } }),
+    db.publication.findMany({
+      where: { productId },
+      orderBy: { createdAt: 'asc' },
+      select: {
+        id: true,
+        videoVariants: true,
+        channelCopy: { select: { photos: true, photoIds: true, variations: true, details: true, missingSince: true } },
+      },
+    }),
+  ]);
+  const allMeasures = measuresOf(variants);
+  return pubs.map((p) => {
+    const copy = p.channelCopy && !p.channelCopy.missingSince ? p.channelCopy : null;
+    const sole = soleMeasureOf(allMeasures, copy);
+    const measures: PublicationMeasures = { measures: sole || allMeasures.length < 2 ? [] : allMeasures.map((m) => m.key), sole: sole?.key ?? null };
+    return {
+      id: p.id,
+      videoVariants: parseVideoVariants(p.videoVariants),
+      channelRefs: channelPhotos(copy?.photos, copy?.photoIds, copy?.variations),
+      measures,
+    };
+  });
 }
 
 export async function loadMediaSources(db: Db, accountId: string, publicationId: string) {

@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { cookies } from 'next/headers';
-import { AlignLeft, DollarSign, History, Image as ImageIcon, KanbanSquare, ListChecks, ListTodo, MessageCircleQuestion, MessageSquareText, Package, PlugZap, RefreshCw, SlidersHorizontal, Type, Upload, Users } from 'lucide-react';
+import { AlignLeft, Camera, ClipboardList, DollarSign, History, Image as ImageIcon, KanbanSquare, ListChecks, ListTodo, MessageCircleQuestion, MessageSquareText, Package, PlugZap, RefreshCw, SlidersHorizontal, Type, Upload, Users } from 'lucide-react';
 import { NavLink } from '@/components/dashboard/NavLink';
 import { SidebarShell } from '@/components/dashboard/SidebarShell';
 import { SidebarToggle } from '@/components/dashboard/SidebarToggle';
@@ -83,6 +83,11 @@ export async function Sidebar({
               <Package className="h-4 w-4" />
             </NavLink>
           ) : null}
+          {sees('captura') ? (
+            <NavLink href={`${accountHome}/registro-productos`} label="Registro de productos">
+              <Camera className="h-4 w-4" />
+            </NavLink>
+          ) : null}
           {sees('publicaciones') ? (
             <NavLink href={`${accountHome}/publicaciones`} label="Publicaciones">
               <ListChecks className="h-4 w-4" />
@@ -146,6 +151,11 @@ export async function Sidebar({
           {sees('respuestas') ? (
             <NavLink href={`${accountHome}/respuestas`} label="Respuestas">
               <MessageSquareText className="h-4 w-4" />
+            </NavLink>
+          ) : null}
+          {sees('protocolos') ? (
+            <NavLink href={`${accountHome}/protocolos`} label="Protocolos de fotos">
+              <ClipboardList className="h-4 w-4" />
             </NavLink>
           ) : null}
           {sees('conexion') ? (

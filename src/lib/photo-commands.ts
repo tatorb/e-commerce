@@ -6,6 +6,7 @@ import { plural } from '@/lib/format';
 import { photoFolderId, photoOwner, syncCorrected } from '@/lib/photo-files';
 import { addChannelPhotos, PhotoError, type AsIsCheck } from '@/lib/photos';
 import { setAsIs } from '@/lib/photo-queue';
+import { placeShotPhotosQuietly } from '@/lib/shoot';
 import { driveRef, storageError } from '@/lib/stored-files';
 
 // Lo que se hace con las fotos de un producto desde una publicación, igual
@@ -74,5 +75,7 @@ export async function setPhotoAsIs(db: PrismaClient, args: { publicationId: stri
   }
   await setAsIs(db, { editId: edit.id, asIs: args.asIs });
   await tidyCorrected(db, edit.productId);
+  // Si era una foto de Registro de productos, ya está lista para sus publicaciones.
+  if (args.asIs) await placeShotPhotosQuietly(db, edit.productId);
   return args.asIs ? 'Se usa el original tal cual.' : 'Vuelve a la línea para corregirla en la Mac.';
 }

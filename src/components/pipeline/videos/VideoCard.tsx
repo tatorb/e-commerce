@@ -160,6 +160,7 @@ export function VideoCard({
           <p className="text-xs text-muted-foreground">
             {video.origin === 'APP' ? `Subido desde la app${video.uploadedBy ? ` por ${video.uploadedBy}` : ''}` : 'Agregado desde el Drive'}, {timeLabel}
           </p>
+          {video.shot ? <p className="text-xs text-muted-foreground">{video.shot}</p> : null}
           {video.gone ? (
             <p className="text-xs text-destructive">Ya no está en la carpeta del Drive: se borró o se movió.</p>
           ) : check ? (

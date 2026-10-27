@@ -79,6 +79,7 @@ model User {
   tasksCreated       Task[]               @relation("TaskCreatedBy")
   tasks              TaskAssignee[]
   stockMoves         StockMovement[]
+  shootProtocols     ShootProtocol[]      @relation("ShootProtocolCreatedBy")
 
   @@map("users")
 }
@@ -213,6 +214,7 @@ model Account {
   activity            ActivityLog[]
   pricingSettings     PricingSettings?
   tasks               Task[]
+  shootProtocols      ShootProtocol[]
 
   @@map("accounts")
 }
@@ -1263,8 +1265,19 @@ model PhotoEdit {
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
   runs         PhotoStepRun[]
+  // Sacada en Registro de productos: se suma sola a las publicaciones del
+  // producto cuando está lista (placedAt, cuándo se sumó).
+  shot         Boolean        @default(false)
+  placedAt     DateTime?
+  // El paso del protocolo que siguió, si siguió uno.
+  shootStepId  String?
+  shootStep    ShootStep?     @relation(fields: [shootStepId], references: [id], onDelete: SetNull)
+  // La medida que eligió el operario (variantKey) y cómo se llamaba. Sin medida: todas.
+  variantKey   String?
+  variantLabel String?
 
   @@index([productId, position])
+  @@index([shot, placedAt])
   @@map("photo_edits")
 }
 
@@ -1700,6 +1713,12 @@ model ProductVideo {
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
   clips          PublicationClip[]
+  // Grabado en Registro de productos, con el paso del protocolo y la medida.
+  shot           Boolean           @default(false)
+  shootStepId    String?
+  shootStep      ShootStep?        @relation(fields: [shootStepId], references: [id], onDelete: SetNull)
+  variantKey     String?
+  variantLabel   String?
 
   @@index([productId])
   @@map("product_videos")
@@ -1724,6 +1743,58 @@ model PublicationClip {
   @@id([publicationId, videoId])
   @@index([videoId])
   @@map("publication_clips")
+}
+
+// ───────────────────────────── Registro de productos ─────────────────────────────
+
+enum ShootKind {
+  PHOTO
+  VIDEO
+}
+
+// Un protocolo para sacar las fotos y los videos de un producto: los pasos que
+// sigue el operario en Registro de productos. Es de la cuenta.
+model ShootProtocol {
+  id          String      @id @default(cuid())
+  accountId   String
+  account     Account     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  name        String
+  description String      @default("")
+  position    Int         @default(0)
+  // Archivado: no se ofrece, pero lo que se sacó con él sigue anotado.
+  archivedAt  DateTime?
+  createdById String?
+  createdBy   User?       @relation("ShootProtocolCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  steps       ShootStep[]
+
+  @@index([accountId, position])
+  @@map("shoot_protocols")
+}
+
+// Un paso del protocolo: qué sacar, foto o video, cómo, y una ilustración.
+model ShootStep {
+  id               String         @id @default(cuid())
+  protocolId       String
+  protocol         ShootProtocol  @relation(fields: [protocolId], references: [id], onDelete: Cascade)
+  position         Int            @default(0)
+  title            String
+  kind             ShootKind      @default(PHOTO)
+  explanation      String         @default("")
+  // La ilustración, en el Drive (drive:<id>), con su tipo y su nombre.
+  illustrationUrl  String?
+  illustrationType String?
+  illustrationName String?
+  // Sacado del protocolo: lo que se sacó con él sigue anotado.
+  archivedAt       DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  photos           PhotoEdit[]
+  videos           ProductVideo[]
+
+  @@index([protocolId, position])
+  @@map("shoot_steps")
 }
 
 // ───────────────────────────── Descripciones ─────────────────────────────

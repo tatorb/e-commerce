@@ -16,6 +16,11 @@ type SectionSpec = {
 export const SECTIONS = {
   pipeline: { label: 'Pipeline', levels: ['read', 'write'], hint: 'El tablero y cada paso: título, fotos, descripción, precio.' },
   productos: { label: 'Productos', levels: ['read', 'write'], hint: 'La ficha y la investigación de cada producto.' },
+  captura: {
+    label: 'Registro de productos',
+    levels: ['read', 'write'],
+    hint: 'Sacar y subir las fotos y los videos de cada producto desde el celular, siguiendo un protocolo. Con "Ve" solo mira lo que se registró.',
+  },
   publicaciones: { label: 'Publicaciones', levels: ['read', 'write'], hint: 'La lista y la página de cada publicación.' },
   subir: {
     label: 'Subir a los canales',
@@ -43,6 +48,11 @@ export const SECTIONS = {
   descripciones: { label: 'Descripciones', levels: ['read', 'write'] },
   precios: { label: 'Precios', levels: ['read', 'write'] },
   respuestas: { label: 'Respuestas', levels: ['read', 'write'] },
+  protocolos: {
+    label: 'Protocolos de fotos',
+    levels: ['read', 'write'],
+    hint: 'Los pasos, las explicaciones y las ilustraciones que sigue el operario en Registro de productos.',
+  },
   conexion: { label: 'Conexión', levels: ['read', 'write'], hint: 'La conexión de cada tienda con su canal.' },
 } as const satisfies Record<string, SectionSpec>;
 
@@ -51,7 +61,7 @@ export type Section = keyof typeof SECTIONS;
 export const SECTION_KEYS = Object.keys(SECTIONS) as Section[];
 
 // Las del menú Ajustes, para agruparlas en la pantalla de permisos.
-export const SETTINGS_SECTIONS: readonly Section[] = ['estandar', 'imagenes', 'reglas', 'descripciones', 'precios', 'respuestas', 'conexion'];
+export const SETTINGS_SECTIONS: readonly Section[] = ['estandar', 'imagenes', 'reglas', 'descripciones', 'precios', 'respuestas', 'protocolos', 'conexion'];
 
 /** Lo que se puede elegir en la sección. */
 export function levelsOf(section: Section): readonly Level[] {
@@ -139,6 +149,7 @@ const WITHOUT_SCREEN: readonly Section[] = ['subir', 'entrenar'];
 export const SECTION_PATH: Record<Section, string> = {
   pipeline: 'pipeline',
   productos: 'productos',
+  captura: 'registro-productos',
   publicaciones: 'publicaciones',
   subir: 'publicaciones',
   preguntas: 'preguntas',
@@ -153,6 +164,7 @@ export const SECTION_PATH: Record<Section, string> = {
   descripciones: 'descripciones',
   precios: 'precios',
   respuestas: 'respuestas',
+  protocolos: 'protocolos',
   conexion: 'conexion',
 };
 

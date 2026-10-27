@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { videoUploadType } from '@/domain/videos';
+import { shotText } from '@/domain/shoot';
 import {
   DriveError,
   driveEmail,
@@ -344,6 +345,8 @@ export type VideoRow = {
   uploadedBy: string | null;
   createdAt: Date;
   gone: boolean;
+  // Grabado en Registro de productos: la medida y el paso.
+  shot: string | null;
 };
 
 /** Lo que muestra el paso Videos: los videos del producto, el clip de la publicación y la conexión con el Drive. */
@@ -371,7 +374,7 @@ export async function loadVideosStep(db: PrismaClient, args: { accountId: string
     db.productVideo.findMany({
       where: { productId: pub.productId, OR: [{ goneAt: null }, { clips: { some: { publicationId: args.publicationId } } }] },
       orderBy: [{ driveCreatedAt: 'asc' }, { createdAt: 'asc' }],
-      include: { uploadedBy: { select: { name: true } } },
+      include: { uploadedBy: { select: { name: true } }, shootStep: { select: { title: true } } },
     }),
     db.publication.count({ where: { productId: pub.productId } }),
   ]);
@@ -390,6 +393,7 @@ export async function loadVideosStep(db: PrismaClient, args: { accountId: string
     uploadedBy: v.uploadedBy?.name ?? null,
     createdAt: v.driveCreatedAt ?? v.createdAt,
     gone: v.goneAt !== null,
+    shot: v.shot ? shotText(v.variantLabel, v.shootStep?.title ?? null) : null,
   }));
   return {
     productId: pub.productId,

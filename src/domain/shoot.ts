@@ -1,0 +1,128 @@
+import { z } from 'zod';
+
+// Registro de productos: el operario saca las fotos y los videos de un
+// producto con el celular, por medida, siguiendo un protocolo o sin ninguno.
+// Este módulo no usa la base: las reglas de los protocolos, la calidad mínima,
+// qué pasos ya se hicieron y a qué publicaciones va cada foto.
+
+export type ShootKind = 'PHOTO' | 'VIDEO';
+
+export const SHOOT_KIND_LABEL: Record<ShootKind, string> = { PHOTO: 'Foto', VIDEO: 'Video' };
+
+export const protocolInput = z.object({
+  name: z.string().trim().min(1, 'Poné un nombre.').max(120, 'El nombre es muy largo.'),
+  description: z.string().trim().max(1000, 'La descripción es muy larga.').default(''),
+});
+
+export const stepInput = z.object({
+  title: z.string().trim().min(1, 'Poné un título.').max(120, 'El título es muy largo.'),
+  kind: z.enum(['PHOTO', 'VIDEO']),
+  explanation: z.string().trim().max(4000, 'La explicación es muy larga.').default(''),
+});
+
+/** El primer motivo por el que no sirve lo que se cargó. */
+export function inputProblem(r: { success: boolean; error?: z.ZodError }): string | null {
+  return r.success ? null : (r.error?.issues[0]?.message ?? 'Revisá los datos.');
+}
+
+// Las ilustraciones de los pasos: imágenes comunes, que el navegador muestra.
+export const ILLUSTRATION_TYPES: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+  gif: 'image/gif',
+};
+export const ILLUSTRATION_MAX_BYTES = 15 * 1024 * 1024;
+
+/** El tipo de una ilustración por su nombre, o el motivo por el que no sirve. */
+export function illustrationType(file: { name: string; size: number }): { ok: true; type: string } | { ok: false; error: string } {
+  const ext = file.name.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? '';
+  const type = ILLUSTRATION_TYPES[ext];
+  if (!type) return { ok: false, error: 'La ilustración tiene que ser una imagen JPG, PNG, WEBP o GIF.' };
+  if (!(file.size > 0) || file.size > ILLUSTRATION_MAX_BYTES) return { ok: false, error: 'La ilustración pesa más de 15 MB.' };
+  return { ok: true, type };
+}
+
+// ───────────────────────────── Calidad ─────────────────────────────
+
+// Lo mínimo es HD: 1280 × 720, con el teléfono parado o acostado.
+export const MIN_SHORT_SIDE = 720;
+export const MIN_LONG_SIDE = 1280;
+
+export type Quality = {
+  // Lo que se le muestra al operario, por ejemplo "4K, 3840 × 2160" o "12 MP, 4032 × 3024".
+  text: string;
+  // Por debajo de HD no se sube.
+  enough: boolean;
+};
+
+const size = (w: number, h: number) => `${w} × ${h}`;
+
+/** La calidad de una foto o un video por su ancho y alto. Null si no se pudo medir. */
+export function qualityOf(kind: ShootKind, dims: { width: number; height: number } | null): Quality | null {
+  if (!dims || !(dims.width > 0) || !(dims.height > 0)) return null;
+  const short = Math.min(dims.width, dims.height);
+  const long = Math.max(dims.width, dims.height);
+  const enough = short >= MIN_SHORT_SIDE && long >= MIN_LONG_SIDE;
+  if (kind === 'PHOTO') {
+    const mp = (dims.width * dims.height) / 1_000_000;
+    const label = mp >= 10 ? `${Math.round(mp)} MP` : `${mp.toFixed(1).replace('.', ',')} MP`;
+    return { text: `${label}, ${size(dims.width, dims.height)}`, enough };
+  }
+  const label = short >= 2160 || long >= 3840 ? '4K' : short >= 1080 ? 'Full HD' : enough ? 'HD' : 'Menos que HD';
+  return { text: `${label}, ${size(dims.width, dims.height)}`, enough };
+}
+
+export const LOW_QUALITY_HELP =
+  'Está por debajo de HD, que es lo mínimo. Revisá la calidad de la cámara: en iPhone, Ajustes, Cámara, y elegí 4K en Grabar video; en Android, en la cámara, tocá el engranaje y elegí la resolución más alta.';
+
+// ───────────────────────────── Pasos hechos ─────────────────────────────
+
+/** Lo que ya se sacó del producto en Registro de productos. */
+export type Shot = { stepId: string | null; variantKey: string | null };
+
+/**
+ * Cuántas fotos o videos tiene cada paso para la medida elegida. Lo que se
+ * sacó para todas las medidas cuenta para cada una; lo de una medida, solo para esa.
+ */
+export function shotsPerStep(shots: Shot[], variantKey: string | null): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const s of shots) {
+    if (!s.stepId) continue;
+    if (s.variantKey !== null && s.variantKey !== variantKey) continue;
+    out[s.stepId] = (out[s.stepId] ?? 0) + 1;
+  }
+  return out;
+}
+
+// ───────────────────────────── Adónde va ─────────────────────────────
+
+/**
+ * Cómo ve las medidas una publicación del producto: las que se pueden marcar
+ * (dos o más, si en el canal tiene variantes) y la medida que vende sola, si
+ * cada medida se publica aparte. Lo arma lib/media.ts.
+ */
+export type PublicationMeasures = { measures: string[]; sole: string | null };
+
+/**
+ * Si una foto sacada para una medida (o para todas, null) va a una
+ * publicación, y con qué medidas marcada. Sin marcas es de todas.
+ */
+export function photoPlacement(pub: PublicationMeasures, variantKey: string | null): { add: false } | { add: true; variants: string[] } {
+  if (pub.sole !== null) return variantKey === null || variantKey === pub.sole ? { add: true, variants: [] } : { add: false };
+  if (variantKey === null || pub.measures.length < 2) return { add: true, variants: [] };
+  // Una medida que la publicación no tiene: no se suma, para que no aparezca en las otras.
+  return pub.measures.includes(variantKey) ? { add: true, variants: [variantKey] } : { add: false };
+}
+
+/** Las medidas con que queda marcado un video en una publicación. Vacío: ninguna marca. */
+export function videoMarks(pub: PublicationMeasures, variantKey: string | null): string[] {
+  if (pub.sole !== null || variantKey === null || pub.measures.length < 2) return [];
+  return pub.measures.includes(variantKey) ? [variantKey] : [];
+}
+
+/** Cómo se dice en los pasos Imágenes y Videos lo que se sacó en Registro de productos: "Registro: medida 0.50, Frente". */
+export function shotText(variantLabel: string | null, stepTitle: string | null): string {
+  return `Registro: ${[variantLabel ? `medida ${variantLabel}` : 'todas las medidas', stepTitle].filter(Boolean).join(', ')}`;
+}

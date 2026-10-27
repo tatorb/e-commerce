@@ -13,6 +13,7 @@ import { approveStep, archivePhoto, PhotoQueueError, redoStep, retryStep, skipSt
 import { publicAppUrl } from '@/lib/public-url';
 import { storageError } from '@/lib/stored-files';
 import { addChannelPhotosOf, asIsCheckFor, setPhotoAsIs, tidyCorrected } from '@/lib/photo-commands';
+import { placeShotPhotosQuietly } from '@/lib/shoot';
 import { plural } from '@/lib/format';
 
 // Lo que se hace desde el paso Imágenes: sumar fotos y decidir cada paso de
@@ -168,6 +169,8 @@ export async function approvePhotoStepAction(accountSlug: string, runId: string)
     return guard(accountSlug, async () => {
       await approveStep(prisma, { runId, userId: user.id });
       await tidyCorrected(prisma, run.productId);
+      // Si era una foto de Registro de productos, ya está lista para sus publicaciones.
+      await placeShotPhotosQuietly(prisma, run.productId);
     });
   });
 }

@@ -6,6 +6,7 @@ import { photoFileHref } from '@/lib/photo-rules';
 import { partsOf } from '@/lib/photo-queue';
 import type { loadPhotoLine } from '@/lib/photos';
 import type { PhotoView, RunView } from './types';
+import { shotText } from '@/domain/shoot';
 
 // Arma lo que muestra la pantalla a partir de lo guardado. Corre en el servidor.
 
@@ -58,6 +59,7 @@ export function buildPhotoView(edit: Edit, timeZone: string): PhotoView {
     // La que se usa tal cual ya está lista.
     progress: edit.asIs ? { kind: 'done' } : progress,
     progressText: edit.asIs ? 'Original, sin editar' : photoProgressText(progress),
+    shot: edit.shot ? shotText(edit.variantLabel, edit.shootStep?.title ?? null) : null,
     steps,
     costUsd: edit.runs.reduce((sum, r) => sum + (typeof obj(r.aiUsage)?.costo_usd === 'number' ? (obj(r.aiUsage)!.costo_usd as number) : 0), 0),
   };

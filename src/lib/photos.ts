@@ -46,13 +46,22 @@ export function originalProblem(file: { name: string; size?: string | number | n
  */
 export async function addDriveOriginal(
   db: PrismaClient,
-  args: { productId: string; file: { id: string; name: string; size?: string | number | null }; userId: string | null; asIs?: boolean },
+  args: {
+    productId: string;
+    file: { id: string; name: string; size?: string | number | null };
+    userId: string | null;
+    asIs?: boolean;
+    // Sacada en Registro de productos: su paso del protocolo y su medida.
+    shot?: ShotMarks;
+  },
 ) {
   const problem = originalProblem(args.file);
   if (problem) throw new PhotoError(problem);
   const originalUrl = driveRef(args.file.id);
+  const shot = args.shot ? { shot: true, ...args.shot } : {};
   const existing = await db.photoEdit.findUnique({ where: { originalUrl } });
-  if (existing) return existing;
+  // Si al leer la carpeta ya había entrado a la línea, se le anota lo del registro.
+  if (existing) return args.shot && !existing.shot ? db.photoEdit.update({ where: { id: existing.id }, data: shot }) : existing;
   try {
     return await createEdit(db, {
       productId: args.productId,
@@ -63,13 +72,18 @@ export async function addDriveOriginal(
       originalSize: Number(args.file.size ?? 0),
       asIs: args.asIs ?? false,
       createdById: args.userId,
+      ...shot,
     });
   } catch (e) {
     // La anotó otro pedido a la vez, por ejemplo al leer la carpeta.
     if (!isUniqueViolation(e)) throw e;
-    return db.photoEdit.findUniqueOrThrow({ where: { originalUrl } });
+    const edit = await db.photoEdit.findUniqueOrThrow({ where: { originalUrl } });
+    return args.shot && !edit.shot ? db.photoEdit.update({ where: { id: edit.id }, data: shot }) : edit;
   }
 }
+
+/** Lo que anota Registro de productos en una foto o un video: el paso del protocolo y la medida. */
+export type ShotMarks = { shootStepId: string | null; variantKey: string | null; variantLabel: string | null };
 
 async function productInAccount(db: PrismaClient, accountId: string, productId: string) {
   const p = await db.product.findFirst({ where: { id: productId, accountId }, select: { id: true } });
@@ -228,6 +242,7 @@ export async function loadPhotoLine(db: PrismaClient, productId: string) {
     orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
     include: {
       runs: { orderBy: { createdAt: 'asc' }, include: { decidedBy: { select: { name: true } } } },
+      shootStep: { select: { title: true } },
     },
   });
 }
