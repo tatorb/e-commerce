@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ChevronLeft, ChevronRight, Settings2, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ExternalLink, Settings2, X } from 'lucide-react';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Button } from '@/components/ui/button';
@@ -8,6 +8,8 @@ import { Input } from '@/components/ui/input';
 import { ReadQuestionsButton } from '@/components/questions/ReadQuestionsButton';
 import { AnswerBox, type DraftView } from '@/components/questions/AnswerBox';
 import { DraftMissing } from '@/components/questions/DraftMissing';
+import { PublicationFactsRow } from '@/components/publication/PublicationFactsRow';
+import { loadPublicationFacts, type PublicationFacts } from '@/lib/publication-facts';
 import { isAiConfigured } from '@/ai/claude';
 import type { PracticeCounts } from '@/domain/answers';
 import { titleOrUntitled } from '@/domain/publication-title';
@@ -24,6 +26,7 @@ import {
   type QuestionSearch,
 } from '@/lib/queries/questions';
 import { cn } from '@/lib/utils/cn';
+import { prisma } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 // "Leer ahora" hace varios pedidos al canal.
@@ -135,6 +138,60 @@ function StoreStatus({ store, accountSlug, timeZone }: { store: QuestionList['st
   );
 }
 
+/** La primera foto que tiene en el canal. */
+function firstPhoto(photos: unknown): string | null {
+  return Array.isArray(photos) && typeof photos[0] === 'string' && photos[0] ? photos[0] : null;
+}
+
+/** La publicación donde se hizo la pregunta: su foto, su título, su código y cómo está. */
+function QuestionListing({
+  q,
+  accountSlug,
+  showStore,
+  facts,
+}: {
+  q: QuestionRow;
+  accountSlug: string;
+  showStore: boolean;
+  facts: PublicationFacts | null;
+}) {
+  const pub = q.publication;
+  const photo = pub ? firstPhoto(pub.channelCopy?.photos) : null;
+  return (
+    <div className="flex items-start gap-3 rounded-md border bg-muted/30 p-2">
+      {photo ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={photo} alt="" className="h-14 w-14 shrink-0 rounded border bg-white object-contain" loading="lazy" />
+      ) : (
+        <div className="h-14 w-14 shrink-0 rounded border bg-muted" aria-hidden />
+      )}
+      <div className="min-w-0 space-y-1">
+        {pub ? (
+          <Link href={`/a/${accountSlug}/publicaciones/${pub.id}`} className="block font-medium leading-snug underline-offset-4 hover:underline">
+            {titleOrUntitled(pub.title)}
+          </Link>
+        ) : (
+          <p className="text-muted-foreground">Publicación que no está en la app</p>
+        )}
+        <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
+          <span>{pub?.externalId ?? q.listingId}</span>
+          {showStore ? <span>· {q.store.name}</span> : null}
+          {pub?.url ? (
+            <>
+              <span aria-hidden>·</span>
+              <a href={pub.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 underline-offset-4 hover:underline">
+                Ver en {q.store.channel.name}
+                <ExternalLink className="h-3 w-3" aria-hidden />
+              </a>
+            </>
+          ) : null}
+        </p>
+        {facts ? <PublicationFactsRow facts={facts} /> : null}
+      </div>
+    </div>
+  );
+}
+
 function QuestionItem({
   q,
   accountSlug,
@@ -142,6 +199,7 @@ function QuestionItem({
   now,
   showStore,
   canDraft,
+  facts,
 }: {
   q: QuestionRow;
   accountSlug: string;
@@ -149,6 +207,7 @@ function QuestionItem({
   now: Date;
   showStore: boolean;
   canDraft: boolean;
+  facts: Map<string, PublicationFacts>;
 }) {
   const draft = draftView(q);
   const waitingH = (now.getTime() - q.askedAt.getTime()) / 3_600_000;
@@ -163,17 +222,7 @@ function QuestionItem({
         ) : null}
       </div>
       <p className="whitespace-pre-line break-words font-medium">{q.text || 'El canal ocultó el texto de esta pregunta.'}</p>
-      <p className="min-w-0 text-xs text-muted-foreground">
-        {q.publication ? (
-          <Link href={`/a/${accountSlug}/publicaciones/${q.publication.id}`} className="font-medium text-foreground underline-offset-4 hover:underline">
-            {titleOrUntitled(q.publication.title)}
-          </Link>
-        ) : (
-          <span>Publicación que no está en la app</span>
-        )}
-        {` · ${q.publication?.externalId ?? q.listingId}`}
-        {showStore ? ` · ${q.store.name}` : ''}
-      </p>
+      <QuestionListing q={q} accountSlug={accountSlug} showStore={showStore} facts={q.publication ? (facts.get(q.publication.id) ?? null) : null} />
       {q.answer ? (
         <div className="rounded-md bg-muted px-3 py-2">
           <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -219,6 +268,10 @@ export default async function QuestionsPage({ params, searchParams }: { params: 
   const tz = account.timezone;
   const f = parseQuestionSearch(search);
   const [list, practice, settings] = await Promise.all([loadQuestions(account.id, f), loadPractice(account.id), loadAnswerSettings(account.id)]);
+  // El código, el estado, las medidas y la respuesta automática de cada publicación con preguntas.
+  const facts = await loadPublicationFacts(prisma, [
+    ...new Set([...list.forPerson, ...list.questions].flatMap((q) => (q.publication ? [q.publication.id] : []))),
+  ]);
   const now = new Date();
   const aiReady = isAiConfigured();
   // Las que Claude todavía no propuso: se proponen al abrir la pantalla.
@@ -326,7 +379,7 @@ export default async function QuestionsPage({ params, searchParams }: { params: 
             </div>
             <ul className="divide-y">
               {list.forPerson.map((q) => (
-                <QuestionItem key={q.id} q={q} accountSlug={account.slug} timeZone={tz} now={now} showStore={list.stores.length > 1} canDraft={aiReady} />
+                <QuestionItem key={q.id} q={q} accountSlug={account.slug} timeZone={tz} now={now} showStore={list.stores.length > 1} canDraft={aiReady} facts={facts} />
               ))}
             </ul>
           </Card>
@@ -354,7 +407,7 @@ export default async function QuestionsPage({ params, searchParams }: { params: 
           ) : (
             <ul className="divide-y">
               {list.questions.map((q) => (
-                <QuestionItem key={q.id} q={q} accountSlug={account.slug} timeZone={tz} now={now} showStore={list.stores.length > 1} canDraft={aiReady} />
+                <QuestionItem key={q.id} q={q} accountSlug={account.slug} timeZone={tz} now={now} showStore={list.stores.length > 1} canDraft={aiReady} facts={facts} />
               ))}
             </ul>
           )}

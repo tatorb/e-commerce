@@ -49,7 +49,8 @@ const QUESTION_SELECT = {
   draft: {
     select: { text: true, kind: true, usedData: true, missing: true, needsPerson: true, reason: true, outcome: true, sentText: true, costUsd: true },
   },
-  publication: { select: { id: true, title: true, externalId: true } },
+  // La publicación donde se preguntó, con su link y su primera foto en el canal.
+  publication: { select: { id: true, title: true, externalId: true, url: true, channelCopy: { select: { photos: true } } } },
   store: { select: { name: true, channel: { select: { name: true } } } },
 } satisfies Prisma.BuyerQuestionSelect;
 
