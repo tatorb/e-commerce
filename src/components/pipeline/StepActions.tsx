@@ -5,14 +5,15 @@ import { useRouter } from 'next/navigation';
 import { ArrowLeft, ArrowRight, Check, ChevronDown, MoveRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { nextStep, PIPELINE_STEP_LABEL, PIPELINE_STEPS, previousStep } from '@/domain/pipeline';
+import { nextStep, PIPELINE_STEP_LABEL, PIPELINE_STEP_SLUG, PIPELINE_STEPS, previousStep } from '@/domain/pipeline';
 import type { PipelineStep } from '@/generated/prisma/enums';
 import { jumpStepAction, moveStepAction } from '@/app/a/[cuenta]/pipeline/actions';
 import { RemoveFromPipelineDialog } from './RemoveFromPipelineDialog';
 
 // Los botones de abajo de cada paso: volver, avanzar o, en el último, marcarla
 // como corregida. Pegada al botón principal, una flecha abre la lista de los
-// pasos para llevarla a cualquier otro, saltando los del medio.
+// pasos para llevarla a cualquier otro, saltando los del medio. Al moverla, la
+// pantalla abre el paso adonde fue.
 export function StepActions({
   accountSlug,
   publicationId,
@@ -33,12 +34,22 @@ export function StepActions({
   const next = nextStep(step);
   const previous = previousStep(step);
 
+  // Después de moverla, abre el paso adonde fue, desde arriba de la pantalla.
+  // La que se desliza es el área principal (<main>), no la ventana.
+  function open(to: PipelineStep | null) {
+    const page = `/a/${accountSlug}/pipeline/${publicationId}`;
+    router.push(to ? `${page}?paso=${PIPELINE_STEP_SLUG[to]}` : page, { scroll: false });
+    router.refresh();
+    document.querySelector('main')?.scrollTo({ top: 0 });
+  }
+
   function move(kind: 'advance' | 'back' | 'complete') {
     setError(null);
     startTransition(async () => {
-      const r = await moveStepAction(accountSlug, publicationId, step, kind);
-      if (!r.ok) setError(r.error);
-      else router.refresh();
+      const r = await moveStepAction(accountSlug, publicationId, step, kind).catch(() => null);
+      if (!r) return setError('Se cortó la conexión con la app.');
+      if (!r.ok) return setError(r.error);
+      open(kind === 'advance' ? next : kind === 'back' ? previous : null);
     });
   }
 
@@ -49,8 +60,7 @@ export function StepActions({
       const r = await jumpStepAction(accountSlug, publicationId, step, to).catch(() => null);
       if (!r) return setError('Se cortó la conexión con la app.');
       if (!r.ok) return setError(r.error);
-      router.push(`/a/${accountSlug}/pipeline/${publicationId}`);
-      router.refresh();
+      open(to);
     });
   }
 
