@@ -88,6 +88,11 @@ describe('de Mercado Libre al formato neutro', () => {
       // Vino con varios valores: se suben como lista.
       { id: 'OEM', name: 'Código OEM', value: 'AB12, CD34', multiple: true },
     ]);
+    expect(l.channelFamilyName).toBeNull();
+    expect(parseItem({ id: 'MLA9', user_product_id: 'MLAU9', family_name: ' Kit Embrague Ford Ka ' })).toMatchObject({
+      channelProductId: 'MLAU9',
+      channelFamilyName: 'Kit Embrague Ford Ka',
+    });
   });
 
   it('las variantes dan el SKU y la medida, y cada estado como lo maneja Mercado Libre', () => {
@@ -151,6 +156,7 @@ describe('de Mercado Libre al formato neutro', () => {
 describe('con la cuenta conectada', () => {
   let server: http.Server;
   const paths: string[] = [];
+  const familyPaths: string[] = [];
   // Si el Mercado Libre simulado acepta las visitas de varias juntas.
   let visitsTogether = false;
   let busy = false;
@@ -163,6 +169,24 @@ describe('con la cuenta conectada', () => {
       if (req.headers.authorization !== 'Bearer llave') return json(401, {});
       if (busy && u.pathname.endsWith('/description')) return json(429, {});
 
+      // Las familias: cada medida es un producto del vendedor.
+      const up = u.pathname.match(/^\/user-products\/(\w+)$/);
+      if (up) {
+        familyPaths.push(u.pathname);
+        if (up[1] === 'MLAU1' || up[1] === 'MLAU2') return json(200, { id: up[1], family_id: 555, site_id: 'MLA' });
+        if (up[1] === 'MLAU3') return json(200, { id: up[1], site_id: 'MLA' });
+        return json(404, {});
+      }
+      if (u.pathname === '/sites/MLA/user-products-families/555') {
+        familyPaths.push(u.pathname);
+        return json(200, { family_id: 555, site_id: 'MLA', user_id: 7, user_products_ids: ['MLAU1', 'MLAU2'] });
+      }
+      if (u.pathname === '/users/7/items/search' && u.searchParams.has('user_product_id')) {
+        familyPaths.push(u.pathname + u.search);
+        expect(u.searchParams.get('user_product_id')).toBe('MLAU1,MLAU2');
+        const list = u.searchParams.get('status') === 'active' ? ['MLA10', 'MLA11'] : u.searchParams.get('status') === 'paused' ? ['MLA12'] : [];
+        return json(200, { results: list, paging: { total: list.length } });
+      }
       if (u.pathname === '/users/7/items/search') {
         const status = u.searchParams.get('status');
         const all = status === 'active' ? ACTIVE : status === 'paused' ? PAUSED : status === 'closed' ? CLOSED : [];
@@ -250,6 +274,19 @@ describe('con la cuenta conectada', () => {
     expect(paths.some((p) => p.includes('/visits/time_window'))).toBe(false);
     visitsTogether = false;
     resetVisitsTogether();
+  });
+
+  it('la familia de cada producto: sus medidas y sus publicaciones, leyendo cada familia una vez', async () => {
+    familyPaths.length = 0;
+    const families = await mercadolibreListings.readFamilies!('llave', '7', ['MLAU1', 'MLAU2', 'MLAU3', 'MLAU9', 'MLAU1']);
+    const family = { familyId: '555', channelProductIds: ['MLAU1', 'MLAU2'], listingIds: ['MLA10', 'MLA11', 'MLA12'] };
+    expect(families.get('MLAU1')).toEqual(family);
+    expect(families.get('MLAU2')).toEqual(family);
+    // Sin familia, null; la que no se pudo leer no está, para probar otro día.
+    expect(families.get('MLAU3')).toBeNull();
+    expect(families.has('MLAU9')).toBe(false);
+    expect(familyPaths.filter((p) => p.startsWith('/sites/'))).toHaveLength(1);
+    expect(familyPaths.filter((p) => p.startsWith('/user-products/MLAU1'))).toHaveLength(1);
   });
 
   it('una llave que no sirve corta y pide volver a conectar', async () => {

@@ -1,7 +1,7 @@
 import type { ChannelStatus } from '@/generated/prisma/enums';
 import { BULK_MAX, MercadoLibreRequestError, mlGet, readItems } from './http';
 import { mercadolibreCatalog } from './catalog';
-import type { ChannelListing, ChannelListings, ListingStatus } from '../listings-types';
+import type { ChannelFamily, ChannelListing, ChannelListings, ListingStatus } from '../listings-types';
 import { LOW_INTEREST_PLAN } from '@/domain/pricing';
 
 // Leer las publicaciones propias de la cuenta conectada. Solo lo público de
@@ -36,6 +36,7 @@ const ITEM_FIELDS = [
   'variations',
   'seller_custom_field',
   'user_product_id',
+  'family_name',
   'health',
   'last_updated',
 ];
@@ -200,6 +201,7 @@ export function parseItem(item: Obj): ChannelListing {
     updatedAt: str(item.last_updated),
     // En el modelo de producto de usuario: las publicaciones del mismo producto comparten sus fotos.
     channelProductId: str(item.user_product_id),
+    channelFamilyName: str(item.family_name),
   };
 }
 
@@ -318,6 +320,71 @@ async function idsWithStatus(accessToken: string, userId: string, status: Listin
   return scanned;
 }
 
+// ───────────────────────────── Familias ─────────────────────────────
+
+// En el modelo de producto de usuario cada medida es un producto del vendedor,
+// con sus publicaciones, y los productos con el mismo nombre de familia quedan
+// juntos. No hay un pedido con todas las familias del vendedor: se sale de cada
+// producto, en tres pasos.
+//   /user-products/{producto}                       → family_id y el sitio
+//   /sites/{sitio}/user-products-families/{familia} → user_products_ids
+//   /users/{vendedor}/items/search?user_product_id= → las publicaciones
+
+// Las publicaciones de la familia que se buscan: las finalizadas no vuelven.
+const FAMILY_STATUSES: ListingStatus[] = ['active', 'paused'];
+
+const idText = (v: unknown): string | null => (typeof v === 'number' && Number.isFinite(v) ? String(v) : str(v));
+
+/** Las publicaciones de esos productos del vendedor, activas o pausadas. */
+async function listingsOfProducts(accessToken: string, userId: string, productIds: string[]): Promise<string[]> {
+  const out: string[] = [];
+  for (const status of FAMILY_STATUSES) {
+    for (let offset = 0; offset < OFFSET_MAX; offset += PAGE) {
+      const params = { user_product_id: productIds.join(','), status, limit: String(PAGE), offset: String(offset) };
+      const body = await mlGet(searchPath(userId, params), accessToken);
+      const page = results(body);
+      for (const id of page) if (!out.includes(id)) out.push(id);
+      if (page.length < PAGE || offset + PAGE >= total(body)) break;
+    }
+  }
+  return out;
+}
+
+/** La familia de cada producto, leyendo cada familia una sola vez. */
+async function readFamilies(accessToken: string, userId: string, productIds: string[]): Promise<Map<string, ChannelFamily | null>> {
+  const out = new Map<string, ChannelFamily | null>();
+  const families = new Map<string, Promise<ChannelFamily | null>>();
+  const familyOf = (site: string, familyId: string) => {
+    if (!families.has(familyId)) {
+      families.set(
+        familyId,
+        optional(async () => {
+          const body = await mlGet(`/sites/${encodeURIComponent(site)}/user-products-families/${encodeURIComponent(familyId)}`, accessToken);
+          const members = isObj(body) ? arr(body.user_products_ids).flatMap((id) => idText(id) ?? []) : [];
+          if (members.length === 0) return null;
+          return { familyId, channelProductIds: members, listingIds: await listingsOfProducts(accessToken, userId, members) };
+        }),
+      );
+    }
+    return families.get(familyId)!;
+  };
+  const tasks = [...new Set(productIds)].map((productId) => async () => {
+    const body = await optional(() => mlGet(`/user-products/${encodeURIComponent(productId)}`, accessToken));
+    if (!isObj(body)) return;
+    const familyId = idText(body.family_id);
+    if (!familyId) {
+      out.set(productId, null);
+      return;
+    }
+    // El sitio va en el producto; si no, son las primeras letras de su código, como MLA en MLAU123.
+    const site = str(body.site_id) ?? productId.slice(0, 3);
+    const family = await familyOf(site, familyId);
+    if (family) out.set(productId, family.channelProductIds.includes(productId) ? family : { ...family, channelProductIds: [productId, ...family.channelProductIds] });
+  });
+  await inParallel(tasks);
+  return out;
+}
+
 export const mercadolibreListings: ChannelListings = {
   async countByStatus(accessToken, userId) {
     const [active, paused, closed] = await Promise.all(
@@ -364,4 +431,6 @@ export const mercadolibreListings: ChannelListings = {
     const found = new Set(listings.map((l) => l.externalId));
     return { listings, missing: wanted.filter((id) => !found.has(id)) };
   },
+
+  readFamilies,
 };

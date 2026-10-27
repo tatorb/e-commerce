@@ -2,7 +2,7 @@ import { Prisma, type PrismaClient } from '@/generated/prisma/client';
 import type { SyncTrigger } from '@/generated/prisma/enums';
 import { getChannelAdapter } from '@/channels';
 import { ConnectError } from '@/channels/connect';
-import { getChannelListings, LISTINGS_BATCH, type ChannelListing } from '@/channels/listings';
+import { getChannelListings, LISTINGS_BATCH, type ChannelFamily, type ChannelListing, type ChannelListings } from '@/channels/listings';
 import type { ChannelAdapter } from '@/channels/types';
 import {
   FACE_FIELDS,
@@ -20,6 +20,7 @@ import {
   type FaceValues,
   type Fingerprints,
 } from '@/domain/channel-sync';
+import { familyDetails, needsFamilyRead } from '@/domain/families';
 import { channelPhotos, parseVariantListings } from '@/domain/media';
 import { channelQuantities } from '@/domain/quantities';
 import { parseMetrics, type Metrics } from '@/domain/measurements';
@@ -160,6 +161,8 @@ async function applyListing(
   publicationId: string,
   listing: ChannelListing,
   descriptionRead: boolean,
+  // La familia, si se leyó esta vez. Sin leer, queda la que ya estaba.
+  family?: ChannelFamily | null,
 ): Promise<FaceField[]> {
   const p = await tx.publication.findUniqueOrThrow({
     where: { id: publicationId },
@@ -184,6 +187,7 @@ async function applyListing(
           discount: true,
           discountUntil: true,
           discountSentAt: true,
+          details: true,
         },
       },
     },
@@ -282,6 +286,8 @@ async function applyListing(
       measures: listing.measures,
       categoryName: listing.categoryName,
       channelProductId: listing.channelProductId ?? null,
+      channelFamilyName: listing.channelFamilyName ?? null,
+      ...familyDetails(family, p.channelCopy?.details, ctx.now),
     },
     categoryId: listing.categoryId,
     attributeIds: listingAttributeIds(listing, ctx.adapter),
@@ -301,6 +307,35 @@ async function applyListing(
   });
   return taken;
 }
+
+/**
+ * Las familias de las publicaciones leídas que hace mucho no se leen, si el
+ * canal agrupa las medidas. Una falla no corta la lectura: se prueba en la
+ * próxima pasada. Solo una llave vencida corta.
+ */
+async function readFamiliesFor(
+  listings: ChannelListings,
+  token: string,
+  userId: string,
+  read: ChannelListing[],
+  details: (externalId: string) => unknown,
+  now: Date,
+): Promise<Map<string, ChannelFamily | null>> {
+  if (!listings.readFamilies) return new Map();
+  const wanted = read.filter((l) => needsFamilyRead(details(l.externalId), l.channelProductId, now)).map((l) => l.channelProductId!);
+  if (wanted.length === 0) return new Map();
+  try {
+    return await listings.readFamilies(token, userId, wanted);
+  } catch (e) {
+    if (e instanceof ConnectError && e.reauth) throw e;
+    if (!(e instanceof ConnectError)) console.error('Error al leer las familias del canal', e instanceof Error ? e.message : e);
+    return new Map();
+  }
+}
+
+/** La familia leída para una publicación: undefined si esta vez no se leyó. */
+const familyFor = (families: Map<string, ChannelFamily | null>, listing: ChannelListing) =>
+  listing.channelProductId && families.has(listing.channelProductId) ? families.get(listing.channelProductId)! : undefined;
 
 // ───────────────────────────── Seguir una pasada ─────────────────────────────
 
@@ -361,7 +396,7 @@ export async function runSyncStep(
           id: true,
           externalId: true,
           variantListings: true,
-          channelCopy: { select: { channelUpdatedAt: true, descriptionReadAt: true, description: true, agreed: true } },
+          channelCopy: { select: { channelUpdatedAt: true, descriptionReadAt: true, description: true, agreed: true, details: true } },
         },
       });
       const byId = new Map(publications.map((p) => [p.externalId!, p]));
@@ -374,16 +409,20 @@ export async function runSyncStep(
       );
       const others = [...families.values()].flatMap((f) => f.map((v) => v.externalId)).filter((id) => !batch.includes(id));
       const withDescription = new Set<string>();
-      const result = await withAccessToken(db, run.store.id, async (token, userId) => ({
-        ...(await listings.readListings(token, userId, batch, {
+      const result = await withAccessToken(db, run.store.id, async (token, userId) => {
+        const read = await listings.readListings(token, userId, batch, {
           description: (l) => {
             const need = needsDescription(byId.get(l.externalId)?.channelCopy, l, now);
             if (need) withDescription.add(l.externalId);
             return need;
           },
-        })),
-        members: await readVariantListings(listings, token, userId, others),
-      }));
+        });
+        return {
+          ...read,
+          members: await readVariantListings(listings, token, userId, others),
+          families: await readFamiliesFor(listings, token, userId, read.listings, (id) => byId.get(id)?.channelCopy?.details, now),
+        };
+      });
 
       const ctx = { syncId: run.id, adapter, day: dayIn(run.store.account.timezone, now), now };
       let read = 0;
@@ -397,7 +436,10 @@ export async function runSyncStep(
         const family = families.get(found.externalId);
         const listing = family ? familyListing(found, family, members) : found;
         try {
-          const taken = await db.$transaction((tx) => applyListing(tx, ctx, publication.id, listing, withDescription.has(listing.externalId)));
+          const channelFamily = familyFor(result.families, found);
+          const taken = await db.$transaction((tx) =>
+            applyListing(tx, ctx, publication.id, listing, withDescription.has(listing.externalId), channelFamily),
+          );
           read++;
           if (taken.length > 0) updated++;
         } catch (e) {
@@ -506,6 +548,7 @@ export async function readOne(db: Db, args: { accountId: string; publicationId: 
       id: true,
       externalId: true,
       variantListings: true,
+      channelCopy: { select: { details: true } },
       store: { select: { id: true, channel: { select: { kind: true, name: true } }, account: { select: { timezone: true } } } },
     },
   });
@@ -517,10 +560,14 @@ export async function readOne(db: Db, args: { accountId: string; publicationId: 
   const externalId = p.externalId;
   const family = parseVariantListings(p.variantListings);
   const others = family.length >= 2 ? family.map((v) => v.externalId).filter((id) => id !== externalId) : [];
-  const result = await withAccessToken(db, p.store.id, async (token, userId) => ({
-    ...(await listings.readListings(token, userId, [externalId], { description: () => true })),
-    members: await readVariantListings(listings, token, userId, others),
-  }));
+  const result = await withAccessToken(db, p.store.id, async (token, userId) => {
+    const read = await listings.readListings(token, userId, [externalId], { description: () => true });
+    return {
+      ...read,
+      members: await readVariantListings(listings, token, userId, others),
+      families: await readFamiliesFor(listings, token, userId, read.listings, () => p.channelCopy?.details, now),
+    };
+  });
   const read = result.listings.find((l) => l.externalId === externalId);
   const listing = read && family.length >= 2 ? familyListing(read, family, result.members) : read;
   if (!listing) {
@@ -528,7 +575,7 @@ export async function readOne(db: Db, args: { accountId: string; publicationId: 
     return null;
   }
   const ctx = { syncId: null, adapter, day: dayIn(p.store.account.timezone, now), now };
-  return db.$transaction((tx) => applyListing(tx, ctx, p.id, listing, true));
+  return db.$transaction((tx) => applyListing(tx, ctx, p.id, listing, true, familyFor(result.families, read!)));
 }
 
 // ───────────────────────────── Elegir ─────────────────────────────

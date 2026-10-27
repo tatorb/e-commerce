@@ -276,6 +276,7 @@ model Store {
   // Por qué no se pueden leer, por ejemplo porque falta el permiso.
   salesError     String?
   sales          ChannelSale[]
+  families       ListingFamily[]
 
   @@unique([accountId, channelId, name])
   @@map("stores")
@@ -327,6 +328,7 @@ model Product {
   compatibilities  Compatibility[]
   assets           Asset[]
   publications     Publication[]
+  families         ListingFamily[]
   importChanges    ImportChange[]
   research         ProductResearch?
   files            ProductFile[]
@@ -508,6 +510,17 @@ model Publication {
   // Si la cantidad en el canal se actualiza sola con el stock del producto.
   // Apagado, se cambia a mano en la publicación; sus ventas igual descuentan.
   followsStock      Boolean              @default(true)
+  // La familia, cuando el canal guarda cada medida como una publicación aparte
+  // y las agrupa (src/lib/families.ts). Sin familia: una publicación suelta.
+  familyId          String?
+  family            ListingFamily?       @relation("FamilyMembers", fields: [familyId], references: [id], onDelete: SetNull)
+  // La familia de la que es la principal: ahí se guarda el trabajo del pipeline.
+  leadOf            ListingFamily?       @relation("FamilyLead")
+  // La medida que vende, cuando vende una sola: la clave de src/domain/media.ts
+  // (variantKey). Null: vende todas, o todavía no se sabe.
+  variantKey        String?
+  // En una familia: la medida tiene su propio precio y no sigue al de la familia.
+  ownPrice          Boolean              @default(false)
   source            RecordSource         @default(MANUAL)
   // Importación que la creó, para poder deshacerla.
   importRunId       String?
@@ -537,7 +550,37 @@ model Publication {
   @@index([pipelineStatus])
   @@index([productId])
   @@index([importRunId])
+  @@index([familyId])
   @@map("publications")
+}
+
+// La familia: las publicaciones de un producto en una tienda, una por medida,
+// cuando el canal guarda cada medida aparte y las agrupa. Se trabajan juntas
+// en el pipeline: lo que es de la familia (el paso, el título, la descripción,
+// los datos de catálogo, las preguntas frecuentes, las reglas del bot y el
+// precio) se guarda igual en todas, y cada una tiene su código, su cantidad,
+// sus fotos y su estado (src/lib/families.ts).
+model ListingFamily {
+  id              String        @id @default(cuid())
+  storeId         String
+  store           Store         @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  productId       String
+  product         Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  // El código de la familia en el canal, tal cual lo da. Null mientras no se creó allá.
+  channelFamilyId String?
+  // La publicación principal: ahí vive el trabajo del pipeline, y lo terminado
+  // se copia a las demás.
+  leadId          String?       @unique
+  lead            Publication?  @relation("FamilyLead", fields: [leadId], references: [id], onDelete: SetNull)
+  // El mismo precio para todas las medidas, salvo las que tienen el suyo (ownPrice).
+  samePrice       Boolean       @default(true)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  members         Publication[] @relation("FamilyMembers")
+
+  @@unique([storeId, channelFamilyId])
+  @@index([productId])
+  @@map("listing_families")
 }
 
 // Registro de cuándo entra y sale una publicación de cada etapa. Una sola

@@ -6,7 +6,7 @@ import type { ChannelListings } from './listings-types';
 // Los tipos están en listings-types.ts, así cada canal los usa sin depender de
 // esta lista.
 
-export { LISTING_STATUSES, LISTINGS_BATCH, type ChannelListing, type ChannelListings, type ListingStatus } from './listings-types';
+export { LISTING_STATUSES, LISTINGS_BATCH, type ChannelFamily, type ChannelListing, type ChannelListings, type ListingStatus } from './listings-types';
 
 const LISTINGS: Partial<Record<ChannelKind, ChannelListings>> = {
   MERCADOLIBRE: mercadolibreListings,

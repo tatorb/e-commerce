@@ -91,7 +91,7 @@ describe('de qué lado cambió cada dato', () => {
 
 const url = process.env.TEST_DATABASE_URL;
 
-type Item = { title: string; description: string; price: number; status: string; last_updated: string; attributes?: object[] };
+type Item = { title: string; description: string; price: number; status: string; last_updated: string; attributes?: object[]; user_product_id?: string };
 
 describe.skipIf(!url)('la lectura automática en la base', () => {
   const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: url! }) });
@@ -99,6 +99,10 @@ describe.skipIf(!url)('la lectura automática en la base', () => {
   const paths: string[] = [];
   let items: Record<string, Item> = {};
   let inChannel: string[] = [];
+  // Las familias del canal: el producto de cada medida, su familia y las publicaciones de cada producto.
+  let familyOf: Record<string, string> = {};
+  let familyProducts: Record<string, string[]> = {};
+  let productListings: Record<string, string[]> = {};
   let reject = false;
   let accountId = '';
   let storeId = '';
@@ -139,6 +143,15 @@ describe.skipIf(!url)('la lectura automática en la base', () => {
         return json(200, (u.searchParams.get('ids') ?? '').split(',').map((id) => ({ item_id: id, total_visits: 50 })));
       }
       if (u.pathname === '/categories/MLA999') return json(200, { id: 'MLA999', name: 'Repuestos' });
+      const up = u.pathname.match(/^\/user-products\/(\w+)$/);
+      if (up) return up[1] in familyOf ? json(200, { id: up[1], family_id: familyOf[up[1]] || undefined, site_id: 'MLA' }) : json(404, {});
+      const fam = u.pathname.match(/^\/sites\/MLA\/user-products-families\/(\w+)$/);
+      if (fam) return json(200, { family_id: fam[1], user_products_ids: familyProducts[fam[1]] ?? [] });
+      if (u.pathname === '/users/7/items/search' && u.searchParams.has('user_product_id')) {
+        const list =
+          u.searchParams.get('status') === 'active' ? (u.searchParams.get('user_product_id') ?? '').split(',').flatMap((id) => productListings[id] ?? []) : [];
+        return json(200, { results: list, paging: { total: list.length } });
+      }
       if (u.pathname === '/users/7/items/search') {
         const status = u.searchParams.get('status');
         const list = status === 'active' ? inChannel : [];
@@ -165,6 +178,9 @@ describe.skipIf(!url)('la lectura automática en la base', () => {
     reject = false;
     inChannel = [];
     items = {};
+    familyOf = {};
+    familyProducts = {};
+    productListings = {};
     const channel = await db.channel.create({ data: { kind: 'MERCADOLIBRE', name: 'Mercado Libre' } });
     const account = await db.account.create({ data: { slug: 'prueba', name: 'Cuenta de prueba' } });
     const store = await db.store.create({ data: { accountId: account.id, channelId: channel.id, name: 'TIENDA' } });
@@ -270,6 +286,46 @@ describe.skipIf(!url)('la lectura automática en la base', () => {
     expect((await db.publication.findUniqueOrThrow({ where: { id: c.id } })).description).toBe('Kit completo y garantía.');
     const taken = await db.channelSyncChange.findFirstOrThrow({ where: { publicationId: a.id, field: 'title' } });
     expect(taken).toMatchObject({ kind: 'TAKEN', before: 'Kit Embrague Ford Ka', after: 'Kit Embrague Ford Ka 1.6 Sachs' });
+  });
+
+  it('lee la familia de cada medida una vez, la guarda en la cara del canal y la vuelve a leer a la semana', async () => {
+    await publication('MLA1');
+    await publication('MLA2');
+    await publication('MLA3');
+    items = { MLA1: item({ user_product_id: 'MLAU1' }), MLA2: item({ user_product_id: 'MLAU2' }), MLA3: item({ user_product_id: 'MLAU3' }) };
+    familyOf = { MLAU1: '77', MLAU2: '77' };
+    familyProducts = { '77': ['MLAU1', 'MLAU2', 'MLAU5'] };
+    productListings = { MLAU1: ['MLA1'], MLAU2: ['MLA2'], MLAU5: ['MLA5'] };
+    await pass();
+    const details = async (externalId: string) =>
+      (await db.channelCopy.findFirstOrThrow({ where: { publication: { externalId } } })).details as Record<string, unknown>;
+    expect(await details('MLA1')).toMatchObject({
+      channelProductId: 'MLAU1',
+      channelFamilyId: '77',
+      familyProductIds: ['MLAU1', 'MLAU2', 'MLAU5'],
+      familyListingIds: ['MLA1', 'MLA2', 'MLA5'],
+    });
+    expect((await details('MLA2')).channelFamilyId).toBe('77');
+    // La familia se leyó una sola vez para las dos medidas.
+    expect(paths.filter((p) => p.startsWith('/sites/'))).toHaveLength(1);
+    // MLA3 no se pudo leer: queda sin familia, para probar en la próxima pasada.
+    expect((await details('MLA3')).familyReadAt).toBeUndefined();
+
+    // La pasada siguiente no la vuelve a pedir y la conserva.
+    paths.length = 0;
+    await pass();
+    expect(paths.filter((p) => p.startsWith('/user-products/'))).toEqual(['/user-products/MLAU3']);
+    expect((await details('MLA1')).channelFamilyId).toBe('77');
+
+    // A la semana se vuelve a leer: MLAU1 ya no está en ninguna familia.
+    const copy = await db.channelCopy.findFirstOrThrow({ where: { publication: { externalId: 'MLA1' } } });
+    await db.channelCopy.update({
+      where: { publicationId: copy.publicationId },
+      data: { details: { ...(copy.details as object), familyReadAt: new Date(Date.now() - 8 * 86_400_000).toISOString() } },
+    });
+    familyOf.MLAU1 = '';
+    await pass();
+    expect(await details('MLA1')).toMatchObject({ channelFamilyId: null, familyProductIds: [], familyListingIds: [] });
   });
 
   it('la descripción se vuelve a pedir solo si la publicación cambió en el canal', async () => {

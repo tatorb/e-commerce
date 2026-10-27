@@ -1,5 +1,8 @@
 import type { ChannelStatus } from '@/generated/prisma/enums';
+import type { ChannelFamily } from '@/domain/families';
 import type { ChannelVariation } from '@/domain/media';
+
+export type { ChannelFamily };
 
 // Leer las publicaciones de una tienda desde su canal, con la cuenta
 // conectada. Cada canal lo resuelve en src/channels/<canal>/; el importador
@@ -57,6 +60,9 @@ export type ChannelListing = {
   // El producto del canal al que pertenece, cuando el canal agrupa varias
   // publicaciones en un producto que es dueño de las fotos y los datos.
   channelProductId?: string | null;
+  // El nombre de la familia, cuando el canal agrupa las medidas en una
+  // familia: es el título que comparten todas.
+  channelFamilyName?: string | null;
 };
 
 export interface ChannelListings {
@@ -75,4 +81,10 @@ export interface ChannelListings {
     ids: string[],
     opts?: { description?: (listing: ChannelListing) => boolean },
   ): Promise<{ listings: ChannelListing[]; missing: string[] }>;
+  /**
+   * La familia de cada producto del canal (channelProductId), solo en los
+   * canales que guardan cada medida aparte. Un producto sin familia queda en
+   * null; uno que no se pudo leer no está, para probar de nuevo otro día.
+   */
+  readFamilies?(accessToken: string, userId: string, channelProductIds: string[]): Promise<Map<string, ChannelFamily | null>>;
 }
