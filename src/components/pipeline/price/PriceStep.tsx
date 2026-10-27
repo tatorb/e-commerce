@@ -129,7 +129,7 @@ export function PriceStep({
   const parts = breakdown(sim.finalPrice, cost ?? 0, params, plan);
   const refs = cost ? references(listPrice, cost, params) : null;
   const comparison =
-    data.competitors.length > 0 && listPrice > 0 ? compare({ mine: { listPrice, discountPct: discount, plan }, competitors: data.competitors, cost: cost ?? 0, params }) : null;
+    data.competitors.length > 0 && listPrice > 0 ? compare({ mine: { listPrice, discountPct: discount, plan, brand: data.brand }, competitors: data.competitors, cost: cost ?? 0, params }) : null;
   const ready = cost !== null && listPrice > 0;
   const below = ready && sim.level === 'below';
   const range = data.discountRange;

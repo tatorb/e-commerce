@@ -25,6 +25,7 @@ export function PipelineBoard({
             id: i.id,
             title: i.title,
             externalId: i.externalId,
+            code: i.code,
             storeName: i.storeName,
             kind: i.kind,
             score: i.score,

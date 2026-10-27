@@ -82,6 +82,7 @@ function competitorOut(c: Parameters<typeof storedCompetitor>[0]) {
     vendidos: row.soldQuantity,
     link: row.url,
     vendedor: row.sellerName,
+    marca: row.brand,
     precio_de_lista: row.listPrice,
     descuento_pct: row.discountPct,
     cuotas_sin_interes: row.installments,

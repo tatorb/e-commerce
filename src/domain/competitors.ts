@@ -48,6 +48,12 @@ export const competitorsSchema = z
         .max(200, 'El nombre del vendedor es muy largo.')
         .nullish()
         .transform((v) => v || null),
+      brand: z
+        .string()
+        .trim()
+        .max(100, 'La marca es muy larga.')
+        .nullish()
+        .transform((v) => v || null),
       listPrice: z
         .union([z.string(), z.number(), z.null()])
         .optional()
@@ -118,6 +124,7 @@ export const COMPETITOR_SELECT = {
   url: true,
   soldQuantity: true,
   sellerName: true,
+  brand: true,
   listPrice: true,
   discountPct: true,
   installments: true,
@@ -131,6 +138,7 @@ type StoredCompetitor = {
   url: string | null;
   soldQuantity: number | null;
   sellerName: string | null;
+  brand: string | null;
   listPrice: { toString(): string } | null;
   discountPct: { toString(): string };
   installments: number;
@@ -146,6 +154,7 @@ export function storedCompetitor(c: StoredCompetitor): CompetitorsOutput[number]
     url: c.url,
     soldQuantity: c.soldQuantity,
     sellerName: c.sellerName,
+    brand: c.brand,
     listPrice: c.listPrice === null ? null : Number(c.listPrice.toString()),
     discountPct: Number(c.discountPct.toString()),
     installments: c.installments,

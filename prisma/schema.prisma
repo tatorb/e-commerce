@@ -846,6 +846,8 @@ model CompetitorListing {
   title         String
   soldQuantity  Int?
   sellerName    String?
+  // La marca del producto que vende: sin ella, comparar el precio dice poco.
+  brand         String?
   // El precio antes de cualquier descuento.
   listPrice     Decimal?    @db.Decimal(14, 2)
   // El descuento activo en %, por ejemplo 15 para 15 %.

@@ -31,7 +31,7 @@ describe('herramientas de escritura en la lista', () => {
     expect(tools.get('update_task')).toMatchObject({ readOnlyHint: false, destructiveHint: false });
     expect(tools.get('set_product_stock')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('set_publication_status')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
-    expect(tools.size).toBe(38);
+    expect(tools.size).toBe(42);
   });
 });
 
@@ -206,10 +206,11 @@ describe.skipIf(!url)('herramientas de escritura', () => {
   it('save_competitors: reemplaza la lista, también con más de 5', async () => {
     const r = await call('save_competitors', {
       publicacion: 'MLA1110001',
-      competencia: [{ titulo: 'Kit Embrague Gol Original', vendidos: 120, link: 'https://ejemplo.com/a' }, { titulo: 'Kit Embrague Vw Gol' }],
+      competencia: [{ titulo: 'Kit Embrague Gol Original', vendidos: 120, link: 'https://ejemplo.com/a', marca: 'Sachs' }, { titulo: 'Kit Embrague Vw Gol' }],
     });
     expect(r.data).toMatchObject({ listo: true, guardadas: 2 });
     expect(await db.competitorListing.count({ where: { publicationId: kitId } })).toBe(2);
+    expect((await db.competitorListing.findFirstOrThrow({ where: { publicationId: kitId }, orderBy: { position: 'asc' } })).brand).toBe('Sachs');
     const seven = Array.from({ length: 7 }, (_, i) => ({ titulo: `Kit Embrague Gol ${i + 1}` }));
     expect((await call('save_competitors', { publicacion: 'MLA1110001', competencia: seven })).data.guardadas).toBe(7);
     expect((await call('save_competitors', { publicacion: 'MLA1110001', competencia: [] })).data.guardadas).toBe(0);

@@ -8,6 +8,7 @@ const COST = 99_627.5;
 const competitor = (sellerName: string, listPrice: number, discountPct: number, installments: number, freeShipping: boolean) => ({
   title: `Publicación de ${sellerName}`,
   sellerName,
+  brand: sellerName === 'Dos' ? 'Persan' : null,
   url: null,
   surveyedAt: '2026-10-20',
   offer: { listPrice, discountPct, installments, freeShipping },
@@ -18,9 +19,10 @@ describe('comparación con la competencia', () => {
 
   it('compara el precio efectivo: el mío con envío gratis, el de ellos con el envío si no es gratis', () => {
     const c = compare({ mine: { listPrice: 240_000, discountPct: 0, plan: 0 }, competitors, cost: COST, params: P });
-    expect(c.rows[0]).toMatchObject({ mine: true, effectivePrice: 240_000, freeShipping: true });
-    // Dos: 230.000 más el envío.
-    expect(c.rows[2]).toMatchObject({ name: 'Dos', effectivePrice: 230_000 + P.shipping });
+    expect(c.rows[0]).toMatchObject({ mine: true, effectivePrice: 240_000, freeShipping: true, brand: null });
+    // Dos: 230.000 más el envío. Con su marca, para saber si se compara lo mismo.
+    expect(c.rows[2]).toMatchObject({ name: 'Dos', brand: 'Persan', effectivePrice: 230_000 + P.shipping });
+    expect(compare({ mine: { listPrice: 240_000, discountPct: 0, plan: 0, brand: 'Rik' }, competitors, cost: COST, params: P }).rows[0].brand).toBe('Rik');
     expect(c.rows[1].effectivePrice).toBe(225_000);
     expect(c.rows[3].effectivePrice).toBe(221_000);
     // Más caro que Uno: la diferencia es positiva.

@@ -58,13 +58,14 @@ export async function loadPriceStep(db: Db, accountId: string, publicationId: st
       channelCopy: { select: { price: true, installments: true, discount: true, discountUntil: true, missingSince: true } },
       competitors: {
         orderBy: { position: 'asc' },
-        select: { title: true, sellerName: true, url: true, surveyedAt: true, listPrice: true, discountPct: true, installments: true, freeShipping: true },
+        select: { title: true, sellerName: true, brand: true, url: true, surveyedAt: true, listPrice: true, discountPct: true, installments: true, freeShipping: true },
       },
       priceDecisions: { orderBy: { decidedAt: 'desc' }, take: 1, include: { decidedBy: { select: { name: true } } } },
       product: {
         select: {
           id: true,
           name: true,
+          brand: true,
           replacementCost: true,
           pricingOverrides: true,
           _count: { select: { publications: true } },
@@ -77,7 +78,7 @@ export async function loadPriceStep(db: Db, accountId: string, publicationId: st
   const overrides = parsePricingValues(p.product.pricingOverrides);
   const competitors: CompetitorPrice[] = p.competitors.flatMap((c) => {
     const offer = offerOf(c);
-    return offer ? [{ title: c.title, sellerName: c.sellerName, url: c.url, surveyedAt: dayOf(c.surveyedAt), offer }] : [];
+    return offer ? [{ title: c.title, sellerName: c.sellerName, brand: c.brand, url: c.url, surveyedAt: dayOf(c.surveyedAt), offer }] : [];
   });
   const decision = p.priceDecisions[0] ?? null;
   const copy = p.channelCopy && !p.channelCopy.missingSince ? p.channelCopy : null;
@@ -85,6 +86,8 @@ export async function loadPriceStep(db: Db, accountId: string, publicationId: st
     publicationId: p.id,
     productId: p.product.id,
     productName: p.product.name,
+    // La marca del producto, para compararla con la de la competencia.
+    brand: p.product.brand,
     channelName: getChannelAdapter(p.store.channel.kind, p.store.channel.name).name,
     // El precio publicado: el de la app y el que se leyó del canal.
     price: p.price === null ? null : Number(p.price),

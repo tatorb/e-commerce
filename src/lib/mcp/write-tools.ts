@@ -16,6 +16,9 @@ import {
   removeFromPipeline,
 } from '@/domain/pipeline';
 import { productInfoSchema, updateProductInfo } from '@/domain/product-info';
+import { MediaError } from '@/lib/media';
+import { VideoError } from '@/lib/videos';
+import { copyMedia } from './media-tools';
 import { MAX_COMBO_ITEMS, MAX_COMBO_QUANTITY, setComboItems, setProductKind } from '@/domain/combos';
 import type { Prisma } from '@/generated/prisma/client';
 import { loadCombo } from '@/lib/queries/combos';
@@ -528,6 +531,10 @@ const saveCompetitorsTool = defineTool({
           link: z.string().optional(),
           vendidos: z.number().int().min(0).nullable().optional(),
           vendedor: z.string().optional().describe('El nombre del vendedor.'),
+          marca: z
+            .string()
+            .optional()
+            .describe('La marca del producto que vende, por ejemplo Persan o Mahle. Sin ella, comparar el precio dice poco: si no está en el título o en la publicación, dejala vacía.'),
           precio_de_lista: z.number().positive().nullable().optional().describe('El precio antes de cualquier descuento, en pesos.'),
           descuento_pct: z.number().min(0).max(99).optional().describe('El descuento activo en %, por ejemplo 15. 0 si no tiene.'),
           cuotas_sin_interes: z
@@ -552,6 +559,7 @@ const saveCompetitorsTool = defineTool({
         url: c.link ?? '',
         soldQuantity: c.vendidos ?? null,
         sellerName: c.vendedor,
+        brand: c.marca,
         listPrice: c.precio_de_lista,
         discountPct: c.descuento_pct,
         installments: c.cuotas_sin_interes,
@@ -1101,6 +1109,8 @@ const COPYABLE = {
   preguntas_propias: 'las preguntas propias',
   busquedas_principales: 'las búsquedas principales',
   semillas: 'las semillas',
+  fotos: 'las fotos elegidas, en su orden y con sus medidas',
+  clips: 'los clips',
 } as const;
 type Copyable = keyof typeof COPYABLE;
 
@@ -1110,7 +1120,7 @@ const copyResearchTool = defineTool({
   title: 'Copiar datos de otra publicación del mismo producto',
   description: `Copia a una publicación los datos que son de cada publicación desde otra del mismo producto, eligiendo qué copiar: ${Object.entries(COPYABLE)
     .map(([k, v]) => `${k} (${v})`)
-    .join(', ')}. Lo que se copia reemplaza lo que tenía la de destino; lo que la de origen no tiene no se toca. La ficha y la investigación del producto no hace falta copiarlas: ya las comparten. Confirmalo con la persona antes.`,
+    .join(', ')}. Lo que se copia reemplaza lo que tenía la de destino; lo que la de origen no tiene no se toca. Las fotos del canal de la otra solo se copian si esta también las tiene; las corregidas y las del producto, siempre. Las fotos quedan en el borrador hasta que se suben. La ficha y la investigación del producto no hace falta copiarlas: ya las comparten. Confirmalo con la persona antes.`,
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg.describe('La publicación a la que se copia: su id, su código en el canal o su link.'),
@@ -1147,6 +1157,8 @@ const copyResearchTool = defineTool({
     const searches = Array.isArray(from.titleWork?.mainSearches) ? (from.titleWork.mainSearches as string[]) : [];
     await ctx.db.$transaction(async (tx) => {
       for (const what of wanted) {
+        // Las fotos y los clips se copian después, con las reglas de Organización de multimedia.
+        if (what === 'fotos' || what === 'clips') continue;
         if (what === 'competencia') {
           if (from.competitors.length === 0) skipped.push(COPYABLE[what]);
           else {
@@ -1169,6 +1181,26 @@ const copyResearchTool = defineTool({
         }
       }
     });
+    if (wanted.includes('fotos') || wanted.includes('clips')) {
+      try {
+        const media = await copyMedia(ctx.db, {
+          accountId: account.id,
+          fromId,
+          toId: id,
+          photos: wanted.includes('fotos'),
+          clips: wanted.includes('clips'),
+          userId: ctx.userId,
+        });
+        if (media.fotos) copied.fotos = media.fotos;
+        else if (wanted.includes('fotos')) skipped.push(COPYABLE.fotos);
+        if (media.fotos_que_no_estan_en_esta) copied.fotos_del_canal_de_la_otra_que_esta_no_tiene = media.fotos_que_no_estan_en_esta;
+        if (media.clips) copied.clips = media.clips;
+        else if (wanted.includes('clips')) skipped.push(COPYABLE.clips);
+      } catch (e) {
+        if (e instanceof MediaError || e instanceof VideoError) throw new McpToolError(e.message);
+        throw e;
+      }
+    }
     return {
       listo: Object.keys(copied).length > 0,
       desde: { codigo: from.externalId, titulo: from.title },

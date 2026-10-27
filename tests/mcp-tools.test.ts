@@ -30,6 +30,7 @@ describe('lista de herramientas', () => {
       'get_title_workspace',
       'check_title',
       'list_tasks',
+      'get_publication_media',
     ]);
     for (const t of tools) {
       expect(t.inputSchema.type).toBe('object');

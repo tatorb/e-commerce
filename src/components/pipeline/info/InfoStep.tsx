@@ -28,6 +28,7 @@ function competitorRow(c: TitleContext['competitors'][number]): CompetitorRow {
     title: r.title,
     soldQuantity: r.soldQuantity?.toString() ?? '',
     sellerName: r.sellerName ?? '',
+    brand: r.brand ?? '',
     listPrice: decimal(r.listPrice),
     discountPct: r.discountPct === 0 ? '' : decimal(r.discountPct),
     installments: String(r.installments),

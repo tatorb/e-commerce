@@ -34,6 +34,7 @@ describe('precios de la competencia', () => {
         url: '',
         soldQuantity: '1.200',
         sellerName: '  Repuestos Sur ',
+        brand: ' Sachs ',
         listPrice: '$ 125.000,50',
         discountPct: '12,5 %',
         installments: '6',
@@ -48,6 +49,7 @@ describe('precios de la competencia', () => {
       url: null,
       soldQuantity: 1200,
       sellerName: 'Repuestos Sur',
+      brand: 'Sachs',
       listPrice: 125000.5,
       discountPct: 12.5,
       installments: 6,
@@ -79,6 +81,7 @@ describe('precios de la competencia', () => {
         url: null,
         soldQuantity: 5,
         sellerName: 'V',
+        brand: 'Persan',
         listPrice: '1000',
         discountPct: '5',
         installments: 3,
@@ -86,7 +89,7 @@ describe('precios de la competencia', () => {
         surveyedAt: new Date('2026-10-01T00:00:00Z'),
         notes: null,
       }),
-    ).toEqual({ title: 'A', url: null, soldQuantity: 5, sellerName: 'V', listPrice: 1000, discountPct: 5, installments: 3, freeShipping: false, surveyedAt: '2026-10-01', notes: null });
+    ).toEqual({ title: 'A', url: null, soldQuantity: 5, sellerName: 'V', brand: 'Persan', listPrice: 1000, discountPct: 5, installments: 3, freeShipping: false, surveyedAt: '2026-10-01', notes: null });
   });
 
   it('días desde el relevamiento', () => {

@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db';
+import { productCode } from '@/lib/publication-facts';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
 import { faceSummary, faceValues, fingerprintsOf } from '@/domain/channel-sync';
@@ -109,6 +110,8 @@ export async function listScoredPublications(
       externalId: p.externalId,
       url: p.url,
       skus: p.product.variants.map((v) => v.sku).filter((s): s is string => Boolean(s)),
+      // El código con que se nombra el producto, por ejemplo SP-808.
+      code: productCode(p.product),
       storeName: p.store.name,
       channelName: channel.name,
       channelAccent: channel.accent,

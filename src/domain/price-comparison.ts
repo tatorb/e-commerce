@@ -10,6 +10,7 @@ import { finalPriceOf, fixedInstallments, isInstallmentPlan, installmentCostPct,
 export type CompetitorPrice = {
   title: string;
   sellerName: string | null;
+  brand: string | null;
   url: string | null;
   // El día del relevamiento, como 2026-10-23.
   surveyedAt: string | null;
@@ -19,6 +20,8 @@ export type CompetitorPrice = {
 export type ComparedRow = {
   mine: boolean;
   name: string;
+  // La marca del producto que vende; null si no se cargó.
+  brand: string | null;
   title: string | null;
   url: string | null;
   surveyedAt: string | null;
@@ -49,7 +52,7 @@ export type Comparison = {
 export const sellerOf = (c: { sellerName: string | null; title: string }) => c.sellerName?.trim() || c.title;
 
 export function compare(args: {
-  mine: { listPrice: number; discountPct: number; plan: InstallmentPlan };
+  mine: { listPrice: number; discountPct: number; plan: InstallmentPlan; brand?: string | null };
   competitors: CompetitorPrice[];
   cost: number;
   params: PricingParams;
@@ -59,6 +62,7 @@ export function compare(args: {
   const me: ComparedRow = {
     mine: true,
     name: 'Mi publicación',
+    brand: mine.brand?.trim() || null,
     title: null,
     url: null,
     surveyedAt: null,
@@ -76,6 +80,7 @@ export function compare(args: {
     return {
       mine: false,
       name: sellerOf(c),
+      brand: c.brand?.trim() || null,
       title: c.title,
       url: c.url,
       surveyedAt: c.surveyedAt,

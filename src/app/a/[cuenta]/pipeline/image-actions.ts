@@ -3,17 +3,16 @@
 import { act } from '@/lib/auth/guard';
 import { revalidatePath } from 'next/cache';
 import { headers } from 'next/headers';
-import { getChannelAdapter } from '@/channels';
-import { asIsProblem } from '@/domain/media';
 import { prisma } from '@/lib/db';
 import { requireUser } from '@/lib/auth/session';
 import { getAccountBySlug } from '@/lib/queries/accounts';
-import { startResumableUpload, uploadContent, withDriveToken } from '@/lib/drive';
-import { originalTypeFor, photoFolderId, photoOwner, syncCorrected } from '@/lib/photo-files';
-import { addChannelPhotos, addUploadedOriginals, originalProblem, PhotoError, syncOriginals, type AsIsCheck } from '@/lib/photos';
-import { approveStep, archivePhoto, PhotoQueueError, redoStep, retryStep, setAsIs, skipStep } from '@/lib/photo-queue';
+import { startResumableUpload, withDriveToken } from '@/lib/drive';
+import { originalTypeFor, photoFolderId, photoOwner } from '@/lib/photo-files';
+import { addUploadedOriginals, originalProblem, PhotoError, syncOriginals } from '@/lib/photos';
+import { approveStep, archivePhoto, PhotoQueueError, redoStep, retryStep, skipStep } from '@/lib/photo-queue';
 import { publicAppUrl } from '@/lib/public-url';
-import { driveRef, storageError } from '@/lib/stored-files';
+import { storageError } from '@/lib/stored-files';
+import { addChannelPhotosOf, asIsCheckFor, setPhotoAsIs, tidyCorrected } from '@/lib/photo-commands';
 import { plural } from '@/lib/format';
 
 // Lo que se hace desde el paso Imágenes: sumar fotos y decidir cada paso de
@@ -30,13 +29,6 @@ async function productOf(accountSlug: string, publicationId: string): Promise<st
     select: { productId: true },
   });
   return pub?.productId ?? null;
-}
-
-/** Qué impide usar una foto tal cual en el canal de la publicación. */
-async function asIsCheckFor(publicationId: string): Promise<AsIsCheck> {
-  const pub = await prisma.publication.findUniqueOrThrow({ where: { id: publicationId }, select: { store: { select: { channel: true } } } });
-  const adapter = getChannelAdapter(pub.store.channel.kind, pub.store.channel.name);
-  return (file) => asIsProblem(file, adapter.photos, adapter.name);
 }
 
 async function runInAccount(accountSlug: string, runId: string): Promise<{ productId: string } | null> {
@@ -57,18 +49,6 @@ async function guard(accountSlug: string, run: () => Promise<string | void>): Pr
     const storage = storageError(e);
     if (storage) return { ok: false, error: storage };
     throw e;
-  }
-}
-
-/**
- * Deja Corregidas al día después de una decisión. Si el Drive no responde no
- * corta nada: se pone al día en la próxima.
- */
-async function tidyCorrected(productId: string) {
-  try {
-    await syncCorrected(prisma, productId);
-  } catch (e) {
-    console.error('No se pudo ordenar la carpeta Corregidas.', storageError(e) ?? e);
   }
 }
 
@@ -122,7 +102,7 @@ export async function addUploadedPhotosAction(accountSlug: string, publicationId
         productId,
         fileIds: (fileIds ?? []).map(String),
         userId: user.id,
-        asIs: asIs === true ? await asIsCheckFor(publicationId) : undefined,
+        asIs: asIs === true ? await asIsCheckFor(prisma, publicationId) : undefined,
       });
       if (r.added === 0 && r.problems.length > 0) throw new PhotoError(r.problems.join(' '));
       return [`${plural(r.added, 'foto')} en la línea.`, ...r.problems].join(' ');
@@ -137,21 +117,14 @@ export async function addUploadedPhotosAction(accountSlug: string, publicationId
 export async function setPhotoAsIsAction(accountSlug: string, publicationId: string, editId: string, asIs: boolean): Promise<Result> {
   return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Cambió si una foto se usa tal cual', publicationId }, async () => {
     await requireUser();
-    const productId = await productOf(accountSlug, publicationId);
-    const edit = await prisma.photoEdit.findFirst({
-      where: { id: editId, productId: productId ?? '' },
-      select: { id: true, productId: true, originalType: true, originalSize: true },
+    if (!(await productOf(accountSlug, publicationId))) return NOT_FOUND;
+    let found = true;
+    const r = await guard(accountSlug, async () => {
+      const message = await setPhotoAsIs(prisma, { publicationId, editId, asIs: asIs === true });
+      if (message === null) found = false;
+      return message ?? undefined;
     });
-    if (!productId || !edit) return NOT_FOUND;
-    return guard(accountSlug, async () => {
-      if (asIs === true) {
-        const problem = (await asIsCheckFor(publicationId))({ type: edit.originalType, size: edit.originalSize });
-        if (problem) throw new PhotoError(problem);
-      }
-      await setAsIs(prisma, { editId: edit.id, asIs: asIs === true });
-      await tidyCorrected(edit.productId);
-      return asIs === true ? 'Se usa el original tal cual.' : 'Vuelve a la línea para corregirla en la Mac.';
-    });
+    return found ? r : NOT_FOUND;
   });
 }
 
@@ -183,29 +156,7 @@ export async function addChannelPhotosAction(accountSlug: string, publicationId:
     const user = await requireUser();
     const productId = await productOf(accountSlug, publicationId);
     if (!productId) return NOT_FOUND;
-    return guard(accountSlug, async () => {
-      const owner = await photoOwner(prisma, productId);
-      const r = await withDriveToken(prisma, async (token, email) => {
-        const folderId = await photoFolderId(prisma, token, email, owner, 'originales');
-        return addChannelPhotos(
-          prisma,
-          { productId, userId: user.id },
-          {
-            fetch,
-            put: async (name, body, contentType) => ({
-              url: driveRef((await uploadContent(token, { folderId, name, type: contentType, data: body, properties: { mrbProducto: productId } })).id),
-            }),
-          },
-        );
-      });
-      const parts = [
-        r.added > 0 ? `Se sumaron ${plural(r.added, 'foto')}.` : 'No se sumó ninguna foto.',
-        r.already > 0 ? `${plural(r.already, 'ya estaba', 'ya estaban')} en la línea.` : '',
-        ...r.failed,
-      ];
-      if (r.added === 0 && r.failed.length > 0) throw new PhotoError(parts.filter(Boolean).join(' '));
-      return parts.filter(Boolean).join(' ');
-    });
+    return guard(accountSlug, () => addChannelPhotosOf(prisma, { productId, userId: user.id }));
   });
 }
 
@@ -216,7 +167,7 @@ export async function approvePhotoStepAction(accountSlug: string, runId: string)
     if (!run) return NOT_FOUND;
     return guard(accountSlug, async () => {
       await approveStep(prisma, { runId, userId: user.id });
-      await tidyCorrected(run.productId);
+      await tidyCorrected(prisma, run.productId);
     });
   });
 }
@@ -228,7 +179,7 @@ export async function skipPhotoStepAction(accountSlug: string, runId: string): P
     if (!run) return NOT_FOUND;
     return guard(accountSlug, async () => {
       await skipStep(prisma, { runId, userId: user.id });
-      await tidyCorrected(run.productId);
+      await tidyCorrected(prisma, run.productId);
     });
   });
 }
@@ -259,7 +210,7 @@ export async function redoPhotoStepAction(
       : null;
     return guard(accountSlug, async () => {
       await redoStep(prisma, { runId, userId: user.id, request: clean });
-      await tidyCorrected(run.productId);
+      await tidyCorrected(prisma, run.productId);
       return 'En cola para rehacer.';
     });
   });
@@ -284,7 +235,7 @@ export async function archivePhotoAction(accountSlug: string, editId: string): P
     if (!edit) return NOT_FOUND;
     return guard(accountSlug, async () => {
       await archivePhoto(prisma, edit.id);
-      await tidyCorrected(edit.productId);
+      await tidyCorrected(prisma, edit.productId);
       return 'Se sacó de la lista.';
     });
   });

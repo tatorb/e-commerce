@@ -10,11 +10,11 @@ import { formatPercent, formatPrice, parsePercent, parsePrice } from '@/domain/m
 import { cn } from '@/lib/utils/cn';
 import { CompetitorsForm, installmentsLabel, type CompetitorRow } from './CompetitorsForm';
 
-// Competencia comprimida: una fila por publicación, con su vendedor, su precio
-// final, cuotas, envío y de cuándo es el precio. Se abre para cargar o editar.
+// Competencia comprimida: una fila por publicación, con su vendedor, su marca,
+// su precio final, cuotas, envío y de cuándo es el precio. Se abre para cargar o editar.
 // Sin ninguna cargada, arranca abierta.
 
-const COLUMNS = 'sm:grid sm:grid-cols-[minmax(0,1fr)_4.5rem_7rem_8.5rem_6.5rem_8rem_1.75rem] sm:items-center sm:gap-3';
+const COLUMNS = 'sm:grid sm:grid-cols-[minmax(0,1fr)_7rem_4.5rem_7rem_8.5rem_6.5rem_8rem_1.75rem] sm:items-center sm:gap-3';
 
 function surveyed(day: string, today: string): string {
   const days = daysSince(day, today);
@@ -59,6 +59,7 @@ export function CompetitorsCard({
         <div className="divide-y">
           <div className={cn('hidden px-4 py-1.5 text-xs uppercase tracking-wide text-muted-foreground', COLUMNS)}>
             <span>Publicación</span>
+            <span>Marca</span>
             <span className="text-right">Vendidos</span>
             <span className="text-right">Precio final</span>
             <span>Cuotas</span>
@@ -93,6 +94,9 @@ export function CompetitorsCard({
                 {/* En la computadora, una fila con sus columnas. */}
                 <div className={cn('hidden', COLUMNS)}>
                   {title}
+                  <span className={cn('truncate', c.brand ? 'font-medium' : 'text-xs text-muted-foreground')} title={c.brand || undefined}>
+                    {c.brand || 'Sin marca'}
+                  </span>
                   <span className="text-right tabular-nums text-muted-foreground">{c.soldQuantity || '—'}</span>
                   <span className="text-right">
                     <span className={cn('tabular-nums', prices ? 'font-medium' : 'text-muted-foreground')}>{price}</span>
@@ -110,6 +114,7 @@ export function CompetitorsCard({
                     {link}
                   </div>
                   <p className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+                    <span className={cn(c.brand && 'font-medium text-foreground')}>{c.brand ? `Marca ${c.brand}` : 'Sin marca'}</span>
                     <span className={cn('tabular-nums', prices && 'font-medium text-foreground')}>
                       {price}
                       {off ? ` (${off})` : ''}

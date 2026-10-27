@@ -84,7 +84,7 @@ export async function saveCompetitorsAction(accountSlug: string, publicationId: 
     if (!t) return NOT_FOUND;
     const parsed = competitorsSchema.safeParse(
       (rows ?? []).filter((r) =>
-        [r.url, r.title, r.soldQuantity, r.sellerName, r.listPrice, r.notes].some((v) => v !== null && String(v ?? '').trim() !== ''),
+        [r.url, r.title, r.soldQuantity, r.sellerName, r.brand, r.listPrice, r.notes].some((v) => v !== null && String(v ?? '').trim() !== ''),
       ),
     );
     if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Revisá los datos.' };

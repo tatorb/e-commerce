@@ -147,6 +147,7 @@ export function CompetitionCard({
             <thead>
               <tr className="border-b text-left text-[11px] uppercase tracking-wide text-muted-foreground">
                 <th className="py-2 pr-2 font-normal">Vendedor</th>
+                <th className="py-2 pr-2 font-normal">Marca</th>
                 <th className="py-2 pr-2 text-right font-normal">Lista</th>
                 <th className="py-2 pr-2 text-right font-normal">Desc.</th>
                 <th className="py-2 pr-2 font-normal">Cuotas</th>
@@ -168,6 +169,9 @@ export function CompetitionCard({
                     </div>
                     {!r.mine ? <span className="block text-[11px] font-normal text-muted-foreground">{surveyed(r.surveyedAt, today)}</span> : null}
                   </td>
+                  <td className={cn('max-w-32 truncate py-2 pr-2', !r.brand && 'text-xs font-normal text-muted-foreground')} title={r.brand ?? undefined}>
+                    {r.brand ?? 'Sin marca'}
+                  </td>
                   <td className="py-2 pr-2 text-right tabular-nums">{formatPrice(Math.round(r.listPrice))}</td>
                   <td className="py-2 pr-2 text-right tabular-nums">{r.discountPct > 0 ? formatPercent(r.discountPct) : '—'}</td>
                   <td className="py-2 pr-2">{cuotas(r)}</td>
@@ -186,6 +190,7 @@ export function CompetitionCard({
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <p className="truncate font-medium">{r.name}</p>
+                  <p className="truncate text-xs text-muted-foreground">{r.brand ? `Marca ${r.brand}` : 'Sin marca'}</p>
                   {!r.mine ? <p className="text-[11px] text-muted-foreground">{surveyed(r.surveyedAt, today)}</p> : null}
                 </div>
                 <div className="text-right">

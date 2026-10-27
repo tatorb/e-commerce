@@ -24,6 +24,8 @@ export type BoardCardData = {
   id: string;
   title: string | null;
   externalId: string | null;
+  // El código del producto, por ejemplo SP-808.
+  code: string | null;
   storeName: string;
   kind: ProductKind;
   score: number | null;
@@ -213,6 +215,11 @@ function BoardCard({
           ) : null}
         </div>
         <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+          {card.code ? (
+            <span title="Código del producto" className="rounded border bg-background px-1.5 py-px font-semibold tracking-wide text-foreground">
+              {card.code}
+            </span>
+          ) : null}
           {codeOrUnpublished(card.externalId)}
           {showStore ? <span>· {card.storeName}</span> : null}
           <KindBadge kind={card.kind} />

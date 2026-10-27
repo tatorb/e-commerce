@@ -32,9 +32,13 @@ export type FactsInput = {
 const labelOf = (v: VariantLike, i: number) => v.measure?.trim() || v.sku?.trim() || `Medida ${i + 1}`;
 
 export function publicationFacts(pub: FactsInput, product: { partNumber: string | null; variants: VariantLike[] }): PublicationFacts {
+  return { code: productCode(product), status: pub.channelStatus, measures: measuresOf(pub, product), autoAnswer: pub.autoAnswer };
+}
+
+/** El código del producto: el de sus SKU sin la medida o, si no hay uno común, su número de pieza. */
+export function productCode(product: { partNumber: string | null; variants: VariantLike[] }): string | null {
   const skus = product.variants.map((v) => v.sku?.trim()).filter((s): s is string => Boolean(s));
-  const code = skuCode(skus) ?? (product.partNumber?.trim() || null);
-  return { code, status: pub.channelStatus, measures: measuresOf(pub, product), autoAnswer: pub.autoAnswer };
+  return skuCode(skus) ?? (product.partNumber?.trim() || null);
 }
 
 // Lo que llevan al final los SKU de cada medida: STD, 00, 050, 0.50…

@@ -23,6 +23,7 @@ export type CompetitorRow = {
   title: string;
   soldQuantity: string;
   sellerName: string;
+  brand: string;
   listPrice: string;
   discountPct: string;
   // "0" es sin cuotas.
@@ -38,6 +39,7 @@ export const EMPTY_COMPETITOR: CompetitorRow = {
   title: '',
   soldQuantity: '',
   sellerName: '',
+  brand: '',
   listPrice: '',
   discountPct: '',
   installments: '0',
@@ -53,7 +55,7 @@ const PRICE_FIELDS: (keyof CompetitorRow)[] = ['listPrice', 'discountPct', 'inst
 
 export const installmentsLabel = (n: number) => (n === 0 ? 'Sin cuotas' : `${n} cuotas`);
 
-const isFilled = (r: CompetitorRow) => [r.url, r.title, r.soldQuantity, r.sellerName, r.listPrice, r.notes].some((v) => v.trim() !== '');
+const isFilled = (r: CompetitorRow) => [r.url, r.title, r.soldQuantity, r.sellerName, r.brand, r.listPrice, r.notes].some((v) => v.trim() !== '');
 
 /** Lo calculado de una fila mientras se carga; null si falta el precio o no se entiende. */
 function calculated(row: CompetitorRow, shippingCost: number) {
@@ -95,7 +97,7 @@ export function CompetitorsForm({
       {rows.map((row, index) => {
         const id = (key: string) => `competitor-${index}-${key}`;
         const prices = calculated(row, shippingCost);
-        const field = (key: 'url' | 'title' | 'sellerName' | 'soldQuantity' | 'listPrice' | 'discountPct' | 'notes', label: string, extra: { placeholder?: string; numeric?: boolean; className?: string } = {}) => (
+        const field = (key: 'url' | 'title' | 'sellerName' | 'brand' | 'soldQuantity' | 'listPrice' | 'discountPct' | 'notes', label: string, extra: { placeholder?: string; numeric?: boolean; className?: string } = {}) => (
           <div className={extra.className ?? 'col-span-1'}>
             <Label htmlFor={id(key)} className="mb-1 block text-xs text-muted-foreground">
               {label}
@@ -148,10 +150,11 @@ export function CompetitorsForm({
                 </div>
               </div>
               {field('title', 'Título', { placeholder: 'Como aparece en la publicación', className: 'col-span-2 sm:col-span-7' })}
-              {field('sellerName', 'Vendedor', { placeholder: 'Nombre del vendedor', className: 'col-span-2 sm:col-span-4' })}
+              {field('brand', 'Marca', { placeholder: 'De qué marca es', className: 'col-span-1 sm:col-span-3' })}
+              {field('sellerName', 'Vendedor', { placeholder: 'Nombre del vendedor', className: 'col-span-1 sm:col-span-3' })}
               {field('soldQuantity', 'Vendidos', { placeholder: '150', numeric: true, className: 'col-span-1 sm:col-span-2' })}
-              {field('listPrice', 'Precio de lista', { placeholder: '125.000', numeric: true, className: 'col-span-1 sm:col-span-3' })}
-              {field('discountPct', 'Descuento %', { placeholder: '0', numeric: true, className: 'col-span-1 sm:col-span-3' })}
+              {field('listPrice', 'Precio de lista', { placeholder: '125.000', numeric: true, className: 'col-span-1 sm:col-span-2' })}
+              {field('discountPct', 'Descuento %', { placeholder: '0', numeric: true, className: 'col-span-2 sm:col-span-2' })}
               <div className="col-span-1 sm:col-span-3">
                 <Label htmlFor={id('installments')} className="mb-1 block text-xs text-muted-foreground">
                   Cuotas sin interés
