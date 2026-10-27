@@ -1,9 +1,11 @@
 import { Bot, Ruler } from 'lucide-react';
+import { ChannelStatusBadge } from '@/components/stages/StageBadge';
 import { measuresText, type PublicationFacts } from '@/lib/publication-facts';
 import { cn } from '@/lib/utils/cn';
 
-// El código del producto, sus medidas y la respuesta automática, en una fila:
-// va arriba de la publicación, en su tarjeta del producto y en el Pipeline.
+// El código del producto, su estado en el canal, sus medidas y la respuesta
+// automática, en una fila: va arriba de la publicación, en su tarjeta del
+// producto y en el Pipeline.
 export function PublicationFactsRow({ facts, className }: { facts: PublicationFacts; className?: string }) {
   const chip = 'inline-flex items-center gap-1 rounded-md border px-2 py-0.5';
   return (
@@ -13,6 +15,7 @@ export function PublicationFactsRow({ facts, className }: { facts: PublicationFa
           {facts.code}
         </span>
       ) : null}
+      <ChannelStatusBadge status={facts.status} />
       <span className={cn(chip, 'text-muted-foreground')}>
         <Ruler className="h-3 w-3" aria-hidden />
         {measuresText(facts.measures)}

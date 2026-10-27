@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { AddToPipelineButton } from '@/components/pipeline/AddToPipelineButton';
 import { EntityLabel } from '@/components/navigation/EntityLabel';
 import { ScoreBadge } from '@/components/stages/ScoreBadge';
-import { ChannelStatusBadge, PipelineBadge } from '@/components/stages/StageBadge';
+import { PipelineBadge } from '@/components/stages/StageBadge';
 import { codeOrUnpublished } from '@/domain/channel-status';
 import { faceSummary, faceValues, fingerprintsOf } from '@/domain/channel-sync';
 import { titleOrUntitled } from '@/domain/publication-title';
@@ -121,7 +121,6 @@ export function ProductPublications({
             </div>
             <Figures f={figures.get(pub.id)!} />
             <div className="flex flex-wrap gap-1.5">
-              <ChannelStatusBadge status={pub.channelStatus} />
               <PipelineBadge state={pub} />
               {summary.draft.length > 0 ? <Badge variant="secondary">Cambios sin subir</Badge> : null}
               {summary.choose.length > 0 ? <Badge variant="destructive">Para elegir</Badge> : null}

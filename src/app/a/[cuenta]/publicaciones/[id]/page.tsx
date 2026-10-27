@@ -160,7 +160,6 @@ export default async function PublicationPage({
               </p>
               {facts ? <PublicationFactsRow facts={facts} /> : null}
               <div className="flex flex-wrap gap-1.5">
-                <ChannelStatusBadge status={p.channelStatus} />
                 <PipelineBadge state={p} />
                 {copy && !data.missing && pending === 0 ? <Badge variant="outline">Al día con {channelName}</Badge> : null}
                 {summary.draft.length > 0 ? <Badge variant="secondary">Borrador</Badge> : null}

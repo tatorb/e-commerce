@@ -1,10 +1,12 @@
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
+import type { ChannelStatus } from '@/generated/prisma/enums';
 import { parseVariantListings, parseVariations, type VariantLike } from '@/domain/media';
 import { singleMeasure } from '@/lib/stock-plan';
 
 // Lo que conviene ver siempre arriba de una publicación: el código con el que
-// se nombra el producto (por ejemplo SP-914), si tiene medidas y cuántas, y si
-// la respuesta automática a los compradores está prendida.
+// se nombra el producto (por ejemplo SP-914), su estado en el canal, si tiene
+// medidas y cuántas, y si la respuesta automática a los compradores está
+// prendida.
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -17,10 +19,11 @@ export type MeasuresFact =
   | { kind: 'sole'; label: string }
   | { kind: 'none' };
 
-export type PublicationFacts = { code: string | null; measures: MeasuresFact; autoAnswer: boolean };
+export type PublicationFacts = { code: string | null; status: ChannelStatus; measures: MeasuresFact; autoAnswer: boolean };
 
 export type FactsInput = {
   autoAnswer: boolean;
+  channelStatus: ChannelStatus;
   externalId: string | null;
   variantListings: unknown;
   channelCopy: { variations: unknown; details: unknown; missingSince: Date | null } | null;
@@ -30,8 +33,27 @@ const labelOf = (v: VariantLike, i: number) => v.measure?.trim() || v.sku?.trim(
 
 export function publicationFacts(pub: FactsInput, product: { partNumber: string | null; variants: VariantLike[] }): PublicationFacts {
   const skus = product.variants.map((v) => v.sku?.trim()).filter((s): s is string => Boolean(s));
-  const code = product.partNumber?.trim() || (skus.length === 1 ? skus[0] : null);
-  return { code, measures: measuresOf(pub, product), autoAnswer: pub.autoAnswer };
+  const code = skuCode(skus) ?? (product.partNumber?.trim() || null);
+  return { code, status: pub.channelStatus, measures: measuresOf(pub, product), autoAnswer: pub.autoAnswer };
+}
+
+// Lo que llevan al final los SKU de cada medida: STD, 00, 050, 0.50…
+const MEASURE_SUFFIX = /[\s\-_./]+(STD|0?0|0?10|0?20|0?25|0?30|0?40|0?50|0?60|0?75|0?80|100|125|150|0[.,]\d{2})$/i;
+
+/** El SKU sin la medida del final, si lo que queda todavía es un código (tiene algún número). */
+function withoutMeasure(sku: string): string {
+  const base = sku.replace(MEASURE_SUFFIX, '').trim();
+  return /\d/.test(base) ? base : sku;
+}
+
+/**
+ * El código con que se nombra el producto, como sale de sus SKU sin la
+ * medida del final: SP-808-00 y SP-808-50 dan SP-808; SP-865 050 da SP-865.
+ * Null si no hay SKU o si cada medida tiene un código distinto.
+ */
+export function skuCode(skus: string[]): string | null {
+  const bases = skus.map(withoutMeasure);
+  return bases.length > 0 && bases.every((b) => b.toUpperCase() === bases[0].toUpperCase()) ? bases[0] : null;
 }
 
 function measuresOf(pub: FactsInput, product: { variants: VariantLike[] }): MeasuresFact {
@@ -61,6 +83,7 @@ export function measuresText(m: MeasuresFact): string {
 const FACTS_SELECT = {
   id: true,
   autoAnswer: true,
+  channelStatus: true,
   externalId: true,
   variantListings: true,
   channelCopy: { select: { variations: true, details: true, missingSince: true } },
