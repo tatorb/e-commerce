@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils/cn';
 // pendiente: todavía no pasó, aunque haya pasos después que sí, porque se
 // puede saltar a cualquiera. "active" es falso si la publicación no está en
 // el pipeline: el paso guardado queda como "quedó acá". Cada paso es un link
-// para verlo; el que se está mirando va en negrita, subrayado y con un aro.
+// para verlo; el que se está mirando es el único en negrita, y su círculo lleva un aro.
 // Si no entra, se desliza de costado y arranca en el que se mira.
 
 type State = 'done' | 'current' | 'left' | 'pending';
@@ -105,8 +105,8 @@ export function StepLine({
               </span>
               <span
                 className={cn(
-                  'text-sm leading-tight underline-offset-4 group-hover:underline',
-                  isViewing ? 'font-semibold text-foreground underline decoration-2' : reached ? 'font-medium text-foreground' : 'text-muted-foreground',
+                  'text-sm leading-tight group-hover:text-foreground',
+                  isViewing ? 'font-semibold text-foreground' : reached ? 'text-foreground' : 'text-muted-foreground',
                 )}
               >
                 {PIPELINE_STEP_LABEL[step]}
