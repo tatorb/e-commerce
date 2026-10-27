@@ -15,6 +15,7 @@ import {
   removeFromPipeline,
 } from '@/domain/pipeline';
 import { createPipelinePublication, type ShortProduct } from '@/domain/pipeline-publications';
+import { familyByMeasure } from '@/lib/families';
 import { PRODUCT_KINDS } from '@/domain/combos';
 import type { PipelineRemoval, PipelineStep } from '@/generated/prisma/enums';
 import { getAccountBySlug } from '@/lib/queries/accounts';
@@ -122,15 +123,18 @@ export async function createPipelinePublicationAction(
         ? { name: str(raw.name), productType: str(raw.productType), kind: PRODUCT_KINDS.includes(raw.kind) ? raw.kind : 'INDIVIDUAL' }
         : null;
     try {
-      const r = await prisma.$transaction((tx) =>
-        createPipelinePublication(tx, {
+      const r = await prisma.$transaction(async (tx) => {
+        const made = await createPipelinePublication(tx, {
           accountId: account.id,
           storeId: str(input?.storeId),
           productId: str(input?.productId) || null,
           newProduct,
           userId: user.id,
-        }),
-      );
+        });
+        // Con varias medidas, una publicación por medida, en su familia.
+        await familyByMeasure(tx, { publicationId: made.publicationId, userId: user.id });
+        return made;
+      });
       revalidatePath(`/a/${accountSlug}`, 'layout');
       return { ok: true, id: r.publicationId };
     } catch (e) {

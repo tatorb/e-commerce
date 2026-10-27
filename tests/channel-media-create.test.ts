@@ -23,6 +23,7 @@ import { pushDrafts } from '@/lib/channel-push';
 import { runSyncStep, startSync } from '@/lib/channel-sync';
 import { encrypt } from '@/lib/crypto';
 import { loadMediaSources, measuresOf, MediaError, saveMedia } from '@/lib/media';
+import { saveFamilyMedia } from '@/lib/family-media';
 import { saveQuestions } from '@/lib/buyer-questions';
 import { loadCatalogData, saveCatalogData } from '@/lib/catalog-data';
 import { resetVisitsTogether } from '@/channels/mercadolibre/listings';
@@ -200,7 +201,8 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
       }
       if (u.pathname === '/users/me') return json(200, { id: 7, tags: separate ? ['normal', 'user_product_seller'] : ['normal'] });
       if (u.pathname === '/items' && req.method === 'POST') {
-        if ((body.title ?? body.family_name).includes('RECHAZAR')) {
+        const rejectedSku = body.attributes.some((a: { id?: string; value_name?: string }) => a.id === 'SELLER_SKU' && a.value_name === 'RECHAZAR');
+        if ((body.title ?? body.family_name).includes('RECHAZAR') || rejectedSku) {
           return json(400, { message: 'Validation error', cause: [{ code: 'item.price.invalid', message: 'El precio es muy bajo' }] });
         }
         // Como Mercado Libre con familias: sin variantes ni título, con nombre de familia.
@@ -866,9 +868,11 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     expect(await measuresCheck()).toMatchObject({ ok: false, detail: 'std está más de una vez en la ficha.' });
     await db.productVariant.updateMany({ where: { productId, sku: 'B' }, data: { measure: '0,50' } });
     await saveMedia(db, { accountId, publicationId: pub.id, refs: [{ kind: 'asset', url: 'https://otra/foto.jpg', variants: ['sku:A medida:std'] }] });
-    expect(await measuresCheck()).toMatchObject({ ok: false, detail: 'La medida 0,50 no tiene fotos, elegilas en Organización de multimedia.' });
+    expect(await measuresCheck()).toMatchObject({ ok: true });
+    info = await createChecks(db, { accountId, publicationId: pub.id });
+    expect(info.checks.find((c) => c.label === 'Fotos')).toMatchObject({ ok: false, detail: 'La medida 0,50 no tiene fotos, elegilas en Organización de multimedia.' });
     await expect(createInChannel(db, { accountId, publicationId: pub.id, price: 100, quantity: 1, listingType: 'clasica', userId: null })).rejects.toThrow(
-      'Medidas',
+      'Fotos',
     );
 
     await saveMedia(db, { accountId, publicationId: pub.id, refs: [{ kind: 'asset', url: 'https://otra/foto.jpg' }] });
@@ -876,20 +880,24 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     expect(info.ready).toBe(true);
     expect(info.checks.find((c) => c.label === 'Medidas')).toMatchObject({
       ok: true,
-      detail: 'STD y 0,50, en la misma publicación. Comparten el precio y cada una lleva su SKU, su cantidad y sus fotos.',
+      detail: 'STD y 0,50, una publicación por medida, en la misma familia. Cada una lleva su SKU, su cantidad y sus fotos.',
     });
+    expect(info.checks.find((c) => c.label === 'Fotos')).toMatchObject({ ok: true, detail: 'STD con 1 foto y 0,50 con 1 foto.' });
     expect(info.measures).toEqual([
-      { key: 'sku:A medida:std', label: 'STD' },
-      { key: 'sku:B medida:0.50', label: '0,50' },
+      { key: 'sku:A medida:std', label: 'STD', price: null },
+      { key: 'sku:B medida:0.50', label: '0,50', price: null },
     ]);
     // La cantidad se carga en cada medida.
     await expect(
       createInChannel(db, { accountId, publicationId: pub.id, price: 100, quantities: { 'sku:A medida:std': 2 }, listingType: 'clasica', userId: null }),
     ).rejects.toThrow('La cantidad de 0,50 tiene que ser 1 o más.');
     expect(calls.some((c) => c.path === '/items')).toBe(false);
+    // Ver lo que falta no arma la familia: se arma al crear.
+    expect(await db.listingFamily.count()).toBe(0);
+    expect((await db.publication.findUniqueOrThrow({ where: { id: pub.id } })).familyId).toBeNull();
   });
 
-  it('con varias medidas crea una sola publicación, cada medida con su SKU, su cantidad y sus fotos', async () => {
+  it('con varias medidas crea una publicación por medida, en su familia, cada una con su SKU, su cantidad y sus fotos', async () => {
     // El mismo SKU en las dos medidas, como en algunas fábricas.
     await db.productVariant.createMany({
       data: [
@@ -904,7 +912,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     await withPackage(pub.id);
     const general = await correctedPhoto('general.jpg');
     const box = await correctedPhoto('caja-050.jpg');
-    // La general es de todas; la del producto, de STD; la de la caja, de 0,50, que la ve primero.
+    // La general es de todas; la del producto, de STD; la de la caja, de 0,50.
     await saveMedia(db, {
       accountId,
       publicationId: pub.id,
@@ -923,42 +931,42 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
       listingType: 'clasica',
       userId: null,
     });
-    expect(created).toMatchObject({ externalId: 'MLA900', confirmed: true });
-    const post = calls.find((c) => c.path === '/items')!.body as Record<string, unknown>;
-    expect(post.available_quantity).toBeUndefined();
-    expect(post.price).toBe(80000);
-    expect(post.pictures).toEqual([{ id: 'SUBIDA-1' }, { source: 'https://otra/foto.jpg' }, { id: 'SUBIDA-2' }]);
-    expect(post.attributes).not.toContainEqual(expect.objectContaining({ id: 'SELLER_SKU' }));
-    expect(post.variations).toEqual([
-      {
-        attribute_combinations: [{ name: 'Medida', value_name: 'STD' }],
-        price: 80000,
-        available_quantity: 2,
-        picture_ids: ['https://otra/foto.jpg', 'SUBIDA-1'],
-        attributes: [{ id: 'SELLER_SKU', value_name: 'SP-413' }],
-      },
-      {
-        attribute_combinations: [{ name: 'Medida', value_name: '0,50' }],
-        price: 80000,
-        available_quantity: 5,
-        picture_ids: ['SUBIDA-2', 'SUBIDA-1'],
-        attributes: [{ id: 'SELLER_SKU', value_name: 'SP-413' }],
-      },
-    ]);
+    expect(created).toMatchObject({
+      externalId: 'MLA900',
+      confirmed: true,
+      warnings: [],
+      created: [
+        { label: 'STD', externalId: 'MLA900' },
+        { label: '0,50', externalId: 'MLA901' },
+      ],
+    });
+    const posts = calls.filter((c) => c.path === '/items').map((c) => c.body as Record<string, unknown>);
+    expect(posts).toHaveLength(2);
+    for (const post of posts) {
+      expect(post).toMatchObject({ title: 'Subconjunto Peugeot 1.6 SP-413', price: 80000 });
+      expect(post.variations).toBeUndefined();
+    }
+    expect(posts.map((p) => p.available_quantity)).toEqual([2, 5]);
+    // Cada medida ve primero las suyas; la general se sube una sola vez y la otra usa su código.
+    expect(posts[0].pictures).toEqual([{ source: 'https://otra/foto.jpg' }, { id: 'SUBIDA-1' }]);
+    expect(posts[1].pictures).toEqual([{ id: 'SUBIDA-2' }, { id: 'SUBIDA-1' }]);
+    expect(uploads).toBe(2);
+    expect(posts[0].attributes).toEqual(expect.arrayContaining([{ id: 'SELLER_SKU', value_name: 'SP-413' }, { name: 'Medida', value_name: 'STD' }]));
+    expect(posts[1].attributes).toEqual(expect.arrayContaining([{ id: 'SELLER_SKU', value_name: 'SP-413' }, { name: 'Medida', value_name: '0,50' }]));
 
-    // Queda al día: la app sigue a las fotos del canal, con lo que ve cada medida.
+    // Quedan dos publicaciones en la familia, cada una con su código, su medida y sus fotos del canal.
     const after = await db.publication.findUniqueOrThrow({ where: { id: pub.id }, include: { channelCopy: true } });
-    expect(after.media).toBeNull();
-    expect(after.channelCopy!.variations).toEqual([
-      // La lectura de confirmación trae también la cantidad de cada medida, y el código de la variante.
-      { sku: 'SP-413', measure: 'STD', photoIds: ['LINK-1', 'SUBIDA-1'], variationId: '100', quantity: 2 },
-      { sku: 'SP-413', measure: '0,50', photoIds: ['SUBIDA-2', 'SUBIDA-1'], variationId: '101', quantity: 5 },
-    ]);
-    const photos = channelPhotos(after.channelCopy!.photos, after.channelCopy!.photoIds, after.channelCopy!.variations);
-    const ids = (key: string) => variantPhotos(photos, key).map((r) => (r.kind === 'channel' ? r.id : ''));
-    expect(ids(std)).toEqual(['LINK-1', 'SUBIDA-1']);
-    expect(ids(half)).toEqual(['SUBIDA-2', 'SUBIDA-1']);
+    const other = await db.publication.findFirstOrThrow({ where: { productId, id: { not: pub.id }, title: { not: 'Otra de la tienda' } }, include: { channelCopy: true } });
+    expect(after).toMatchObject({ externalId: 'MLA900', variantKey: std, channelStatus: 'ACTIVE', media: null, familyId: expect.any(String) });
+    expect(other).toMatchObject({ externalId: 'MLA901', variantKey: half, channelStatus: 'ACTIVE', media: null, familyId: after.familyId, title: after.title });
+    expect([Number(after.price), Number(other.price)]).toEqual([80000, 80000]);
+    expect(await db.listingFamily.findUniqueOrThrow({ where: { id: after.familyId! } })).toMatchObject({ leadId: pub.id, productId });
+    expect(after.channelCopy!.photoIds).toEqual(['LINK-0', 'SUBIDA-1']);
+    expect(other.channelCopy!.photoIds).toEqual(['SUBIDA-2', 'SUBIDA-1']);
     expect(await state(pub.id)).toEqual({ draft: [], choose: [], rejected: [] });
+    expect(await state(other.id)).toEqual({ draft: [], choose: [], rejected: [] });
+    // Ya no queda nada para crear.
+    expect((await createChecks(db, { accountId, publicationId: other.id })).blocked).toBe('Todas las medidas ya están publicadas en Mercado Libre.');
   });
 
   it('crea la publicación con sus datos, fotos y descripción, y queda con su código y al día', async () => {
@@ -978,7 +986,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     await withPackage(pub.id);
 
     const created = await createInChannel(db, { accountId, publicationId: pub.id, price: 45000, quantity: 3, listingType: 'premium', userId: null });
-    expect(created).toEqual({ externalId: 'MLA900', url: 'https://articulo.mercadolibre.com.ar/MLA-900', warnings: [], confirmed: true });
+    expect(created).toEqual({ externalId: 'MLA900', url: 'https://articulo.mercadolibre.com.ar/MLA-900', warnings: [], confirmed: true, created: [] });
     const post = calls.find((c) => c.path === '/items')!.body as Record<string, unknown>;
     expect(post).toMatchObject({
       title: 'Kit Embrague Ford Ka 1.6',
@@ -1151,14 +1159,14 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
         ],
       });
       const result = await createInChannel(db, { accountId, publicationId: pub.id, price: 80000, quantities: { [std]: 2, [half]: 5 }, listingType: 'clasica', userId: null });
-      return { pub, result };
+      const other = await db.publication.findFirstOrThrow({ where: { productId, variantKey: half } });
+      return { pub, other, result };
     }
 
-    it('crea una publicación por medida con el mismo nombre de familia, y la app las sigue como una', async () => {
-      const { pub, result } = await createFamily();
-      expect(result).toMatchObject({ externalId: 'MLA900', confirmed: true });
-      // Mercado Libre arma el título: la app se queda con ese y lo avisa.
-      expect(result.warnings).toEqual(['Mercado Libre armó su propio título: «Subconjunto Peugeot 1.6 SP-413 STD». Quedó así en la app.']);
+    it('crea una publicación por medida con el mismo nombre de familia, y cada una queda en la familia de la app', async () => {
+      const { pub, other, result } = await createFamily();
+      // Mercado Libre arma el título con la medida: el nombre de la familia sigue siendo el de la app.
+      expect(result).toMatchObject({ externalId: 'MLA900', confirmed: true, warnings: [] });
 
       const posts = calls.filter((c) => c.path === '/items').map((c) => c.body as Record<string, unknown>);
       expect(posts).toHaveLength(2);
@@ -1177,35 +1185,33 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
       expect(descriptions).toEqual({ MLA900: 'Pistones y aros.', MLA901: 'Pistones y aros.' });
 
       const after = await db.publication.findUniqueOrThrow({ where: { id: pub.id }, include: { channelCopy: true } });
-      expect(after).toMatchObject({ externalId: 'MLA900', title: 'Subconjunto Peugeot 1.6 SP-413 STD', media: null });
-      expect(after.variantListings).toEqual([
-        { externalId: 'MLA900', sku: 'SP-413', measure: 'STD' },
-        { externalId: 'MLA901', sku: 'SP-413', measure: '0,50' },
-      ]);
-      // La cara del canal tiene las fotos de las dos, y lo que ve el comprador en cada medida.
-      const photos = channelPhotos(after.channelCopy!.photos, after.channelCopy!.photoIds, after.channelCopy!.variations);
-      const ids = (key: string) => variantPhotos(photos, key).map((r) => (r.kind === 'channel' ? r.id : ''));
-      expect(ids(std)).toEqual(['SUBIDA-1', 'LINK-1']);
-      expect(ids(half)).toEqual(['LINK-1']);
+      expect(after).toMatchObject({ externalId: 'MLA900', title: 'Subconjunto Peugeot 1.6 SP-413', media: null, variantListings: [], variantKey: std });
+      expect(other).toMatchObject({ externalId: 'MLA901', title: 'Subconjunto Peugeot 1.6 SP-413', familyId: after.familyId, description: 'Pistones y aros.' });
+      // Cada una con las fotos que ve el comprador en su medida.
+      const otherCopy = await db.channelCopy.findUniqueOrThrow({ where: { publicationId: other.id } });
+      expect(after.channelCopy!.photoIds).toEqual(['SUBIDA-1', 'LINK-1']);
+      expect(otherCopy.photoIds).toEqual(['LINK-1']);
       expect(await state(pub.id)).toEqual({ draft: [], choose: [], rejected: [] });
+      expect(await state(other.id)).toEqual({ draft: [], choose: [], rejected: [] });
 
-      // La lectura de la tienda las lee juntas y sigue todo igual.
+      // La lectura de la tienda las lee y sigue todo igual.
       await readAll();
       expect(await state(pub.id)).toEqual({ draft: [], choose: [], rejected: [] });
+      expect(await state(other.id)).toEqual({ draft: [], choose: [], rejected: [] });
 
-      // Las preguntas de cualquiera de las dos van a la misma publicación.
+      // Las preguntas de cada código van a la publicación de su medida.
       await saveQuestions(db, storeId, [
         { externalId: 'Q1', sellerId: '7', listingId: 'MLA901', text: '¿Sirve para 206?', status: 'UNANSWERED', askedAt: '2026-10-22T10:00:00Z', buyerId: '9', answer: null },
       ], new Date());
-      expect(await db.buyerQuestion.findFirst({ where: { externalId: 'Q1' } })).toMatchObject({ publicationId: pub.id });
+      expect(await db.buyerQuestion.findFirst({ where: { externalId: 'Q1' } })).toMatchObject({ publicationId: other.id });
     });
 
     it('los cambios se suben a cada una, y las fotos de cada medida a la suya', async () => {
-      const { pub } = await createFamily();
+      const { pub, other } = await createFamily();
       calls.length = 0;
-      await db.publication.update({ where: { id: pub.id }, data: { description: 'Pistones, aros y pernos.' } });
+      await db.publication.updateMany({ where: { familyId: other.familyId }, data: { description: 'Pistones, aros y pernos.' } });
       // La corregida pasa a ser de las dos: en la STD va segunda y en la 0,50, primera.
-      await saveMedia(db, {
+      await saveFamilyMedia(db, {
         accountId,
         publicationId: pub.id,
         refs: [
@@ -1213,8 +1219,10 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
           { kind: 'channel', id: 'SUBIDA-1', url: '', positions: { [half]: 0 } },
         ],
       });
-      const result = await pushDrafts(db, { accountId, publicationId: pub.id, userId: null });
-      expect(result).toMatchObject({ sent: expect.arrayContaining(['description', 'photos']), rejected: [], confirmed: true });
+      for (const id of [pub.id, other.id]) {
+        const result = await pushDrafts(db, { accountId, publicationId: id, userId: null });
+        expect(result).toMatchObject({ sent: expect.arrayContaining(['description', 'photos']), rejected: [], confirmed: true });
+      }
       expect(descriptions).toMatchObject({ MLA900: 'Pistones, aros y pernos.', MLA901: 'Pistones, aros y pernos.' });
       const puts = calls.filter((c) => c.method === 'PUT' && /^\/items\/MLA90\d$/.test(c.path));
       expect(puts.map((c) => [c.path, (c.body as { pictures: unknown }).pictures])).toEqual([
@@ -1222,31 +1230,54 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
         ['/items/MLA901', [{ id: 'SUBIDA-1' }, { id: 'LINK-1' }]],
       ]);
       expect(await state(pub.id)).toEqual({ draft: [], choose: [], rejected: [] });
+      expect(await state(other.id)).toEqual({ draft: [], choose: [], rejected: [] });
     });
 
-    it('el estado cambia en cada medida, y republicar republica cada una', async () => {
-      const { pub } = await createFamily();
+    it('el estado es de cada medida, y cada una se republica con su código nuevo', async () => {
+      const { pub, other } = await createFamily();
       calls.length = 0;
-      await changeStatus(db, { accountId, publicationIds: [pub.id], action: 'close', userId: null });
+      await changeStatus(db, { accountId, publicationIds: [pub.id, other.id], action: 'close', userId: null });
       expect(calls.filter((c) => c.method === 'PUT').map((c) => [c.path, c.body])).toEqual([
         ['/items/MLA900', { status: 'closed' }],
         ['/items/MLA901', { status: 'closed' }],
       ]);
-      const info = await relistInfo(db, { accountId, publicationId: pub.id });
-      expect(info.measures).toEqual([
-        { key: std, label: 'STD' },
-        { key: half, label: '0,50' },
-      ]);
-      const r = await relistInChannel(db, { accountId, publicationId: pub.id, price: 90000, quantities: { [std]: 1, [half]: 4 }, listingType: 'clasica', userId: null });
-      expect(r.externalId).toBe('MLA902');
+      // Cada una vende una sola medida: se republica con su cantidad.
+      expect((await relistInfo(db, { accountId, publicationId: pub.id })).measures).toEqual([]);
+      const a = await relistInChannel(db, { accountId, publicationId: pub.id, price: 90000, quantity: 1, listingType: 'clasica', userId: null });
+      const b = await relistInChannel(db, { accountId, publicationId: other.id, price: 90000, quantity: 4, listingType: 'clasica', userId: null });
+      expect([a.externalId, b.externalId]).toEqual(['MLA902', 'MLA903']);
       expect(calls.filter((c) => c.path.endsWith('/relist')).map((c) => [c.path, c.body])).toEqual([
         ['/items/MLA900/relist', { price: 90000, listing_type_id: 'gold_special', quantity: 1 }],
         ['/items/MLA901/relist', { price: 90000, listing_type_id: 'gold_special', quantity: 4 }],
       ]);
-      expect((await db.publication.findUniqueOrThrow({ where: { id: pub.id } })).variantListings).toEqual([
-        { externalId: 'MLA902', sku: 'SP-413', measure: 'STD' },
-        { externalId: 'MLA903', sku: 'SP-413', measure: '0,50' },
-      ]);
+      expect((await db.publication.findUniqueOrThrow({ where: { id: other.id } })).familyId).toBe(other.familyId);
+    });
+
+    it('si una medida no se crea, queda sin publicar en la familia y se crea después', async () => {
+      // La segunda medida tiene un SKU que el canal rechaza.
+      await db.productVariant.updateMany({ where: { productId, measure: '0,50' }, data: { sku: 'RECHAZAR' } });
+      const pub = await db.publication.create({ data: { productId, storeId, title: 'Subconjunto Peugeot 1.6 SP-413', channelStatus: 'UNPUBLISHED' } });
+      await withPackage(pub.id);
+      await saveMedia(db, { accountId, publicationId: pub.id, refs: [{ kind: 'asset', url: 'https://otra/foto.jpg' }] });
+      const rejected = 'sku:RECHAZAR medida:0.50';
+      const result = await createInChannel(db, { accountId, publicationId: pub.id, price: 80000, quantities: { [std]: 2, [rejected]: 5 }, listingType: 'clasica', userId: null });
+      expect(result.created).toEqual([{ label: 'STD', externalId: 'MLA900' }]);
+      expect(result.warnings).toEqual([expect.stringContaining('La medida 0,50 no se creó')]);
+      const other = await db.publication.findFirstOrThrow({ where: { productId, variantKey: rejected } });
+      expect(other).toMatchObject({ externalId: null, channelStatus: 'UNPUBLISHED' });
+      expect(await db.channelSyncChange.findFirst({ where: { publicationId: other.id, kind: 'CREATE_FAILED' } })).not.toBeNull();
+
+      // Desde cualquiera de las dos se ve lo que falta: solo la 0,50.
+      const info = await createChecks(db, { accountId, publicationId: pub.id });
+      expect(info.measures).toEqual([{ key: rejected, label: '0,50', price: null }]);
+      expect(info.published).toEqual([{ label: 'STD', externalId: 'MLA900' }]);
+      expect(info.checks.find((c) => c.label === 'Medidas')).toMatchObject({ ok: true, detail: 'Falta crear 0,50, en la familia de STD, que ya está publicada.' });
+      await db.productVariant.updateMany({ where: { productId, measure: '0,50' }, data: { sku: 'SP-414' } });
+      await db.publication.update({ where: { id: other.id }, data: { variantKey: 'sku:SP-414 medida:0.50' } });
+      calls.length = 0;
+      const again = await createInChannel(db, { accountId, publicationId: other.id, price: 80000, quantities: { 'sku:SP-414 medida:0.50': 5 }, listingType: 'clasica', userId: null });
+      expect(again.created).toEqual([{ label: '0,50', externalId: 'MLA901' }]);
+      expect(calls.filter((c) => c.path === '/items')).toHaveLength(1);
     });
 
     it('una sola medida se crea con nombre de familia y sin título', async () => {
@@ -1259,7 +1290,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
       const post = calls.find((c) => c.path === '/items')!.body as Record<string, unknown>;
       expect(post).toMatchObject({ family_name: 'Subconjunto Peugeot 1.6 SP-413', available_quantity: 3 });
       expect(post.title).toBeUndefined();
-      expect((await db.publication.findUniqueOrThrow({ where: { id: pub.id } })).variantListings).toEqual([]);
+      expect((await db.publication.findUniqueOrThrow({ where: { id: pub.id } })).familyId).toBeNull();
     });
   });
 });

@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SectionBody, SectionCard } from '@/components/ui/section-card';
 import type { CreateInfo } from '@/lib/channel-create';
+import { formatPrice } from '@/domain/money';
 import { cn } from '@/lib/utils/cn';
 import { createInChannelAction } from '@/app/a/[cuenta]/publicaciones/sync-actions';
 
@@ -16,7 +17,10 @@ const SELECT_CLASS =
 
 // Crear en el canal una publicación que todavía no está publicada: qué está
 // listo, qué falta, y lo que pide el canal al crearla (precio, cantidad y tipo).
-// Con varias medidas, la cantidad se carga en cada una.
+// Con varias medidas se crea una por medida, en la misma familia: la cantidad
+// se carga en cada una y el precio es el de la familia, salvo la que tiene el suyo.
+
+const names = (list: string[]) => (list.length <= 1 ? list.join('') : `${list.slice(0, -1).join(', ')} y ${list[list.length - 1]}`);
 export function CreateInChannelCard({ accountSlug, publicationId, info }: { accountSlug: string; publicationId: string; info: CreateInfo }) {
   const router = useRouter();
   const [price, setPrice] = useState(info.price !== null ? String(info.price) : '');
@@ -30,10 +34,14 @@ export function CreateInChannelCard({ accountSlug, publicationId, info }: { acco
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const { channelName } = info;
   const byMeasure = info.measures.length > 0;
+  const several = info.measures.length >= 2;
   const missingQuantity = byMeasure ? info.measures.some((m) => !quantities[m.key]?.trim()) : !quantity.trim();
 
   async function create() {
-    if (!window.confirm(`¿Crear la publicación en ${channelName}? Queda publicada y a la venta.`)) return;
+    const ask = several
+      ? `¿Crear las ${info.measures.length} publicaciones en ${channelName}, una por medida? Quedan publicadas y a la venta.`
+      : `¿Crear la publicación en ${channelName}? Queda publicada y a la venta.`;
+    if (!window.confirm(ask)) return;
     setBusy(true);
     setMessage(null);
     const amounts = byMeasure ? { quantities: Object.fromEntries(info.measures.map((m) => [m.key, quantities[m.key] ?? ''])) } : { quantity };
@@ -41,14 +49,22 @@ export function CreateInChannelCard({ accountSlug, publicationId, info }: { acco
     setBusy(false);
     if (!r) return setMessage({ kind: 'error', text: 'Se cortó la conexión con la app. Antes de probar de nuevo, fijate en el canal si se creó.' });
     if (!r.ok) return setMessage({ kind: 'error', text: r.error });
-    setMessage({ kind: 'ok', text: `Listo: se creó en ${channelName} con el código ${r.externalId}.${r.warnings.length > 0 ? ` ${r.warnings.join(' ')}` : ''}` });
+    const done =
+      r.created.length > 0
+        ? `Listo: se ${r.created.length === 1 ? 'creó' : 'crearon'} en ${channelName} ${names(r.created.map((c) => `${c.label} con el código ${c.externalId}`))}.`
+        : `Listo: se creó en ${channelName} con el código ${r.externalId}.`;
+    setMessage({ kind: 'ok', text: `${done}${r.warnings.length > 0 ? ` ${r.warnings.join(' ')}` : ''}` });
     router.refresh();
   }
 
   return (
     <SectionCard
       title={`Crear en ${channelName}`}
-      description={`Todavía no está publicada. La app la crea en ${channelName} con su título, descripción, categoría, datos de catálogo y fotos. El precio y la cantidad se cargan acá; después se manejan en ${channelName}.`}
+      description={
+        byMeasure
+          ? `La app crea en ${channelName} una publicación por medida, en la misma familia, con el título, la descripción, la categoría y los datos de catálogo de la familia, y las fotos de cada medida. El precio y la cantidad se cargan acá; después se manejan en ${channelName}.`
+          : `Todavía no está publicada. La app la crea en ${channelName} con su título, descripción, categoría, datos de catálogo y fotos. El precio y la cantidad se cargan acá; después se manejan en ${channelName}.`
+      }
     >
       <SectionBody className="space-y-4">
         {info.blocked ? <p className="text-sm text-muted-foreground">{info.blocked}</p> : null}
@@ -70,7 +86,7 @@ export function CreateInChannelCard({ accountSlug, publicationId, info }: { acco
         {!info.blocked ? (
           <div className={cn('grid gap-3', byMeasure ? 'sm:grid-cols-2' : 'sm:grid-cols-3')}>
             <div className="space-y-1.5">
-              <Label htmlFor="create-price">Precio</Label>
+              <Label htmlFor="create-price">{byMeasure ? 'Precio de la familia' : 'Precio'}</Label>
               <Input id="create-price" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="Por ejemplo 45000" />
             </div>
             {!byMeasure ? (
@@ -105,10 +121,17 @@ export function CreateInChannelCard({ accountSlug, publicationId, info }: { acco
                     value={quantities[m.key] ?? ''}
                     onChange={(e) => setQuantities((q) => ({ ...q, [m.key]: e.target.value }))}
                   />
+                  {m.price !== null ? <p className="text-xs text-muted-foreground">Con su precio, {formatPrice(m.price)}</p> : null}
                 </div>
               ))}
             </div>
           </fieldset>
+        ) : null}
+
+        {!info.blocked && info.published.length > 0 ? (
+          <p className="text-xs text-muted-foreground">
+            Ya {info.published.length === 1 ? 'está publicada' : 'están publicadas'} {names(info.published.map((x) => `${x.label}, ${x.externalId}`))}.
+          </p>
         ) : null}
 
         {!info.blocked && info.stock ? (
@@ -118,7 +141,7 @@ export function CreateInChannelCard({ accountSlug, publicationId, info }: { acco
         {!info.blocked ? (
           <Button access="subir" onClick={create} disabled={!info.ready || busy || !price.trim() || missingQuantity} pending={busy}>
             <Upload />
-            Crear en {channelName}
+            {several ? `Crear las ${info.measures.length} en ${channelName}` : `Crear en ${channelName}`}
           </Button>
         ) : null}
         {!info.ready && !info.blocked ? <p className="text-xs text-muted-foreground">Completá lo que falta para poder crearla.</p> : null}

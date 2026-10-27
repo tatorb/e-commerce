@@ -163,8 +163,10 @@ export default async function PipelineStepPage({
     viewing === 'PUBLISH' ? loadPublicationFaces(account.id, pub.id) : null,
     // Una familia ordena las fotos de todas sus medidas juntas, una ventana por medida.
     viewing === 'MEDIA' ? loadFamilyMedia(prisma, account.id, pub.id).then((f) => f ?? loadMediaSources(prisma, account.id, pub.id)) : null,
-    // Sin publicar: lo que hace falta para crearla en el canal.
-    viewing === 'PUBLISH' && !pub.externalId ? createChecks(prisma, { accountId: account.id, publicationId: pub.id }) : null,
+    // Sin publicar, o una familia con medidas sin publicar: lo que hace falta para crearlas en el canal.
+    viewing === 'PUBLISH'
+      ? createChecks(prisma, { accountId: account.id, publicationId: pub.id }).then((c) => (pub.externalId && c.measures.length === 0 ? null : c))
+      : null,
     viewing === 'VIDEOS' ? loadVideosStep(prisma, { accountId: account.id, publicationId: pub.id }) : null,
     viewing === 'DESCRIPTION' ? loadDescriptionStep(prisma, { accountId: account.id, publicationId: pub.id }) : null,
     viewing === 'QA' ? loadQaStep(prisma, { accountId: account.id, publicationId: pub.id }) : null,

@@ -1,6 +1,6 @@
 import { MercadoLibreRequestError, mlGet, mlSend } from './http';
 import { CAMPAIGN_TAG, CLASSIC, inFull, INSTALLMENT_TAGS, LOW_INTEREST_TAG, PREMIUM, tagsOf, variationsOf } from './listings';
-import { measureText, variantKey, type ChannelVariation, type VariantLike } from '@/domain/media';
+import { measureText, variantKey, type VariantLike } from '@/domain/media';
 import { isInstallmentPlan, LOW_INTEREST_PLAN } from '@/domain/pricing';
 import { MAX_QUANTITY, quantityKey } from '@/domain/quantities';
 import {
@@ -269,21 +269,23 @@ function pictureKeeper(body: PictureBody[]) {
   };
 }
 
-/** Con nombre de familia: una publicación por medida, cada una con su SKU, su cantidad y sus fotos. */
-async function createSeparate(accessToken: string, l: ChannelNewListing): Promise<ChannelCreated> {
+/**
+ * Crea una publicación por cada una que se pide, de a una por vez. Con nombre
+ * de familia, Mercado Libre agrupa las medidas y arma el título de cada una;
+ * sin ese modelo, cada una lleva el título.
+ */
+async function createMembers(accessToken: string, l: ChannelNewListing, family: boolean): Promise<ChannelCreated> {
   const keeper = pictureKeeper(await picturesBody(accessToken, l.pictures));
-  const everything = l.pictures.map((_, i) => i);
-  const measures = l.variants.length >= 2 ? l.variants : [{ sku: l.sku, measure: null, quantity: l.quantity, pictures: everything }];
-  const created: (ChannelVariation & { externalId: string; url: string | null })[] = [];
+  const members: ChannelCreated['members'] = [];
   const warnings: string[] = [];
-  for (const m of measures) {
+  for (const m of l.members) {
     const name = m.measure ? `La medida ${m.measure}` : 'La publicación';
     let body: unknown;
     try {
       body = await send('POST', '/items', accessToken, {
-        family_name: l.title,
+        ...(family ? { family_name: l.title } : { title: l.title }),
         category_id: l.categoryId,
-        price: l.price,
+        price: m.price,
         currency_id: l.currency,
         available_quantity: m.quantity,
         buying_mode: 'buy_it_now',
@@ -301,19 +303,20 @@ async function createSeparate(accessToken: string, l: ChannelNewListing): Promis
           : {}),
       });
     } catch (e) {
-      // Si ya se creó otra medida, se sigue con las demás y se avisa cuál faltó.
-      if (!(e instanceof PublishError) || created.length === 0) throw e;
+      // Si ya se creó otra, se sigue con las demás y se avisa cuál faltó.
+      if (!(e instanceof PublishError) || !members.some(Boolean)) throw e;
       warnings.push(`${name} no se creó: ${e.message}`);
+      members.push(null);
       continue;
     }
     const id = isObj(body) && typeof body.id === 'string' ? body.id : null;
     if (!id) {
-      if (created.length === 0) throw new PublishError('Mercado Libre no devolvió el código de la publicación nueva.');
+      if (!members.some(Boolean)) throw new PublishError('Mercado Libre no devolvió el código de la publicación nueva.');
       warnings.push(`${name} no se creó: Mercado Libre no devolvió su código.`);
+      members.push(null);
       continue;
     }
-    const photoIds = keeper.learn(m.pictures, pictureIdsOf(body)) ?? [];
-    created.push({ externalId: id, url: isObj(body) && typeof body.permalink === 'string' ? body.permalink : null, sku: m.sku, measure: m.measure, photoIds });
+    members.push({ externalId: id, url: isObj(body) && typeof body.permalink === 'string' ? body.permalink : null, pictureIds: keeper.learn(m.pictures, pictureIdsOf(body)) });
     if (l.description) {
       try {
         await send('POST', `/items/${encodeURIComponent(id)}/description`, accessToken, { plain_text: l.description });
@@ -323,13 +326,7 @@ async function createSeparate(accessToken: string, l: ChannelNewListing): Promis
       }
     }
   }
-  return {
-    externalId: created[0].externalId,
-    url: created[0].url,
-    pictureIds: keeper.all(),
-    variations: l.variants.length >= 2 ? created.map((v) => ({ externalId: v.externalId, sku: v.sku, measure: v.measure, photoIds: v.photoIds })) : [],
-    warnings,
-  };
+  return { members, warnings };
 }
 
 /** Un dato de catálogo como lo pide Mercado Libre: un valor por nombre, o la lista si acepta varios. */
@@ -349,65 +346,7 @@ export const mercadolibrePublisher: ChannelPublisher = {
   ],
 
   async create(accessToken, l) {
-    if (await separateVariants(accessToken)) return createSeparate(accessToken, l);
-    const pictures = await picturesBody(accessToken, l.pictures);
-    const ref = (p: { id: string } | { source: string }) => ('id' in p ? p.id : p.source);
-    const variants = l.variants.length >= 2 ? l.variants : [];
-    // Con medidas, el SKU y la cantidad van en cada una, y todas al mismo precio.
-    const sku = variants.length === 0 && l.sku ? [{ id: 'SELLER_SKU', value_name: l.sku }] : [];
-    const created = await send('POST', '/items', accessToken, {
-      title: l.title,
-      category_id: l.categoryId,
-      price: l.price,
-      currency_id: l.currency,
-      ...(variants.length === 0 ? { available_quantity: l.quantity } : {}),
-      buying_mode: 'buy_it_now',
-      listing_type_id: LISTING_TYPE_ID[l.listingType] ?? 'gold_special',
-      condition: 'new',
-      pictures,
-      attributes: [...l.attributes.map(attributeBody), ...sku],
-      ...(variants.length > 0
-        ? {
-            variations: variants.map((v) => ({
-              // Las categorías de repuestos no traen un campo de medida para las variantes: va con su nombre.
-              attribute_combinations: [{ name: 'Medida', value_name: v.measure }],
-              price: l.price,
-              available_quantity: v.quantity,
-              picture_ids: v.pictures.filter((i) => i >= 0 && i < pictures.length).map((i) => ref(pictures[i])),
-              ...(v.sku ? { attributes: [{ id: 'SELLER_SKU', value_name: v.sku }] } : {}),
-            })),
-          }
-        : {}),
-      ...(l.warranty
-        ? { sale_terms: [{ id: 'WARRANTY_TYPE', value_name: 'Garantía del vendedor' }, { id: 'WARRANTY_TIME', value_name: l.warranty }] }
-        : {}),
-    });
-    const id = isObj(created) && typeof created.id === 'string' ? created.id : null;
-    if (!id) throw new PublishError('Mercado Libre no devolvió el código de la publicación nueva.');
-    const warnings: string[] = [];
-    if (l.description) {
-      try {
-        await send('POST', `/items/${encodeURIComponent(id)}/description`, accessToken, { plain_text: l.description });
-      } catch (e) {
-        if (!(e instanceof PublishError)) throw e;
-        warnings.push(`La publicación se creó, pero la descripción no: ${e.message} Queda en el borrador para subirla.`);
-      }
-    }
-    const pictureIds = pictureIdsOf(created);
-    // Las medidas en el orden en que se mandaron, con el código de sus fotos como las guardó Mercado Libre.
-    const back = isObj(created) ? variationsOf(created) : [];
-    const variations = variants.map((v, i) => {
-      const same = back.length === variants.length ? back[i] : null;
-      const sent = pictureIds ? v.pictures.flatMap((p) => (pictureIds[p] ? [pictureIds[p]] : [])) : [];
-      return { sku: v.sku, measure: same?.measure ?? v.measure, photoIds: same && same.photoIds.length > 0 ? same.photoIds : sent };
-    });
-    return {
-      externalId: id,
-      url: isObj(created) && typeof created.permalink === 'string' ? created.permalink : null,
-      pictureIds,
-      variations,
-      warnings,
-    };
+    return createMembers(accessToken, l, await separateVariants(accessToken));
   },
 
   async updatePictures(accessToken, externalId, pictures, layout) {

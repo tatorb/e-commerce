@@ -51,6 +51,7 @@ import {
 import { checkTitle, parsePastedSuggestions, wordKey } from '@/domain/titles';
 import { resolveExternalIds } from '@/lib/catalog';
 import { createPipelinePublication } from '@/domain/pipeline-publications';
+import { familyByMeasure } from '@/lib/families';
 import { savePublicationCode } from '@/lib/publication-code';
 import { QaError, saveQaTexts } from '@/lib/publication-qa';
 import { loadCatalogData, saveCatalogData } from '@/lib/catalog-data';
@@ -207,7 +208,7 @@ const createPublicationTool = defineTool({
   section: ['pipeline', 'publicaciones'],
   title: 'Crear una publicación nueva',
   description:
-    'Crea una publicación nueva, todavía sin publicar en el canal, y la deja en el pipeline en Información. Es de un producto que ya está (producto) o de uno nuevo con ficha corta (producto_nuevo), uno de los dos. Antes de crearla, mostrale a la persona qué vas a crear y esperá que confirme. Cuando ya esté publicada, su código se carga con update_publication.',
+    'Crea una publicación nueva, todavía sin publicar en el canal, y la deja en el pipeline en Información. Es de un producto que ya está (producto) o de uno nuevo con ficha corta (producto_nuevo), uno de los dos. Si el producto tiene varias medidas, crea una publicación por medida, juntas en su familia. Antes de crearla, mostrale a la persona qué vas a crear y esperá que confirme. Cuando ya esté publicada, su código se carga con update_publication.',
   input: z.object({
     cuenta: accountArg,
     producto: z
@@ -258,8 +259,8 @@ const createPublicationTool = defineTool({
       titleWarnings = check.warnings;
     }
     const nuevo = args.producto_nuevo;
-    const r = await ctx.db.$transaction(async (tx) =>
-      createPipelinePublication(tx, {
+    const r = await ctx.db.$transaction(async (tx) => {
+      const made = await createPipelinePublication(tx, {
         accountId: account.id,
         storeId: store.id,
         productId: args.producto ? (await findProduct(tx, account.id, args.producto)).id : null,
@@ -268,8 +269,10 @@ const createPublicationTool = defineTool({
           : null,
         title,
         userId: ctx.userId,
-      }),
-    );
+      });
+      // Con varias medidas, una publicación por medida, en su familia.
+      return { ...made, measures: (await familyByMeasure(tx, { publicationId: made.publicationId, userId: ctx.userId })).length };
+    });
     const product = await ctx.db.product.findUniqueOrThrow({ where: { id: r.productId }, select: { name: true } });
     return {
       listo: true,
@@ -277,6 +280,7 @@ const createPublicationTool = defineTool({
       tienda: store.name,
       ...(await stateOf(ctx, account, r.publicationId)),
       ...(titleWarnings.length > 0 ? { avisos_del_titulo: titleWarnings } : {}),
+      ...(r.measures > 0 ? { familia: `El producto tiene varias medidas: se creó una publicación por medida, ${r.measures + 1} en total, juntas en su familia.` } : {}),
       ...(r.related.length > 0
         ? { aviso: `El producto ya tiene ${r.related.length === 1 ? 'otra publicación' : `${r.related.length} publicaciones`} en el pipeline.` }
         : {}),

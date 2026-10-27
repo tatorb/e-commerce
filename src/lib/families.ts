@@ -1,9 +1,10 @@
-import { Prisma, type PrismaClient } from '@/generated/prisma/client';
+import { Prisma, type PrismaClient, type Publication } from '@/generated/prisma/client';
 import type { ChannelStatus, PipelineExit } from '@/generated/prisma/enums';
 import { getChannelAdapter } from '@/channels';
 import { fingerprint } from '@/domain/channel-sync';
 import { comparableText, distinctTexts, familyRead, pipelineRank } from '@/domain/families';
-import { parseMedia, parseVariantListings, variantKey } from '@/domain/media';
+import { lockFamily } from '@/domain/family-members';
+import { parseMedia, parseVariantListings, variantKey, type PhotoRef } from '@/domain/media';
 import { PIPELINE_STEP_LABEL, PIPELINE_STEPS, pipelineLabel } from '@/domain/pipeline';
 import { measuresOf, soleMeasureOf, soleMeasurePhotos, type Measure } from '@/lib/media';
 import { productCode } from '@/lib/publication-facts';
@@ -531,6 +532,55 @@ export async function joinFamily(
 }
 
 /**
+ * Una publicación nueva de la familia, con lo mismo que la principal: lo
+ * compartido, su lugar en el pipeline y su historial desde ahora. Lleva su
+ * medida, su código del canal si ya tiene y sus fotos. Devuelve su id.
+ */
+async function copyMember(
+  tx: Tx,
+  head: Publication,
+  args: { familyId: string; variantKey: string | null; externalId: string | null; media: PhotoRef[] | null; at: Date; userId: string | null },
+): Promise<string> {
+  const p = await tx.publication.create({
+    data: {
+      productId: head.productId,
+      storeId: head.storeId,
+      externalId: args.externalId,
+      title: head.title,
+      description: head.description,
+      attributes: head.attributes as Prisma.InputJsonValue,
+      ownQuestions: null,
+      faq: head.faq,
+      answerRules: head.answerRules,
+      autoAnswer: head.autoAnswer,
+      price: head.price,
+      installments: head.installments,
+      discount: head.discount,
+      currency: head.currency,
+      channelStatus: args.externalId ? head.channelStatus : 'UNPUBLISHED',
+      stage: head.stage,
+      pipelineStatus: head.pipelineStatus,
+      pipelineStep: head.pipelineStep,
+      pipelineRemoval: head.pipelineRemoval,
+      titleLockedManual: head.titleLockedManual,
+      channelCategory: head.channelCategory,
+      media: json(args.media),
+      videoVariants: head.videoVariants as Prisma.InputJsonValue,
+      followsStock: head.followsStock,
+      source: head.source,
+      familyId: args.familyId,
+      variantKey: args.variantKey,
+    },
+    select: { id: true },
+  });
+  await tx.stageMovement.create({ data: { publicationId: p.id, stage: head.stage, enteredAt: args.at, userId: args.userId } });
+  if (head.pipelineStatus === 'IN_PIPELINE' && head.pipelineStep) {
+    await tx.pipelineMovement.create({ data: { publicationId: p.id, step: head.pipelineStep, enteredAt: args.at, userId: args.userId } });
+  }
+  return p.id;
+}
+
+/**
  * Separa una publicación que la app creó con un código del canal por medida
  * (variantListings) en una publicación por medida, en su familia. La primera
  * queda como principal, con su historial; cada una nueva lleva lo mismo, las
@@ -570,47 +620,79 @@ export async function splitFamily(tx: Tx, args: { publicationId: string; userId:
       });
       continue;
     }
-    const p = await tx.publication.create({
-      data: {
-        productId: head.productId,
-        storeId: head.storeId,
-        externalId: v.externalId,
-        title: head.title,
-        description: head.description,
-        attributes: head.attributes as Prisma.InputJsonValue,
-        ownQuestions: null,
-        faq: head.faq,
-        answerRules: head.answerRules,
-        autoAnswer: head.autoAnswer,
-        price: head.price,
-        installments: head.installments,
-        discount: head.discount,
-        currency: head.currency,
-        channelStatus: head.channelStatus,
-        stage: head.stage,
-        pipelineStatus: head.pipelineStatus,
-        pipelineStep: head.pipelineStep,
-        pipelineRemoval: head.pipelineRemoval,
-        titleLockedManual: head.titleLockedManual,
-        channelCategory: head.channelCategory,
-        media: json(mediaFor(m)),
-        videoVariants: head.videoVariants as Prisma.InputJsonValue,
-        followsStock: head.followsStock,
-        source: head.source,
-        familyId: family.id,
-        variantKey: m?.key ?? null,
-      },
-      select: { id: true },
-    });
-    await tx.stageMovement.create({ data: { publicationId: p.id, stage: head.stage, enteredAt: at, userId: args.userId } });
-    if (head.pipelineStatus === 'IN_PIPELINE' && head.pipelineStep) {
-      await tx.pipelineMovement.create({ data: { publicationId: p.id, step: head.pipelineStep, enteredAt: at, userId: args.userId } });
-    }
+    const id = await copyMember(tx, head, { familyId: family.id, variantKey: m?.key ?? null, externalId: v.externalId, media: mediaFor(m), at, userId: args.userId });
     // Las preguntas que recibió el código de esta medida pasan a su publicación.
-    await tx.buyerQuestion.updateMany({ where: { storeId: head.storeId, listingId: v.externalId }, data: { publicationId: p.id } });
-    created.push(p.id);
+    await tx.buyerQuestion.updateMany({ where: { storeId: head.storeId, listingId: v.externalId }, data: { publicationId: id } });
+    created.push(id);
   }
   return created;
+}
+
+/**
+ * Arma la familia de una publicación sin publicar de un producto con varias
+ * medidas: una publicación por medida, con lo mismo que la principal y las
+ * fotos de su medida. Si ya está en una familia que no tiene nada publicado,
+ * suma las medidas de la ficha que le faltan. Las publicadas no se tocan: sus
+ * medidas llegan del canal. Devuelve las publicaciones nuevas.
+ */
+export async function familyByMeasure(tx: Tx, args: { publicationId: string; userId: string | null; now?: Date }): Promise<string[]> {
+  const at = args.now ?? new Date();
+  const ids = await lockFamily(tx, args.publicationId);
+  const rows = await tx.publication.findMany({
+    where: { id: { in: ids } },
+    include: { family: { select: { leadId: true } }, product: { select: { variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } } } } },
+  });
+  if (rows.length === 0 || rows.some((r) => r.externalId || parseVariantListings(r.variantListings).length >= 2)) return [];
+  const measures = measuresOf(rows[0].product.variants);
+  if (measures.length < 2) return [];
+  const head = rows.find((r) => r.id === rows[0].family?.leadId) ?? rows.find((r) => r.id === args.publicationId)!;
+  const media = parseMedia(head.media);
+  const mediaFor = (m: Measure) => (media === null ? null : soleMeasurePhotos(media, measures, m));
+
+  let familyId = head.familyId;
+  if (!familyId) {
+    const own = measures.find((m) => m.key === head.variantKey) ?? measures[0];
+    familyId = (await tx.listingFamily.create({ data: { storeId: head.storeId, productId: head.productId, leadId: head.id }, select: { id: true } })).id;
+    await tx.publication.update({ where: { id: head.id }, data: { familyId, variantKey: own.key, ownPrice: false, media: json(mediaFor(own)) } });
+    head.variantKey = own.key;
+  }
+  const covered = new Set(rows.map((r) => (r.id === head.id ? head.variantKey : r.variantKey)));
+  const created: string[] = [];
+  for (const m of measures) {
+    if (covered.has(m.key)) continue;
+    created.push(await copyMember(tx, head, { familyId, variantKey: m.key, externalId: null, media: mediaFor(m), at, userId: args.userId }));
+  }
+  return created;
+}
+
+/**
+ * Le pone a una familia el código que le dio el canal, si todavía no lo tiene:
+ * el que leyeron sus medidas, si es uno solo y no lo tiene otra familia.
+ */
+export async function fillFamilyCode(db: Db, familyId: string): Promise<boolean> {
+  const family = await db.listingFamily.findUnique({
+    where: { id: familyId },
+    select: { storeId: true, channelFamilyId: true, members: { select: { channelCopy: { select: { details: true } } } } },
+  });
+  if (!family || family.channelFamilyId) return false;
+  const read = [...new Set(family.members.flatMap((m) => familyRead(m.channelCopy?.details)?.channelFamilyId ?? []))];
+  if (read.length !== 1) return false;
+  const taken = await db.listingFamily.count({ where: { storeId: family.storeId, channelFamilyId: read[0] } });
+  if (taken > 0) return false;
+  await db.listingFamily.update({ where: { id: familyId }, data: { channelFamilyId: read[0] } });
+  return true;
+}
+
+/** Le pone a cada familia de esas publicaciones que no tiene código el que le dio el canal. */
+export async function fillFamilyCodes(db: Db, publicationIds: string[]): Promise<number> {
+  if (publicationIds.length === 0) return 0;
+  const families = await db.listingFamily.findMany({
+    where: { channelFamilyId: null, members: { some: { id: { in: publicationIds } } } },
+    select: { id: true },
+  });
+  let filled = 0;
+  for (const f of families) if (await fillFamilyCode(db, f.id)) filled++;
+  return filled;
 }
 
 /**

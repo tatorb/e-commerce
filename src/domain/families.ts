@@ -1,4 +1,5 @@
 import type { PipelineStatus, PipelineStep } from '@/generated/prisma/enums';
+import { measureText } from '@/domain/media';
 import { PIPELINE_STEPS } from '@/domain/pipeline';
 
 // Las familias del canal: el canal guarda cada medida como una publicación
@@ -100,4 +101,18 @@ export function distinctTexts(values: (string | null | undefined)[]): string[] {
     out.push(v!.trim());
   }
   return out;
+}
+
+/**
+ * El nombre de la familia a partir del título de una medida, para cuando el
+ * canal no lo da: el título sin la medida que el canal le agrega al final.
+ */
+export function titleWithoutMeasure(title: string, key: string | null): string {
+  const measure = key?.match(/(?:^| )medida:(\S+)/)?.[1];
+  if (!measure) return title;
+  const words = title.trim().split(/\s+/);
+  for (let n = 1; n <= Math.min(3, words.length - 1); n++) {
+    if (measureText(words.slice(-n).join(' ')) === measure) return words.slice(0, -n).join(' ');
+  }
+  return title;
 }

@@ -22,6 +22,7 @@ import { StockError } from '@/domain/stock';
 import { plannedText } from '@/lib/stock-plan';
 import { settleReactivations } from '@/lib/restock';
 import { saveFamilyMedia } from '@/lib/family-media';
+import { familyMemberIds } from '@/domain/family-members';
 
 // Lo que se hace desde la página de una publicación y desde Por subir: cambiar
 // el borrador, subirlo al canal, descartarlo y volver a leer del canal.
@@ -203,7 +204,7 @@ export async function createInChannelAction(
   accountSlug: string,
   publicationId: string,
   input: z.input<typeof createSchema>,
-): Promise<Result<{ externalId: string; warnings: string[] }>> {
+): Promise<Result<{ externalId: string; warnings: string[]; created: { label: string; externalId: string }[] }>> {
   return act(accountSlug, { section: 'subir', does: 'Creó la publicación en el canal', publicationId }, async () => {
     const user = await requireUser();
     const account = await getAccountBySlug(accountSlug);
@@ -214,13 +215,13 @@ export async function createInChannelAction(
     if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Revisá los datos.' };
     try {
       const created = await createInChannel(prisma, { accountId: account.id, publicationId: id.data, ...parsed.data, userId: user.id });
-      // Si el producto lleva stock en la app, queda con ese.
-      await syncStock(prisma, { publicationIds: [id.data], userId: user.id, note: 'Al crearla, con el stock del producto.' }).catch((e) =>
+      // Si el producto lleva stock en la app, queda con ese, en cada medida de la familia.
+      await syncStock(prisma, { publicationIds: await familyMemberIds(prisma, id.data), userId: user.id, note: 'Al crearla, con el stock del producto.' }).catch((e) =>
         console.error('No se pudo subir el stock', e instanceof Error ? e.message : e),
       );
       refresh(accountSlug, id.data);
       revalidatePath(`/a/${accountSlug}/pipeline/${id.data}`);
-      return { ok: true, externalId: created.externalId, warnings: created.warnings };
+      return { ok: true, externalId: created.externalId, warnings: created.warnings, created: created.created };
     } catch (e) {
       if (e instanceof CreateError) return { ok: false, error: e.message };
       return failure(e);

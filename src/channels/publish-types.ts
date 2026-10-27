@@ -2,7 +2,7 @@
 // resuelve en src/channels/<canal>/; el resto de la app usa esta interfaz y
 // nunca conoce el formato del canal. Solo corre en el servidor.
 
-import type { ChannelVariation, VariantLike } from '@/domain/media';
+import type { VariantLike } from '@/domain/media';
 
 /** Los datos que hoy se pueden subir. */
 export type PublishField = 'title' | 'description' | 'attributes' | 'photos' | 'price' | 'installments' | 'discount' | 'quantity';
@@ -31,40 +31,36 @@ export type ChannelPictureLayout = {
 };
 
 /**
- * Una medida de la publicación nueva: lo que elige el comprador, su SKU, su
- * cantidad y sus fotos, por su posición en la lista y en el orden en que las ve.
+ * Una publicación nueva: la única, o la de una medida de la familia. Cada una
+ * lleva su SKU, lo que elige el comprador, su precio, su cantidad y sus fotos,
+ * por su posición en la lista y en el orden en que las ve.
  */
-export type ChannelNewVariant = VariantLike & { measure: string; quantity: number; pictures: number[] };
+export type ChannelNewMember = VariantLike & { price: number; quantity: number; pictures: number[] };
 
-/** Lo que hace falta para crear una publicación en el canal. */
+/** Lo que hace falta para crear publicaciones en el canal. */
 export type ChannelNewListing = {
+  // Con varias, el nombre de la familia que comparten.
   title: string;
   categoryId: string;
-  price: number;
   currency: string;
-  // Sin medidas: la cantidad y el SKU de la publicación.
-  quantity: number;
   listingType: string;
   description: string | null;
   attributes: ChannelAttributeUpdate[];
+  // Las fotos de todas: una foto que va en varias se sube una sola vez.
   pictures: ChannelPicture[];
-  sku: string | null;
   // Por ejemplo "6 meses".
   warranty: string | null;
-  // Con dos o más, la publicación se crea con esas medidas, todas al mismo precio.
-  variants: ChannelNewVariant[];
+  // Una sola, o una por medida, todas en la misma familia.
+  members: ChannelNewMember[];
 };
 
+/** Una publicación que se creó: su código, su link y el código de cada foto en el canal, si lo informa. */
+export type ChannelCreatedMember = { externalId: string; url: string | null; pictureIds: string[] | null };
+
 export type ChannelCreated = {
-  externalId: string;
-  url: string | null;
-  // El código de cada foto en el canal, en orden, si lo informa.
-  pictureIds: string[] | null;
-  // Las medidas como quedaron en el canal, con el código de sus fotos. Vacío sin
-  // medidas. Si el canal guarda cada medida como una publicación aparte, cada
-  // una trae su código; la primera es externalId.
-  variations: ChannelVariation[];
-  // Lo que se creó pero quedó a medias, como la descripción.
+  // Una por cada una que se pidió, en el mismo orden: null si esa no se creó, con el motivo en warnings.
+  members: (ChannelCreatedMember | null)[];
+  // Lo que se creó pero quedó a medias, como la descripción, y las que no se crearon.
   warnings: string[];
 };
 
@@ -82,7 +78,10 @@ export type ChannelRelist = {
 export interface ChannelPublisher {
   /** Los tipos de publicación que ofrece el canal, el primero es el de siempre. */
   listingTypes: { value: string; label: string }[];
-  /** Crea la publicación. Lanza PublishError si el canal no la acepta. */
+  /**
+   * Crea las publicaciones, en orden. Lanza PublishError si el canal no acepta
+   * la primera; si ya se creó alguna, sigue con las demás y avisa cuál faltó.
+   */
   create(accessToken: string, listing: ChannelNewListing): Promise<ChannelCreated>;
   /**
    * Deja las fotos de la publicación en ese orden y, si tiene medidas, las de

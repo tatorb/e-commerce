@@ -20,7 +20,7 @@ import {
   type FaceValues,
   type Fingerprints,
 } from '@/domain/channel-sync';
-import { familyDetails, needsFamilyRead } from '@/domain/families';
+import { familyDetails, needsFamilyRead, titleWithoutMeasure } from '@/domain/families';
 import { channelPhotos, parseVariantListings } from '@/domain/media';
 import { channelQuantities } from '@/domain/quantities';
 import { parseMetrics, type Metrics } from '@/domain/measurements';
@@ -28,7 +28,7 @@ import type { NameValue } from '@/domain/name-value';
 import { isUniqueViolation } from '@/domain/publications';
 import { listingAttributeIds, listingAttributes } from '@/importers/channel-listings';
 import { withAccessToken } from '@/lib/connections';
-import { joinKnownFamilies } from '@/lib/families';
+import { fillFamilyCodes, joinKnownFamilies } from '@/lib/families';
 import { familyListing, readVariantListings, variantListingOwners } from '@/lib/variant-listings';
 
 // La lectura automática del canal: recorre las publicaciones de cada tienda
@@ -169,6 +169,7 @@ async function applyListing(
     where: { id: publicationId },
     select: {
       familyId: true,
+      variantKey: true,
       title: true,
       description: true,
       attributes: true,
@@ -197,7 +198,7 @@ async function applyListing(
   const app = faceValues(p);
   const channel: FaceValues = {
     // En una familia, el título que se edita es el nombre de la familia: cada medida lo muestra con su medida.
-    title: (p.familyId && listing.channelFamilyName) || listing.title,
+    title: p.familyId ? listing.channelFamilyName || (listing.title && titleWithoutMeasure(listing.title, p.variantKey)) : listing.title,
     description: descriptionRead ? listing.description : (p.channelCopy?.description ?? null),
     attributes: listingAttributes(listing, ctx.adapter),
     photos: channelPhotos(listing.photos, listing.photoIds, listing.variations),
@@ -458,9 +459,11 @@ export async function runSyncStep(
         });
         for (const id of missing) addError(`${id}: el canal no la devolvió. Puede estar borrada o ser de otra cuenta.`);
       }
-      // Las que llegaron después a una familia que ya está en la app se suman solas.
+      // Las que llegaron después a una familia que ya está en la app se suman solas,
+      // y las familias que creó la app toman el código que les dio el canal.
       try {
         await joinKnownFamilies(db, run.store.id, publications.map((p) => p.id));
+        await fillFamilyCodes(db, publications.map((p) => p.id));
       } catch (e) {
         console.error('Error al sumar medidas a su familia', e instanceof Error ? e.message : e);
       }
