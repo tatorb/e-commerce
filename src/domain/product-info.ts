@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { Prisma } from '@/generated/prisma/client';
 import { withEngineData } from './engine';
+import { moveMeasureRefs, type MeasureRow } from './measure-moves';
 import { productInputSchema } from './products';
 
 // Los datos de la ficha que se editan desde el paso Información: tipo de
@@ -38,19 +39,23 @@ export async function updateProductInfo(tx: Tx, args: { accountId: string; produ
   });
 
   // Medidas: se actualizan en su lugar, se suman las nuevas y se borran las que se sacaron.
-  const existing = new Set(
-    (await tx.productVariant.findMany({ where: { productId }, select: { id: true } })).map((v) => v.id),
-  );
+  const before = await tx.productVariant.findMany({ where: { productId }, orderBy: { position: 'asc' }, select: { id: true, sku: true, measure: true } });
+  const existing = new Set(before.map((v) => v.id));
   const rows = data.variants.filter((v) => v.measure !== null || v.sku !== null);
   const keep = rows.flatMap((v) => (v.id && existing.has(v.id) ? [v.id] : []));
   await tx.productVariant.deleteMany({ where: { productId, id: { notIn: keep } } });
+  const after: MeasureRow[] = [];
   for (const [position, v] of rows.entries()) {
     if (v.id && existing.has(v.id)) {
       await tx.productVariant.update({ where: { id: v.id }, data: { measure: v.measure, sku: v.sku, position } });
+      after.push({ id: v.id, measure: v.measure, sku: v.sku });
     } else {
-      await tx.productVariant.create({ data: { productId, measure: v.measure, sku: v.sku, position } });
+      const created = await tx.productVariant.create({ data: { productId, measure: v.measure, sku: v.sku, position }, select: { id: true } });
+      after.push({ id: created.id, measure: v.measure, sku: v.sku });
     }
   }
+  // La que cambió de nombre conserva su id: su stock, sus fotos y lo demás pasan al nombre nuevo.
+  await moveMeasureRefs(tx, productId, before, after);
 
   await tx.compatibility.deleteMany({ where: { productId } });
   if (data.compatibilities.length > 0) {

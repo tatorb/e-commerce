@@ -2,12 +2,12 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { CheckCircle2 } from 'lucide-react';
+import { CheckCircle2, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { StatusText } from '@/components/pipeline/StatusText';
-import { markStockReviewedAction, setProductStockAction } from '@/app/a/[cuenta]/productos/stock-actions';
+import { dropOrphanStockAction, markStockReviewedAction, setProductStockAction } from '@/app/a/[cuenta]/productos/stock-actions';
 
 // Cambiar a mano el stock del producto, uno por medida. Al guardar se sube
 // solo a todas sus publicaciones.
@@ -96,5 +96,46 @@ export function StockReviewedButton({ accountSlug, productId }: { accountSlug: s
       <CheckCircle2 className="h-4 w-4" />
       Ya lo revisé
     </Button>
+  );
+}
+
+/** Borrar el stock de una medida que ya no está en la ficha, con una confirmación. */
+export function DropOrphanStockButton({ accountSlug, productId, stockKey, label }: { accountSlug: string; productId: string; stockKey: string; label: string }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [asking, setAsking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!asking) {
+    return (
+      <Button size="sm" variant="ghost" access="productos" onClick={() => setAsking(true)}>
+        <Trash2 className="h-4 w-4" />
+        Borrar
+      </Button>
+    );
+  }
+  return (
+    <span className="inline-flex flex-wrap items-center gap-2 text-sm">
+      ¿Borrar el stock de «{label}»?
+      <Button
+        size="sm"
+        variant="destructive"
+        access="productos"
+        pending={pending}
+        disabled={pending}
+        onClick={() =>
+          startTransition(async () => {
+            const r = await dropOrphanStockAction(accountSlug, productId, stockKey);
+            if (r.ok) router.refresh();
+            else setError(r.error);
+          })
+        }
+      >
+        Sí, borrar
+      </Button>
+      <Button size="sm" variant="ghost" disabled={pending} onClick={() => setAsking(false)}>
+        No
+      </Button>
+      {error ? <span className="text-destructive">{error}</span> : null}
+    </span>
   );
 }

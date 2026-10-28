@@ -7,7 +7,7 @@ import { formatDateTime } from '@/lib/format';
 import type { ProductStockView } from '@/lib/stock';
 import { plannedText } from '@/lib/stock-plan';
 import { cn } from '@/lib/utils/cn';
-import { StockForm, StockReviewedButton } from './StockForm';
+import { DropOrphanStockButton, StockForm, StockReviewedButton } from './StockForm';
 
 // El stock del producto: cuánto hay, qué muestra cada publicación y lo que fue
 // pasando. Un combo no tiene stock propio: sale de sus piezas.
@@ -82,10 +82,19 @@ export function ProductStockPanel({
           )}
 
           {view.orphans.length > 0 ? (
-            <p className="text-xs text-muted-foreground">
-              Hay stock de medidas que ya no están en la ficha: {view.orphans.map((o) => `${o.label || 'sin nombre'} (${o.quantity})`).join(', ')}. No lo usa ninguna
-              publicación.
-            </p>
+            <div className="space-y-1.5 text-xs text-muted-foreground">
+              <p>Hay stock de medidas que ya no están en la ficha. No lo usa ninguna publicación ni se sube al canal.</p>
+              <ul className="divide-y rounded-md border">
+                {view.orphans.map((o) => (
+                  <li key={o.key} className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5">
+                    <span>
+                      {o.label || 'Sin nombre'}: {o.quantity}
+                    </span>
+                    {canEdit ? <DropOrphanStockButton accountSlug={accountSlug} productId={view.id} stockKey={o.key} label={o.label || 'sin nombre'} /> : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
           ) : null}
         </SectionBody>
       </SectionCard>

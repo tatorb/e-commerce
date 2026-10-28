@@ -45,10 +45,10 @@ const setProductStockTool = defineTool({
       }
     }
     const r = await setProductStock(ctx.db, { accountId: account.id, productId: pub.product.id, userId: ctx.userId, stock });
-    const now = await ctx.db.productStock.findMany({ where: { productId: pub.product.id }, select: { label: true, quantity: true } });
+    const now = await ctx.db.productStock.findMany({ where: { productId: pub.product.id }, select: { key: true, quantity: true } });
     return {
       guardado: true,
-      stock: stockText(slots.map((s) => ({ label: s.label, quantity: now.find((n) => n.label === s.label)?.quantity ?? 0 }))),
+      stock: stockText(slots.map((s) => ({ label: s.label, quantity: now.find((n) => n.key === s.key)?.quantity ?? 0 }))),
       publicaciones_actualizadas: r.sync.sent,
       ...(r.sync.failed.length > 0 ? { no_se_pudo_subir: r.sync.failed.map((f) => ({ publicacion: f.title, motivo: f.error })) } : {}),
     };

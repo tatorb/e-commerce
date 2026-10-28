@@ -4,6 +4,7 @@ import { parseMedia, photoKey, withVariants, type PhotoRef } from '@/domain/medi
 import { addToPipeline } from '@/domain/pipeline';
 import { createPipelinePublication } from '@/domain/pipeline-publications';
 import { productInputSchema, writeProduct } from '@/domain/products';
+import { moveMeasureRefs } from '@/domain/measure-moves';
 import {
   illustrationType,
   inputProblem,
@@ -485,7 +486,7 @@ export async function addShootMeasures(db: Db, args: { accountId: string; produc
   await productIn(db, args.accountId, args.productId);
   const input = parsed(newMeasuresInput, args.input);
   return db.$transaction(async (tx) => {
-    const existing = await tx.productVariant.findMany({ where: { productId: args.productId }, orderBy: { position: 'asc' }, select: { measure: true, sku: true, position: true } });
+    const existing = await tx.productVariant.findMany({ where: { productId: args.productId }, orderBy: { position: 'asc' }, select: { id: true, measure: true, sku: true, position: true } });
     const rows = measureRows(input, existing);
     if (!rows.ok) throw new ShootError(rows.error);
     if (rows.rows.length === 0) throw new ShootError('Cargá al menos una medida.');
@@ -494,6 +495,9 @@ export async function addShootMeasures(db: Db, args: { accountId: string; produc
     await tx.productVariant.createMany({
       data: rows.rows.map((r, i) => ({ productId: args.productId, measure: r.measure, sku: r.sku || null, position: start + i })),
     });
+    // Con una sola medida, el stock no lleva medida: al sumar otra, pasa a la que ya estaba.
+    const after = await tx.productVariant.findMany({ where: { productId: args.productId }, orderBy: { position: 'asc' }, select: { id: true, measure: true, sku: true } });
+    await moveMeasureRefs(tx, args.productId, existing, after);
     // Las sin publicar suman la medida a su familia, una vez por familia.
     const unpublished = await tx.publication.findMany({
       where: { productId: args.productId, externalId: null, channelStatus: 'UNPUBLISHED' },

@@ -2,6 +2,7 @@ import type { Prisma } from '@/generated/prisma/client';
 import { parseEngine } from './engine';
 import { parseNameValueList, type NameValue } from './name-value';
 import { writeToFamily } from './family-members';
+import { moveMeasureRefs } from './measure-moves';
 
 // Contenido de una publicación y de su ficha maestra, campo por campo. Lo usan
 // las importaciones, y más adelante la lectura por API, para completar o
@@ -365,11 +366,20 @@ export async function writeContentField(
       }
       return;
     }
-    case 'measures':
+    case 'measures': {
+      const before = await tx.productVariant.findMany({ where: { productId }, orderBy: { position: 'asc' }, select: { id: true, sku: true, measure: true } });
       for (const v of value as VariantMeasure[]) {
         await tx.productVariant.updateMany({ where: { id: v.id, productId }, data: { measure: v.measure } });
       }
+      const changes = new Map((value as VariantMeasure[]).map((v) => [v.id, v.measure]));
+      await moveMeasureRefs(
+        tx,
+        productId,
+        before,
+        before.map((v) => ({ ...v, measure: changes.has(v.id) ? changes.get(v.id)! : v.measure })),
+      );
       return;
+    }
     default:
       await tx.product.update({ where: { id: productId }, data: { [field]: value as string | null } });
   }

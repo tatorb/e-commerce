@@ -4,10 +4,11 @@ import { revalidatePath } from 'next/cache';
 import { act } from '@/lib/auth/guard';
 import { prisma } from '@/lib/db';
 import { StockError } from '@/domain/stock';
-import { markStockReviewed, setProductStock } from '@/lib/stock';
+import { dropOrphanStock, markStockReviewed, setProductStock } from '@/lib/stock';
 
 // El stock del producto: cambiarlo a mano, que se sube solo a sus
-// publicaciones, y marcar como revisado lo que había para revisar.
+// publicaciones, marcar como revisado lo que había para revisar y borrar el
+// de medidas que ya no están en la ficha.
 
 type Result = { ok: true; message: string } | { ok: false; error: string };
 
@@ -31,5 +32,18 @@ export async function markStockReviewedAction(accountSlug: string, productId: st
     await markStockReviewed(prisma, { accountId: account.id, productId: String(productId) });
     revalidatePath(`/a/${accountSlug}`, 'layout');
     return { ok: true, message: 'Listo.' };
+  });
+}
+
+export async function dropOrphanStockAction(accountSlug: string, productId: string, key: string): Promise<Result> {
+  return act(accountSlug, { section: 'productos', does: 'Borró el stock de una medida que ya no está en la ficha', productId }, async ({ user, account }) => {
+    try {
+      await dropOrphanStock(prisma, { accountId: account.id, productId: String(productId), key: String(key), userId: user.id });
+      revalidatePath(`/a/${accountSlug}`, 'layout');
+      return { ok: true, message: 'Borrado.' };
+    } catch (e) {
+      if (e instanceof StockError) return { ok: false, error: e.message };
+      throw e;
+    }
   });
 }

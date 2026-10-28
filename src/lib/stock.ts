@@ -224,6 +224,36 @@ export async function setProductStock(
   return { changed, sync };
 }
 
+/**
+ * Borra el stock de una medida que ya no está en la ficha. Ninguna
+ * publicación lo usa: solo queda a la vista hasta que alguien lo borra. En el
+ * historial queda que se borró.
+ */
+export async function dropOrphanStock(db: Db, args: { accountId: string; productId: string; key: string; userId: string }): Promise<void> {
+  const product = await db.product.findFirst({
+    where: { id: args.productId, accountId: args.accountId },
+    select: { id: true, variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } } },
+  });
+  if (!product) throw new StockError('El producto no está en la cuenta.');
+  if (stockSlots(product.variants).some((s) => s.key === args.key)) throw new StockError('Esa medida está en la ficha: su stock se cambia arriba.');
+  await db.$transaction(async (tx) => {
+    const row = await tx.productStock.findUnique({ where: { productId_key: { productId: product.id, key: args.key } } });
+    if (!row) return;
+    await tx.productStock.delete({ where: { productId_key: { productId: product.id, key: args.key } } });
+    await tx.stockMovement.create({
+      data: {
+        productId: product.id,
+        key: args.key,
+        kind: 'MANUAL',
+        delta: -row.quantity,
+        after: 0,
+        userId: args.userId,
+        note: `Se borró el stock de «${row.label || 'sin nombre'}», una medida que ya no está en la ficha.`,
+      },
+    });
+  });
+}
+
 /** Ya se revisó lo que había para revisar del stock. */
 export async function markStockReviewed(db: Db, args: { accountId: string; productId: string }): Promise<void> {
   await db.product.updateMany({ where: { id: args.productId, accountId: args.accountId }, data: { stockReview: null } });

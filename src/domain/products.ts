@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { RecordSource } from '@/generated/prisma/enums';
+import { moveMeasureRefs, type MeasureRow } from './measure-moves';
 import { withEngineData } from './engine';
 import { setProductKind } from './combos';
 import { compactNameValues, nameValueSchema } from './name-value';
@@ -145,12 +146,14 @@ export async function writeProduct(tx: Tx, args: SaveArgs): Promise<{ id: string
   };
 
   let id: string;
+  let before: MeasureRow[] | null = null;
   if (productId) {
     const existing = await tx.product.findFirst({ where: { id: productId, accountId }, select: { id: true } });
     if (!existing) throw new Error('El producto no existe en esta cuenta.');
     id = existing.id;
     await tx.product.update({ where: { id }, data: fields });
     if (data.kind) await setProductKind(tx, { accountId, productId: id, kind: data.kind });
+    before = await tx.productVariant.findMany({ where: { productId: id }, orderBy: { position: 'asc' }, select: { sku: true, measure: true } });
     await tx.productVariant.deleteMany({ where: { productId: id } });
     await tx.compatibility.deleteMany({ where: { productId: id } });
     await tx.asset.deleteMany({ where: { productId: id } });
@@ -173,6 +176,8 @@ export async function writeProduct(tx: Tx, args: SaveArgs): Promise<{ id: string
       data: data.variants.map((v, position) => ({ ...v, productId: id, position })),
     });
   }
+  // Las medidas llegan enteras y sin id: la que cambió de nombre se reconoce por lo que tiene igual o por su lugar.
+  if (before) await moveMeasureRefs(tx, id, before, data.variants, { byPosition: true });
   if (data.compatibilities.length > 0) {
     await tx.compatibility.createMany({
       data: data.compatibilities.map((c, position) => ({ ...withEngineData(c), productId: id, position })),
