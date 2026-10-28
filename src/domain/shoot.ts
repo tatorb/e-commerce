@@ -26,6 +26,50 @@ export const stepInput = z.object({
   explanation: z.string().trim().max(4000, 'La explicación es muy larga.').default(''),
 });
 
+// ───────────────────────────── Producto nuevo y medidas ─────────────────────────────
+
+const optText = (max: number, tooLong: string) => z.string().trim().max(max, tooLong).default('');
+
+/** Una medida cargada desde el registro: su nombre y, si tiene, su SKU. */
+export const measureRowInput = z.object({
+  measure: optText(100, 'La medida es muy larga.'),
+  sku: optText(200, 'El SKU es muy largo.'),
+});
+
+export type MeasureRow = z.infer<typeof measureRowInput>;
+
+/** Lo básico de un producto que entra por primera vez desde el registro. El resto de la ficha se completa en Productos. */
+export const newProductInput = z.object({
+  name: z.string().trim().min(1, 'Poné el nombre del producto.').max(300, 'El nombre es muy largo.'),
+  partNumber: optText(200, 'El código es muy largo.'),
+  brand: optText(200, 'La marca es muy larga.'),
+  productType: optText(200, 'El tipo de producto es muy largo.'),
+  measures: z.array(measureRowInput).max(100, 'Son demasiadas medidas.').default([]),
+});
+
+export const newMeasuresInput = z.array(measureRowInput).max(100, 'Son demasiadas medidas.');
+
+/**
+ * Las medidas cargadas sin las líneas vacías, o el motivo por el que no
+ * sirven: cada una necesita su nombre, y no se repiten ni entre ellas ni con
+ * las que ya tiene el producto. El SKU repetido en otro producto se mira con la base.
+ */
+export function measureRows(rows: MeasureRow[], existing: { measure: string | null; sku: string | null }[] = []): { ok: true; rows: MeasureRow[] } | { ok: false; error: string } {
+  const filled = rows.filter((r) => r.measure || r.sku);
+  if (filled.some((r) => !r.measure)) return { ok: false, error: 'Cada medida necesita su nombre, por ejemplo STD o 0.50.' };
+  const seen = new Set(existing.map((e) => e.measure?.trim().toUpperCase()).filter(Boolean));
+  const skus = new Set(existing.map((e) => e.sku?.trim().toUpperCase()).filter(Boolean));
+  for (const r of filled) {
+    const m = r.measure.toUpperCase();
+    if (seen.has(m)) return { ok: false, error: `La medida ${r.measure} ya está.` };
+    seen.add(m);
+    const sku = r.sku.toUpperCase();
+    if (sku && skus.has(sku)) return { ok: false, error: `El SKU ${r.sku} ya está en otra medida.` };
+    if (sku) skus.add(sku);
+  }
+  return { ok: true, rows: filled };
+}
+
 /** El primer motivo por el que no sirve lo que se cargó. */
 export function inputProblem(r: { success: boolean; error?: z.ZodError }): string | null {
   return r.success ? null : (r.error?.issues[0]?.message ?? 'Revisá los datos.');

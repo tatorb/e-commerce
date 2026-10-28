@@ -6,7 +6,17 @@ import { prisma } from '@/lib/db';
 import { act } from '@/lib/auth/guard';
 import { publicAppUrl } from '@/lib/public-url';
 import { PipelineError } from '@/domain/pipeline';
-import { finishShotPhoto, finishShotVideo, markShotCheck, ShootError, shootToPipeline, startShotUpload, undoShotCheck } from '@/lib/shoot';
+import {
+  addShootMeasures,
+  createShootProduct,
+  finishShotPhoto,
+  finishShotVideo,
+  markShotCheck,
+  ShootError,
+  shootToPipeline,
+  startShotUpload,
+  undoShotCheck,
+} from '@/lib/shoot';
 import { PhotoError } from '@/lib/photos';
 import { storageError } from '@/lib/stored-files';
 import { VideoError } from '@/lib/videos';
@@ -123,5 +133,20 @@ export async function shootToPipelineAction(
   const productId = String(args?.productId ?? '');
   return act(accountSlug, { section: 'captura', does: 'Agregó al pipeline desde Registro de productos', productId }, ({ user, account }) =>
     guard(accountSlug, () => shootToPipeline(prisma, { accountId: account.id, productId, storeId: idOrNull(args?.storeId), userId: user.id })),
+  );
+}
+
+/** Crea un producto que entra por primera vez, con lo básico, para empezar a registrarlo. */
+export async function createShootProductAction(accountSlug: string, input: unknown): Promise<Result<{ id: string }>> {
+  return act(accountSlug, { section: 'captura', does: 'Creó un producto desde Registro de productos' }, ({ account }) =>
+    guard(accountSlug, async () => ({ id: await createShootProduct(prisma, { accountId: account.id, input }) })),
+  );
+}
+
+/** Suma medidas a un producto desde el registro. */
+export async function addShootMeasuresAction(accountSlug: string, productId: string, input: unknown): Promise<Result<{ added: number }>> {
+  const id = String(productId ?? '');
+  return act(accountSlug, { section: 'captura', does: 'Agregó medidas desde Registro de productos', productId: id }, ({ user, account }) =>
+    guard(accountSlug, async () => ({ added: await addShootMeasures(prisma, { accountId: account.id, productId: id, input, userId: user.id }) })),
   );
 }

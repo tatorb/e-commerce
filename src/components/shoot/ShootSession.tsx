@@ -523,7 +523,7 @@ export function ShootSession({
             En esta tanda: {uploaded.filter((u) => u.kind === 'PHOTO').length} fotos y {uploaded.filter((u) => u.kind === 'VIDEO').length} videos.
           </p>
         ) : null}
-        <EndLinks base={base} productId={product.id} hasMeasures={measureText !== null} />
+        <EndLinks base={base} productId={product.id} />
         {fileInputs}
       </div>
     );
@@ -571,7 +571,7 @@ export function ShootSession({
       <div className="mx-auto w-full max-w-xl space-y-4">
         {header}
         <p className="rounded-2xl border bg-card shadow-card p-4 text-sm text-muted-foreground">Este protocolo todavía no tiene pasos. Elegí otro o seguí sin protocolo.</p>
-        <EndLinks base={base} productId={product.id} hasMeasures={measureText !== null} />
+        <EndLinks base={base} productId={product.id} />
       </div>
     );
   }
@@ -626,7 +626,7 @@ export function ShootSession({
             })}
           </ul>
         </section>
-        <EndLinks base={base} productId={product.id} hasMeasures={measureText !== null} />
+        <EndLinks base={base} productId={product.id} />
       </div>
     );
   }
@@ -723,14 +723,12 @@ function UploadBar({ upload, productId }: { upload: ShotUpload; productId: strin
   );
 }
 
-function EndLinks({ base, productId, hasMeasures }: { base: string; productId: string; hasMeasures: boolean }) {
+function EndLinks({ base, productId }: { base: string; productId: string }) {
   return (
     <div className="grid gap-2 sm:grid-cols-2">
-      {hasMeasures ? (
-        <Button asChild variant="outline" size="lg" className="px-4">
-          <Link href={`${base}?producto=${productId}`}>Otra medida de este producto</Link>
-        </Button>
-      ) : null}
+      <Button asChild variant="outline" size="lg" className="px-4">
+        <Link href={`${base}?producto=${productId}`}>Otra medida de este producto</Link>
+      </Button>
       <Button asChild variant="outline" size="lg" className="px-4">
         <Link href={base}>Otro producto</Link>
       </Button>

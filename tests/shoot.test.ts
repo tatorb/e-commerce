@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { illustrationType, photoPlacement, protocolInput, qualityOf, shotsPerStep, stepInput, videoMarks } from '@/domain/shoot';
+import { illustrationType, measureRows, newProductInput, photoPlacement, protocolInput, qualityOf, shotsPerStep, stepInput, videoMarks } from '@/domain/shoot';
 
 // Registro de productos sin la base: la calidad, los pasos hechos y adónde va cada foto.
 
@@ -76,5 +76,26 @@ describe('adónde va cada foto', () => {
     expect(videoMarks(both, 'medida:std')).toEqual(['medida:std']);
     expect(videoMarks(both, null)).toEqual([]);
     expect(videoMarks({ measures: [], sole: 'medida:std' }, 'medida:std')).toEqual([]);
+  });
+});
+
+describe('producto nuevo y medidas desde el registro', () => {
+  it('el nombre es lo único obligatorio', () => {
+    expect(newProductInput.safeParse({ name: ' ' }).success).toBe(false);
+    expect(newProductInput.parse({ name: ' Bujía de encendido ' })).toEqual({ name: 'Bujía de encendido', partNumber: '', brand: '', productType: '', measures: [] });
+  });
+
+  it('cada medida necesita su nombre y no se repite, ni con las que ya tiene', () => {
+    expect(measureRows([{ measure: 'STD', sku: 'BJ-1' }, { measure: '', sku: '' }, { measure: '0.50', sku: '' }])).toEqual({
+      ok: true,
+      rows: [
+        { measure: 'STD', sku: 'BJ-1' },
+        { measure: '0.50', sku: '' },
+      ],
+    });
+    expect(measureRows([{ measure: '', sku: 'BJ-1' }])).toEqual({ ok: false, error: 'Cada medida necesita su nombre, por ejemplo STD o 0.50.' });
+    expect(measureRows([{ measure: 'std', sku: '' }, { measure: 'STD', sku: '' }])).toEqual({ ok: false, error: 'La medida STD ya está.' });
+    expect(measureRows([{ measure: '0.50', sku: 'bj-1' }], [{ measure: 'STD', sku: 'BJ-1' }])).toEqual({ ok: false, error: 'El SKU bj-1 ya está en otra medida.' });
+    expect(measureRows([{ measure: 'std', sku: '' }], [{ measure: 'STD', sku: null }]).ok).toBe(false);
   });
 });

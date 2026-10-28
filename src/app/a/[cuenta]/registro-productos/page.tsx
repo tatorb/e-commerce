@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { PickLink } from '@/components/shoot/PickLink';
+import { AddMeasuresForm, NewProductForm } from '@/components/shoot/ProductForms';
 import { ProtocolPicker } from '@/components/shoot/ProtocolPicker';
 import { ShootSession } from '@/components/shoot/ShootSession';
 import { ShotThumb, type SessionShot } from '@/components/shoot/ShotViewer';
@@ -95,6 +96,8 @@ export default async function ShootPage({ params, searchParams }: { params: Prom
               {q.trim().length >= 2 && products.length === 0 ? <p className="text-sm text-muted-foreground">No encontramos productos con «{q.trim()}».</p> : null}
               {q.trim().length < 2 && products.length > 0 ? <p className="text-xs font-medium text-muted-foreground">Los últimos registrados</p> : null}
               <ProductList products={products} base={base} />
+              {/* Si no está, se crea acá con lo básico, con lo buscado ya cargado. */}
+              <NewProductForm key={q} accountSlug={account.slug} base={base} search={q.trim()} startOpen={q.trim().length >= 2 && products.length === 0} />
             </section>
           </div>
         </PageBody>
@@ -102,16 +105,18 @@ export default async function ShootPage({ params, searchParams }: { params: Prom
     );
   }
 
-  const needsMeasure = plan.measures.length >= 2;
+  // La medida se elige siempre, aunque el producto tenga una sola o ninguna. Todas: con varias, lo que
+  // sirve para todas; sin medidas cargadas, sin medida.
+  const measures = plan.measures;
   const medida = one(sp.medida);
-  const measure = needsMeasure ? (plan.measures.find((m) => m.key === medida) ?? null) : null;
-  const measureChosen = !needsMeasure || medida === ALL || measure !== null;
-  const measureText = needsMeasure ? (measure ? `Medida ${measure.label}` : 'Todas las medidas') : null;
+  const measure = measures.find((m) => m.key === medida) ?? null;
+  const measureChosen = medida === ALL || measure !== null;
+  const measureText = measures.length === 0 ? null : measure ? `${measure.named ? 'Medida' : 'SKU'} ${measure.label}` : 'Todas las medidas';
   const protocolo = one(sp.protocolo);
   const protocol = plan.protocols.find((p) => p.id === protocolo) ?? null;
   const protocolChosen = protocolo === NONE || protocol !== null;
   const withProduct = `${base}?producto=${plan.product.id}`;
-  const withMeasure = `${withProduct}${needsMeasure ? `&medida=${encodeURIComponent(measure?.key ?? ALL)}` : ''}`;
+  const withMeasure = `${withProduct}&medida=${encodeURIComponent(measure?.key ?? ALL)}`;
   // El producto en el pipeline: para el interruptor al elegir el protocolo y la marca durante el registro.
   const inPipeline = measureChosen ? await shootPipelineState(prisma, account.id, plan.product.id) : null;
   const pipelineHref = inPipeline?.openId && can(user.access, 'pipeline', 'read') ? `/a/${account.slug}/pipeline/${inPipeline.openId}` : null;
@@ -135,30 +140,51 @@ export default async function ShootPage({ params, searchParams }: { params: Prom
             {!measureChosen ? (
               <section className="space-y-3 rounded-2xl border bg-card shadow-card p-4">
                 <h2 className="text-base font-semibold">2. Elegí la medida</h2>
-                <p className="text-sm text-muted-foreground">Lo que saques queda marcado para esa medida en las publicaciones. Si sirve para todas, elegí Todas las medidas.</p>
-                <ul className="grid gap-2 sm:grid-cols-2">
-                  {plan.measures.map((m) => (
+                <p className="text-sm text-muted-foreground">
+                  {measures.length >= 2
+                    ? 'Lo que saques queda marcado para esa medida en las publicaciones. Si sirve para todas, elegí Todas las medidas.'
+                    : measures.length === 1
+                      ? 'Lo que saques queda marcado para esa medida. Si el producto tiene otra, agregala abajo.'
+                      : 'Este producto todavía no tiene medidas cargadas. Podés seguir sin medida o agregar las que tenga.'}
+                </p>
+                <ul className={measures.length >= 2 ? 'grid gap-2 sm:grid-cols-2' : 'grid gap-2'}>
+                  {measures.map((m) => (
                     <li key={m.key}>
-                      <PickLink href={`${withProduct}&medida=${encodeURIComponent(m.key)}`} title={m.label} note={countText(plan.shots.filter((s) => s.variantKey === m.key))} />
+                      <PickLink
+                        href={`${withProduct}&medida=${encodeURIComponent(m.key)}`}
+                        title={m.named ? m.label : `SKU ${m.label}`}
+                        description={m.named ? null : 'Sin nombre de medida'}
+                        note={countText(plan.shots.filter((s) => s.variantKey === m.key))}
+                      />
                     </li>
                   ))}
-                  <li className="sm:col-span-2">
-                    <PickLink href={`${withProduct}&medida=${ALL}`} title="Todas las medidas" note={countText(plan.shots.filter((s) => s.variantKey === null))} />
-                  </li>
+                  {measures.length !== 1 ? (
+                    <li className="sm:col-span-2">
+                      <PickLink
+                        href={`${withProduct}&medida=${ALL}`}
+                        title={measures.length === 0 ? 'Sin medida' : 'Todas las medidas'}
+                        note={countText(plan.shots.filter((s) => s.variantKey === null))}
+                      />
+                    </li>
+                  ) : null}
                 </ul>
+                <AddMeasuresForm
+                  accountSlug={account.slug}
+                  productId={plan.product.id}
+                  label="Agregar una medida"
+                  hint={measures.length === 0 ? 'Si ya vendía una medida, cargala también, por ejemplo STD.' : undefined}
+                />
               </section>
             ) : (
               <section className="space-y-3 rounded-2xl border bg-card shadow-card p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h2 className="text-base font-semibold">{needsMeasure ? '3' : '2'}. Elegí el protocolo</h2>
-                  {measureText ? (
-                    <span className="inline-flex items-center gap-2 text-sm">
-                      <Badge variant="secondary">{measureText}</Badge>
-                      <Link href={withProduct} className="text-xs font-medium text-primary underline-offset-4 hover:underline">
-                        Cambiar
-                      </Link>
-                    </span>
-                  ) : null}
+                  <h2 className="text-base font-semibold">3. Elegí el protocolo</h2>
+                  <span className="inline-flex items-center gap-2 text-sm">
+                    <Badge variant="secondary">{measureText ?? 'Sin medida'}</Badge>
+                    <Link href={withProduct} className="text-xs font-medium text-primary underline-offset-4 hover:underline">
+                      Cambiar
+                    </Link>
+                  </span>
                 </div>
                 {plan.protocols.length === 0 ? <p className="text-sm text-muted-foreground">Todavía no hay protocolos armados. Podés seguir sin protocolo.</p> : null}
                 <ProtocolPicker
@@ -168,7 +194,7 @@ export default async function ShootPage({ params, searchParams }: { params: Prom
                     state: inPipeline?.state ?? 'none',
                     href: pipelineHref,
                     stores: stores.length > 1 ? stores.map((st) => ({ id: st.id, label: `${st.name} · ${st.channel.name}` })) : [],
-                    byMeasure: plan.measures.length >= 2,
+                    byMeasure: measures.length >= 2,
                   }}
                   options={[
                     ...plan.protocols.map((p) => ({

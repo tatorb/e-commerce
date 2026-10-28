@@ -3,9 +3,13 @@ import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { parseMedia, photoKey, withVariants, type PhotoRef } from '@/domain/media';
 import { addToPipeline } from '@/domain/pipeline';
 import { createPipelinePublication } from '@/domain/pipeline-publications';
+import { productInputSchema, writeProduct } from '@/domain/products';
 import {
   illustrationType,
   inputProblem,
+  measureRows,
+  newMeasuresInput,
+  newProductInput,
   photoPlacement,
   protocolInput,
   SHOOT_KIND_TEXT,
@@ -303,8 +307,8 @@ export async function shootPlan(db: Db, accountId: string, productId: string) {
   ].sort((a, b) => b.at.localeCompare(a.at));
   return {
     product: pickOf(p),
-    // Con una sola medida no hay nada que elegir.
-    measures: measures.length >= 2 ? measures.map((m) => ({ key: m.key, label: m.label })) : [],
+    // Todas, aunque sea una sola: la medida siempre se elige. Sin nombre, se nombra por su SKU.
+    measures: measures.map((m) => ({ key: m.key, label: m.label, named: m.measure !== null })),
     protocols,
     shots,
   };
@@ -427,6 +431,84 @@ export async function undoShotCheck(db: Db, args: { accountId: string; productId
   await productIn(db, args.accountId, args.productId);
   await stepIn(db, args.accountId, args.stepId);
   await db.shootCheck.deleteMany({ where: { productId: args.productId, shootStepId: args.stepId, variantKey: args.variantKey } });
+}
+
+// ───────────────────────────── Producto nuevo y medidas ─────────────────────────────
+
+/** Que ningún SKU nuevo sea ya de otro producto de la cuenta: sería el mismo producto cargado dos veces. */
+async function skusFree(tx: Prisma.TransactionClient, accountId: string, skus: string[], productId: string | null) {
+  const wanted = skus.map((s) => s.trim()).filter(Boolean);
+  if (wanted.length === 0) return;
+  const taken = await tx.productVariant.findFirst({
+    where: { sku: { in: wanted, mode: 'insensitive' }, product: { accountId, ...(productId ? { id: { not: productId } } : {}) } },
+    select: { sku: true, product: { select: { name: true } } },
+  });
+  if (taken) throw new ShootError(`El SKU ${taken.sku} ya es de «${taken.product.name}». Buscá ese producto.`);
+}
+
+/**
+ * Crea un producto que entra por primera vez, con lo básico: nombre, código,
+ * marca, tipo y sus medidas. El resto de la ficha se completa en Productos.
+ */
+export async function createShootProduct(db: Db, args: { accountId: string; input: unknown }): Promise<string> {
+  const data = parsed(newProductInput, args.input);
+  const rows = measureRows(data.measures);
+  if (!rows.ok) throw new ShootError(rows.error);
+  const product = productInputSchema.parse({
+    name: data.name,
+    brand: data.brand,
+    partNumber: data.partNumber,
+    productType: data.productType,
+    engineSystem: '',
+    line: '',
+    origin: '',
+    warranty: '',
+    kitContents: '',
+    notes: '',
+    specs: [],
+    variants: rows.rows.map((r) => ({ measure: r.measure, sku: r.sku })),
+    compatibilities: [],
+    assets: [],
+  });
+  return db.$transaction(async (tx) => {
+    await skusFree(tx, args.accountId, rows.rows.map((r) => r.sku), null);
+    return (await writeProduct(tx, { accountId: args.accountId, productId: null, data: product })).id;
+  });
+}
+
+/**
+ * Suma medidas a un producto, al final. Si tiene publicaciones sin publicar,
+ * cada medida nueva se suma a su familia con su publicación; las publicadas
+ * no se tocan, sus medidas llegan del canal. Devuelve cuántas sumó.
+ */
+export async function addShootMeasures(db: Db, args: { accountId: string; productId: string; input: unknown; userId: string | null }): Promise<number> {
+  await productIn(db, args.accountId, args.productId);
+  const input = parsed(newMeasuresInput, args.input);
+  return db.$transaction(async (tx) => {
+    const existing = await tx.productVariant.findMany({ where: { productId: args.productId }, orderBy: { position: 'asc' }, select: { measure: true, sku: true, position: true } });
+    const rows = measureRows(input, existing);
+    if (!rows.ok) throw new ShootError(rows.error);
+    if (rows.rows.length === 0) throw new ShootError('Cargá al menos una medida.');
+    await skusFree(tx, args.accountId, rows.rows.map((r) => r.sku), args.productId);
+    const start = existing.reduce((max, v) => Math.max(max, v.position + 1), 0);
+    await tx.productVariant.createMany({
+      data: rows.rows.map((r, i) => ({ productId: args.productId, measure: r.measure, sku: r.sku || null, position: start + i })),
+    });
+    // Las sin publicar suman la medida a su familia, una vez por familia.
+    const unpublished = await tx.publication.findMany({
+      where: { productId: args.productId, externalId: null, channelStatus: 'UNPUBLISHED' },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, familyId: true },
+    });
+    const done = new Set<string>();
+    for (const p of unpublished) {
+      const group = p.familyId ?? p.id;
+      if (done.has(group)) continue;
+      done.add(group);
+      await familyByMeasure(tx, { publicationId: p.id, userId: args.userId });
+    }
+    return rows.rows.length;
+  });
 }
 
 // ───────────────────────────── Al pipeline ─────────────────────────────

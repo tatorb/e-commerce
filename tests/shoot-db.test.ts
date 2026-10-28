@@ -4,9 +4,11 @@ import { PrismaClient } from '@/generated/prisma/client';
 import { completeDriveAuthorization, saveDriveCredentials, startDriveAuthorization } from '@/lib/drive';
 import { setAsIs } from '@/lib/photo-queue';
 import {
+  addShootMeasures,
   addStep,
   archiveProtocol,
   createProtocol,
+  createShootProduct,
   finishShotPhoto,
   finishShotVideo,
   listProtocols,
@@ -26,6 +28,7 @@ import {
   undoShotCheck,
   updateStep,
 } from '@/lib/shoot';
+import { variantKey } from '@/domain/media';
 import { shotsPerStep } from '@/domain/shoot';
 import { startFakeGoogle, type FakeGoogle } from './fake-google';
 
@@ -352,5 +355,45 @@ describe.skipIf(!url)('Registro de productos', () => {
     await expect(shootToPipeline(db, { accountId, productId: second, storeId: otherStore.id, userId })).rejects.toThrow('Elegí una tienda de esta cuenta.');
     await expect(shootToPipeline(db, { accountId: otherAccountId, productId: second, storeId: null, userId })).rejects.toThrow('no es de esta cuenta');
     expect(await db.publication.count({ where: { productId: second } })).toBe(0);
+  });
+
+  it('crea un producto con lo básico y le suma medidas; las sin publicar las suman a su familia', async () => {
+    const id = await createShootProduct(db, {
+      accountId,
+      input: { name: 'Bujía de prueba', partNumber: 'BJ-9001', brand: 'Marca X', productType: 'Bujía', measures: [{ measure: 'Corta', sku: 'BJ-9001-C' }, { measure: '', sku: '' }] },
+    });
+    const made = await db.product.findUniqueOrThrow({ where: { id }, include: { variants: { orderBy: { position: 'asc' } } } });
+    expect(made).toMatchObject({ accountId, name: 'Bujía de prueba', partNumber: 'BJ-9001', brand: 'Marca X', productType: 'Bujía', kind: 'INDIVIDUAL' });
+    expect(made.variants.map((v) => [v.measure, v.sku])).toEqual([['Corta', 'BJ-9001-C']]);
+    // Un SKU que ya es de otro producto: sería el mismo cargado dos veces.
+    await expect(createShootProduct(db, { accountId, input: { name: 'Otra', measures: [{ measure: 'STD', sku: 'ar-1-00' }] } })).rejects.toThrow('El SKU AR-1-00 ya es de «Aros de prueba»');
+    await expect(createShootProduct(db, { accountId, input: { name: '' } })).rejects.toThrow('Poné el nombre del producto.');
+
+    // Entra al pipeline sin publicar, con una sola medida; después se le suma otra y se suma a su familia.
+    await shootToPipeline(db, { accountId, productId: id, storeId: null, userId });
+    expect(await db.publication.count({ where: { productId: id } })).toBe(1);
+    expect(await addShootMeasures(db, { accountId, productId: id, input: [{ measure: 'Larga', sku: 'BJ-9001-L' }], userId })).toBe(1);
+    const variants = await db.productVariant.findMany({ where: { productId: id }, orderBy: { position: 'asc' } });
+    expect(variants.map((v) => [v.measure, v.position])).toEqual([
+      ['Corta', 0],
+      ['Larga', 1],
+    ]);
+    const pubs = await db.publication.findMany({ where: { productId: id }, select: { familyId: true, variantKey: true, pipelineStatus: true } });
+    expect(pubs).toHaveLength(2);
+    expect(new Set(pubs.map((p) => p.familyId)).size).toBe(1);
+    // Cada publicación vende una medida distinta.
+    expect(pubs.map((p) => p.variantKey).sort()).toEqual(variants.map((v) => variantKey(v)).sort());
+    expect(pubs.every((p) => p.pipelineStatus === 'IN_PIPELINE')).toBe(true);
+
+    // Lo que no se puede: repetir una medida, una línea sin nombre, nada, ni el producto de otra cuenta.
+    await expect(addShootMeasures(db, { accountId, productId: id, input: [{ measure: 'larga', sku: '' }], userId })).rejects.toThrow('La medida larga ya está.');
+    await expect(addShootMeasures(db, { accountId, productId: id, input: [{ measure: '', sku: 'X' }], userId })).rejects.toThrow('Cada medida necesita su nombre');
+    await expect(addShootMeasures(db, { accountId, productId: id, input: [{ measure: '', sku: '' }], userId })).rejects.toThrow('Cargá al menos una medida.');
+    await expect(addShootMeasures(db, { accountId: otherAccountId, productId: id, input: [{ measure: 'XL', sku: '' }], userId })).rejects.toThrow('no es de esta cuenta');
+
+    // A un producto publicado se le suma la medida, sin crear publicaciones.
+    const before = await db.publication.count({ where: { productId } });
+    expect(await addShootMeasures(db, { accountId, productId, input: [{ measure: '1.00', sku: 'AR-1-100' }], userId })).toBe(1);
+    expect(await db.publication.count({ where: { productId } })).toBe(before);
   });
 });
