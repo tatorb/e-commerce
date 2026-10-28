@@ -41,6 +41,8 @@ export async function Sidebar({
   // siempre: cada uno ve las suyas.
   const sees = (section: Section) => accountHome !== null && (isOwnSection(section) || can(user.access, section, 'read'));
   const settings = SETTINGS_SECTIONS.some(sees);
+  // Lo de todos los días: registrar productos, responder preguntas y las tareas.
+  const daily = (['captura', 'preguntas', 'tareas'] as const).some(sees);
   const collapsed = (await cookies()).get('sidebar_collapsed')?.value === '1';
 
   return (
@@ -83,24 +85,9 @@ export async function Sidebar({
               <Package className="h-4 w-4" />
             </NavLink>
           ) : null}
-          {sees('captura') ? (
-            <NavLink href={`${accountHome}/registro-productos`} label="Registro de productos">
-              <Camera className="h-4 w-4" />
-            </NavLink>
-          ) : null}
           {sees('publicaciones') ? (
             <NavLink href={`${accountHome}/publicaciones`} label="Publicaciones">
               <ListChecks className="h-4 w-4" />
-            </NavLink>
-          ) : null}
-          {sees('preguntas') ? (
-            <NavLink href={`${accountHome}/preguntas`} label="Preguntas" badge={questions}>
-              <MessageCircleQuestion className="h-4 w-4" />
-            </NavLink>
-          ) : null}
-          {sees('tareas') ? (
-            <NavLink href={`${accountHome}/tareas`} label="Tareas" badge={tasks}>
-              <ListTodo className="h-4 w-4" />
             </NavLink>
           ) : null}
           {sees('importar') ? (
@@ -116,6 +103,26 @@ export async function Sidebar({
           {sees('registro') ? (
             <NavLink href={`${accountHome}/registro`} label="Registro">
               <History className="h-4 w-4" />
+            </NavLink>
+          ) : null}
+          {daily ? (
+            <p className="mt-3 mb-1 px-3 text-[10px] uppercase tracking-wide text-muted-foreground font-medium md:group-data-[collapsed=true]:hidden">
+              Día a día
+            </p>
+          ) : null}
+          {sees('captura') ? (
+            <NavLink href={`${accountHome}/registro-productos`} label="Registro de productos">
+              <Camera className="h-4 w-4" />
+            </NavLink>
+          ) : null}
+          {sees('preguntas') ? (
+            <NavLink href={`${accountHome}/preguntas`} label="Preguntas" badge={questions}>
+              <MessageCircleQuestion className="h-4 w-4" />
+            </NavLink>
+          ) : null}
+          {sees('tareas') ? (
+            <NavLink href={`${accountHome}/tareas`} label="Tareas" badge={tasks}>
+              <ListTodo className="h-4 w-4" />
             </NavLink>
           ) : null}
           {settings ? (
