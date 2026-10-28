@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import type * as React from 'react';
 import { Thumb } from '@/components/ui/thumb';
 import { cn } from '@/lib/utils/cn';
@@ -57,5 +58,25 @@ export function HeroStat({ icon, children }: { icon?: React.ReactNode; children:
       {icon ? <span className="text-muted-foreground [&_svg]:h-4 [&_svg]:w-4" aria-hidden>{icon}</span> : null}
       {children}
     </span>
+  );
+}
+
+/** Un link de la fila de la ficha, con su ícono. Los de afuera abren otra pestaña. */
+export function HeroLink({ href, icon, external, children }: { href: string; icon?: React.ReactNode; external?: boolean; children: React.ReactNode }) {
+  const cls = 'inline-flex items-center gap-1.5 font-medium text-primary underline-offset-4 hover:underline';
+  const inner = (
+    <>
+      {icon ? <span className="[&_svg]:h-4 [&_svg]:w-4" aria-hidden>{icon}</span> : null}
+      {children}
+    </>
+  );
+  return external ? (
+    <a href={href} target="_blank" rel="noreferrer" className={cls}>
+      {inner}
+    </a>
+  ) : (
+    <Link href={href} className={cls}>
+      {inner}
+    </Link>
   );
 }

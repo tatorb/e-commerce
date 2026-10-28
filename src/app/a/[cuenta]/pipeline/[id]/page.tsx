@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
-import { AppWindow, ExternalLink, Lock, Package, Tag } from 'lucide-react';
+import { AppWindow, ExternalLink, Lock, Package, Ruler, Tag } from 'lucide-react';
+import { EntityHero, HeroLink } from '@/components/navigation/EntityHero';
+import { InfoStrip } from '@/components/ui/info-strip';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Breadcrumb } from '@/components/navigation/Breadcrumb';
@@ -18,7 +20,8 @@ import { FamilyMembersRow } from '@/components/families/FamilyMembersRow';
 import { FamilyPublishCard, type FamilyPublishRow } from '@/components/families/FamilyPublishCard';
 import { listScoredPublications } from '@/lib/queries/scoring';
 import { familyLeadId, familyOf } from '@/lib/families';
-import { loadPublicationFacts } from '@/lib/publication-facts';
+import { loadPublicationFacts, measuresText } from '@/lib/publication-facts';
+import { firstPhoto, productCovers } from '@/lib/queries/products';
 import { PipelineHistory } from '@/components/pipeline/PipelineHistory';
 import { AddToPipelineButton } from '@/components/pipeline/AddToPipelineButton';
 import { PublicationCodeCard } from '@/components/pipeline/PublicationCodeCard';
@@ -126,7 +129,7 @@ export default async function PipelineStepPage({
   // Lo que usa el paso que se mira, pedido todo junto: con la base lejos, cada
   // consulta en fila suma una ida y vuelta.
   const canTask = can(user.access, 'tareas', 'write');
-  const [ctx, info, images, channel, faces, media, create, videos, description, qa, price, decision, tasks, people, stockPlans, factsOf, family] = await Promise.all([
+  const [ctx, info, images, channel, faces, media, create, videos, description, qa, price, decision, tasks, people, stockPlans, factsOf, family, cover] = await Promise.all([
     // Información y Título usan la ficha, la competencia y lo leído del buscador.
     viewing === 'INFO' || viewing === 'TITLE' ? loadTitleContext(prisma, account.id, pub.id) : null,
     viewing === 'INFO'
@@ -181,6 +184,11 @@ export default async function PipelineStepPage({
     loadPublicationFacts(prisma, [pub.id]),
     // Las medidas de su familia, que se trabajan juntas.
     familyOf(prisma, pub.id),
+    // La foto de la ficha de arriba: la primera en el canal o, si no tiene, la del producto.
+    Promise.all([
+      prisma.channelCopy.findUnique({ where: { publicationId: pub.id }, select: { photos: true } }),
+      productCovers([pub.productId]),
+    ]).then(([copy, covers]) => firstPhoto(copy?.photos) ?? covers.get(pub.productId) ?? null),
   ]);
   const facts = factsOf.get(pub.id) ?? null;
   const auto = ctx && viewing === 'TITLE' ? await autoAvailable(prisma, ctx.channel, ctx.storeId) : null;
@@ -204,26 +212,52 @@ export default async function PipelineStepPage({
   return (
     <>
       <PageHeader staticOnMobile>
-        <div className="space-y-2">
+        <div className="space-y-3">
           <Breadcrumb items={[{ label: account.name, href: boardHref }, { label: 'Pipeline', href: boardHref }, { label: titleOrUntitled(pub.title) }]} />
-          <div className="space-y-1.5">
-            <EntityLabel kind="publication" channelName={pub.channelName} accent={pub.channelAccent} />
-            <h1 className="flex items-start gap-2 text-2xl font-bold tracking-tight">
-              <span className={pub.title ? undefined : 'text-muted-foreground'}>{titleOrUntitled(pub.title)}</span>
-              {lock ? (
-                <span title={lock} aria-label={lock} className="mt-2 shrink-0 text-amber-700">
-                  <Lock className="h-4 w-4" />
-                </span>
-              ) : null}
-            </h1>
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-muted-foreground">
-              <span>{codeOrUnpublished(pub.externalId)}</span>
-              <KindBadge kind={pub.kind} />
-              <ScoreBadge score={pub.score} />
-              <span>{pub.sales === null ? 'Ventas sin dato' : `${plural(pub.sales, 'venta')} en 90 días`}</span>
-              <PipelineBadge state={pub} />
-            </div>
-            {facts ? <PublicationFactsRow facts={facts} /> : null}
+          <EntityHero
+            photo={{ src: cover, alt: titleOrUntitled(pub.title) }}
+            label={<EntityLabel kind="publication" channelName={pub.channelName} accent={pub.channelAccent} />}
+            title={
+              <span className="flex items-start gap-2">
+                <span className={pub.title ? undefined : 'text-muted-foreground'}>{titleOrUntitled(pub.title)}</span>
+                {lock ? (
+                  <span title={lock} aria-label={lock} className="mt-1 shrink-0 text-amber-700">
+                    <Lock className="h-4 w-4" />
+                  </span>
+                ) : null}
+              </span>
+            }
+            meta={`${codeOrUnpublished(pub.externalId)} · ${pub.sales === null ? 'Ventas sin dato' : `${plural(pub.sales, 'venta')} en 90 días`}`}
+            facts={
+              <div className="flex flex-wrap items-center gap-1.5">
+                <PipelineBadge state={pub} />
+                <ScoreBadge score={pub.score} />
+                <KindBadge kind={pub.kind} />
+                {facts ? <PublicationFactsRow facts={facts} hideMeasures className="contents" /> : null}
+              </div>
+            }
+            stats={
+              <>
+                <HeroLink href={`/a/${account.slug}/productos/${pub.productId}`} icon={<Package />}>
+                  Producto
+                </HeroLink>
+                {pub.url ? (
+                  <HeroLink href={pub.url} icon={<ExternalLink />} external>
+                    Ver en {pub.channelName}
+                  </HeroLink>
+                ) : null}
+                {can(user.access, 'publicaciones', 'read') ? (
+                  <HeroLink href={`/a/${account.slug}/publicaciones/${pub.id}`} icon={<Tag />}>
+                    Fuera del pipeline
+                  </HeroLink>
+                ) : null}
+                <HeroLink href={viewHref} icon={<AppWindow />} external>
+                  Otra pestaña
+                </HeroLink>
+              </>
+            }
+          >
+            {facts && facts.measures.kind !== 'none' ? <InfoStrip icon={<Ruler />}>{measuresText(facts.measures)}</InfoStrip> : null}
             {family ? (
               <FamilyMembersRow
                 members={family.members}
@@ -232,45 +266,7 @@ export default async function PipelineStepPage({
                 linkToApp={can(user.access, 'publicaciones', 'read')}
               />
             ) : null}
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-              <Link
-                href={`/a/${account.slug}/productos/${pub.productId}`}
-                className="inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline"
-              >
-                <Package className="h-3.5 w-3.5" />
-                Producto: {pub.productName}
-              </Link>
-              {pub.url ? (
-                <a
-                  href={pub.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline"
-                >
-                  <ExternalLink className="h-3.5 w-3.5" />
-                  Ver en {pub.channelName}
-                </a>
-              ) : null}
-              {can(user.access, 'publicaciones', 'read') ? (
-                <Link
-                  href={`/a/${account.slug}/publicaciones/${pub.id}`}
-                  className="inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline"
-                >
-                  <Tag className="h-3.5 w-3.5" />
-                  Ver la publicación fuera del pipeline
-                </Link>
-              ) : null}
-              <a
-                href={viewHref}
-                target="_blank"
-                rel="noopener"
-                className="inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline"
-              >
-                <AppWindow className="h-3.5 w-3.5" />
-                Abrir en otra pestaña
-              </a>
-            </div>
-          </div>
+          </EntityHero>
         </div>
         <StepLine
           current={pub.pipelineStep}
