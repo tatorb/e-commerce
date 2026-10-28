@@ -1,7 +1,8 @@
 // Subida de un archivo al Drive desde el navegador, de a partes. Primero prueba
 // hablar directo con Google; si el navegador no puede, manda las partes por la
 // app (/api/drive/subida), más chicas. Si se corta, le pregunta a Google hasta
-// dónde llegó y sigue desde ahí.
+// dónde llegó y sigue desde ahí. Cada parte avisa cuánto lleva mandado, así el
+// avance se mueve aunque el archivo entre en una sola parte.
 
 import type { BrowserMeasure } from '@/lib/videos';
 
@@ -21,21 +22,51 @@ function nextFrom(range: string | null, fallback: number): number {
   return m ? Number(m[1]) + 1 : fallback;
 }
 
-async function sendPart(mode: Mode, url: string, body: Blob | null, contentRange: string, assumeNext: number): Promise<PartResult> {
+type Reply = { status: number; ok: boolean; header: (name: string) => string | null; json: () => Promise<unknown> };
+
+/**
+ * Un PUT. Con onSent va por XMLHttpRequest, que dice cuánto lleva mandado;
+ * fetch no lo dice. Si no se puede conectar, falla igual que fetch: no es una
+ * respuesta de Google.
+ */
+function put(url: string, headers: Record<string, string>, body: Blob | null, onSent?: (bytes: number) => void): Promise<Reply> {
+  if (!body || !onSent) {
+    return fetch(url, { method: 'PUT', headers, body }).then((res) => ({
+      status: res.status,
+      ok: res.ok,
+      header: (name) => res.headers.get(name),
+      json: () => res.json(),
+    }));
+  }
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', url);
+    for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
+    xhr.upload.onprogress = (e) => onSent(e.loaded);
+    xhr.onload = () =>
+      resolve({
+        status: xhr.status,
+        ok: xhr.status >= 200 && xhr.status < 300,
+        header: (name) => xhr.getResponseHeader(name),
+        json: async () => JSON.parse(xhr.responseText) as unknown,
+      });
+    xhr.onerror = () => reject(new TypeError('No se pudo conectar.'));
+    xhr.onabort = () => reject(new TypeError('Se cortó la conexión.'));
+    xhr.send(body);
+  });
+}
+
+async function sendPart(mode: Mode, url: string, body: Blob | null, contentRange: string, assumeNext: number, onSent?: (bytes: number) => void): Promise<PartResult> {
   if (mode === 'direct') {
-    const res = await fetch(url, { method: 'PUT', headers: { 'Content-Range': contentRange }, body });
-    if (res.status === 308) return { kind: 'more', next: nextFrom(res.headers.get('range'), assumeNext) };
+    const res = await put(url, { 'Content-Range': contentRange }, body, onSent);
+    if (res.status === 308) return { kind: 'more', next: nextFrom(res.header('range'), assumeNext) };
     if (res.ok) {
       const file = (await res.json()) as { id?: string };
       if (file.id) return { kind: 'done', fileId: file.id };
     }
     throw new UploadFailure(res.status);
   }
-  const res = await fetch('/api/drive/subida', {
-    method: 'PUT',
-    headers: { 'x-upload-url': url, 'x-content-range': contentRange },
-    body,
-  });
+  const res = await put('/api/drive/subida', { 'x-upload-url': url, 'x-content-range': contentRange }, body, onSent);
   const r = (await res.json().catch(() => null)) as { status?: number; range?: string | null; file?: { id?: string } | null; error?: string } | null;
   if (!res.ok || !r?.status) throw new UploadFailure(res.status, r?.error);
   if (r.status === 308) return { kind: 'more', next: nextFrom(r.range ?? null, assumeNext) };
@@ -69,9 +100,10 @@ export async function uploadToDrive(file: File, uploadUrl: string, onProgress: (
   let failures = 0;
   for (;;) {
     const part = mode === 'direct' ? DIRECT_PART : PROXY_PART;
-    const end = Math.min(offset + part, size);
+    const from = offset;
+    const end = Math.min(from + part, size);
     try {
-      const r = await sendPart(mode, uploadUrl, file.slice(offset, end), `bytes ${offset}-${end - 1}/${size}`, end);
+      const r = await sendPart(mode, uploadUrl, file.slice(from, end), `bytes ${from}-${end - 1}/${size}`, end, (bytes) => onProgress(Math.min(from + bytes, size)));
       if (r.kind === 'done') {
         onProgress(size);
         return r.fileId;

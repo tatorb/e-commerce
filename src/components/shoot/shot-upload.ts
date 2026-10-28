@@ -92,7 +92,11 @@ async function run(key: number) {
     if (!fileId) {
       const start = await startShotUploadAction(u.accountSlug, u.productId, u.kind, { name: u.name, size: u.file.size, type: u.file.type });
       if (!start.ok) throw new Error(start.error);
-      fileId = await uploadToDrive(u.file, start.uploadUrl, (sent) => update(key, { percent: Math.min(99, Math.floor((sent / u.file.size) * 100)) }));
+      // Solo para adelante: si se corta y sigue, no vuelve atrás. Y una vez por punto, no por cada pedazo.
+      fileId = await uploadToDrive(u.file, start.uploadUrl, (sent) => {
+        const percent = Math.min(99, Math.floor((sent / u.file.size) * 100));
+        if (current?.key === key && percent > current.percent) update(key, { percent });
+      });
       update(key, { fileId });
     }
     update(key, { saving: true });

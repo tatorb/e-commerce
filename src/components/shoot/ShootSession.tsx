@@ -366,6 +366,8 @@ export function ShootSession({
       );
     }
     const more = step && hasSome;
+    // Mientras sube la anterior, el botón se va llenando con su avance hasta que se prende.
+    const fill = upload && upload.status === 'uploading' ? (upload.saving ? 100 : upload.percent) : null;
     return (
       <div className="space-y-2">
         <div className={cn('grid gap-2', more ? 'sm:grid-cols-2' : kinds.length > 1 ? 'grid-cols-2' : 'grid-cols-1')}>
@@ -375,12 +377,16 @@ export function ShootSession({
               key={kind}
               size="lg"
               variant={more ? 'outline' : 'default'}
-              className="h-14 px-4 text-base"
+              className={cn('relative h-14 overflow-hidden px-4 text-base', fill !== null && 'border bg-muted text-foreground disabled:opacity-100')}
               onClick={() => inputs[kind].camera.current?.click()}
               disabled={busy}
             >
-              {kind === 'PHOTO' ? <Camera /> : <Video />}
-              {more ? (kind === 'PHOTO' ? 'Sacar otra foto' : 'Grabar otro video') : kind === 'PHOTO' ? 'Sacar foto' : 'Grabar video'}
+              {fill !== null ? <span aria-hidden className="absolute inset-y-0 left-0 bg-primary/30 transition-[width] duration-300" style={{ width: `${fill}%` }} /> : null}
+              <span className="relative inline-flex items-center gap-2">
+                {kind === 'PHOTO' ? <Camera /> : <Video />}
+                {more ? (kind === 'PHOTO' ? 'Sacar otra foto' : 'Grabar otro video') : kind === 'PHOTO' ? 'Sacar foto' : 'Grabar video'}
+                {fill !== null ? <span className="tabular-nums text-muted-foreground">· {fill} %</span> : null}
+              </span>
             </Button>
           ))}
         </div>
