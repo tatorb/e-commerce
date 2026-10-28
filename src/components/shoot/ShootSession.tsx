@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, Camera, Check, ChevronRight, CircleDashed, Images, KanbanSquare, Redo2, RotateCcw, SkipForward, Trash2, Undo2, Upload, Video } from 'lucide-react';
+import { AlertTriangle, Camera, Check, ChevronLeft, ChevronRight, CircleDashed, Images, KanbanSquare, Plus, Redo2, RotateCcw, SkipForward, Trash2, Undo2, Upload, Video } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useReadOnly } from '@/components/access/AccessProvider';
@@ -137,6 +137,8 @@ export function ShootSession({
   const checksOf = (stepId: string) => shots.filter((s) => s.kind === 'CHECK' && s.stepId === stepId && shotCounts(s, variantKey));
   const [index, setIndex] = useState(() => Math.max(0, steps.findIndex((s) => !done[s.id])));
   const [finished, setFinished] = useState(false);
+  // Fotos y videos extra, fuera de los pasos del protocolo: se abre en cualquier momento y se vuelve a donde estaba.
+  const [extra, setExtra] = useState(false);
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
   const [uploaded, setUploaded] = useState<{ kind: MediaKind; title: string | null }[]>([]);
   const [capture, setCapture] = useState<Capture | null>(null);
@@ -149,7 +151,7 @@ export function ShootSession({
     PHOTO: { camera: useRef<HTMLInputElement>(null), gallery: useRef<HTMLInputElement>(null) },
     VIDEO: { camera: useRef<HTMLInputElement>(null), gallery: useRef<HTMLInputElement>(null) },
   };
-  const step = protocol && !finished ? (steps[index] ?? null) : null;
+  const step = protocol && !finished && !extra ? (steps[index] ?? null) : null;
 
   // Cuando termina de subir, pide lo guardado una vez y suelta la vista previa
   // apenas la pantalla lo tiene. La de otro producto se suelta enseguida.
@@ -205,7 +207,16 @@ export function ShootSession({
     setNotice(null);
     setEnlarged(false);
     setFinished(false);
+    setExtra(false);
     setIndex(i);
+  }
+
+  /** Abre o cierra lo extra. Al cerrarlo vuelve al paso, o al resumen, donde estaba. */
+  function showExtra(open: boolean) {
+    clearCapture();
+    setNotice(null);
+    setEnlarged(false);
+    setExtra(open);
   }
 
   function next() {
@@ -545,40 +556,57 @@ export function ShootSession({
 
   const stateOf = (id: string) => (done[id] ? 'done' : pending?.stepId === id ? 'uploading' : skipped.has(id) ? 'skipped' : 'pending');
 
+  const extraMedia = mediaOf(null);
   const stepList = (
-    <ol className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
-      {steps.map((s, i) => {
-        const state = stateOf(s.id);
-        const current = !finished && i === index;
-        return (
-          <li key={s.id} className="shrink-0">
-            <button
-              type="button"
-              onClick={() => goTo(i)}
-              disabled={capture?.measuring}
-              className={cn(
-                'flex max-w-[11rem] items-center gap-1.5 rounded-full border px-3 py-1.5 text-left text-xs',
-                current ? 'border-foreground bg-foreground text-background' : 'bg-background hover:bg-muted',
-              )}
-              aria-current={current ? 'step' : undefined}
-            >
-              {state === 'done' ? (
-                <Check className="h-3.5 w-3.5 shrink-0" />
-              ) : state === 'uploading' ? (
-                <Upload className="h-3.5 w-3.5 shrink-0" />
-              ) : state === 'skipped' ? (
-                <SkipForward className="h-3.5 w-3.5 shrink-0" />
-              ) : (
-                <CircleDashed className="h-3.5 w-3.5 shrink-0" />
-              )}
-              <span className="truncate">
-                {i + 1}. {s.title}
-              </span>
-            </button>
-          </li>
-        );
-      })}
-    </ol>
+    <div className="flex items-start gap-2">
+      <ol className="-mx-1 flex min-w-0 flex-1 gap-2 overflow-x-auto px-1 pb-1">
+        {steps.map((s, i) => {
+          const state = stateOf(s.id);
+          const current = !finished && !extra && i === index;
+          return (
+            <li key={s.id} className="shrink-0">
+              <button
+                type="button"
+                onClick={() => goTo(i)}
+                disabled={capture?.measuring}
+                className={cn(
+                  'flex max-w-[11rem] items-center gap-1.5 rounded-full border px-3 py-1.5 text-left text-xs',
+                  current ? 'border-foreground bg-foreground text-background' : 'bg-background hover:bg-muted',
+                )}
+                aria-current={current ? 'step' : undefined}
+              >
+                {state === 'done' ? (
+                  <Check className="h-3.5 w-3.5 shrink-0" />
+                ) : state === 'uploading' ? (
+                  <Upload className="h-3.5 w-3.5 shrink-0" />
+                ) : state === 'skipped' ? (
+                  <SkipForward className="h-3.5 w-3.5 shrink-0" />
+                ) : (
+                  <CircleDashed className="h-3.5 w-3.5 shrink-0" />
+                )}
+                <span className="truncate">
+                  {i + 1}. {s.title}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ol>
+      {/* Siempre a mano: lo que no es de ningún paso. */}
+      <button
+        type="button"
+        onClick={() => showExtra(true)}
+        disabled={capture?.measuring}
+        aria-pressed={extra}
+        className={cn(
+          'flex shrink-0 items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium',
+          extra ? 'border-foreground bg-foreground text-background' : 'border-dashed bg-background hover:bg-muted',
+        )}
+      >
+        <Plus className="h-3.5 w-3.5" />
+        Extra{extraMedia.length > 0 ? ` (${extraMedia.length})` : ''}
+      </button>
+    </div>
   );
 
   if (steps.length === 0) {
@@ -587,6 +615,33 @@ export function ShootSession({
         {header}
         <p className="rounded-2xl border bg-card shadow-card p-4 text-sm text-muted-foreground">Este protocolo todavía no tiene pasos. Elegí otro o seguí sin protocolo.</p>
         <EndLinks base={base} productId={product.id} />
+      </div>
+    );
+  }
+
+  // ── Extra: fotos y videos fuera de los pasos del protocolo ──
+  if (extra) {
+    return (
+      <div className="mx-auto w-full max-w-xl space-y-4">
+        {header}
+        {stepList}
+        {uploadBar}
+        {noticeBar}
+        <section className="space-y-3 rounded-2xl border bg-card shadow-card p-4">
+          <Badge variant="outline" className="gap-1">
+            <Plus className="h-3 w-3" />
+            Extra
+          </Badge>
+          <h2 className="text-lg font-semibold leading-tight">Fotos y videos extra</h2>
+          <p className="text-sm text-muted-foreground">No van a ningún paso del protocolo. Se suben y quedan registrados igual que los demás.</p>
+          {!capture ? <ShotViewer title="Lo que ya registraste fuera de los pasos" items={extraMedia} withMeasure={withMeasure} /> : null}
+          {captureArea(capture ? [capture.kind] : ['PHOTO', 'VIDEO'])}
+          <Button variant="outline" size="lg" className="w-full px-4" onClick={() => showExtra(false)} disabled={capture?.measuring} access="view">
+            <ChevronLeft />
+            {finished ? 'Volver al resumen' : `Volver al paso ${index + 1}`}
+          </Button>
+        </section>
+        {fileInputs}
       </div>
     );
   }
@@ -639,6 +694,24 @@ export function ShootSession({
                 </li>
               );
             })}
+            <li>
+              <button type="button" className="block w-full space-y-2 px-3 py-2 text-left text-sm hover:bg-muted" onClick={() => showExtra(true)}>
+                <span className="flex items-center gap-2">
+                  <Plus className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1 truncate">Extra, fuera de los pasos</span>
+                  <span className="shrink-0 text-xs text-muted-foreground">{extraMedia.length > 0 ? plural(extraMedia.length, 'archivo') : 'Sacar'}</span>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                </span>
+                {extraMedia.length > 0 ? (
+                  <span className="flex flex-wrap gap-1.5 pl-6">
+                    {extraMedia.slice(0, 6).map((m) => (
+                      <ShotThumb key={m.id} shot={m} className="h-11 w-11" />
+                    ))}
+                    {extraMedia.length > 6 ? <span className="flex h-11 items-center px-1 text-xs text-muted-foreground">y {extraMedia.length - 6} más</span> : null}
+                  </span>
+                ) : null}
+              </button>
+            </li>
           </ul>
         </section>
         <EndLinks base={base} productId={product.id} />
