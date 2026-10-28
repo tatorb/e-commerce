@@ -179,6 +179,11 @@ export function ShootSession({
     setError(null);
   }
 
+  /**
+   * Lo que vuelve de la cámara o de la galería ya está confirmado en el
+   * celular: se mide la calidad y se sube solo. Lo que está por debajo de HD
+   * no se sube y queda a la vista para sacar otra.
+   */
   async function onFile(file: File | undefined, kind: MediaKind) {
     if (!file) return;
     setError(null);
@@ -187,7 +192,12 @@ export function ShootSession({
     setCapture({ file, url, kind, measuring: true, quality: null, video: null });
     const video = kind === 'VIDEO' ? await measureVideo(file) : null;
     const dims = kind === 'VIDEO' ? video : await measurePhoto(url);
-    setCapture((c) => (c && c.url === url ? { ...c, measuring: false, video, quality: qualityOf(kind, dims) } : c));
+    const quality = qualityOf(kind, dims);
+    if (quality && !quality.enough) {
+      setCapture((c) => (c && c.url === url ? { ...c, measuring: false, video, quality } : c));
+      return;
+    }
+    send({ file, url, kind, measuring: false, quality, video });
   }
 
   function goTo(i: number) {
@@ -208,9 +218,7 @@ export function ShootSession({
   }
 
   /** Empieza a subir y deja la pantalla libre: se queda en el paso, con lo que sube a la vista. */
-  function send() {
-    if (!capture || busy) return;
-    const c = capture;
+  function send(c: Capture) {
     const started = startShotUpload({
       accountSlug,
       productId: product.id,
@@ -223,7 +231,11 @@ export function ShootSession({
       name: fileNameFor(c.file, [product.code ?? product.name, measure?.label, step?.title]),
       video: c.video,
     });
-    if (!started) return setError('Esperá a que termine de subir la anterior.');
+    if (!started) {
+      // Otra todavía no terminó: queda a la vista para subirla después.
+      setCapture({ ...c, measuring: false });
+      return setError('Esperá a que termine de subir la anterior y tocá Subir.');
+    }
     clearCapture();
     setNotice(null);
     setUploaded((list) => [...list, { kind: c.kind, title: step?.title ?? null }]);
@@ -312,31 +324,33 @@ export function ShootSession({
           </div>
           <p className="text-sm">
             {capture.measuring ? (
-              <span className="text-muted-foreground">Midiendo la calidad…</span>
+              <span className="text-muted-foreground">Revisando la calidad para subirla…</span>
             ) : capture.quality ? (
               <>
                 <span className="font-medium">Calidad: {capture.quality.text}.</span>
-                {low ? <span className="mt-1 block text-destructive">{LOW_QUALITY_HELP}</span> : null}
+                {low ? <span className="mt-1 block text-destructive">No se subió. {LOW_QUALITY_HELP}</span> : null}
               </>
-            ) : (
-              <span className="text-muted-foreground">No se pudo medir la calidad en este navegador. Se sube igual, tal como salió.</span>
-            )}
+            ) : null}
           </p>
           {error ? (
             <p className="text-sm text-destructive" role="alert">
               {error}
             </p>
           ) : null}
-          <div className="grid grid-cols-2 gap-2">
-            <Button size="lg" className="px-4" onClick={send} disabled={busy || capture.measuring || Boolean(low)}>
-              <Upload />
-              {error ? 'Reintentar' : 'Subir'}
-            </Button>
-            <Button size="lg" variant="outline" className="px-4" onClick={clearCapture} access="view">
-              <RotateCcw />
-              Repetir
-            </Button>
-          </div>
+          {!capture.measuring ? (
+            <div className={cn('grid gap-2', error && !low ? 'grid-cols-2' : 'grid-cols-1')}>
+              {error && !low ? (
+                <Button size="lg" className="px-4" onClick={() => send(capture)} disabled={busy}>
+                  <Upload />
+                  Subir
+                </Button>
+              ) : null}
+              <Button size="lg" variant="outline" className="px-4" onClick={clearCapture} access="view">
+                <RotateCcw />
+                {capture.kind === 'PHOTO' ? 'Sacar otra foto' : 'Grabar otro video'}
+              </Button>
+            </div>
+          ) : null}
         </div>
       );
     }
@@ -541,6 +555,7 @@ export function ShootSession({
             <button
               type="button"
               onClick={() => goTo(i)}
+              disabled={capture?.measuring}
               className={cn(
                 'flex max-w-[11rem] items-center gap-1.5 rounded-full border px-3 py-1.5 text-left text-xs',
                 current ? 'border-foreground bg-foreground text-background' : 'bg-background hover:bg-muted',
