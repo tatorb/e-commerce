@@ -8,6 +8,7 @@ import { parseVariations } from '@/domain/media';
 import { channelQuantities, totalQuantity } from '@/domain/quantities';
 import { resolveTitleLock } from '@/domain/title-lock';
 import { FAMILY_LOCK_SELECT, titleLockFromData } from '@/lib/family-lock';
+import { measuresOf } from '@/lib/media';
 import { scorePublication, type RuleConfig, type ScoreResult } from '@/domain/standard';
 import { toScoreInput } from './score-input';
 
@@ -57,13 +58,20 @@ export async function listScoredPublications(
         stage: true,
         pipelineStatus: true,
         pipelineStep: true,
+        variantKey: true,
         pipelineRemoval: true,
         titleLockedManual: true,
         updatedAt: true,
         store: { select: { name: true, channelId: true, channel: { select: { kind: true, name: true } } } },
         measurements: { orderBy: { takenAt: 'desc' }, take: LATEST_MEASUREMENTS, select: { takenAt: true, metrics: true } },
         // La familia de medidas: su principal, sus medidas y sus ventas, para el candado del título.
-        family: { select: { leadId: true, ...FAMILY_LOCK_SELECT.select } },
+        family: {
+          select: {
+            leadId: true,
+            ...FAMILY_LOCK_SELECT.select,
+            members: { select: { ...FAMILY_LOCK_SELECT.select.members.select, variantKey: true } },
+          },
+        },
         channelCopy: {
           select: {
             fingerprints: true,
@@ -105,6 +113,13 @@ export async function listScoredPublications(
     const app = faceValues(p);
     const faces = faceSummary(fingerprintsOf(app), copy);
     const lines = copy ? channelQuantities(copy.quantity, parseVariations(copy.variations)) : null;
+    // Las medidas que vende, en el orden de la ficha: las de su familia, la suya, o si no se
+    // sabe cuál vende, todas las del producto.
+    const productMeasures = measuresOf(p.product.variants);
+    const sold = p.family ? p.family.members.map((m) => m.variantKey) : p.variantKey ? [p.variantKey] : null;
+    const selling = sold ? productMeasures.filter((m) => sold.includes(m.key)) : productMeasures;
+    // Un solo SKU sin nombre de medida no es una medida: sería repetir el código.
+    const measures = selling.length === 1 && !selling[0].measure ? [] : selling.map((m) => m.label);
     return {
       id: p.id,
       title: p.title,
@@ -127,6 +142,7 @@ export async function listScoredPublications(
       // La familia de medidas: la principal, que la representa en el tablero, y cuántas medidas tiene.
       familyLeadId: p.family?.leadId ?? null,
       familySize: p.family?.members.length ?? 0,
+      measures,
       productType: p.product.productType?.trim() || null,
       kind: p.product.kind,
       visits: typeof metrics.visits_90d === 'number' ? metrics.visits_90d : null,

@@ -37,7 +37,12 @@ export type BoardCardData = {
   step: PipelineStep;
   // Cuántas medidas tiene su familia; 0 si no es de una familia.
   familySize?: number;
+  // Las medidas que vende la tarjeta, por ejemplo STD y 0.50: las de su familia, la suya, o las del producto.
+  measures?: string[];
 };
+
+// Las medidas que entran en la tarjeta; las demás se cuentan.
+const MAX_MEASURES = 8;
 
 export function BoardColumns({
   accountSlug,
@@ -232,7 +237,7 @@ function BoardCard({
           {card.familySize && card.familySize > 1 ? (
             <span title="Las medidas de la familia se mueven juntas" className="inline-flex items-center gap-1 font-medium text-foreground">
               <Layers className="h-3 w-3" />
-              Familia de {card.familySize} medidas
+              Familia
             </span>
           ) : (
             codeOrUnpublished(card.externalId)
@@ -240,6 +245,16 @@ function BoardCard({
           {showStore ? <span>· {card.storeName}</span> : null}
           <KindBadge kind={card.kind} />
         </p>
+        {card.measures && card.measures.length > 0 ? (
+          <ul className="flex flex-wrap gap-1" aria-label="Medidas">
+            {card.measures.slice(0, MAX_MEASURES).map((m) => (
+              <li key={m} className="rounded bg-muted px-1.5 py-px text-[11px] font-medium leading-4 text-foreground">
+                {m}
+              </li>
+            ))}
+            {card.measures.length > MAX_MEASURES ? <li className="px-0.5 text-[11px] leading-4 text-muted-foreground">y {card.measures.length - MAX_MEASURES} más</li> : null}
+          </ul>
+        ) : null}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
           <ScoreBadge score={card.score} />
           <span>{card.sales === null ? 'Ventas sin dato' : plural(card.sales, 'venta')}</span>

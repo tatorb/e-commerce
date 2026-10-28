@@ -34,6 +34,7 @@ export function PipelineBoard({
             lock: i.titleLock.locked ? titleLockText(i.titleLock) : null,
             step: i.pipelineStep,
             familySize: i.familySize,
+            measures: i.measures,
           },
         ]
       : [],
