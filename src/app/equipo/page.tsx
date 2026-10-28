@@ -60,7 +60,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
       <PageHeader>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-1">
-            <h1 className="text-2xl font-semibold tracking-tight">Equipo</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Equipo</h1>
             <p className="text-sm text-muted-foreground">
               {admin
                 ? 'Las personas que pueden entrar a la app, qué cuentas ven y qué pueden hacer en cada sección.'

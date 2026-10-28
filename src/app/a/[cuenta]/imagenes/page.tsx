@@ -24,7 +24,7 @@ export default async function PhotoSettingsPage({ params }: { params: Promise<{ 
     <>
       <PageHeader>
         <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Imágenes</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Imágenes</h1>
           <p className="text-sm text-muted-foreground">
             Cómo quedan las fotos de <strong>{account.name}</strong> al pasar por la línea de corrección del paso Imágenes.
             Valen para los pasos que se hagan desde que los guardás.

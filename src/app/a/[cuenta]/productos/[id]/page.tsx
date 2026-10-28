@@ -23,7 +23,10 @@ import { prisma } from '@/lib/db';
 import { plural } from '@/lib/format';
 import { loadPhotoLine } from '@/lib/photos';
 import { loadCombo } from '@/lib/queries/combos';
-import { getProduct, listStores, type ProductDetail } from '@/lib/queries/products';
+import { getProduct, listStores, productCovers, type ProductDetail } from '@/lib/queries/products';
+import { EntityHero, HeroStat } from '@/components/navigation/EntityHero';
+import { ScoreBadge } from '@/components/stages/ScoreBadge';
+import { BarChart3, KanbanSquare, Tag } from 'lucide-react';
 import { loadResearch } from '@/lib/queries/research';
 import { loadRulesByChannel, toScoreInput } from '@/lib/queries/scoring';
 import { publicationFigures } from '@/lib/publication-figures';
@@ -84,7 +87,7 @@ export default async function ProductPage({
 }) {
   const [{ cuenta, id }, { seccion }] = await Promise.all([params, searchParams]);
   const { account, canWrite } = await requireAccount(cuenta, 'productos');
-  const [product, stores, rules, combo, research, photos, videos, stock] = await Promise.all([
+  const [product, stores, rules, combo, research, photos, videos, stock, covers] = await Promise.all([
     getProduct(account.id, id),
     listStores(account.id),
     loadRulesByChannel(account.id),
@@ -97,6 +100,7 @@ export default async function ProductPage({
       select: { id: true, name: true, durationMs: true, width: true, height: true },
     }),
     loadProductStock(prisma, { accountId: account.id, productId: id }),
+    productCovers([id]),
   ]);
   if (!product || !combo || !stock) notFound();
   // Lo que le toca a cada publicación del stock del producto, para su cantidad.
@@ -113,12 +117,6 @@ export default async function ProductPage({
   const inPipeline = pubs.filter((p) => p.pipelineStatus === 'IN_PIPELINE').length;
   const measures = product.variants.map((v) => v.measure?.trim()).filter(Boolean);
   const subtitle = [product.brand, product.productType, product.partNumber, measures.length > 1 ? measures.join(', ') : null].filter(Boolean).join(' · ');
-  const summary = [
-    plural(pubs.length, 'publicación', 'publicaciones'),
-    inPipeline > 0 ? `${inPipeline} en el pipeline` : null,
-    known.length > 0 ? `puntaje más bajo ${Math.min(...known)}` : null,
-  ].filter(Boolean);
-
   // Para ir a trabajar lo del producto en el pipeline: la que ya está ahí o la primera.
   const worked = pubs.find((p) => p.pipelineStatus === 'IN_PIPELINE') ?? pubs[0] ?? null;
   const stepHref = worked ? (step: string) => `/a/${account.slug}/pipeline/${worked.id}?paso=${step}` : null;
@@ -137,8 +135,8 @@ export default async function ProductPage({
   ];
   const wanted = TAB_KEYS.find((k) => k === seccion);
   const initial: ProductTabKey = wanted ?? (pubs.length > 0 ? 'publicaciones' : 'ficha');
-  const newPublication = (label: string) => (
-    <NewPublicationDialog accountSlug={account.slug} productId={product.id} productName={product.name} stores={storeOptions} label={label} />
+  const newPublication = (label: string, variant?: 'default') => (
+    <NewPublicationDialog accountSlug={account.slug} productId={product.id} productName={product.name} stores={storeOptions} label={label} variant={variant} />
   );
 
   return (
@@ -146,18 +144,29 @@ export default async function ProductPage({
       <PageHeader staticOnMobile>
         <div className="space-y-2">
           <Breadcrumb items={[{ label: account.name, href: base }, { label: 'Productos', href: base }, { label: product.name }]} />
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0 space-y-1.5">
-              <EntityLabel kind="product" />
-              <h1 className="flex flex-wrap items-center gap-2 text-xl font-semibold tracking-tight md:text-2xl">
-                {product.name}
+          <EntityHero
+            photo={{ src: covers.get(product.id) ?? null, alt: product.name }}
+            label={
+              <span className="flex flex-wrap items-center gap-1.5">
+                <EntityLabel kind="product" />
                 <KindBadge kind={product.kind} />
-              </h1>
-              {subtitle ? <p className="text-sm text-muted-foreground">{subtitle}</p> : null}
-              <p className="text-sm">{summary.join(' · ')}</p>
-            </div>
-            {pubs.length > 0 ? newPublication('Agregar publicación') : null}
-          </div>
+              </span>
+            }
+            title={product.name}
+            meta={subtitle || null}
+            stats={
+              <>
+                <HeroStat icon={<Tag />}>{plural(pubs.length, 'publicación', 'publicaciones')}</HeroStat>
+                {inPipeline > 0 ? <HeroStat icon={<KanbanSquare />}>{inPipeline} en el pipeline</HeroStat> : null}
+                {known.length > 0 ? (
+                  <HeroStat icon={<BarChart3 />}>
+                    Puntaje más bajo <ScoreBadge score={Math.min(...known)} />
+                  </HeroStat>
+                ) : null}
+              </>
+            }
+            actions={pubs.length > 0 ? newPublication('Agregar publicación', 'default') : null}
+          />
         </div>
       </PageHeader>
       <PageBody>
@@ -168,7 +177,7 @@ export default async function ProductPage({
           panels={{
             publicaciones:
               pubs.length > 0 ? (
-                <ProductPublications accountSlug={account.slug} publications={pubs} channels={channels} scores={scores} figures={figures} facts={facts} />
+                <ProductPublications accountSlug={account.slug} publications={pubs} channels={channels} scores={scores} figures={figures} facts={facts} cover={covers.get(product.id) ?? null} />
               ) : (
                 <div className="space-y-3 rounded-lg border border-dashed p-8 text-center">
                   <p className="text-sm text-muted-foreground">

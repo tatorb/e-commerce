@@ -24,7 +24,7 @@ export default async function DescriptionSettingsPage({ params }: { params: Prom
     <>
       <PageHeader>
         <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Descripciones</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Descripciones</h1>
           <p className="text-sm text-muted-foreground">
             El encabezado y el pie que llevan todas las descripciones de <strong>{account.name}</strong>, y lo que Claude usa para
             proponerlas en el paso Descripción del pipeline.

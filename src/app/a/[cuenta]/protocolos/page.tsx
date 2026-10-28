@@ -24,7 +24,7 @@ export default async function ProtocolsPage({ params }: { params: Promise<{ cuen
     <>
       <PageHeader>
         <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Protocolos de fotos</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Protocolos de fotos</h1>
           <p className="text-sm text-muted-foreground">
             Los pasos que sigue el operario de <strong>{account.name}</strong> para sacar las fotos y los videos de cada producto con el celular, en{' '}
             {can(user.access, 'captura', 'read') ? (

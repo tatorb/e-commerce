@@ -1,5 +1,6 @@
 import Link from 'next/link';
-import { ChevronLeft, ChevronRight, ExternalLink, Settings2, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ExternalLink, MessageCircleQuestion, Search, Settings2, Sparkles, X } from 'lucide-react';
+import { SectionCard } from '@/components/ui/section-card';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Button } from '@/components/ui/button';
@@ -65,32 +66,56 @@ function draftView(q: QuestionRow): DraftView | null {
   };
 }
 
-function Practice({ p, channels }: { p: PracticeCounts; channels: string }) {
-  const parts = [
-    `${p.SENT_AS_IS} mandadas tal cual`,
-    `${p.SENT_EDITED} corregidas`,
-    ...(p.SENT_AUTO > 0 ? [`${p.SENT_AUTO} mandadas por Claude solo`] : []),
-    `${p.DISCARDED} descartadas`,
-    `${p.ANSWERED_IN_CHANNEL} respondidas en ${channels} sin usarla`,
-    ...(p.PENDING > 0 ? [`${p.PENDING} esperando`] : []),
-  ];
+/** Una cifra grande con lo que es abajo, y el detalle en gris. */
+function Number_({ value, label, detail }: { value: React.ReactNode; label: string; detail?: string | null }) {
   return (
-    <Card className="space-y-1 p-4 text-sm">
-      <p className="font-medium">
-        Cómo le va a Claude en los últimos {PRACTICE_DAYS} días: {plural(p.total, 'propuesta', 'propuestas')}
-      </p>
-      <p className="text-muted-foreground">
-        {parts.join(' · ')}. Costaron {formatUsd(p.costUsd)}.
-      </p>
-    </Card>
+    <div className="min-w-0 bg-card px-4 py-3">
+      <p className="text-2xl font-bold tabular-nums leading-none">{value}</p>
+      <p className="mt-1.5 text-xs text-muted-foreground">{label}</p>
+      {detail ? <p className="mt-0.5 text-[11px] text-muted-foreground/80">{detail}</p> : null}
+    </div>
+  );
+}
+
+function Practice({ p, channels }: { p: PracticeCounts; channels: string }) {
+  const sent = p.SENT_AS_IS + p.SENT_EDITED + p.SENT_AUTO;
+  const unused = p.DISCARDED + p.ANSWERED_IN_CHANNEL;
+  const sentDetail = [
+    p.SENT_AS_IS > 0 ? `${p.SENT_AS_IS} tal cual` : null,
+    p.SENT_EDITED > 0 ? `${p.SENT_EDITED} corregidas` : null,
+    p.SENT_AUTO > 0 ? `${p.SENT_AUTO} por Claude solo` : null,
+  ].filter(Boolean);
+  const unusedDetail = [
+    p.DISCARDED > 0 ? `${p.DISCARDED} descartadas` : null,
+    p.ANSWERED_IN_CHANNEL > 0 ? `${p.ANSWERED_IN_CHANNEL} respondidas en ${channels}` : null,
+  ].filter(Boolean);
+  return (
+    <SectionCard
+      title="Cómo le va a Claude"
+      icon={<Sparkles />}
+      description={`Las respuestas que propuso en los últimos ${PRACTICE_DAYS} días${p.PENDING > 0 ? `, ${plural(p.PENDING, 'esperando', 'esperando')}` : ''}.`}
+    >
+      {/* Las líneas entre las cifras son el fondo que asoma entre ellas. */}
+      <div className="grid grid-cols-2 gap-px bg-border sm:grid-cols-4">
+        <Number_ value={p.total} label={p.total === 1 ? 'propuesta' : 'propuestas'} />
+        <Number_ value={sent} label="mandadas" detail={sentDetail.join(', ') || null} />
+        <Number_ value={unused} label="sin usar" detail={unusedDetail.join(', ') || null} />
+        <Number_ value={formatUsd(p.costUsd)} label="costo" />
+      </div>
+    </SectionCard>
   );
 }
 
 function chipClass(active: boolean): string {
   return cn(
-    'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
-    active ? 'bg-foreground text-background border-foreground' : 'bg-background text-foreground/70 border-border hover:bg-muted hover:text-foreground',
+    'inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors',
+    active ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card text-foreground/80 hover:bg-muted hover:text-foreground',
   );
+}
+
+/** El número de un filtro. */
+function ChipCount({ active, children }: { active: boolean; children: React.ReactNode }) {
+  return <span className={cn('rounded-full px-1.5 text-xs tabular-nums', active ? 'bg-primary-foreground/20' : 'bg-muted text-muted-foreground')}>{children}</span>;
 }
 
 function StoreStatus({ store, accountSlug, timeZone }: { store: QuestionList['stores'][number]; accountSlug: string; timeZone: string }) {
@@ -124,11 +149,26 @@ function StoreStatus({ store, accountSlug, timeZone }: { store: QuestionList['st
       ? `Último aviso de ${store.channelName} el ${formatDateTime(r.noticeAt, timeZone)}: las preguntas llegan al instante.`
       : `Todavía no llegó ningún aviso de ${store.channelName}. Sin el aviso, las preguntas llegan con la lectura de cada hora.`,
   });
+  // De un vistazo: si las preguntas llegan al instante, cada hora o hay un problema.
+  const state = !store.connected || r?.lastError
+    ? { label: 'Con problemas', dot: 'bg-destructive', text: 'text-destructive' }
+    : r?.noticeAt
+      ? { label: 'Llegan al instante', dot: 'bg-emerald-500', text: 'text-emerald-700' }
+      : { label: 'Llegan cada hora', dot: 'bg-amber-500', text: 'text-amber-700' };
   return (
-    <div className="space-y-1 text-sm">
-      <p className="font-medium">
-        {store.channelName} · {store.name}
-      </p>
+    <div className="space-y-2 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span
+          className="inline-flex items-center rounded-md px-2 py-1 text-[11px] font-semibold uppercase leading-none tracking-wide"
+          style={store.accent ? { backgroundColor: store.accent.background, color: store.accent.foreground } : undefined}
+        >
+          {store.channelName} · {store.name}
+        </span>
+        <span className={cn('inline-flex items-center gap-1.5 text-xs font-medium', state.text)}>
+          <span className={cn('h-2 w-2 rounded-full', state.dot)} aria-hidden />
+          {state.label}
+        </span>
+      </div>
       {lines.map((l, i) => (
         <p key={i} className={l.alert ? 'text-destructive' : 'text-muted-foreground'}>
           {l.text}
@@ -296,14 +336,14 @@ export default async function QuestionsPage({ params, searchParams }: { params: 
       <PageHeader>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-1">
-            <h1 className="text-2xl font-semibold tracking-tight">Preguntas</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Preguntas</h1>
             <p className="text-sm text-muted-foreground">
               Las preguntas de los compradores de <strong>{account.name}</strong> en {channels}. Llegan solas, y lo que se responde allá también
               aparece acá.
             </p>
           </div>
           <div className="flex flex-wrap items-start gap-2">
-            <Button size="sm" variant="ghost" asChild>
+            <Button size="sm" variant="outline" asChild>
               <Link href={`/a/${account.slug}/respuestas`}>
                 <Settings2 className="h-4 w-4" />
                 Cómo responde la tienda
@@ -314,10 +354,10 @@ export default async function QuestionsPage({ params, searchParams }: { params: 
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Link href={hrefWith({ vista: null, page: null })} className={chipClass(f.view === 'sin-responder')}>
-            Sin responder · {list.counts.unanswered}
+            Sin responder <ChipCount active={f.view === 'sin-responder'}>{list.counts.unanswered}</ChipCount>
           </Link>
           <Link href={hrefWith({ vista: 'respondidas', page: null })} className={chipClass(f.view === 'respondidas')}>
-            Respondidas · {list.counts.answered}
+            Respondidas <ChipCount active={f.view === 'respondidas'}>{list.counts.answered}</ChipCount>
           </Link>
           {f.publicationId ? (
             <Link
@@ -355,8 +395,11 @@ export default async function QuestionsPage({ params, searchParams }: { params: 
         {toDraft > 0 ? <DraftMissing accountSlug={account.slug} count={toDraft} /> : null}
 
         <Card>
-          <form className="flex flex-wrap items-end gap-3 p-4" action="" method="get">
-            <Input name="q" defaultValue={f.q} placeholder="texto, título o código…" aria-label="Buscar" className="w-full sm:w-80" />
+          <form className="flex flex-wrap items-end gap-2 p-4" action="" method="get">
+            <div className="relative min-w-0 flex-1 sm:w-80 sm:flex-none">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+              <Input name="q" defaultValue={f.q} placeholder="texto, título o código…" aria-label="Buscar" className="pl-9" />
+            </div>
             {kept
               .filter(([k]) => k !== 'q' && k !== 'page')
               .map(([k, v]) => (
@@ -393,17 +436,29 @@ export default async function QuestionsPage({ params, searchParams }: { params: 
 
         <Card className="overflow-hidden">
           {list.questions.length === 0 ? (
-            <p className="p-10 text-center text-sm text-muted-foreground">
-              {neverRead
-                ? 'Todavía no se leyeron las preguntas.'
-                : f.q || f.publicationId
-                  ? 'No hay preguntas que coincidan.'
-                  : f.view === 'sin-responder'
-                    ? list.counts.forPerson > 0
-                      ? 'No hay otras preguntas sin responder.'
-                      : 'No hay preguntas sin responder.'
-                    : 'Todavía no hay preguntas respondidas.'}
-            </p>
+            <div className="flex flex-col items-center gap-3 px-6 py-12 text-center">
+              <span className="flex h-14 w-14 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                <MessageCircleQuestion className="h-7 w-7" aria-hidden />
+              </span>
+              <p className="font-semibold">
+                {neverRead
+                  ? 'Todavía no se leyeron las preguntas.'
+                  : f.q || f.publicationId
+                    ? 'No hay preguntas que coincidan.'
+                    : f.view === 'sin-responder'
+                      ? list.counts.forPerson > 0
+                        ? 'No hay otras preguntas sin responder.'
+                        : 'No hay preguntas sin responder.'
+                      : 'Todavía no hay preguntas respondidas.'}
+              </p>
+              <p className="max-w-xs text-sm text-muted-foreground">
+                {neverRead
+                  ? 'Tocá Leer ahora para traerlas.'
+                  : f.q || f.publicationId
+                    ? 'Probá con otra búsqueda.'
+                    : 'Cuando lleguen preguntas nuevas, aparecen acá.'}
+              </p>
+            </div>
           ) : (
             <ul className="divide-y">
               {list.questions.map((q) => (

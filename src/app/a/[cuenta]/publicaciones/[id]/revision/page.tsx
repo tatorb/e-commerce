@@ -59,7 +59,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ cuenta:
         />
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-1">
-            <h1 className="text-2xl font-semibold tracking-tight">Revisión de la propuesta</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Revisión de la propuesta</h1>
             <p className="text-sm text-muted-foreground">
               {title} · {publication.store.name} · {publication.externalId ?? 'sin ID'}
             </p>

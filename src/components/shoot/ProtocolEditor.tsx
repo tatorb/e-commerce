@@ -81,7 +81,7 @@ export function ProtocolEditor({ accountSlug, protocols }: { accountSlug: string
         <ProtocolCard key={p.id} accountSlug={accountSlug} protocol={p} index={i} total={active.length} />
       ))}
       {archived.length > 0 ? (
-        <details className="rounded-lg border bg-card">
+        <details className="rounded-2xl border bg-card shadow-card">
           <summary className="cursor-pointer px-4 py-3 text-sm font-medium">Archivados ({archived.length})</summary>
           <div className="space-y-4 border-t p-4">
             {archived.map((p, i) => (

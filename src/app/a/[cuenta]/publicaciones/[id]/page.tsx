@@ -1,6 +1,26 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ArrowRight, ExternalLink, KanbanSquare, Package } from 'lucide-react';
+import {
+  AlignLeft,
+  Camera,
+  CreditCard,
+  ExternalLink,
+  KanbanSquare,
+  ListChecks,
+  Package,
+  Percent,
+  Ruler,
+  Tag,
+  Type,
+  Boxes,
+  Info,
+} from 'lucide-react';
+import type { ReactNode } from 'react';
+import { EntityHero } from '@/components/navigation/EntityHero';
+import { CollapsibleCard } from '@/components/ui/collapsible-card';
+import { InfoStrip } from '@/components/ui/info-strip';
+import { NavRow } from '@/components/ui/nav-row';
+import { measuresText } from '@/lib/publication-facts';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Breadcrumb } from '@/components/navigation/Breadcrumb';
@@ -9,10 +29,11 @@ import { PublicationHistoryPanel } from '@/components/publication/PublicationHis
 import { channelInfo } from '@/channels';
 import { codeOrUnpublished } from '@/domain/channel-status';
 import { isAiConfigured } from '@/ai/claude';
-import { getProduct } from '@/lib/queries/products';
+import { firstPhoto, getProduct, productCovers } from '@/lib/queries/products';
 import { loadRulesByChannel } from '@/lib/queries/scoring';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { TabLinks } from '@/components/ui/tab-links';
 import { SectionBody, SectionCard } from '@/components/ui/section-card';
 import { ChannelStatusBadge, PipelineBadge } from '@/components/stages/StageBadge';
 import { DraftBar, DraftField, FaceValue, ReadOneButton } from '@/components/publication/FaceControls';
@@ -44,7 +65,6 @@ import { PublicationFactsRow } from '@/components/publication/PublicationFactsRo
 import { loadPublicationFacts } from '@/lib/publication-facts';
 import { can } from '@/domain/access';
 import { formatDateTime, plural } from '@/lib/format';
-import { cn } from '@/lib/utils/cn';
 import { loadPublicationFaces, type PublicationFaces } from '@/lib/queries/publication-faces';
 import { FamilyMembersRow } from '@/components/families/FamilyMembersRow';
 import { familyOf } from '@/lib/families';
@@ -61,6 +81,21 @@ export async function generateMetadata({ params }: { params: Promise<{ cuenta: s
 }
 
 type State = PublicationFaces['states'][FaceField];
+
+// El ícono de cada dato de la publicación.
+const FIELD_ICON: Record<FaceField, ReactNode> = {
+  title: <Type />,
+  description: <AlignLeft />,
+  attributes: <ListChecks />,
+  photos: <Camera />,
+  price: <Tag />,
+  installments: <CreditCard />,
+  discount: <Percent />,
+  quantity: <Boxes />,
+};
+
+// Los datos cortos: en la vista del canal van como filas que llevan a cambiarlos.
+const SHORT_FIELDS: FaceField[] = ['price', 'installments', 'discount', 'quantity'];
 
 const STATE: Record<State, { label: string; variant: 'secondary' | 'destructive' | 'outline' }> = {
   same: { label: 'Igual en los dos lados', variant: 'outline' },
@@ -113,7 +148,7 @@ export default async function PublicationPage({
   const productHref = `/a/${account.slug}/productos/${p.product.id}`;
   // Las otras publicaciones del mismo producto, para pasar de una a otra.
   const canTask = can(user.access, 'tareas', 'write');
-  const [others, history, knowledge, qa, tasks, people, stockPlans, factsOf, family] = await Promise.all([
+  const [others, history, knowledge, qa, tasks, people, stockPlans, factsOf, family, covers] = await Promise.all([
     prisma.publication.findMany({
       where: { productId: p.product.id, id: { not: p.id } },
       orderBy: { createdAt: 'asc' },
@@ -138,6 +173,8 @@ export default async function PublicationPage({
     loadPublicationFacts(prisma, [p.id]),
     // Las demás medidas de su familia, que se trabajan juntas.
     familyOf(prisma, p.id),
+    // La portada del producto, si la publicación no tiene fotos leídas del canal.
+    productCovers([p.product.id]),
   ]);
   const facts = factsOf.get(p.id) ?? null;
   const stockPlan = stockPlans.get(p.id) ?? null;
@@ -146,7 +183,7 @@ export default async function PublicationPage({
   return (
     <>
       <PageHeader staticOnMobile>
-        <div className="space-y-2">
+        <div className="space-y-3">
           <Breadcrumb
             items={[
               { label: account.name, href: `/a/${account.slug}/pipeline` },
@@ -155,73 +192,62 @@ export default async function PublicationPage({
               { label: title },
             ]}
           />
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0 space-y-1.5">
-              <EntityLabel kind="publication" channelName={channelName} accent={channelOf.accent} />
-              <h1 className="text-xl font-semibold tracking-tight md:text-2xl">{title}</h1>
-              <p className="text-sm text-muted-foreground">
-                {p.store.name} · {codeOrUnpublished(p.externalId)}
-              </p>
-              {facts ? <PublicationFactsRow facts={facts} /> : null}
-              {family ? <FamilyMembersRow members={family.members} accountSlug={account.slug} channelName={data.channelName} currentId={p.id} /> : null}
+          <EntityHero
+            photo={{ src: firstPhoto(copy?.photos) ?? covers.get(p.product.id) ?? null, alt: title }}
+            label={<EntityLabel kind="publication" channelName={channelName} accent={channelOf.accent} />}
+            title={title}
+            meta={`${p.store.name} · ${codeOrUnpublished(p.externalId)}`}
+            facts={
               <div className="flex flex-wrap gap-1.5">
+                {facts ? <PublicationFactsRow facts={facts} hideMeasures className="contents" /> : null}
                 <PipelineBadge state={p} />
                 {copy && !data.missing && pending === 0 ? <Badge variant="outline">Al día con {channelName}</Badge> : null}
                 {summary.draft.length > 0 ? <Badge variant="secondary">Borrador</Badge> : null}
                 {summary.choose.length > 0 ? <Badge variant="destructive">Para elegir</Badge> : null}
                 {summary.rejected.length > 0 ? <Badge variant="destructive">Rechazada</Badge> : null}
               </div>
-            </div>
-            <div className="flex flex-wrap items-start gap-2">
-              {p.url ? (
-                <Button size="sm" variant="outline" asChild>
-                  <a href={p.url} target="_blank" rel="noreferrer">
-                    <ExternalLink />
-                    Ver en {channelName}
-                  </a>
-                </Button>
-              ) : null}
-              {p.pipelineStatus === 'IN_PIPELINE' ? (
-                <Button size="sm" variant="outline" asChild>
-                  <Link href={`/a/${account.slug}/pipeline/${p.id}`}>
-                    <KanbanSquare />
-                    Abrir su paso
-                  </Link>
-                </Button>
-              ) : null}
-              {data.canRead ? <ReadOneButton accountSlug={account.slug} publicationId={p.id} channelName={channelName} /> : null}
-            </div>
-          </div>
-        </div>
-        {/* De qué producto es, y sus otras publicaciones. */}
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-md border bg-muted/40 px-3 py-2 text-sm">
-          <Link href={productHref} className="inline-flex min-w-0 items-center gap-1.5 hover:underline">
-            <Package className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-            <span className="text-muted-foreground">Producto</span>
-            <span className="truncate font-medium">{p.product.name}</span>
-            <ArrowRight className="h-3.5 w-3.5 shrink-0" aria-hidden />
-          </Link>
-          {others.length > 0 ? (
-            <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-              <span className="text-muted-foreground">{others.length === 1 ? 'Otra publicación:' : 'Otras publicaciones:'}</span>
-              {others.slice(0, 3).map((o) => (
-                <Link
-                  key={o.id}
-                  href={`/a/${account.slug}/publicaciones/${o.id}`}
-                  title={`${titleOrUntitled(o.title)} · ${o.store.name}`}
-                  className="inline-flex min-w-0 max-w-full items-center gap-1 underline-offset-4 hover:underline"
-                >
-                  <span className="truncate sm:max-w-[16rem]">{titleOrUntitled(o.title)}</span>
-                  <span className="shrink-0 text-muted-foreground">· {codeOrUnpublished(o.externalId)}</span>
-                </Link>
-              ))}
-              {others.length > 3 ? (
-                <Link href={`${productHref}?seccion=publicaciones`} className="text-muted-foreground underline-offset-4 hover:underline">
-                  y {others.length - 3} más
-                </Link>
-              ) : null}
-            </span>
-          ) : null}
+            }
+            actions={
+              <>
+                {p.url ? (
+                  <Button size="sm" variant="outline" asChild>
+                    <a href={p.url} target="_blank" rel="noreferrer">
+                      <ExternalLink />
+                      Ver en {channelName}
+                    </a>
+                  </Button>
+                ) : null}
+                {p.pipelineStatus === 'IN_PIPELINE' ? (
+                  <Button size="sm" variant="outline" asChild>
+                    <Link href={`/a/${account.slug}/pipeline/${p.id}`}>
+                      <KanbanSquare />
+                      Abrir su paso
+                    </Link>
+                  </Button>
+                ) : null}
+                {data.canRead ? <ReadOneButton accountSlug={account.slug} publicationId={p.id} channelName={channelName} /> : null}
+              </>
+            }
+          >
+            {facts && facts.measures.kind !== 'none' ? <InfoStrip icon={<Ruler />}>{measuresText(facts.measures)}</InfoStrip> : null}
+            {family ? <FamilyMembersRow members={family.members} accountSlug={account.slug} channelName={data.channelName} currentId={p.id} /> : null}
+          </EntityHero>
+          {/* De qué producto es, y sus otras publicaciones. */}
+          <nav aria-label="El producto y sus publicaciones" className="divide-y overflow-hidden rounded-2xl border bg-card shadow-card">
+            <NavRow href={productHref} icon={<Package />} label="Producto" value={p.product.name} />
+            {others.slice(0, 3).map((o) => (
+              <NavRow
+                key={o.id}
+                href={`/a/${account.slug}/publicaciones/${o.id}`}
+                icon={<Tag />}
+                label={`Otra publicación · ${o.store.name} · ${codeOrUnpublished(o.externalId)}`}
+                value={titleOrUntitled(o.title)}
+              />
+            ))}
+            {others.length > 3 ? (
+              <NavRow href={`${productHref}?seccion=publicaciones`} icon={<Info />} label="Del mismo producto" value={`${others.length - 3} publicaciones más`} />
+            ) : null}
+          </nav>
         </div>
       </PageHeader>
 
@@ -231,29 +257,16 @@ export default async function PublicationPage({
         ) : null}
 
         {/* Las dos caras de la publicación, y su puntaje e historial. */}
-        <div className="inline-flex w-full rounded-lg border bg-muted/50 p-1 sm:w-auto" role="tablist" aria-label="Cara de la publicación">
-          {(
+        <TabLinks
+          label="Cara de la publicación"
+          items={(
             [
               ['canal', channelName, null],
               ['borrador', 'Borrador', pending],
               ['historial', 'Puntaje e historial', null],
             ] as const
-          ).map(([key, label, count]) => (
-            <Link
-              key={key}
-              href={`${base}?cara=${key}`}
-              role="tab"
-              aria-selected={face === key}
-              className={cn(
-                'flex flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors sm:flex-none sm:px-4',
-                face === key ? 'bg-card shadow-sm' : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {label}
-              {count ? <span className="rounded-full bg-foreground px-1.5 text-[11px] tabular-nums text-background">{count}</span> : null}
-            </Link>
-          ))}
-        </div>
+          ).map(([key, label, count]) => ({ key, href: `${base}?cara=${key}`, label, active: face === key, count }))}
+        />
 
         {face === 'historial' ? (
           history ? (
@@ -271,7 +284,7 @@ export default async function PublicationPage({
           <>
             {create ? <CreateInChannelCard accountSlug={account.slug} publicationId={p.id} info={create} /> : null}
             {p.externalId ? (
-              <div className="rounded-lg border bg-card px-4 py-3 text-sm">
+              <div className="rounded-2xl border bg-card shadow-card px-4 py-3 text-sm">
                 {data.missing ? (
                   <p>
                     {channelName} no la devuelve: puede estar borrada o ser de otra cuenta. Los cambios quedan en la app.
@@ -324,7 +337,9 @@ export default async function PublicationPage({
               return (
                 <SectionCard
                   key={field}
+                  id={`campo-${field}`}
                   title={FACE_FIELD_LABEL[field]}
+                  icon={FIELD_ICON[field]}
                   action={state === 'unread' && !p.externalId ? null : <Badge variant={STATE[state].variant}>{STATE[state].label}</Badge>}
                 >
                   <SectionBody>
@@ -389,18 +404,36 @@ export default async function PublicationPage({
               Así está en {channelName}, según la lectura del {formatDateTime(copy.readAt, tz)}.
               {data.missing ? ` En la última lectura ${channelName} no la devolvió.` : ''}
             </p>
-            {FACE_FIELDS.map((field) => (
-              <SectionCard key={field} title={FACE_FIELD_LABEL[field]}>
+            <SectionCard title={FACE_FIELD_LABEL.title} icon={FIELD_ICON.title}>
+              <SectionBody>
+                <FaceValue field="title" value={channel ? asText(channel, 'title') : ''} />
+              </SectionBody>
+            </SectionCard>
+            <SectionCard title={FACE_FIELD_LABEL.photos} icon={FIELD_ICON.photos}>
+              <SectionBody>
+                <PhotoStrip items={media?.available.channel ?? []} />
+              </SectionBody>
+            </SectionCard>
+            {/* Los datos cortos, en filas que llevan a cambiarlos en el borrador. */}
+            <div className="divide-y overflow-hidden rounded-2xl border bg-card shadow-card">
+              {SHORT_FIELDS.map((field) => (
+                <NavRow
+                  key={field}
+                  href={`${base}?cara=borrador#campo-${field}`}
+                  icon={FIELD_ICON[field]}
+                  label={FACE_FIELD_LABEL[field]}
+                  value={(channel ? asText(channel, field) : '').split('\n').join(' · ') || 'Sin dato'}
+                />
+              ))}
+            </div>
+            {(['description', 'attributes'] as const).map((field) => (
+              <CollapsibleCard key={field} title={FACE_FIELD_LABEL[field]} icon={FIELD_ICON[field]}>
                 <SectionBody>
-                  {field === 'photos' ? (
-                    <PhotoStrip items={media?.available.channel ?? []} />
-                  ) : (
-                    <FaceValue field={field} value={channel ? asText(channel, field) : ''} />
-                  )}
+                  <FaceValue field={field} value={channel ? asText(channel, field) : ''} />
                 </SectionBody>
-              </SectionCard>
+              </CollapsibleCard>
             ))}
-            <SectionCard title="Lo demás">
+            <SectionCard title="Lo demás" icon={<Info />}>
               <SectionBody>
                 <dl className="grid gap-x-4 gap-y-1.5 text-sm sm:grid-cols-[10rem_1fr]">
                   <dt className="text-muted-foreground">Estado</dt>

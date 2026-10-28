@@ -17,7 +17,7 @@ export function EntityLabel({
   accent?: Accent;
   className?: string;
 }) {
-  const base = 'inline-flex w-fit items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide';
+  const base = 'inline-flex w-fit items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-[11px] font-semibold uppercase leading-none tracking-wide';
   if (kind === 'product') {
     return (
       <span className={cn(base, 'bg-muted text-muted-foreground', className)}>

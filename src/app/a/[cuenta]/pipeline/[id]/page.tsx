@@ -208,7 +208,7 @@ export default async function PipelineStepPage({
           <Breadcrumb items={[{ label: account.name, href: boardHref }, { label: 'Pipeline', href: boardHref }, { label: titleOrUntitled(pub.title) }]} />
           <div className="space-y-1.5">
             <EntityLabel kind="publication" channelName={pub.channelName} accent={pub.channelAccent} />
-            <h1 className="flex items-start gap-2 text-2xl font-semibold tracking-tight">
+            <h1 className="flex items-start gap-2 text-2xl font-bold tracking-tight">
               <span className={pub.title ? undefined : 'text-muted-foreground'}>{titleOrUntitled(pub.title)}</span>
               {lock ? (
                 <span title={lock} aria-label={lock} className="mt-2 shrink-0 text-amber-700">

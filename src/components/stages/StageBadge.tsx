@@ -54,7 +54,7 @@ export function DotBadge({ cfg, label, compact }: { cfg: Cfg; label: string; com
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide font-semibold whitespace-nowrap',
+        'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-medium',
         cfg.cls,
       )}
     >

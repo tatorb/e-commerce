@@ -61,7 +61,7 @@ export function MobileTopBar({ sidebar, homeHref }: MobileTopBarProps) {
   }
 
   return (
-    <div className="md:hidden sticky top-0 z-30 flex h-14 items-center gap-1 border-b bg-background px-3">
+    <div className="md:hidden sticky top-0 z-30 flex h-14 items-center gap-1 border-b bg-card px-3">
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetTrigger asChild>
           <button
@@ -98,9 +98,9 @@ export function MobileTopBar({ sidebar, homeHref }: MobileTopBarProps) {
           <ArrowLeft className="h-5 w-5" />
         </Link>
       ) : null}
-      <div className="min-w-0 flex-1 text-center">
+      <div className="min-w-0 flex-1 px-1">
         {title ? (
-          <span className="block truncate text-sm font-medium">{title}</span>
+          <span className="block truncate text-base font-semibold tracking-tight">{title}</span>
         ) : (
           <Link href={homeHref} className="inline-block">
             {/* eslint-disable-next-line @next/next/no-img-element */}

@@ -308,7 +308,7 @@ export function ShootSession({
   }
 
   const header = (
-    <div className="flex items-center gap-3 rounded-lg border bg-card p-3">
+    <div className="flex items-center gap-3 rounded-2xl border bg-card shadow-card p-3">
       {product.thumb ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={product.thumb} alt="" className="h-12 w-12 shrink-0 rounded border bg-white object-contain" />
@@ -350,7 +350,7 @@ export function ShootSession({
       <div className="mx-auto w-full max-w-xl space-y-4">
         {header}
         {noticeBar}
-        <section className="space-y-3 rounded-lg border bg-card p-4">
+        <section className="space-y-3 rounded-2xl border bg-card shadow-card p-4">
           <h2 className="text-base font-semibold">Sacá lo que necesites</h2>
           <p className="text-sm text-muted-foreground">Cada foto o video se sube y queda listo para la próxima.</p>
           {captureArea(capture ? [capture.kind] : ['PHOTO', 'VIDEO'])}
@@ -406,7 +406,7 @@ export function ShootSession({
     return (
       <div className="mx-auto w-full max-w-xl space-y-4">
         {header}
-        <p className="rounded-lg border bg-card p-4 text-sm text-muted-foreground">Este protocolo todavía no tiene pasos. Elegí otro o seguí sin protocolo.</p>
+        <p className="rounded-2xl border bg-card shadow-card p-4 text-sm text-muted-foreground">Este protocolo todavía no tiene pasos. Elegí otro o seguí sin protocolo.</p>
         <EndLinks base={base} productId={product.id} hasMeasures={measureText !== null} />
       </div>
     );
@@ -419,7 +419,7 @@ export function ShootSession({
       <div className="mx-auto w-full max-w-xl space-y-4">
         {header}
         {noticeBar}
-        <section className="space-y-3 rounded-lg border bg-card p-4">
+        <section className="space-y-3 rounded-2xl border bg-card shadow-card p-4">
           <h2 className="text-lg font-semibold">Terminaste</h2>
           <p className="text-sm text-muted-foreground">
             {counts.done} de {steps.length} pasos hechos{counts.skipped > 0 ? `, ${counts.skipped} ${counts.skipped === 1 ? 'salteado' : 'salteados'}` : ''}. En esta tanda subiste {uploaded.length}{' '}
@@ -460,7 +460,7 @@ export function ShootSession({
       {header}
       {stepList}
       {noticeBar}
-      <section className="space-y-3 rounded-lg border bg-card p-4">
+      <section className="space-y-3 rounded-2xl border bg-card shadow-card p-4">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs font-medium text-muted-foreground">
             Paso {index + 1} de {steps.length}

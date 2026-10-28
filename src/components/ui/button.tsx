@@ -23,11 +23,12 @@ const buttonVariants = cva(
         ghost: 'hover:bg-accent hover:text-accent-foreground',
         link: 'text-primary underline-offset-4 hover:underline',
       },
+      // En el celular, más altos para tocarlos con el dedo.
       size: {
-        default: 'h-9 px-4 py-2',
-        sm: 'h-8 rounded-md px-3 text-xs',
-        lg: 'h-10 rounded-md px-8',
-        icon: 'h-9 w-9',
+        default: 'h-10 px-4 py-2 sm:h-9',
+        sm: 'h-9 rounded-md px-3 text-sm sm:h-8 sm:text-xs',
+        lg: 'h-11 rounded-lg px-6',
+        icon: 'h-10 w-10 sm:h-9 sm:w-9',
       },
     },
     defaultVariants: {

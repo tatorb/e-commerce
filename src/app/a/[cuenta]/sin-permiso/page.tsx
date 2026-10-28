@@ -16,7 +16,7 @@ export default async function NoAccessPage({ params, searchParams }: { params: P
   return (
     <>
       <PageHeader>
-        <h1 className="text-2xl font-semibold tracking-tight">Sin permiso</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Sin permiso</h1>
       </PageHeader>
       <PageBody>
         <Card className="space-y-2 p-6 text-sm">

@@ -24,7 +24,7 @@ export default async function AnswerSettingsPage({ params }: { params: Promise<{
     <>
       <PageHeader>
         <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Respuestas</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Respuestas</h1>
           <p className="text-sm text-muted-foreground">
             Cómo responde <strong>{account.name}</strong> las preguntas de los compradores. Claude lo usa para proponer cada respuesta en{' '}
             <Link href={`/a/${account.slug}/preguntas`} className="font-medium text-foreground underline-offset-4 hover:underline">

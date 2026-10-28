@@ -78,7 +78,7 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
           <Breadcrumb items={[{ label: 'Equipo', href: '/equipo' }, { label: 'Actividad' }]} />
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="space-y-1">
-              <h1 className="text-2xl font-semibold tracking-tight">Actividad</h1>
+              <h1 className="text-2xl font-bold tracking-tight">Actividad</h1>
               <p className="text-sm text-muted-foreground">
                 Lo que hace cada persona en la app: lo que guarda o cambia, también desde Claude, y cuándo entra. Lo que la app hace sola está en el
                 Registro de cada cuenta.

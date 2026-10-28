@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { ListChecks } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { TabLinks } from '@/components/ui/tab-links';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { NewPipelinePublicationDialog } from '@/components/pipeline/NewPipelinePublicationDialog';
@@ -15,7 +16,6 @@ import { listStores } from '@/lib/queries/products';
 import { listToPush } from '@/lib/queries/sync';
 import { unansweredSummary } from '@/lib/queries/questions';
 import { plural } from '@/lib/format';
-import { cn } from '@/lib/utils/cn';
 import { prisma } from '@/lib/db';
 import { openTasksByPublication } from '@/lib/tasks';
 
@@ -56,7 +56,7 @@ export default async function PipelinePage({
       <PageHeader>
         <div className="flex items-start justify-between gap-3">
           <div className="space-y-1">
-            <h1 className="text-2xl font-semibold tracking-tight">Pipeline</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Pipeline</h1>
             <p className="text-sm text-muted-foreground">
               Las publicaciones de <strong>{account.name}</strong> que se están corrigiendo. Tocá una para abrir su paso, o
               arrastrala a otro paso: no hace falta pasar por los del medio.
@@ -78,30 +78,21 @@ export default async function PipelinePage({
       </PageHeader>
       <PageBody>
         <QuestionsNotice accountSlug={account.slug} count={questions.count} oldestAt={questions.oldestAt} />
-        <div className="inline-flex w-full rounded-lg border bg-muted/50 p-1 sm:w-auto" role="tablist" aria-label="Vista del pipeline">
-          {(
+        <TabLinks
+          label="Vista del pipeline"
+          items={(
             [
               ['', 'Tablero'],
               ['por-subir', 'Por subir'],
             ] as const
-          ).map(([key, label]) => (
-            <Link
-              key={key}
-              href={key ? `?vista=${key}` : '?'}
-              role="tab"
-              aria-selected={(key === 'por-subir') === toPushView}
-              className={cn(
-                'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-1.5 text-sm font-medium transition-colors sm:flex-none',
-                (key === 'por-subir') === toPushView ? 'bg-card shadow-sm' : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {label}
-              {key === 'por-subir' && toPushView && toPush.length > 0 ? (
-                <span className="rounded-full bg-foreground px-1.5 text-[11px] tabular-nums text-background">{toPush.length}</span>
-              ) : null}
-            </Link>
-          ))}
-        </div>
+          ).map(([key, label]) => ({
+            key: key || 'tablero',
+            href: key ? `?vista=${key}` : '?',
+            label,
+            active: (key === 'por-subir') === toPushView,
+            count: key === 'por-subir' && toPushView ? toPush.length : null,
+          }))}
+        />
         {toPushView ? (
           <>
             <p className="text-sm text-muted-foreground">

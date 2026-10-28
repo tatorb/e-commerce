@@ -39,7 +39,7 @@ export default async function ShootPage({ params, searchParams }: { params: Prom
   const header = (
     <PageHeader>
       <div className="space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Registro de productos</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Registro de productos</h1>
         <p className="text-sm text-muted-foreground">
           Sacá las fotos y los videos de cada producto con el celular. Se suben tal como salen de la cámara y van a los pasos Imágenes y Videos.
           {can(user.access, 'protocolos', 'read') ? (
@@ -67,7 +67,7 @@ export default async function ShootPage({ params, searchParams }: { params: Prom
           <div className="mx-auto w-full max-w-xl space-y-4">
             <BeforeStarting />
             {productId ? <p className="text-sm text-destructive">Ese producto no está en la cuenta. Buscalo de nuevo.</p> : null}
-            <section className="space-y-3 rounded-lg border bg-card p-4">
+            <section className="space-y-3 rounded-2xl border bg-card shadow-card p-4">
               <h2 className="text-base font-semibold">1. Elegí el producto</h2>
               <form action={base} className="flex gap-2">
                 <Input name="q" defaultValue={q} placeholder="Código, nombre o SKU. Por ejemplo SP-914" autoComplete="off" className="h-11 text-base" />
@@ -110,7 +110,7 @@ export default async function ShootPage({ params, searchParams }: { params: Prom
           <div className="mx-auto w-full max-w-xl space-y-4">
             <ProductStrip product={plan.product} base={base} />
             {!measureChosen ? (
-              <section className="space-y-3 rounded-lg border bg-card p-4">
+              <section className="space-y-3 rounded-2xl border bg-card shadow-card p-4">
                 <h2 className="text-base font-semibold">2. Elegí la medida</h2>
                 <p className="text-sm text-muted-foreground">Lo que saques queda marcado para esa medida en las publicaciones. Si sirve para todas, elegí Todas las medidas.</p>
                 <ul className="grid gap-2 sm:grid-cols-2">
@@ -125,7 +125,7 @@ export default async function ShootPage({ params, searchParams }: { params: Prom
                 </ul>
               </section>
             ) : (
-              <section className="space-y-3 rounded-lg border bg-card p-4">
+              <section className="space-y-3 rounded-2xl border bg-card shadow-card p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h2 className="text-base font-semibold">{needsMeasure ? '3' : '2'}. Elegí el protocolo</h2>
                   {measureText ? (
@@ -238,7 +238,7 @@ function ProductList({ products, base }: { products: ShootPick[]; base: string }
 
 function ProductStrip({ product, base }: { product: ShootPick; base: string }) {
   return (
-    <div className="flex items-center gap-3 rounded-lg border bg-card p-3">
+    <div className="flex items-center gap-3 rounded-2xl border bg-card shadow-card p-3">
       {product.thumb ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={product.thumb} alt="" className="h-12 w-12 shrink-0 rounded border bg-white object-contain" />
@@ -259,7 +259,7 @@ function ProductStrip({ product, base }: { product: ShootPick; base: string }) {
 /** Cómo poner la cámara del celular en la mayor calidad. */
 function BeforeStarting({ collapsed = false }: { collapsed?: boolean }) {
   return (
-    <details open={!collapsed} className="rounded-lg border bg-card">
+    <details open={!collapsed} className="rounded-2xl border bg-card shadow-card">
       <summary className="cursor-pointer px-4 py-3 text-sm font-semibold">Antes de empezar: la cámara en la mayor calidad</summary>
       <div className="space-y-2 border-t px-4 py-3 text-sm">
         <p>La app sube cada foto y cada video tal como sale de la cámara, sin achicarlo. La calidad la pone el celular.</p>
@@ -282,7 +282,7 @@ function ShotHistory({ plan, timezone }: { plan: ShootPlan; timezone: string }) 
   if (plan.shots.length === 0) return null;
   const titles = new Map(plan.protocols.flatMap((p) => p.steps.map((s) => [s.id, s.title] as const)));
   return (
-    <details className="rounded-lg border bg-card">
+    <details className="rounded-2xl border bg-card shadow-card">
       <summary className="cursor-pointer px-4 py-3 text-sm font-semibold">Lo que ya se registró de este producto ({plan.shots.length})</summary>
       <ul className="divide-y border-t">
         {plan.shots.map((s, i) => (

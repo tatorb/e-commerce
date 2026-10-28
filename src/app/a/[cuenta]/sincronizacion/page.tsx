@@ -64,7 +64,7 @@ export default async function SyncPage({ params }: { params: Promise<{ cuenta: s
     <>
       <PageHeader>
         <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Sincronización</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Sincronización</h1>
           <p className="text-sm text-muted-foreground">
             La app lee las publicaciones de <strong>{account.name}</strong> en {channels} cada hora. Si algo cambió allá y en la app no lo tocaste,
             la app lo toma sola. Si cambió en los dos lados, te lo muestra acá para que elijas.
@@ -227,7 +227,7 @@ export default async function SyncPage({ params }: { params: Promise<{ cuenta: s
 
 function Stat({ value, label, hint, alert = false }: { value: number; label: string; hint?: string; alert?: boolean }) {
   return (
-    <div className="rounded-lg border bg-card px-3 py-3">
+    <div className="rounded-2xl border bg-card shadow-card px-3 py-3">
       <p className={`text-2xl font-semibold tabular-nums ${alert ? 'text-destructive' : ''}`}>{value}</p>
       <p className="text-xs font-medium">{label}</p>
       {hint ? <p className="hidden text-[11px] text-muted-foreground sm:block">{hint}</p> : null}

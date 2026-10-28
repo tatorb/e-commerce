@@ -375,8 +375,8 @@ export function ProductForm({
       ) : null}
 
       {/* En el celular, el botón queda a la vista abajo mientras se completa. */}
-      <div className="sticky bottom-0 z-10 -mx-4 flex flex-wrap items-center gap-3 border-t bg-background/95 px-4 py-3 backdrop-blur md:static md:mx-0 md:border-0 md:bg-transparent md:p-0 md:backdrop-blur-none">
-        <Button type="submit" pending={pending} disabled={pending || !dirty || !values.name.trim()}>
+      <div className="sticky bottom-0 z-10 -mx-4 flex flex-wrap items-center gap-x-3 gap-y-2 border-t bg-card/95 px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 backdrop-blur md:static md:mx-0 md:border-0 md:bg-transparent md:p-0 md:backdrop-blur-none">
+        <Button type="submit" className="w-full md:w-auto" pending={pending} disabled={pending || !dirty || !values.name.trim()}>
           {isNew ? (pending ? 'Creando…' : 'Crear producto') : pending ? 'Guardando…' : 'Guardar cambios'}
         </Button>
         {status.kind === 'success' ? <span className="text-sm text-green-600">Guardado.</span> : null}

@@ -50,7 +50,7 @@ export default async function TaskPage({ params }: { params: Promise<{ cuenta: s
           <Breadcrumb items={[{ label: 'Tareas', href: `/a/${account.slug}/tareas` }, { label: task.title }]} />
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0 space-y-1">
-              <h1 className="break-words text-2xl font-semibold tracking-tight">{task.title}</h1>
+              <h1 className="break-words text-2xl font-bold tracking-tight">{task.title}</h1>
               <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                 <TaskFlagBadges task={task} now={now} timeZone={tz} />
                 <span>

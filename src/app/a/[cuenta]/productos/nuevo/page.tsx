@@ -19,7 +19,7 @@ export default async function NewProductPage({ params }: { params: Promise<{ cue
             items={[{ label: account.name, href: base }, { label: 'Productos', href: base }, { label: 'Nuevo producto' }]}
           />
           <div className="space-y-1">
-            <h1 className="text-2xl font-semibold tracking-tight">Nuevo producto</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Nuevo producto</h1>
             <p className="text-sm text-muted-foreground">
               Cargá la ficha maestra. Después le agregás su publicación en cada tienda.
             </p>

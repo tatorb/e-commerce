@@ -155,7 +155,7 @@ export default async function SyncLogPage({ params, searchParams }: { params: Pr
       <PageHeader>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-1">
-            <h1 className="text-2xl font-semibold tracking-tight">Registro</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Registro</h1>
             <p className="text-sm text-muted-foreground">
               Todo lo que pasó entre la app y el canal en <strong>{account.name}</strong>: lo que llegó, lo que se subió, lo que se eligió y lo que
               no se pudo, con el motivo. Cada dato con su antes y su después.

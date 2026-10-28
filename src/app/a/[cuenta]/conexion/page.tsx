@@ -80,7 +80,7 @@ export default async function ConnectionPage({
     <>
       <PageHeader>
         <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Conexión con los canales</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Conexión con los canales</h1>
           <p className="text-sm text-muted-foreground">
             Conectá la cuenta de cada tienda para que la app lea y, más adelante, cambie sus publicaciones. La prueba de
             conexión dice qué se puede leer solo. Lo que no se pueda leer solo se carga a mano.

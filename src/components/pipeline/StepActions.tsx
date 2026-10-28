@@ -91,6 +91,24 @@ export function StepActions({
     </DropdownMenu>
   );
 
+  // Avanzar, o marcarla como corregida en el último paso, con la flecha para elegir otro.
+  const primary = (
+    <span className="inline-flex w-full md:w-auto [&>button:first-child]:flex-1">
+      {next ? (
+        <Button className="rounded-r-none" pending={pending} onClick={() => move('advance')} disabled={pending}>
+          {pending ? 'Moviendo…' : `Avanzar a ${PIPELINE_STEP_LABEL[next]}`}
+          <ArrowRight className="h-4 w-4" />
+        </Button>
+      ) : (
+        <Button className="rounded-r-none" pending={pending} onClick={() => move('complete')} disabled={pending || completeBlocked !== null}>
+          <Check className="h-4 w-4" />
+          {pending ? 'Guardando…' : 'Marcar como corregida'}
+        </Button>
+      )}
+      {others}
+    </span>
+  );
+
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -100,26 +118,17 @@ export function StepActions({
             Volver a {PIPELINE_STEP_LABEL[previous]}
           </Button>
         ) : null}
-        <span className="inline-flex">
-          {next ? (
-            <Button className="rounded-r-none" pending={pending} onClick={() => move('advance')} disabled={pending}>
-              {pending ? 'Moviendo…' : `Avanzar a ${PIPELINE_STEP_LABEL[next]}`}
-              <ArrowRight className="h-4 w-4" />
-            </Button>
-          ) : (
-            <Button className="rounded-r-none" pending={pending} onClick={() => move('complete')} disabled={pending || completeBlocked !== null}>
-              <Check className="h-4 w-4" />
-              {pending ? 'Guardando…' : 'Marcar como corregida'}
-            </Button>
-          )}
-          {others}
-        </span>
+        <span className="hidden md:inline-flex">{primary}</span>
         {!next && completeBlocked ? <span className="text-sm text-muted-foreground">{completeBlocked}</span> : null}
         <span className="sm:ml-auto">
           <RemoveFromPipelineDialog accountSlug={accountSlug} publicationId={publicationId} title={title} step={step} />
         </span>
       </div>
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      {/* En el celular, la acción principal queda fija abajo, a lo ancho. */}
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t bg-card/95 px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 backdrop-blur md:hidden">
+        {primary}
+      </div>
     </div>
   );
 }

@@ -208,7 +208,7 @@ function BoardCard({
       onDragEnd={onDragEnd}
       aria-busy={busy || undefined}
       className={cn(
-        'rounded-lg border bg-card text-card-foreground shadow-sm transition-colors hover:border-foreground/25',
+        'rounded-xl border bg-card text-card-foreground shadow-card transition-colors hover:border-foreground/25',
         !readOnly && 'md:cursor-grab',
         dragging && 'opacity-50',
         busy && 'opacity-70',

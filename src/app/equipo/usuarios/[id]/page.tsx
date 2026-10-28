@@ -52,7 +52,7 @@ export default async function UserPage({ params, searchParams }: { params: Promi
       <PageHeader>
         <div className="space-y-2">
           <Breadcrumb items={[{ label: 'Equipo', href: '/equipo' }, { label: user.name }]} />
-          <h1 className="text-2xl font-semibold tracking-tight">{user.name}</h1>
+          <h1 className="text-2xl font-bold tracking-tight">{user.name}</h1>
           <p className="text-sm text-muted-foreground">
             {user.email}
             {user.disabledAt ? ` · dada de baja el ${formatDateTime(user.disabledAt)}` : ''}

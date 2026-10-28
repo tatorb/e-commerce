@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/db';
-import type { Prisma } from '@/generated/prisma/client';
+import { Prisma } from '@/generated/prisma/client';
 import type { ProductKind } from '@/generated/prisma/enums';
 import { productSearchWhere } from './product-search';
 
@@ -37,6 +37,33 @@ export async function listProducts(accountId: string, q?: string, kinds: Product
 }
 
 export type ProductListItem = Awaited<ReturnType<typeof listProducts>>[number];
+
+/** La primera foto de una lista de fotos leída del canal, si tiene. */
+export function firstPhoto(photos: unknown): string | null {
+  const first = Array.isArray(photos) ? photos.find((p) => typeof p === 'string' && p.trim()) : null;
+  return typeof first === 'string' ? first : null;
+}
+
+/**
+ * La foto de portada de cada producto, para mostrarlo en las listas: la
+ * primera foto en el canal de su publicación más vieja que tenga fotos y, si
+ * no hay, la primera foto de la ficha.
+ */
+export async function productCovers(productIds: string[], db: Pick<typeof prisma, '$queryRaw'> = prisma): Promise<Map<string, string>> {
+  if (productIds.length === 0) return new Map();
+  const rows = await db.$queryRaw<{ productId: string; url: string }[]>(Prisma.sql`
+    SELECT DISTINCT ON (pid) pid AS "productId", url FROM (
+      SELECT p."productId" AS pid, c.photos->>0 AS url, 0 AS pri, 0 AS pos, p."createdAt" AS at
+      FROM publications p JOIN channel_copies c ON c."publicationId" = p.id
+      WHERE p."productId" = ANY(${productIds}) AND jsonb_typeof(c.photos) = 'array' AND coalesce(c.photos->>0, '') <> ''
+      UNION ALL
+      SELECT a."productId", a.url, 1, a.position, a."createdAt"
+      FROM assets a
+      WHERE a."productId" = ANY(${productIds}) AND a.kind = 'PHOTO'
+    ) x
+    ORDER BY pid, pri, pos, at`);
+  return new Map(rows.map((r) => [r.productId, r.url]));
+}
 
 export async function getProduct(accountId: string, productId: string) {
   return prisma.product.findFirst({
@@ -87,6 +114,7 @@ export async function getProduct(accountId: string, productId: string) {
               variations: true,
               details: true,
               stockInChannel: true,
+              photos: true,
             },
           },
         },

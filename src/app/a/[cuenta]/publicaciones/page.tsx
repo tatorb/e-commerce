@@ -133,7 +133,7 @@ export default async function PublicationsPage({
       <PageHeader>
         <div className="flex items-start justify-between gap-3">
           <div className="space-y-1">
-            <h1 className="text-2xl font-semibold tracking-tight">Publicaciones</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Publicaciones</h1>
             <p className="text-sm text-muted-foreground">
               Todas las publicaciones de <strong>{account.name}</strong>, con su puntaje según el estándar. Elegí las
               que querés corregir y agregalas al pipeline.

@@ -34,7 +34,7 @@ export default async function StandardPage({ params }: { params: Promise<{ cuent
     <>
       <PageHeader>
         <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Estándar de publicación</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Estándar de publicación</h1>
           <p className="text-sm text-muted-foreground">
             Qué tiene que tener una publicación correcta en <strong>{account.name}</strong>. El puntaje de cada
             publicación sale de estas reglas: lo que suman las que cumple, sobre lo que suman todas, llevado a 100.

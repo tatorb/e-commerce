@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { TAB_ROW, TabCount, tabClass } from '@/components/ui/tab-links';
 import { Check, MailWarning } from 'lucide-react';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
@@ -52,7 +53,7 @@ export default async function TasksPage({ params, searchParams }: { params: Prom
       <PageHeader>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-1">
-            <h1 className="text-2xl font-semibold tracking-tight">Tareas</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Tareas</h1>
             <p className="text-sm text-muted-foreground">
               {seesAll ? (
                 <>
@@ -68,22 +69,13 @@ export default async function TasksPage({ params, searchParams }: { params: Prom
           </div>
           {canWrite ? <TaskDialog accountSlug={account.slug} timeZone={tz} people={people} meId={user.id} /> : null}
         </div>
-        <div className="grid w-full grid-cols-2 gap-1 rounded-lg border bg-muted/50 p-1 sm:inline-flex sm:w-auto sm:gap-0" role="tablist" aria-label="Qué tareas">
+        <div className={TAB_ROW} role="tablist" aria-label="Qué tareas">
           {TASK_VIEWS.map((v) => {
             const on = v.value === filters.view;
             return (
-              <Link
-                key={v.value}
-                href={hrefWith({ ver: v.value === 'abiertas' ? null : v.value })}
-                role="tab"
-                aria-selected={on}
-                className={cn(
-                  'flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors sm:flex-none',
-                  on ? 'bg-card shadow-sm' : 'text-muted-foreground hover:text-foreground',
-                )}
-              >
+              <Link key={v.value} href={hrefWith({ ver: v.value === 'abiertas' ? null : v.value })} role="tab" aria-selected={on} className={tabClass(on)}>
                 {v.label}
-                <span className="text-xs tabular-nums text-muted-foreground">{list.counts[v.value]}</span>
+                <TabCount active={on}>{list.counts[v.value]}</TabCount>
               </Link>
             );
           })}

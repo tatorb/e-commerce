@@ -27,7 +27,7 @@ export default async function FamiliesPage({ params }: { params: Promise<{ cuent
       <PageHeader>
         <div className="space-y-1">
           <Breadcrumb items={[{ label: account.name }, { label: 'Importar', href: `/a/${account.slug}/importar` }, { label: 'Familias' }]} />
-          <h1 className="text-2xl font-semibold tracking-tight">Familias</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Familias</h1>
           <p className="text-sm text-muted-foreground">
             En Mercado Libre cada medida de un producto es una publicación aparte, con su propio código, y las medidas del mismo producto quedan
             juntas en una familia. Acá ves cómo quedarían agrupadas en la app las publicaciones de <strong>{account.name}</strong>: cuáles se juntan,

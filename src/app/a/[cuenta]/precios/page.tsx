@@ -24,7 +24,7 @@ export default async function PricingSettingsPage({ params }: { params: Promise<
     <>
       <PageHeader>
         <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Precios</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Precios</h1>
           <p className="text-sm text-muted-foreground">
             Los cargos, impuestos, cuotas, costos y márgenes con que el paso Precio calcula el precio de las publicaciones de{' '}
             <strong>{account.name}</strong>. Cada producto puede cambiar cualquiera solo para él, desde el paso Precio.

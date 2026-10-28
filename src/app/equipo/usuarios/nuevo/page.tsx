@@ -18,7 +18,7 @@ export default async function NewUserPage() {
       <PageHeader>
         <div className="space-y-2">
           <Breadcrumb items={[{ label: 'Equipo', href: '/equipo' }, { label: 'Nueva persona' }]} />
-          <h1 className="text-2xl font-semibold tracking-tight">Nueva persona</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Nueva persona</h1>
         </div>
       </PageHeader>
       <PageBody>

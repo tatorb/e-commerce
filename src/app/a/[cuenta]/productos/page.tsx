@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Clock, Plus } from 'lucide-react';
+import { ChevronRight, Clock, Plus, Search } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,7 +18,8 @@ import { KindBadge } from '@/components/products/KindBadge';
 import { UrlFilterDropdown } from '@/components/filters/UrlFilterDropdown';
 import { KIND_OPTIONS, parseKinds } from '@/lib/queries/catalog-filters';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
-import { listProducts, type ProductListItem } from '@/lib/queries/products';
+import { listProducts, productCovers, type ProductListItem } from '@/lib/queries/products';
+import { Thumb } from '@/components/ui/thumb';
 import { formatRelativeDate, plural } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
@@ -55,6 +56,7 @@ export default async function ProductsPage({
 
   const kinds = parseKinds(tipo);
   const products = await listProducts(account.id, q, kinds);
+  const covers = await productCovers(products.map((p) => p.id));
   const base = `/a/${account.slug}/productos`;
 
   return (
@@ -62,13 +64,13 @@ export default async function ProductsPage({
       <PageHeader>
         <div className="flex items-start justify-between gap-3">
           <div className="space-y-1">
-            <h1 className="text-2xl font-semibold tracking-tight">Productos</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Productos</h1>
             <p className="text-sm text-muted-foreground">
               Fichas maestras de <strong>{account.name}</strong>. Cada producto se muestra en los
               canales a través de sus publicaciones.
             </p>
           </div>
-          <Button size="sm" variant="outline" asChild>
+          <Button size="sm" asChild>
             <Link href={`${base}/nuevo`}>
               <Plus className="h-4 w-4" />
               Nuevo producto
@@ -79,16 +81,17 @@ export default async function ProductsPage({
       <PageBody>
         <Card>
           <div className="p-4">
-            <form className="flex flex-wrap gap-3 items-end" action="" method="get">
+            <form className="flex flex-wrap items-end gap-3" action="" method="get">
               {tipo ? <input type="hidden" name="tipo" value={tipo} /> : null}
-              <Input
-                id="q"
-                name="q"
-                defaultValue={q}
-                placeholder="nombre, marca, número de pieza, SKU o ID…"
-                className="w-full sm:w-80"
-              />
-              <Button access="view" type="submit">Buscar</Button>
+              <div className="flex w-full gap-2 sm:w-auto">
+                <div className="relative min-w-0 flex-1 sm:w-80 sm:flex-none">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+                  <Input id="q" name="q" defaultValue={q} placeholder="nombre, marca, número de pieza, SKU o ID…" aria-label="Buscar productos" className="pl-9" />
+                </div>
+                <Button access="view" type="submit">
+                  Buscar
+                </Button>
+              </div>
               <UrlFilterDropdown
                 label="Tipo"
                 paramKey="tipo"
@@ -125,32 +128,35 @@ export default async function ProductsPage({
             )
           ) : (
             <>
-              <div className="md:hidden divide-y overflow-y-auto flex-1 min-h-0">
+              <ul className="md:hidden divide-y overflow-y-auto flex-1 min-h-0">
                 {products.map((p) => (
-                  <div key={p.id} className="px-3 py-3 space-y-1.5">
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="flex min-w-0 items-center gap-2">
-                        <Link href={`${base}/${p.id}`} className="font-medium hover:underline min-w-0 truncate">
-                          {p.name}
-                        </Link>
-                        <KindBadge kind={p.kind} />
+                  <li key={p.id}>
+                    <Link href={`${base}/${p.id}`} className="flex items-start gap-3 px-3 py-3 transition-colors hover:bg-muted/50">
+                      <Thumb src={covers.get(p.id) ?? null} alt={p.name} />
+                      <span className="min-w-0 flex-1 space-y-1.5">
+                        <span className="flex items-start justify-between gap-2">
+                          <span className="line-clamp-2 font-semibold leading-snug">{p.name}</span>
+                          <span className="inline-flex shrink-0 items-center gap-1 pt-0.5 text-xs tabular-nums text-muted-foreground">
+                            <Clock className="h-3 w-3" />
+                            {formatRelativeDate(p.updatedAt, account.timezone)}
+                          </span>
+                        </span>
+                        <span className="flex flex-wrap items-center gap-1">
+                          <KindBadge kind={p.kind} />
+                          <Stages item={p} />
+                        </span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {[p.brand, p.productType, p.partNumber].filter(Boolean).join(' · ') || '—'}
+                        </span>
+                        <span className="block text-xs text-muted-foreground tabular-nums">
+                          <strong className="text-foreground">{p._count.variants}</strong> {p._count.variants === 1 ? 'medida' : 'medidas'}
+                        </span>
                       </span>
-                      <span className="text-xs text-muted-foreground tabular-nums shrink-0 inline-flex items-center gap-1">
-                        <Clock className="h-3 w-3" />
-                        {formatRelativeDate(p.updatedAt, account.timezone)}
-                      </span>
-                    </div>
-                    <Stages item={p} />
-                    <div className="text-xs text-muted-foreground truncate">
-                      {[p.brand, p.productType, p.partNumber].filter(Boolean).join(' · ') || '—'}
-                    </div>
-                    <div className="text-xs text-muted-foreground tabular-nums">
-                      <strong className="text-foreground">{p._count.variants}</strong>{' '}
-                      {p._count.variants === 1 ? 'medida' : 'medidas'}
-                    </div>
-                  </div>
+                      <ChevronRight className="mt-5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                    </Link>
+                  </li>
                 ))}
-              </div>
+              </ul>
               <div className="hidden md:flex md:flex-1 md:min-h-0 md:flex-col">
                 <Table>
                   <TableHeader>
@@ -168,7 +174,8 @@ export default async function ProductsPage({
                     {products.map((p) => (
                       <TableRow key={p.id}>
                         <TableCell>
-                          <span className="flex items-center gap-2">
+                          <span className="flex items-center gap-3">
+                            <Thumb src={covers.get(p.id) ?? null} alt={p.name} size="sm" />
                             <Link href={`${base}/${p.id}`} className="font-medium hover:underline">
                               {p.name}
                             </Link>

@@ -65,7 +65,7 @@ export default async function ApplyPage({ params }: { params: Promise<{ cuenta: 
           />
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="space-y-1">
-              <h1 className="text-2xl font-semibold tracking-tight">Aplicar en {adapter.name}</h1>
+              <h1 className="text-2xl font-bold tracking-tight">Aplicar en {adapter.name}</h1>
               <p className="text-sm text-muted-foreground">
                 {title} · {publication.store.name} · {publication.externalId ?? 'sin ID'}
               </p>

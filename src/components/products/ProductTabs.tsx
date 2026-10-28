@@ -2,7 +2,7 @@
 
 import { useRef, useState, type ReactNode } from 'react';
 import { ProductForm, type ProductFormSection, type ProductFormValues } from '@/components/products/ProductForm';
-import { cn } from '@/lib/utils/cn';
+import { TAB_ROW, TabCount, tabClass } from '@/components/ui/tab-links';
 
 // Las partes del producto, en pestañas. Todas quedan armadas aunque no se
 // vean, así lo que se está cargando en la ficha no se pierde al cambiar de
@@ -48,8 +48,8 @@ export function ProductTabs({
   const sections = FORM_SECTIONS[active];
   return (
     <>
-      <nav ref={nav} aria-label="Partes del producto" className="sticky top-0 z-20 -mx-4 border-b bg-background/95 px-4 backdrop-blur md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:backdrop-blur-none">
-        <div role="tablist" className="-mb-px flex gap-1 overflow-x-auto py-2 [scrollbar-width:none] md:flex-wrap md:py-0">
+      <nav ref={nav} aria-label="Partes del producto" className="sticky top-0 z-20 -mx-4 bg-background/95 px-4 pt-1 backdrop-blur md:static md:mx-0 md:bg-transparent md:px-0 md:pt-0 md:backdrop-blur-none">
+        <div role="tablist" className={TAB_ROW}>
           {tabs.map((t) => (
             <button
               key={t.key}
@@ -59,15 +59,10 @@ export function ProductTabs({
               aria-selected={active === t.key}
               aria-controls={`parte-${t.key}`}
               onClick={() => choose(t.key)}
-              className={cn(
-                'shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-sm transition-colors',
-                active === t.key ? 'border-foreground bg-foreground text-background' : 'bg-background text-muted-foreground hover:text-foreground',
-              )}
+              className={tabClass(active === t.key)}
             >
               {t.label}
-              {t.count !== undefined && t.count !== null ? (
-                <span className={cn('ml-1.5 tabular-nums', active === t.key ? 'text-background/70' : 'text-muted-foreground')}>{t.count}</span>
-              ) : null}
+              {t.count !== undefined && t.count !== null ? <TabCount active={active === t.key}>{t.count}</TabCount> : null}
             </button>
           ))}
         </div>

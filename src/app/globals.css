@@ -2,32 +2,34 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Tokens copiados de app.studiomrb.com (tatorb/LGM-processor). La app es
-   solo clara, como aquella: los tokens de .dark quedan para no divergir. */
+/* Tokens que salen de app.studiomrb.com (tatorb/LGM-processor), con el
+   estilo propio de esta app: fondo gris azulado claro, bordes y grises
+   suaves, y el mismo gris verdoso para las acciones. La app es solo clara:
+   los tokens de .dark quedan para no divergir. */
 @layer base {
   :root {
-    --background: 0 6.33% 96.15%;
-    --foreground: 0 0% 3.9%;
+    --background: 216 26% 96%;          /* #f3f5f8 gris azulado muy claro */
+    --foreground: 222 22% 11%;          /* #161b24 casi negro, apenas azulado */
     --card: 0 0% 100%;
-    --card-foreground: 0 0% 3.9%;
+    --card-foreground: 222 22% 11%;
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 3.9%;
-    --primary: 198 18% 41%;            /* #556f7a slate teal — atención / CTA / positivo */
+    --popover-foreground: 222 22% 11%;
+    --primary: 198 18% 41%;            /* #556f7a gris verdoso — atención / CTA / positivo */
     --primary-foreground: 0 0% 98%;
-    --secondary: 0 0% 91%;             /* #e8e8e8 fondo interno sutil */
-    --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 91%;
-    --muted-foreground: 0 0% 35%;
-    --accent: 0 0% 91%;
-    --accent-foreground: 0 0% 9%;
+    --secondary: 214 26% 95%;          /* #eef1f5 fondo interno sutil */
+    --secondary-foreground: 222 22% 11%;
+    --muted: 214 26% 95%;
+    --muted-foreground: 215 13% 41%;   /* #5b6675 gris para lo secundario */
+    --accent: 214 26% 95%;
+    --accent-foreground: 222 22% 11%;
     --alert: 339 57% 90%;              /* #f4d7e1 rosa pastel — negativo / alarma */
     --alert-foreground: 0 0% 9%;
     --destructive: 0 84.2% 60.2%;      /* solo para errores duros del sistema */
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
+    --border: 215 26% 91%;             /* #e2e7ee */
+    --input: 215 26% 88%;
     --ring: 198 18% 41%;
-    --radius: 0.5rem;
+    --radius: 0.75rem;
   }
 
   .dark {

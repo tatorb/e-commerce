@@ -1,6 +1,7 @@
 import type { Prisma } from '@/generated/prisma/client';
 import { prisma } from '@/lib/db';
 import { getChannelQuestions } from '@/channels/questions';
+import { channelInfo } from '@/channels';
 import { practiceCounts } from '@/domain/answers';
 
 // Lo que muestran la pantalla Preguntas, el menú y el aviso del Pipeline.
@@ -110,7 +111,15 @@ export async function loadQuestions(accountId: string, f: QuestionFilters) {
     counts: { unanswered, answered, forPerson: forPersonCount },
     stores: stores
       .filter((s) => getChannelQuestions(s.channel.kind) !== null)
-      .map((s) => ({ id: s.id, name: s.name, channelName: s.channel.name, connected: s.connection?.status === 'ACTIVE', reader: s.questionReader })),
+      .map((s) => ({
+        id: s.id,
+        name: s.name,
+        channelName: s.channel.name,
+        // El color del canal, para su etiqueta.
+        accent: channelInfo(s.channel.kind, s.channel.name).accent,
+        connected: s.connection?.status === 'ACTIVE',
+        reader: s.questionReader,
+      })),
     publication,
   };
 }

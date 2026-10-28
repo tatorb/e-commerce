@@ -14,7 +14,7 @@ export default async function ConnectedPage({
   const ok = resultado === 'ok';
   return (
     <AuthCard subtitle="Conexión con Mercado Libre">
-      <div className="space-y-3 rounded-lg border bg-card p-6 text-center">
+      <div className="space-y-3 rounded-2xl border bg-card shadow-card p-6 text-center">
         {ok ? (
           <CheckCircle2 className="mx-auto h-8 w-8 text-emerald-600" aria-hidden />
         ) : (

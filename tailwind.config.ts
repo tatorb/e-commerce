@@ -1,8 +1,9 @@
 import type { Config } from 'tailwindcss';
 import animate from 'tailwindcss-animate';
 
-// Copiado de app.studiomrb.com (tatorb/LGM-processor). No agregar colores
-// propios: si hace falta uno, se suma primero allá.
+// Sale de app.studiomrb.com (tatorb/LGM-processor), con el estilo propio de
+// esta app en los tokens de globals.css. Los colores van por esos tokens o por
+// la paleta de Tailwind, no sueltos.
 const config: Config = {
   darkMode: ['class'],
   content: ['./src/**/*.{ts,tsx}'],
@@ -59,6 +60,10 @@ const config: Config = {
       },
       fontFamily: {
         sans: ['var(--font-sans)', 'system-ui', 'sans-serif'],
+      },
+      boxShadow: {
+        // Las tarjetas: una sombra suave que las despega del fondo.
+        card: '0 1px 2px rgb(16 24 40 / 0.04), 0 2px 8px rgb(16 24 40 / 0.04)',
       },
       keyframes: {
         'accordion-down': {

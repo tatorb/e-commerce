@@ -60,7 +60,7 @@ export default async function ImportPage({ params }: { params: Promise<{ cuenta:
     <>
       <PageHeader>
         <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Importar</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Importar</h1>
           <p className="text-sm text-muted-foreground">
             Cargá publicaciones de <strong>{account.name}</strong> desde un Excel o un CSV, o completá su contenido con
             la planilla que se descarga desde Publicaciones. El archivo se lee en tu navegador: a la app solo viajan las

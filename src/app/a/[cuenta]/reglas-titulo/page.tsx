@@ -36,7 +36,7 @@ export default async function TitleRulesPage({ params }: { params: Promise<{ cue
     <>
       <PageHeader>
         <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Reglas de título</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Reglas de título</h1>
           <p className="text-sm text-muted-foreground">
             Lo que tiene que cumplir el título de cada publicación de <strong>{account.name}</strong>. El paso Título
             del pipeline las chequea en vivo y no deja aprobar un título que no las cumple.

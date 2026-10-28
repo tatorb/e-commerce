@@ -29,14 +29,14 @@ export default async function ConnectClaudePage({
   return (
     <AuthCard subtitle="Conexión con Claude">
       {!check.ok ? (
-        <div className="space-y-3 rounded-lg border bg-card p-6 text-center">
+        <div className="space-y-3 rounded-2xl border bg-card shadow-card p-6 text-center">
           <XCircle className="mx-auto h-8 w-8 text-destructive" aria-hidden />
           <p className="font-medium">No se puede conectar.</p>
           <p className="text-sm text-muted-foreground">{'show' in check ? check.show : null}</p>
           <p className="text-sm text-muted-foreground">Volvé a Claude y agregá el conector de nuevo.</p>
         </div>
       ) : (
-        <form method="post" action="/api/oauth/authorize" className="space-y-4 rounded-lg border bg-card p-6">
+        <form method="post" action="/api/oauth/authorize" className="space-y-4 rounded-2xl border bg-card shadow-card p-6">
           <div className="space-y-2 text-sm">
             <p className="text-base font-medium">{check.clientName} quiere conectarse con tu usuario.</p>
             <p className="text-muted-foreground">

@@ -61,7 +61,7 @@ export function ToPushList({ accountSlug, rows }: { accountSlug: string; rows: T
   const chosen = [...selected];
 
   return (
-    <div className="overflow-hidden rounded-lg border bg-card">
+    <div className="overflow-hidden rounded-2xl border bg-card shadow-card">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-muted/50 px-4 py-3 text-sm">
         <input
           type="checkbox"
