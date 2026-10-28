@@ -26,6 +26,7 @@ describe('protocolos', () => {
     expect(protocolInput.safeParse({ name: '  ' }).success).toBe(false);
     expect(protocolInput.parse({ name: ' Aros ' })).toEqual({ name: 'Aros', description: '' });
     expect(stepInput.safeParse({ title: 'Frente', kind: 'AUDIO' }).success).toBe(false);
+    expect(stepInput.parse({ title: 'Limpiar el lugar', kind: 'CHECK' })).toEqual({ title: 'Limpiar el lugar', kind: 'CHECK', explanation: '' });
     expect(stepInput.parse({ title: 'Frente', kind: 'VIDEO', explanation: ' Girarlo ' })).toEqual({ title: 'Frente', kind: 'VIDEO', explanation: 'Girarlo' });
   });
 

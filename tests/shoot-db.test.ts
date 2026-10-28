@@ -10,6 +10,7 @@ import {
   finishShotPhoto,
   finishShotVideo,
   listProtocols,
+  markShotCheck,
   moveStep,
   placeAllShotPhotos,
   placeShotPhotos,
@@ -20,8 +21,10 @@ import {
   shootPlan,
   startIllustrationUpload,
   startShotUpload,
+  undoShotCheck,
   updateStep,
 } from '@/lib/shoot';
+import { shotsPerStep } from '@/domain/shoot';
 import { startFakeGoogle, type FakeGoogle } from './fake-google';
 
 // Registro de productos contra la base de prueba y un Google simulado: los
@@ -197,7 +200,13 @@ describe.skipIf(!url)('Registro de productos', () => {
     const plan = (await shootPlan(db, accountId, productId))!;
     expect(plan.measures.map((m) => m.label)).toEqual(['STD', '0.50']);
     expect(plan.protocols.map((p) => p.steps.length)).toEqual([2]);
-    expect(plan.shots).toEqual([expect.objectContaining({ kind: 'PHOTO', stepId: front, variantKey: HALF, variantLabel: '0.50', by: 'Operario de prueba' })]);
+    // Se ve el original mientras la Mac no le arma la vista liviana.
+    const href = `/api/imagenes/ver?tipo=original&foto=${editId}`;
+    expect(plan.shots).toEqual([
+      expect.objectContaining({ id: editId, kind: 'PHOTO', stepId: front, variantKey: HALF, variantLabel: '0.50', by: 'Operario de prueba', thumb: href, src: href }),
+    ]);
+    await db.photoEdit.update({ where: { id: editId }, data: { previewUrl: 'drive:vista-1' } });
+    expect((await shootPlan(db, accountId, productId))!.shots[0].src).toBe(`/api/imagenes/ver?tipo=antes&foto=${editId}`);
     expect(await shootPlan(db, otherAccountId, productId)).toBeNull();
   });
 
@@ -253,6 +262,9 @@ describe.skipIf(!url)('Registro de productos', () => {
       variantKey: STD,
     });
     expect(await db.productVideo.findUniqueOrThrow({ where: { id: videoId } })).toMatchObject({ shot: true, shootStepId: spin, variantKey: STD, width: 3840 });
+    expect((await shootPlan(db, accountId, productId))!.shots).toEqual([
+      expect.objectContaining({ id: videoId, kind: 'VIDEO', thumb: `/api/drive/videos/${videoId}/miniatura`, src: `/api/drive/videos/${videoId}` }),
+    ]);
     const marks = async (id: string) => (await db.publication.findUniqueOrThrow({ where: { id }, select: { videoVariants: true } })).videoVariants;
     expect(await marks(bothId)).toEqual({ [videoId]: [STD] });
     expect(await marks(stdId)).toEqual({});
@@ -263,5 +275,41 @@ describe.skipIf(!url)('Registro de productos', () => {
     expect(await searchShootProducts(db, otherAccountId, 'AR-1')).toEqual([]);
     // Sin buscar, los últimos registrados: todavía ninguna foto.
     expect(await searchShootProducts(db, accountId, '')).toEqual([]);
+  });
+
+  it('un paso sin registro se marca Listo por medida, con quién y cuándo, y se deshace', async () => {
+    const pid = await createProtocol(db, { accountId, input: { name: 'Aros' }, userId });
+    const clean = await addStep(db, { accountId, protocolId: pid, input: { title: 'Limpiar el lugar', kind: 'CHECK' } });
+    const front = await addStep(db, { accountId, protocolId: pid, input: { title: 'Frente', kind: 'PHOTO' } });
+    expect((await listProtocols(db, accountId))[0].steps.map((s) => s.kind)).toEqual(['CHECK', 'PHOTO']);
+
+    await markShotCheck(db, { accountId, productId, stepId: clean, variantKey: HALF, userId });
+    // Marcarlo otra vez no lo repite.
+    await markShotCheck(db, { accountId, productId, stepId: clean, variantKey: HALF, userId });
+    await markShotCheck(db, { accountId, productId, stepId: clean, variantKey: null, userId: null });
+    let plan = (await shootPlan(db, accountId, productId))!;
+    const checks = () => plan.shots.filter((s) => s.kind === 'CHECK').map((s) => [s.stepId, s.variantLabel, s.by, s.thumb]);
+    expect(checks()).toEqual(
+      expect.arrayContaining([
+        [clean, '0.50', 'Operario de prueba', null],
+        [clean, null, null, null],
+      ]),
+    );
+    expect(checks()).toHaveLength(2);
+    // Lo de Todas cuenta para cada medida.
+    expect(shotsPerStep(plan.shots, HALF)).toEqual({ [clean]: 2 });
+    expect(shotsPerStep(plan.shots, STD)).toEqual({ [clean]: 1 });
+
+    // Deshacer saca solo el de esa misma elección.
+    await undoShotCheck(db, { accountId, productId, stepId: clean, variantKey: HALF });
+    plan = (await shootPlan(db, accountId, productId))!;
+    expect(checks()).toEqual([[clean, null, null, null]]);
+
+    // Lo que no se puede: Listo en un paso de foto, una foto en un paso sin registro, una medida que no está, el paso de otra cuenta.
+    await expect(markShotCheck(db, { accountId, productId, stepId: front, variantKey: null, userId })).rejects.toThrow('Ese paso es de una foto.');
+    await expect(shootPhoto('IMG_1.JPG', { stepId: clean })).rejects.toThrow('Ese paso es sin registro.');
+    await expect(markShotCheck(db, { accountId, productId, stepId: clean, variantKey: 'sku:OTRO', userId })).rejects.toThrow('ya no está en la ficha');
+    await expect(markShotCheck(db, { accountId: otherAccountId, productId, stepId: clean, variantKey: null, userId })).rejects.toThrow('no es de esta cuenta');
+    await expect(undoShotCheck(db, { accountId: otherAccountId, productId, stepId: clean, variantKey: null })).rejects.toThrow('no es de esta cuenta');
   });
 });

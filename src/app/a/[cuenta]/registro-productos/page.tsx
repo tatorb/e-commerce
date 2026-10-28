@@ -1,11 +1,12 @@
 import Link from 'next/link';
-import { Camera, Check, ChevronRight, ClipboardList, Search, Video } from 'lucide-react';
+import { Camera, Check, ChevronRight, ClipboardList, Search } from 'lucide-react';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ShootSession } from '@/components/shoot/ShootSession';
+import { ShotThumb, type SessionShot } from '@/components/shoot/ShotViewer';
 import { can } from '@/domain/access';
 import { shotsPerStep } from '@/domain/shoot';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
@@ -35,6 +36,18 @@ export default async function ShootPage({ params, searchParams }: { params: Prom
   const base = `/a/${account.slug}/registro-productos`;
   const productId = one(sp.producto);
   const plan = productId ? await shootPlan(prisma, account.id, productId) : null;
+  // Lo ya registrado como lo muestra el celular, con la hora de la cuenta.
+  const shots: SessionShot[] = (plan?.shots ?? []).map((s) => ({
+    id: s.id,
+    kind: s.kind,
+    stepId: s.stepId,
+    variantKey: s.variantKey,
+    variantLabel: s.variantLabel,
+    thumb: s.thumb,
+    src: s.src,
+    by: s.by,
+    when: formatDateTime(new Date(s.at), account.timezone),
+  }));
 
   const header = (
     <PageHeader>
@@ -156,7 +169,7 @@ export default async function ShootPage({ params, searchParams }: { params: Prom
                 </ul>
               </section>
             )}
-            <ShotHistory plan={plan} timezone={account.timezone} />
+            <ShotHistory plan={plan} shots={shots} />
           </div>
         </PageBody>
       </>
@@ -175,11 +188,11 @@ export default async function ShootPage({ params, searchParams }: { params: Prom
             measure={measure}
             measureText={measureText}
             protocol={protocol}
-            shots={plan.shots.map((s) => ({ kind: s.kind, stepId: s.stepId, variantKey: s.variantKey }))}
+            shots={shots}
           />
           <div className="mx-auto w-full max-w-xl space-y-4">
             <BeforeStarting collapsed />
-            <ShotHistory plan={plan} timezone={account.timezone} />
+            <ShotHistory plan={plan} shots={shots} />
           </div>
         </div>
       </PageBody>
@@ -189,9 +202,13 @@ export default async function ShootPage({ params, searchParams }: { params: Prom
 
 function countText(list: { kind: string }[]): string | undefined {
   if (list.length === 0) return undefined;
-  const photos = list.filter((s) => s.kind === 'PHOTO').length;
-  const videos = list.length - photos;
-  return ['Ya tiene', [photos ? plural(photos, 'foto') : '', videos ? plural(videos, 'video') : ''].filter(Boolean).join(' y ')].join(' ');
+  const count = (kind: string) => list.filter((s) => s.kind === kind).length;
+  const parts = [
+    count('PHOTO') ? plural(count('PHOTO'), 'foto') : '',
+    count('VIDEO') ? plural(count('VIDEO'), 'video') : '',
+    count('CHECK') ? plural(count('CHECK'), 'paso hecho', 'pasos hechos') : '',
+  ].filter(Boolean);
+  return `Ya tiene ${parts.length > 1 ? `${parts.slice(0, -1).join(', ')} y ${parts.at(-1)}` : parts[0]}`;
 }
 
 function PickLink({ href, title, description, note, icon }: { href: string; title: string; description?: string; note?: string; icon?: React.ReactNode }) {
@@ -278,24 +295,25 @@ function BeforeStarting({ collapsed = false }: { collapsed?: boolean }) {
   );
 }
 
-function ShotHistory({ plan, timezone }: { plan: ShootPlan; timezone: string }) {
-  if (plan.shots.length === 0) return null;
+function ShotHistory({ plan, shots }: { plan: ShootPlan; shots: SessionShot[] }) {
+  if (shots.length === 0) return null;
   const titles = new Map(plan.protocols.flatMap((p) => p.steps.map((s) => [s.id, s.title] as const)));
   return (
     <details className="rounded-2xl border bg-card shadow-card">
-      <summary className="cursor-pointer px-4 py-3 text-sm font-semibold">Lo que ya se registró de este producto ({plan.shots.length})</summary>
+      <summary className="cursor-pointer px-4 py-3 text-sm font-semibold">Lo que ya se registró de este producto ({shots.length})</summary>
       <ul className="divide-y border-t">
-        {plan.shots.map((s, i) => (
-          <li key={i} className="flex items-start gap-2 px-4 py-2 text-sm">
-            {s.kind === 'PHOTO' ? <Camera className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" /> : <Video className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />}
+        {shots.map((s) => (
+          <li key={s.id} className="flex items-center gap-3 px-4 py-2 text-sm">
+            <ShotThumb shot={s} className="h-11 w-11" />
             <span className="min-w-0 flex-1">
               <span className="block truncate">{s.stepId ? (titles.get(s.stepId) ?? 'Paso que ya no está') : 'Sin protocolo'}</span>
               <span className="block text-xs text-muted-foreground">
-                {s.variantLabel ? `Medida ${s.variantLabel}` : 'Todas las medidas'} · {formatDateTime(new Date(s.at), timezone)}
+                {s.kind === 'CHECK' ? 'Hecho · ' : ''}
+                {s.variantLabel ? `Medida ${s.variantLabel}` : 'Todas las medidas'} · {s.when}
                 {s.by ? ` · ${s.by}` : ''}
               </span>
             </span>
-            <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+            <Check className="h-4 w-4 shrink-0 text-primary" />
           </li>
         ))}
       </ul>

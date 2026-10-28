@@ -34,7 +34,7 @@ export default async function ProtocolsPage({ params }: { params: Promise<{ cuen
             ) : (
               'Registro de productos'
             )}
-            . Cada paso dice qué sacar, si es foto o video, cómo hacerlo y muestra una ilustración de ejemplo.
+            . Cada paso dice qué sacar o qué hacer, si es foto, video o sin registro, cómo hacerlo y muestra una ilustración de ejemplo. Los pasos sin registro, como preparar o limpiar el lugar, se marcan Listo.
           </p>
         </div>
       </PageHeader>

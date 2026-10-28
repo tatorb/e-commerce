@@ -6,14 +6,17 @@ import {
   inputProblem,
   photoPlacement,
   protocolInput,
+  SHOOT_KIND_TEXT,
   stepInput,
   videoMarks,
+  type MediaKind,
   type Shot,
   type ShootKind,
 } from '@/domain/shoot';
 import { driveRef, ensureFolder, getFile, protocolsFolder, startResumableUpload, withDriveToken } from '@/lib/drive';
 import { measuresOf, productPublicationsMedia, readyPhotoIds, type Measure } from '@/lib/media';
 import { originalTypeFor, photoFolderId, photoOwner } from '@/lib/photo-files';
+import { photoFileHref } from '@/lib/photo-rules';
 import { addDriveOriginal, originalProblem, type ShotMarks } from '@/lib/photos';
 import { productCode } from '@/lib/publication-facts';
 import { productSearchWhere } from '@/lib/queries/product-search';
@@ -256,23 +259,44 @@ export async function searchShootProducts(db: Db, accountId: string, q: string):
 export async function shootPlan(db: Db, accountId: string, productId: string) {
   const p = await db.product.findFirst({ where: { id: productId, accountId }, select: PICK_SELECT });
   if (!p) return null;
-  const [protocols, photos, videos] = await Promise.all([
+  const [protocols, photos, videos, checks] = await Promise.all([
     listProtocols(db, accountId),
     db.photoEdit.findMany({
       where: { productId, shot: true, archivedAt: null },
       orderBy: { createdAt: 'desc' },
-      select: { id: true, shootStepId: true, variantKey: true, variantLabel: true, originalName: true, createdAt: true, createdBy: { select: { name: true } } },
+      select: { id: true, shootStepId: true, variantKey: true, variantLabel: true, originalName: true, previewUrl: true, createdAt: true, createdBy: { select: { name: true } } },
     }),
     db.productVideo.findMany({
       where: { productId, shot: true, goneAt: null },
       orderBy: { createdAt: 'desc' },
       select: { id: true, shootStepId: true, variantKey: true, variantLabel: true, name: true, createdAt: true, uploadedBy: { select: { name: true } } },
     }),
+    db.shootCheck.findMany({
+      where: { productId },
+      orderBy: { doneAt: 'desc' },
+      select: { id: true, shootStepId: true, variantKey: true, variantLabel: true, doneAt: true, doneBy: { select: { name: true } } },
+    }),
   ]);
   const measures = measuresOf(p.variants);
-  const shots: (Shot & { kind: ShootKind; name: string; variantLabel: string | null; at: string; by: string | null })[] = [
-    ...photos.map((f) => ({ kind: 'PHOTO' as const, stepId: f.shootStepId, variantKey: f.variantKey, variantLabel: f.variantLabel, name: f.originalName, at: f.createdAt.toISOString(), by: f.createdBy?.name ?? null })),
-    ...videos.map((v) => ({ kind: 'VIDEO' as const, stepId: v.shootStepId, variantKey: v.variantKey, variantLabel: v.variantLabel, name: v.name, at: v.createdAt.toISOString(), by: v.uploadedBy?.name ?? null })),
+  // Dónde se ve cada cosa: la miniatura y el archivo para agrandar. La vista liviana de la foto, si ya está.
+  const shots: (Shot & { id: string; kind: ShootKind; name: string; variantLabel: string | null; at: string; by: string | null; thumb: string | null; src: string | null })[] = [
+    ...photos.map((f) => {
+      const href = photoFileHref(f.previewUrl ? 'antes' : 'original', { foto: f.id });
+      return { id: f.id, kind: 'PHOTO' as const, stepId: f.shootStepId, variantKey: f.variantKey, variantLabel: f.variantLabel, name: f.originalName, at: f.createdAt.toISOString(), by: f.createdBy?.name ?? null, thumb: href, src: href };
+    }),
+    ...videos.map((v) => ({
+      id: v.id,
+      kind: 'VIDEO' as const,
+      stepId: v.shootStepId,
+      variantKey: v.variantKey,
+      variantLabel: v.variantLabel,
+      name: v.name,
+      at: v.createdAt.toISOString(),
+      by: v.uploadedBy?.name ?? null,
+      thumb: `/api/drive/videos/${v.id}/miniatura`,
+      src: `/api/drive/videos/${v.id}`,
+    })),
+    ...checks.map((c) => ({ id: c.id, kind: 'CHECK' as const, stepId: c.shootStepId, variantKey: c.variantKey, variantLabel: c.variantLabel, name: 'Listo', at: c.doneAt.toISOString(), by: c.doneBy?.name ?? null, thumb: null, src: null })),
   ].sort((a, b) => b.at.localeCompare(a.at));
   return {
     product: pickOf(p),
@@ -290,7 +314,7 @@ async function marksFor(db: Db, args: { accountId: string; productId: string; ki
   let shootStepId: string | null = null;
   if (args.stepId) {
     const step = await stepIn(db, args.accountId, args.stepId);
-    if (step.kind !== args.kind) throw new ShootError(args.kind === 'PHOTO' ? 'Ese paso es de un video.' : 'Ese paso es de una foto.');
+    if (step.kind !== args.kind) throw new ShootError(`Ese paso es ${SHOOT_KIND_TEXT[step.kind]}.`);
     shootStepId = step.id;
   }
   if (!args.variantKey) return { shootStepId, variantKey: null, variantLabel: null };
@@ -308,7 +332,7 @@ async function productIn(db: Db, accountId: string, productId: string) {
 /** Abre la subida de una foto o un video del producto. El navegador lo sube directo al Drive, sin achicarlo. */
 export async function startShotUpload(
   db: Db,
-  args: { accountId: string; productId: string; kind: ShootKind; file: { name: string; size: number; type: string }; origin: string },
+  args: { accountId: string; productId: string; kind: MediaKind; file: { name: string; size: number; type: string }; origin: string },
 ): Promise<string> {
   await productIn(db, args.accountId, args.productId);
   const name = String(args.file?.name ?? '').trim().slice(0, 200);
@@ -376,6 +400,30 @@ export async function finishShotVideo(
   await db.productVideo.update({ where: { id: videoId }, data: { shot: true, ...marks } });
   await markShotVideo(db, videoId);
   return videoId;
+}
+
+/**
+ * Marca Listo un paso sin registro en el producto, para la medida elegida o
+ * para todas. Si ya estaba, queda a nombre de quien lo marcó ahora.
+ */
+export async function markShotCheck(
+  db: Db,
+  args: { accountId: string; productId: string; stepId: string; variantKey: string | null; userId: string | null },
+): Promise<void> {
+  await productIn(db, args.accountId, args.productId);
+  const marks = await marksFor(db, { ...args, kind: 'CHECK' });
+  const where = { productId: args.productId, shootStepId: marks.shootStepId!, variantKey: marks.variantKey };
+  await db.$transaction([
+    db.shootCheck.deleteMany({ where }),
+    db.shootCheck.create({ data: { ...where, variantLabel: marks.variantLabel, doneById: args.userId } }),
+  ]);
+}
+
+/** Saca el Listo de un paso para esa misma medida, o para todas. El de la otra elección queda. */
+export async function undoShotCheck(db: Db, args: { accountId: string; productId: string; stepId: string; variantKey: string | null }): Promise<void> {
+  await productIn(db, args.accountId, args.productId);
+  await stepIn(db, args.accountId, args.stepId);
+  await db.shootCheck.deleteMany({ where: { productId: args.productId, shootStepId: args.stepId, variantKey: args.variantKey } });
 }
 
 // ───────────────────────────── A las publicaciones ─────────────────────────────

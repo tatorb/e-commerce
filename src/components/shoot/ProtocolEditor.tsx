@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Camera, ImagePlus, Pencil, Plus, Trash2, Video } from 'lucide-react';
+import { Archive, ArchiveRestore, ArrowDown, ArrowUp, ImagePlus, Pencil, Plus, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,6 +13,7 @@ import { useReadOnly } from '@/components/access/AccessProvider';
 import { uploadToDrive } from '@/components/drive/upload';
 import { ILLUSTRATION_TYPES, SHOOT_KIND_LABEL, illustrationType, type ShootKind } from '@/domain/shoot';
 import type { ProtocolView, StepView } from '@/lib/shoot';
+import { ShootKindIcon } from './ShootKindIcon';
 import {
   addStepAction,
   archiveProtocolAction,
@@ -29,7 +30,7 @@ import {
 } from '@/app/a/[cuenta]/protocolos/actions';
 
 // Armar los protocolos de Registro de productos: cada uno con sus pasos en
-// orden, foto o video, la explicación y una ilustración de ejemplo.
+// orden, foto, video o sin registro, la explicación y una ilustración de ejemplo.
 
 const ACCEPT = Object.keys(ILLUSTRATION_TYPES)
   .map((e) => `.${e}`)
@@ -272,24 +273,24 @@ function StepForm({
     <div className="space-y-3">
       <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
         <div className="space-y-1.5">
-          <Label htmlFor={`${idPrefix}-title`}>Qué sacar</Label>
+          <Label htmlFor={`${idPrefix}-title`}>{values.kind === 'CHECK' ? 'Qué hacer' : 'Qué sacar'}</Label>
           <Input
             id={`${idPrefix}-title`}
             value={values.title}
             onChange={(e) => setValues((v) => ({ ...v, title: e.target.value }))}
-            placeholder="Por ejemplo: Frente, sobre fondo blanco"
+            placeholder={values.kind === 'CHECK' ? 'Por ejemplo: Limpiar el lugar' : 'Por ejemplo: Frente, sobre fondo blanco'}
           />
         </div>
         <div className="space-y-1.5">
           <span className="text-sm font-medium">Es</span>
-          <div role="radiogroup" aria-label="Foto o video" className="flex overflow-hidden rounded-md border">
-            {(['PHOTO', 'VIDEO'] as const).map((k) => (
+          <div role="radiogroup" aria-label="Foto, video o sin registro" className="flex overflow-hidden rounded-md border">
+            {(['PHOTO', 'VIDEO', 'CHECK'] as const).map((k) => (
               <label
                 key={k}
                 className={`flex cursor-pointer items-center gap-1.5 border-l px-3 py-2 text-sm first:border-l-0 ${values.kind === k ? 'bg-foreground text-background' : 'bg-background hover:bg-muted'}`}
               >
                 <input type="radio" className="sr-only" name={`${idPrefix}-kind`} checked={values.kind === k} onChange={() => setValues((v) => ({ ...v, kind: k }))} />
-                {k === 'PHOTO' ? <Camera className="h-4 w-4" /> : <Video className="h-4 w-4" />}
+                <ShootKindIcon kind={k} className="h-4 w-4" />
                 {SHOOT_KIND_LABEL[k]}
               </label>
             ))}
@@ -303,7 +304,11 @@ function StepForm({
           rows={4}
           value={values.explanation}
           onChange={(e) => setValues((v) => ({ ...v, explanation: e.target.value }))}
-          placeholder={'Cómo ubicar el producto, la luz, la distancia y qué tiene que verse.\nPor ejemplo: el aro parado, con la marca hacia la cámara, a un palmo.'}
+          placeholder={
+            values.kind === 'CHECK'
+              ? 'Qué hay que hacer antes de seguir.\nPor ejemplo: pasar un trapo por la mesa y sacar todo lo que no es del producto.'
+              : 'Cómo ubicar el producto, la luz, la distancia y qué tiene que verse.\nPor ejemplo: el aro parado, con la marca hacia la cámara, a un palmo.'
+          }
         />
       </div>
       <div className="flex gap-2">
@@ -412,7 +417,7 @@ function StepRow({ accountSlug, step, n, total, archived }: { accountSlug: strin
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-muted-foreground">Paso {n}</span>
           <Badge variant="outline" className="gap-1">
-            {step.kind === 'PHOTO' ? <Camera className="h-3 w-3" /> : <Video className="h-3 w-3" />}
+            <ShootKindIcon kind={step.kind} className="h-3 w-3" />
             {SHOOT_KIND_LABEL[step.kind]}
           </Badge>
         </div>

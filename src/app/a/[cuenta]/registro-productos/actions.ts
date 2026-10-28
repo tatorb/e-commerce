@@ -5,14 +5,15 @@ import { revalidatePath } from 'next/cache';
 import { prisma } from '@/lib/db';
 import { act } from '@/lib/auth/guard';
 import { publicAppUrl } from '@/lib/public-url';
-import { finishShotPhoto, finishShotVideo, ShootError, startShotUpload } from '@/lib/shoot';
+import { finishShotPhoto, finishShotVideo, markShotCheck, ShootError, startShotUpload, undoShotCheck } from '@/lib/shoot';
 import { PhotoError } from '@/lib/photos';
 import { storageError } from '@/lib/stored-files';
 import { VideoError } from '@/lib/videos';
 
 // Lo que sube el operario en Registro de productos. El navegador sube cada
 // archivo directo al Drive, sin achicarlo; la app abre la subida y después
-// anota la foto o el video con su paso y su medida.
+// anota la foto o el video con su paso y su medida. Los pasos sin registro se
+// marcan Listo.
 
 export type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string };
 
@@ -84,6 +85,27 @@ export async function finishShotVideoAction(
         stepId: idOrNull(args.stepId),
         variantKey: idOrNull(args.variantKey),
       });
+      return {};
+    }),
+  );
+}
+
+/** Marca Listo un paso sin registro, para la medida elegida o para todas. */
+export async function markShotCheckAction(accountSlug: string, args: { productId: string; stepId: string; variantKey: string | null }): Promise<Result> {
+  const productId = String(args?.productId ?? '');
+  return act(accountSlug, { section: 'captura', does: 'Marcó Listo un paso del registro', productId }, ({ user, account }) =>
+    guard(accountSlug, async () => {
+      await markShotCheck(prisma, { accountId: account.id, productId, stepId: String(args.stepId ?? ''), variantKey: idOrNull(args.variantKey), userId: user.id });
+      return {};
+    }),
+  );
+}
+
+export async function undoShotCheckAction(accountSlug: string, args: { productId: string; stepId: string; variantKey: string | null }): Promise<Result> {
+  const productId = String(args?.productId ?? '');
+  return act(accountSlug, { section: 'captura', does: 'Deshizo el Listo de un paso del registro', productId }, ({ account }) =>
+    guard(accountSlug, async () => {
+      await undoShotCheck(prisma, { accountId: account.id, productId, stepId: String(args.stepId ?? ''), variantKey: idOrNull(args.variantKey) });
       return {};
     }),
   );

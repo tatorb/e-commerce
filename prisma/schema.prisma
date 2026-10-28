@@ -80,6 +80,7 @@ model User {
   tasks              TaskAssignee[]
   stockMoves         StockMovement[]
   shootProtocols     ShootProtocol[]      @relation("ShootProtocolCreatedBy")
+  shootChecks        ShootCheck[]         @relation("ShootCheckDoneBy")
 
   @@map("users")
 }
@@ -339,6 +340,7 @@ model Product {
   inCombos         ComboItem[]      @relation("ComboComponent")
   photoEdits       PhotoEdit[]
   videos           ProductVideo[]
+  shootChecks      ShootCheck[]
 
   // Desde cuándo la app maneja su stock: sus publicaciones lo heredan. Null:
   // cada publicación sigue a su canal (src/domain/stock.ts).
@@ -1788,9 +1790,11 @@ model PublicationClip {
 
 // ───────────────────────────── Registro de productos ─────────────────────────────
 
+// CHECK: un paso sin registro, como preparar o limpiar el lugar. Se marca Listo.
 enum ShootKind {
   PHOTO
   VIDEO
+  CHECK
 }
 
 // Un protocolo para sacar las fotos y los videos de un producto: los pasos que
@@ -1833,9 +1837,28 @@ model ShootStep {
   updatedAt        DateTime       @updatedAt
   photos           PhotoEdit[]
   videos           ProductVideo[]
+  checks           ShootCheck[]
 
   @@index([protocolId, position])
   @@map("shoot_steps")
+}
+
+// Un paso sin registro que se marcó Listo en un producto, para una medida o
+// para todas (variantKey null), con quién y cuándo.
+model ShootCheck {
+  id           String    @id @default(cuid())
+  productId    String
+  product      Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  shootStepId  String
+  shootStep    ShootStep @relation(fields: [shootStepId], references: [id], onDelete: Cascade)
+  variantKey   String?
+  variantLabel String?
+  doneById     String?
+  doneBy       User?     @relation("ShootCheckDoneBy", fields: [doneById], references: [id], onDelete: SetNull)
+  doneAt       DateTime  @default(now())
+
+  @@index([productId, shootStepId])
+  @@map("shoot_checks")
 }
 
 // ───────────────────────────── Descripciones ─────────────────────────────

@@ -5,9 +5,15 @@ import { z } from 'zod';
 // Este módulo no usa la base: las reglas de los protocolos, la calidad mínima,
 // qué pasos ya se hicieron y a qué publicaciones va cada foto.
 
-export type ShootKind = 'PHOTO' | 'VIDEO';
+// Un paso es de una foto, de un video, o sin registro: algo que se hace y se
+// marca Listo, como preparar o limpiar el lugar.
+export type ShootKind = 'PHOTO' | 'VIDEO' | 'CHECK';
+export type MediaKind = Exclude<ShootKind, 'CHECK'>;
 
-export const SHOOT_KIND_LABEL: Record<ShootKind, string> = { PHOTO: 'Foto', VIDEO: 'Video' };
+export const SHOOT_KIND_LABEL: Record<ShootKind, string> = { PHOTO: 'Foto', VIDEO: 'Video', CHECK: 'Sin registro' };
+
+/** Cómo se dice de qué es un paso: "Ese paso es de una foto". */
+export const SHOOT_KIND_TEXT: Record<ShootKind, string> = { PHOTO: 'de una foto', VIDEO: 'de un video', CHECK: 'sin registro' };
 
 export const protocolInput = z.object({
   name: z.string().trim().min(1, 'Poné un nombre.').max(120, 'El nombre es muy largo.'),
@@ -16,7 +22,7 @@ export const protocolInput = z.object({
 
 export const stepInput = z.object({
   title: z.string().trim().min(1, 'Poné un título.').max(120, 'El título es muy largo.'),
-  kind: z.enum(['PHOTO', 'VIDEO']),
+  kind: z.enum(['PHOTO', 'VIDEO', 'CHECK']),
   explanation: z.string().trim().max(4000, 'La explicación es muy larga.').default(''),
 });
 
@@ -60,7 +66,7 @@ export type Quality = {
 const size = (w: number, h: number) => `${w} × ${h}`;
 
 /** La calidad de una foto o un video por su ancho y alto. Null si no se pudo medir. */
-export function qualityOf(kind: ShootKind, dims: { width: number; height: number } | null): Quality | null {
+export function qualityOf(kind: MediaKind, dims: { width: number; height: number } | null): Quality | null {
   if (!dims || !(dims.width > 0) || !(dims.height > 0)) return null;
   const short = Math.min(dims.width, dims.height);
   const long = Math.max(dims.width, dims.height);
@@ -79,18 +85,20 @@ export const LOW_QUALITY_HELP =
 
 // ───────────────────────────── Pasos hechos ─────────────────────────────
 
-/** Lo que ya se sacó del producto en Registro de productos. */
+/** Lo que ya se sacó del producto en Registro de productos, o un paso sin registro marcado Listo. */
 export type Shot = { stepId: string | null; variantKey: string | null };
 
+/** Si lo registrado para una medida, o para todas (null), vale para la medida elegida. */
+export const shotCounts = (shot: Shot, variantKey: string | null) => shot.variantKey === null || shot.variantKey === variantKey;
+
 /**
- * Cuántas fotos o videos tiene cada paso para la medida elegida. Lo que se
- * sacó para todas las medidas cuenta para cada una; lo de una medida, solo para esa.
+ * Cuántas fotos, videos o Listo tiene cada paso para la medida elegida. Lo que
+ * se sacó para todas las medidas cuenta para cada una; lo de una medida, solo para esa.
  */
 export function shotsPerStep(shots: Shot[], variantKey: string | null): Record<string, number> {
   const out: Record<string, number> = {};
   for (const s of shots) {
-    if (!s.stepId) continue;
-    if (s.variantKey !== null && s.variantKey !== variantKey) continue;
+    if (!s.stepId || !shotCounts(s, variantKey)) continue;
     out[s.stepId] = (out[s.stepId] ?? 0) + 1;
   }
   return out;

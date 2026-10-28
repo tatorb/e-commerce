@@ -3,27 +3,36 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Camera, Check, ChevronRight, CircleDashed, Images, Redo2, RotateCcw, SkipForward, Upload, Video } from 'lucide-react';
+import { Camera, Check, ChevronRight, CircleDashed, Images, Redo2, RotateCcw, SkipForward, Undo2, Upload, Video } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useReadOnly } from '@/components/access/AccessProvider';
 import { measureVideo, uploadToDrive } from '@/components/drive/upload';
 import { cn } from '@/lib/utils/cn';
-import { LOW_QUALITY_HELP, qualityOf, SHOOT_KIND_LABEL, shotsPerStep, type Quality, type ShootKind } from '@/domain/shoot';
+import { LOW_QUALITY_HELP, qualityOf, SHOOT_KIND_LABEL, shotCounts, shotsPerStep, type MediaKind, type Quality } from '@/domain/shoot';
+import { plural } from '@/lib/format';
 import type { BrowserMeasure } from '@/lib/videos';
-import type { ProtocolView, ShootPick } from '@/lib/shoot';
-import { finishShotPhotoAction, finishShotVideoAction, startShotUploadAction } from '@/app/a/[cuenta]/registro-productos/actions';
+import type { ProtocolView, ShootPick, StepView } from '@/lib/shoot';
+import {
+  finishShotPhotoAction,
+  finishShotVideoAction,
+  markShotCheckAction,
+  startShotUploadAction,
+  undoShotCheckAction,
+} from '@/app/a/[cuenta]/registro-productos/actions';
+import { ShootKindIcon } from './ShootKindIcon';
+import { shotByline, ShotThumb, ShotViewer, type SessionShot } from './ShotViewer';
 
 // Lo que hace el operario con el celular: sigue los pasos del protocolo, o
 // ninguno, saca la foto o graba el video con la cámara del teléfono, lo revisa
-// y lo sube. El archivo va directo al Drive, tal como sale de la cámara.
-
-export type SessionShot = { kind: ShootKind; stepId: string | null; variantKey: string | null };
+// y lo sube. El archivo va directo al Drive, tal como sale de la cámara. Lo
+// subido queda a la vista en su paso para revisarlo, y los pasos sin registro
+// se marcan Listo.
 
 type Capture = {
   file: File;
   url: string;
-  kind: ShootKind;
+  kind: MediaKind;
   measuring: boolean;
   quality: Quality | null;
   video: BrowserMeasure | null;
@@ -98,15 +107,21 @@ export function ShootSession({
   const steps = useMemo(() => protocol?.steps ?? [], [protocol]);
   const variantKey = measure?.key ?? null;
   const done = shotsPerStep(shots, variantKey);
+  const withMeasure = measureText !== null;
+  // Lo de un paso que vale para la medida elegida, lo último primero.
+  const mediaOf = (stepId: string | null) => shots.filter((s) => s.kind !== 'CHECK' && s.stepId === stepId && shotCounts(s, variantKey));
+  const checksOf = (stepId: string) => shots.filter((s) => s.kind === 'CHECK' && s.stepId === stepId && shotCounts(s, variantKey));
   const [index, setIndex] = useState(() => Math.max(0, steps.findIndex((s) => !done[s.id])));
   const [finished, setFinished] = useState(false);
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
-  const [uploaded, setUploaded] = useState<{ kind: ShootKind; title: string | null }[]>([]);
+  const [uploaded, setUploaded] = useState<{ kind: MediaKind; title: string | null }[]>([]);
   const [capture, setCapture] = useState<Capture | null>(null);
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ text: string; back: number | null } | null>(null);
   const [enlarged, setEnlarged] = useState(false);
+  // Mientras se guarda un Listo o se deshace.
+  const [checking, setChecking] = useState(false);
   const inputs = {
     PHOTO: { camera: useRef<HTMLInputElement>(null), gallery: useRef<HTMLInputElement>(null) },
     VIDEO: { camera: useRef<HTMLInputElement>(null), gallery: useRef<HTMLInputElement>(null) },
@@ -136,7 +151,7 @@ export function ShootSession({
     setError(null);
   }
 
-  async function onFile(file: File | undefined, kind: ShootKind) {
+  async function onFile(file: File | undefined, kind: MediaKind) {
     if (!file) return;
     setError(null);
     setNotice(null);
@@ -149,6 +164,7 @@ export function ShootSession({
 
   function goTo(i: number) {
     clearCapture();
+    setNotice(null);
     setEnlarged(false);
     setFinished(false);
     setIndex(i);
@@ -158,6 +174,7 @@ export function ShootSession({
     if (index + 1 < steps.length) goTo(index + 1);
     else {
       clearCapture();
+      setNotice(null);
       setFinished(true);
     }
   }
@@ -182,15 +199,56 @@ export function ShootSession({
       setProgress(null);
       setCapture(null);
       setUploaded((list) => [...list, { kind: c.kind, title: step?.title ?? null }]);
+      // Se queda en el paso: lo subido aparece a la vista para revisarlo antes de seguir.
       const what = c.kind === 'PHOTO' ? 'la foto' : 'el video';
-      setNotice({ text: step ? `Se subió ${what} de “${step.title}”.` : `Se subió ${what}.`, back: step ? index : null });
-      if (step) next();
+      setNotice({ text: step ? `Se subió ${what} de “${step.title}”.` : `Se subió ${what}.`, back: null });
       router.refresh();
     } catch (e) {
       setProgress(null);
       setError(e instanceof Error && e.message ? e.message : 'No se pudo subir. Revisá la conexión y probá de nuevo.');
     }
   }
+
+  /** Marca Listo el paso sin registro y pasa al siguiente. */
+  async function markDone(s: StepView, at: number) {
+    if (checking) return;
+    setChecking(true);
+    setError(null);
+    try {
+      const r = await markShotCheckAction(accountSlug, { productId: product.id, stepId: s.id, variantKey });
+      if (!r.ok) throw new Error(r.error);
+      next();
+      setNotice({ text: `“${s.title}” quedó hecho.`, back: at });
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error && e.message ? e.message : 'No se pudo guardar. Revisá la conexión y probá de nuevo.');
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  async function undoDone(s: StepView) {
+    if (checking) return;
+    setChecking(true);
+    setError(null);
+    try {
+      const r = await undoShotCheckAction(accountSlug, { productId: product.id, stepId: s.id, variantKey });
+      if (!r.ok) throw new Error(r.error);
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error && e.message ? e.message : 'No se pudo deshacer. Revisá la conexión y probá de nuevo.');
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  const isLast = index + 1 >= steps.length;
+  const nextButton = (
+    <Button size="lg" className="h-14 px-4 text-base" onClick={next} disabled={uploading || checking} access="view">
+      <ChevronRight />
+      {isLast ? 'Terminar' : 'Siguiente paso'}
+    </Button>
+  );
 
   const fileInputs = (['PHOTO', 'VIDEO'] as const).map((kind) => (
     <span key={kind} className="hidden">
@@ -218,8 +276,8 @@ export function ShootSession({
     </span>
   ));
 
-  /** Los botones para sacar, o la revisión de lo que se sacó. */
-  function captureArea(kinds: readonly ShootKind[]) {
+  /** Los botones para sacar, o la revisión de lo que se sacó. Si el paso ya tiene algo, primero seguir. */
+  function captureArea(kinds: readonly MediaKind[], hasSome = false) {
     if (capture) {
       const low = capture.quality && !capture.quality.enough;
       return (
@@ -263,13 +321,15 @@ export function ShootSession({
         </div>
       );
     }
+    const more = step && hasSome;
     return (
       <div className="space-y-2">
-        <div className={cn('grid gap-2', kinds.length > 1 ? 'grid-cols-2' : 'grid-cols-1')}>
+        <div className={cn('grid gap-2', more ? 'sm:grid-cols-2' : kinds.length > 1 ? 'grid-cols-2' : 'grid-cols-1')}>
+          {more ? nextButton : null}
           {kinds.map((kind) => (
-            <Button key={kind} size="lg" className="h-14 px-4 text-base" onClick={() => inputs[kind].camera.current?.click()}>
+            <Button key={kind} size="lg" variant={more ? 'outline' : 'default'} className="h-14 px-4 text-base" onClick={() => inputs[kind].camera.current?.click()}>
               {kind === 'PHOTO' ? <Camera /> : <Video />}
-              {kind === 'PHOTO' ? 'Sacar foto' : 'Grabar video'}
+              {more ? (kind === 'PHOTO' ? 'Sacar otra foto' : 'Grabar otro video') : kind === 'PHOTO' ? 'Sacar foto' : 'Grabar video'}
             </Button>
           ))}
         </div>
@@ -288,21 +348,67 @@ export function ShootSession({
               </button>
             ))}
           </div>
-          {step ? (
-            <Button
-              variant="ghost"
-              onClick={() => {
-                setSkipped((s) => new Set(s).add(step.id));
-                setNotice(null);
-                next();
-              }}
-              access="view"
-            >
-              <SkipForward />
-              Saltear
-            </Button>
-          ) : null}
+          {step && !hasSome ? skipButton(step) : null}
         </div>
+      </div>
+    );
+  }
+
+  function skipButton(s: StepView) {
+    return (
+      <Button
+        variant="ghost"
+        onClick={() => {
+          setSkipped((list) => new Set(list).add(s.id));
+          next();
+        }}
+        disabled={checking}
+        access="view"
+      >
+        <SkipForward />
+        Saltear
+      </Button>
+    );
+  }
+
+  /** Un paso sin registro: Listo, o lo que ya quedó hecho con Siguiente paso y Deshacer. */
+  function checkArea(s: StepView) {
+    const marks = checksOf(s.id);
+    const latest = marks[0] ?? null;
+    // Se deshace solo el Listo de esta misma elección: el de Todas las medidas se deshace desde Todas.
+    const own = marks.some((m) => m.variantKey === variantKey);
+    return (
+      <div className="space-y-2">
+        {latest ? (
+          <p className="flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
+            <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+            <span>Hecho · {shotByline(latest, withMeasure)}</span>
+          </p>
+        ) : null}
+        {error ? (
+          <p className="text-sm text-destructive" role="alert">
+            {error}
+          </p>
+        ) : null}
+        {latest ? (
+          <div className="grid gap-2 sm:grid-cols-2">
+            {nextButton}
+            {own ? (
+              <Button size="lg" variant="outline" className="h-14 px-4 text-base" onClick={() => undoDone(s)} pending={checking} disabled={checking}>
+                <Undo2 />
+                Deshacer
+              </Button>
+            ) : null}
+          </div>
+        ) : (
+          <>
+            <Button size="lg" className="h-14 w-full px-4 text-base" onClick={() => markDone(s, index)} pending={checking} disabled={checking}>
+              <Check />
+              Listo
+            </Button>
+            <div className="flex justify-end">{skipButton(s)}</div>
+          </>
+        )}
       </div>
     );
   }
@@ -338,7 +444,7 @@ export function ShootSession({
       {notice.back !== null ? (
         <button type="button" className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline" onClick={() => goTo(notice.back!)}>
           <Redo2 className="h-3.5 w-3.5" />
-          Sacar otra de ese paso
+          Volver a ese paso
         </button>
       ) : null}
     </div>
@@ -352,9 +458,14 @@ export function ShootSession({
         {noticeBar}
         <section className="space-y-3 rounded-2xl border bg-card shadow-card p-4">
           <h2 className="text-base font-semibold">Sacá lo que necesites</h2>
-          <p className="text-sm text-muted-foreground">Cada foto o video se sube y queda listo para la próxima.</p>
+          <p className="text-sm text-muted-foreground">Cada foto o video se sube y queda a la vista abajo, para revisarlo.</p>
           {captureArea(capture ? [capture.kind] : ['PHOTO', 'VIDEO'])}
         </section>
+        {mediaOf(null).length > 0 ? (
+          <div className="rounded-2xl border bg-card shadow-card p-4">
+            <ShotViewer title="Lo que ya registraste sin protocolo" items={mediaOf(null)} withMeasure={withMeasure} />
+          </div>
+        ) : null}
         {uploaded.length > 0 ? (
           <p className="text-sm text-muted-foreground">
             En esta tanda: {uploaded.filter((u) => u.kind === 'PHOTO').length} fotos y {uploaded.filter((u) => u.kind === 'VIDEO').length} videos.
@@ -426,26 +537,37 @@ export function ShootSession({
             {uploaded.length === 1 ? 'archivo' : 'archivos'}.
           </p>
           <ul className="divide-y rounded-md border">
-            {steps.map((s, i) => (
-              <li key={s.id}>
-                <button type="button" className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted" onClick={() => goTo(i)}>
-                  {stateOf(s.id) === 'done' ? (
-                    <Check className="h-4 w-4 shrink-0 text-primary" />
-                  ) : stateOf(s.id) === 'skipped' ? (
-                    <SkipForward className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  ) : (
-                    <CircleDashed className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  )}
-                  <span className="min-w-0 flex-1 truncate">
-                    {i + 1}. {s.title}
-                  </span>
-                  <span className="shrink-0 text-xs text-muted-foreground">
-                    {done[s.id] ? `${done[s.id]} ${s.kind === 'PHOTO' ? (done[s.id] === 1 ? 'foto' : 'fotos') : done[s.id] === 1 ? 'video' : 'videos'}` : stateOf(s.id) === 'skipped' ? 'Salteado' : 'Pendiente'}
-                  </span>
-                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-                </button>
-              </li>
-            ))}
+            {steps.map((s, i) => {
+              const media = mediaOf(s.id);
+              return (
+                <li key={s.id}>
+                  <button type="button" className="block w-full space-y-2 px-3 py-2 text-left text-sm hover:bg-muted" onClick={() => goTo(i)}>
+                    <span className="flex items-center gap-2">
+                      {stateOf(s.id) === 'done' ? (
+                        <Check className="h-4 w-4 shrink-0 text-primary" />
+                      ) : stateOf(s.id) === 'skipped' ? (
+                        <SkipForward className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      ) : (
+                        <CircleDashed className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      )}
+                      <span className="min-w-0 flex-1 truncate">
+                        {i + 1}. {s.title}
+                      </span>
+                      <span className="shrink-0 text-xs text-muted-foreground">{stepNote(s, media.length, stateOf(s.id))}</span>
+                      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    </span>
+                    {media.length > 0 ? (
+                      <span className="flex flex-wrap gap-1.5 pl-6">
+                        {media.slice(0, 6).map((m) => (
+                          <ShotThumb key={m.id} shot={m} className="h-11 w-11" />
+                        ))}
+                        {media.length > 6 ? <span className="flex h-11 items-center px-1 text-xs text-muted-foreground">y {media.length - 6} más</span> : null}
+                      </span>
+                    ) : null}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </section>
         <EndLinks base={base} productId={product.id} hasMeasures={measureText !== null} />
@@ -455,6 +577,7 @@ export function ShootSession({
 
   // ── Un paso ──
   const count = done[step.id] ?? 0;
+  const media = mediaOf(step.id);
   return (
     <div className="mx-auto w-full max-w-xl space-y-4">
       {header}
@@ -466,13 +589,13 @@ export function ShootSession({
             Paso {index + 1} de {steps.length}
           </span>
           <Badge variant="outline" className="gap-1">
-            {step.kind === 'PHOTO' ? <Camera className="h-3 w-3" /> : <Video className="h-3 w-3" />}
+            <ShootKindIcon kind={step.kind} className="h-3 w-3" />
             {SHOOT_KIND_LABEL[step.kind]}
           </Badge>
           {count > 0 ? (
             <Badge variant="secondary" className="gap-1">
               <Check className="h-3 w-3" />
-              Ya tiene {count === 1 ? (step.kind === 'PHOTO' ? 'una foto' : 'un video') : `${count} ${step.kind === 'PHOTO' ? 'fotos' : 'videos'}`}
+              Hecho
             </Badge>
           ) : null}
         </div>
@@ -484,11 +607,26 @@ export function ShootSession({
           </button>
         ) : null}
         {step.explanation ? <p className="whitespace-pre-line text-sm">{step.explanation}</p> : null}
-        {captureArea([step.kind])}
+        {step.kind === 'CHECK' ? (
+          checkArea(step)
+        ) : (
+          <>
+            {!capture ? <ShotViewer title="Lo que ya registraste en este paso" items={media} withMeasure={withMeasure} /> : null}
+            {captureArea([step.kind], media.length > 0)}
+          </>
+        )}
       </section>
       {fileInputs}
     </div>
   );
+}
+
+/** Lo que tiene cada paso en el resumen: sus fotos o videos, Hecho, Salteado o Pendiente. */
+function stepNote(s: StepView, media: number, state: 'done' | 'skipped' | 'pending'): string {
+  if (state === 'skipped') return 'Salteado';
+  if (state === 'pending') return 'Pendiente';
+  if (s.kind === 'CHECK' || media === 0) return 'Hecho';
+  return s.kind === 'PHOTO' ? plural(media, 'foto') : plural(media, 'video');
 }
 
 function EndLinks({ base, productId, hasMeasures }: { base: string; productId: string; hasMeasures: boolean }) {
