@@ -5,7 +5,8 @@ import { revalidatePath } from 'next/cache';
 import { prisma } from '@/lib/db';
 import { act } from '@/lib/auth/guard';
 import { publicAppUrl } from '@/lib/public-url';
-import { finishShotPhoto, finishShotVideo, markShotCheck, ShootError, startShotUpload, undoShotCheck } from '@/lib/shoot';
+import { PipelineError } from '@/domain/pipeline';
+import { finishShotPhoto, finishShotVideo, markShotCheck, ShootError, shootToPipeline, startShotUpload, undoShotCheck } from '@/lib/shoot';
 import { PhotoError } from '@/lib/photos';
 import { storageError } from '@/lib/stored-files';
 import { VideoError } from '@/lib/videos';
@@ -23,7 +24,7 @@ async function guard<T extends object>(accountSlug: string, run: () => Promise<T
     revalidatePath(`/a/${accountSlug}`, 'layout');
     return { ok: true, ...r };
   } catch (e) {
-    if (e instanceof ShootError || e instanceof PhotoError || e instanceof VideoError) return { ok: false, error: e.message };
+    if (e instanceof ShootError || e instanceof PhotoError || e instanceof VideoError || e instanceof PipelineError) return { ok: false, error: e.message };
     const storage = storageError(e);
     if (storage) return { ok: false, error: storage };
     throw e;
@@ -51,11 +52,11 @@ export async function startShotUploadAction(
 export async function finishShotPhotoAction(
   accountSlug: string,
   args: { productId: string; fileId: string; stepId: string | null; variantKey: string | null },
-): Promise<Result> {
+): Promise<Result<{ id: string }>> {
   const productId = String(args?.productId ?? '');
   return act(accountSlug, { section: 'captura', does: 'Registró una foto', productId }, ({ user, account }) =>
     guard(accountSlug, async () => {
-      await finishShotPhoto(prisma, {
+      const id = await finishShotPhoto(prisma, {
         accountId: account.id,
         productId,
         fileId: String(args.fileId ?? ''),
@@ -63,7 +64,7 @@ export async function finishShotPhotoAction(
         stepId: idOrNull(args.stepId),
         variantKey: idOrNull(args.variantKey),
       });
-      return {};
+      return { id };
     }),
   );
 }
@@ -71,11 +72,11 @@ export async function finishShotPhotoAction(
 export async function finishShotVideoAction(
   accountSlug: string,
   args: { productId: string; fileId: string; size: number; measure: unknown; stepId: string | null; variantKey: string | null },
-): Promise<Result> {
+): Promise<Result<{ id: string }>> {
   const productId = String(args?.productId ?? '');
   return act(accountSlug, { section: 'captura', does: 'Registró un video', productId }, ({ user, account }) =>
     guard(accountSlug, async () => {
-      await finishShotVideo(prisma, {
+      const id = await finishShotVideo(prisma, {
         accountId: account.id,
         productId,
         fileId: String(args.fileId ?? ''),
@@ -85,7 +86,7 @@ export async function finishShotVideoAction(
         stepId: idOrNull(args.stepId),
         variantKey: idOrNull(args.variantKey),
       });
-      return {};
+      return { id };
     }),
   );
 }
@@ -108,5 +109,19 @@ export async function undoShotCheckAction(accountSlug: string, args: { productId
       await undoShotCheck(prisma, { accountId: account.id, productId, stepId: String(args.stepId ?? ''), variantKey: idOrNull(args.variantKey) });
       return {};
     }),
+  );
+}
+
+/**
+ * Deja el producto en el pipeline al empezar el registro, si se prendió
+ * Agregar al pipeline. Lo puede hacer quien usa Registro de productos.
+ */
+export async function shootToPipelineAction(
+  accountSlug: string,
+  args: { productId: string; storeId: string | null },
+): Promise<Result<{ publicationId: string; outcome: 'created' | 'added' | 'already' }>> {
+  const productId = String(args?.productId ?? '');
+  return act(accountSlug, { section: 'captura', does: 'Agregó al pipeline desde Registro de productos', productId }, ({ user, account }) =>
+    guard(accountSlug, () => shootToPipeline(prisma, { accountId: account.id, productId, storeId: idOrNull(args?.storeId), userId: user.id })),
   );
 }

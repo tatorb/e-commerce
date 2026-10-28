@@ -3,29 +3,25 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Camera, Check, ChevronRight, CircleDashed, Images, Redo2, RotateCcw, SkipForward, Undo2, Upload, Video } from 'lucide-react';
+import { AlertTriangle, Camera, Check, ChevronRight, CircleDashed, Images, KanbanSquare, Redo2, RotateCcw, SkipForward, Trash2, Undo2, Upload, Video } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useReadOnly } from '@/components/access/AccessProvider';
-import { measureVideo, uploadToDrive } from '@/components/drive/upload';
+import { measureVideo } from '@/components/drive/upload';
 import { cn } from '@/lib/utils/cn';
 import { LOW_QUALITY_HELP, qualityOf, SHOOT_KIND_LABEL, shotCounts, shotsPerStep, type MediaKind, type Quality } from '@/domain/shoot';
 import { plural } from '@/lib/format';
 import type { BrowserMeasure } from '@/lib/videos';
 import type { ProtocolView, ShootPick, StepView } from '@/lib/shoot';
-import {
-  finishShotPhotoAction,
-  finishShotVideoAction,
-  markShotCheckAction,
-  startShotUploadAction,
-  undoShotCheckAction,
-} from '@/app/a/[cuenta]/registro-productos/actions';
+import { markShotCheckAction, undoShotCheckAction } from '@/app/a/[cuenta]/registro-productos/actions';
 import { ShootKindIcon } from './ShootKindIcon';
 import { shotByline, ShotThumb, ShotViewer, type SessionShot } from './ShotViewer';
+import { blocksCamera, discardShotUpload, releaseShotUpload, retryShotUpload, startShotUpload, useShotUpload, type ShotUpload } from './shot-upload';
 
 // Lo que hace el operario con el celular: sigue los pasos del protocolo, o
 // ninguno, saca la foto o graba el video con la cámara del teléfono, lo revisa
-// y lo sube. El archivo va directo al Drive, tal como sale de la cámara. Lo
+// y lo sube. El archivo va directo al Drive, tal como sale de la cámara. Mientras
+// sube se puede pasar al paso siguiente, pero no sacar otra (shot-upload.ts). Lo
 // subido queda a la vista en su paso para revisarlo, y los pasos sin registro
 // se marcan Listo.
 
@@ -91,6 +87,7 @@ export function ShootSession({
   measureText,
   protocol,
   shots,
+  pipeline,
 }: {
   accountSlug: string;
   base: string;
@@ -101,6 +98,8 @@ export function ShootSession({
   measureText: string | null;
   protocol: ProtocolView | null;
   shots: SessionShot[];
+  // Si el producto está en el pipeline, con el link si la persona lo puede abrir.
+  pipeline: { href: string | null } | null;
 }) {
   const router = useRouter();
   const readOnly = useReadOnly();
@@ -108,15 +107,39 @@ export function ShootSession({
   const variantKey = measure?.key ?? null;
   const done = shotsPerStep(shots, variantKey);
   const withMeasure = measureText !== null;
+  const upload = useShotUpload();
+  // Mientras la anterior no subió bien, no se saca otra.
+  const busy = blocksCamera(upload);
+  // Lo que se está subiendo de este producto, a la vista en su paso hasta que la pantalla tiene la guardada.
+  const pending: SessionShot | null =
+    upload && upload.productId === product.id && shotCounts(upload, variantKey) && !shots.some((s) => s.id === upload.savedId)
+      ? {
+          id: `subida-${upload.key}`,
+          kind: upload.kind,
+          stepId: upload.stepId,
+          variantKey: upload.variantKey,
+          variantLabel: upload.variantKey ? (measure?.label ?? null) : null,
+          thumb: upload.url,
+          src: upload.url,
+          by: null,
+          when: 'recién',
+          pending: {
+            text: upload.status === 'failed' ? 'No se pudo subir' : upload.status === 'done' ? 'Subida' : upload.saving ? 'Guardando…' : `Subiendo ${upload.percent} %`,
+            failed: upload.status === 'failed',
+          },
+        }
+      : null;
   // Lo de un paso que vale para la medida elegida, lo último primero.
-  const mediaOf = (stepId: string | null) => shots.filter((s) => s.kind !== 'CHECK' && s.stepId === stepId && shotCounts(s, variantKey));
+  const mediaOf = (stepId: string | null) => [
+    ...(pending && pending.stepId === stepId ? [pending] : []),
+    ...shots.filter((s) => s.kind !== 'CHECK' && s.stepId === stepId && shotCounts(s, variantKey)),
+  ];
   const checksOf = (stepId: string) => shots.filter((s) => s.kind === 'CHECK' && s.stepId === stepId && shotCounts(s, variantKey));
   const [index, setIndex] = useState(() => Math.max(0, steps.findIndex((s) => !done[s.id])));
   const [finished, setFinished] = useState(false);
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
   const [uploaded, setUploaded] = useState<{ kind: MediaKind; title: string | null }[]>([]);
   const [capture, setCapture] = useState<Capture | null>(null);
-  const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ text: string; back: number | null } | null>(null);
   const [enlarged, setEnlarged] = useState(false);
@@ -127,15 +150,20 @@ export function ShootSession({
     VIDEO: { camera: useRef<HTMLInputElement>(null), gallery: useRef<HTMLInputElement>(null) },
   };
   const step = protocol && !finished ? (steps[index] ?? null) : null;
-  const uploading = progress !== null;
 
-  // Mientras sube, avisa antes de cerrar o cambiar de página.
+  // Cuando termina de subir, pide lo guardado una vez y suelta la vista previa
+  // apenas la pantalla lo tiene. La de otro producto se suelta enseguida.
+  const refreshed = useRef<string | null>(null);
   useEffect(() => {
-    if (!uploading) return;
-    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
-    window.addEventListener('beforeunload', warn);
-    return () => window.removeEventListener('beforeunload', warn);
-  }, [uploading]);
+    const id = upload?.status === 'done' ? upload.savedId : null;
+    if (!upload || !id) return;
+    if (upload.productId !== product.id || shots.some((s) => s.id === id) || refreshed.current === id) {
+      releaseShotUpload(id);
+      return;
+    }
+    refreshed.current = id;
+    router.refresh();
+  }, [upload, shots, product.id, router]);
 
   // La vista previa ocupa memoria: se suelta al cambiar de archivo o al salir.
   const previewUrl = capture?.url ?? null;
@@ -179,34 +207,26 @@ export function ShootSession({
     }
   }
 
-  async function send() {
-    if (!capture || uploading) return;
+  /** Empieza a subir y deja la pantalla libre: se queda en el paso, con lo que sube a la vista. */
+  function send() {
+    if (!capture || busy) return;
     const c = capture;
-    const stepId = step?.id ?? null;
-    const name = fileNameFor(c.file, [product.code ?? product.name, measure?.label, step?.title]);
-    setError(null);
-    setProgress('Preparando la subida…');
-    try {
-      const start = await startShotUploadAction(accountSlug, product.id, c.kind, { name, size: c.file.size, type: c.file.type });
-      if (!start.ok) throw new Error(start.error);
-      const fileId = await uploadToDrive(c.file, start.uploadUrl, (sent) => setProgress(`Subiendo, ${Math.floor((sent / c.file.size) * 100)} %`));
-      setProgress('Guardando…');
-      const r =
-        c.kind === 'PHOTO'
-          ? await finishShotPhotoAction(accountSlug, { productId: product.id, fileId, stepId, variantKey })
-          : await finishShotVideoAction(accountSlug, { productId: product.id, fileId, size: c.file.size, measure: c.video, stepId, variantKey });
-      if (!r.ok) throw new Error(r.error);
-      setProgress(null);
-      setCapture(null);
-      setUploaded((list) => [...list, { kind: c.kind, title: step?.title ?? null }]);
-      // Se queda en el paso: lo subido aparece a la vista para revisarlo antes de seguir.
-      const what = c.kind === 'PHOTO' ? 'la foto' : 'el video';
-      setNotice({ text: step ? `Se subió ${what} de “${step.title}”.` : `Se subió ${what}.`, back: null });
-      router.refresh();
-    } catch (e) {
-      setProgress(null);
-      setError(e instanceof Error && e.message ? e.message : 'No se pudo subir. Revisá la conexión y probá de nuevo.');
-    }
+    const started = startShotUpload({
+      accountSlug,
+      productId: product.id,
+      productLabel: product.code ?? product.name,
+      stepId: step?.id ?? null,
+      stepTitle: step?.title ?? null,
+      variantKey,
+      kind: c.kind,
+      file: c.file,
+      name: fileNameFor(c.file, [product.code ?? product.name, measure?.label, step?.title]),
+      video: c.video,
+    });
+    if (!started) return setError('Esperá a que termine de subir la anterior.');
+    clearCapture();
+    setNotice(null);
+    setUploaded((list) => [...list, { kind: c.kind, title: step?.title ?? null }]);
   }
 
   /** Marca Listo el paso sin registro y pasa al siguiente. */
@@ -244,7 +264,7 @@ export function ShootSession({
 
   const isLast = index + 1 >= steps.length;
   const nextButton = (
-    <Button size="lg" className="h-14 px-4 text-base" onClick={next} disabled={uploading || checking} access="view">
+    <Button size="lg" className="h-14 px-4 text-base" onClick={next} disabled={checking} access="view">
       <ChevronRight />
       {isLast ? 'Terminar' : 'Siguiente paso'}
     </Button>
@@ -302,18 +322,17 @@ export function ShootSession({
               <span className="text-muted-foreground">No se pudo medir la calidad en este navegador. Se sube igual, tal como salió.</span>
             )}
           </p>
-          {progress ? <p className="text-sm font-medium" role="status">{progress}</p> : null}
           {error ? (
             <p className="text-sm text-destructive" role="alert">
               {error}
             </p>
           ) : null}
           <div className="grid grid-cols-2 gap-2">
-            <Button size="lg" className="px-4" onClick={send} pending={uploading} disabled={uploading || capture.measuring || Boolean(low)}>
+            <Button size="lg" className="px-4" onClick={send} disabled={busy || capture.measuring || Boolean(low)}>
               <Upload />
               {error ? 'Reintentar' : 'Subir'}
             </Button>
-            <Button size="lg" variant="outline" className="px-4" onClick={clearCapture} disabled={uploading} access="view">
+            <Button size="lg" variant="outline" className="px-4" onClick={clearCapture} access="view">
               <RotateCcw />
               Repetir
             </Button>
@@ -327,19 +346,34 @@ export function ShootSession({
         <div className={cn('grid gap-2', more ? 'sm:grid-cols-2' : kinds.length > 1 ? 'grid-cols-2' : 'grid-cols-1')}>
           {more ? nextButton : null}
           {kinds.map((kind) => (
-            <Button key={kind} size="lg" variant={more ? 'outline' : 'default'} className="h-14 px-4 text-base" onClick={() => inputs[kind].camera.current?.click()}>
+            <Button
+              key={kind}
+              size="lg"
+              variant={more ? 'outline' : 'default'}
+              className="h-14 px-4 text-base"
+              onClick={() => inputs[kind].camera.current?.click()}
+              disabled={busy}
+            >
               {kind === 'PHOTO' ? <Camera /> : <Video />}
               {more ? (kind === 'PHOTO' ? 'Sacar otra foto' : 'Grabar otro video') : kind === 'PHOTO' ? 'Sacar foto' : 'Grabar video'}
             </Button>
           ))}
         </div>
+        {upload && busy ? (
+          <p className="flex items-start gap-2 rounded-lg bg-muted px-3 py-2 text-sm" role="status">
+            <Upload className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+            {upload.status === 'failed'
+              ? `Para sacar otra, reintentá o descartá ${upload.kind === 'PHOTO' ? 'la foto' : 'el video'} que no se pudo subir.`
+              : `Esperá a que termine de subir ${upload.kind === 'PHOTO' ? 'la foto anterior' : 'el video anterior'} para sacar otra.`}
+          </p>
+        ) : null}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap gap-x-4">
             {kinds.map((kind) => (
               <button
                 key={kind}
                 type="button"
-                disabled={readOnly}
+                disabled={readOnly || busy}
                 onClick={() => inputs[kind].gallery.current?.click()}
                 className="inline-flex items-center gap-1 text-sm text-primary underline-offset-4 hover:underline disabled:opacity-50"
               >
@@ -427,6 +461,21 @@ export function ShootSession({
           {product.code ? <Badge variant="outline">{product.code}</Badge> : null}
           {measureText ? <Badge variant="secondary">{measureText}</Badge> : null}
           <Badge variant="secondary">{protocol ? protocol.name : 'Sin protocolo'}</Badge>
+          {pipeline ? (
+            pipeline.href ? (
+              <Link href={pipeline.href}>
+                <Badge variant="outline" className="gap-1 hover:bg-muted">
+                  <KanbanSquare className="h-3 w-3" />
+                  En el pipeline
+                </Badge>
+              </Link>
+            ) : (
+              <Badge variant="outline" className="gap-1">
+                <KanbanSquare className="h-3 w-3" />
+                En el pipeline
+              </Badge>
+            )
+          ) : null}
         </div>
       </div>
       <Link href={`${base}?producto=${product.id}`} className="shrink-0 text-xs font-medium text-primary underline-offset-4 hover:underline">
@@ -434,6 +483,8 @@ export function ShootSession({
       </Link>
     </div>
   );
+
+  const uploadBar = upload && upload.status !== 'done' ? <UploadBar upload={upload} productId={product.id} /> : null;
 
   const noticeBar = notice ? (
     <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-sm" role="status">
@@ -455,6 +506,7 @@ export function ShootSession({
     return (
       <div className="mx-auto w-full max-w-xl space-y-4">
         {header}
+        {uploadBar}
         {noticeBar}
         <section className="space-y-3 rounded-2xl border bg-card shadow-card p-4">
           <h2 className="text-base font-semibold">Sacá lo que necesites</h2>
@@ -477,7 +529,7 @@ export function ShootSession({
     );
   }
 
-  const stateOf = (id: string) => (done[id] ? 'done' : skipped.has(id) ? 'skipped' : 'pending');
+  const stateOf = (id: string) => (done[id] ? 'done' : pending?.stepId === id ? 'uploading' : skipped.has(id) ? 'skipped' : 'pending');
 
   const stepList = (
     <ol className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
@@ -489,7 +541,6 @@ export function ShootSession({
             <button
               type="button"
               onClick={() => goTo(i)}
-              disabled={uploading}
               className={cn(
                 'flex max-w-[11rem] items-center gap-1.5 rounded-full border px-3 py-1.5 text-left text-xs',
                 current ? 'border-foreground bg-foreground text-background' : 'bg-background hover:bg-muted',
@@ -498,6 +549,8 @@ export function ShootSession({
             >
               {state === 'done' ? (
                 <Check className="h-3.5 w-3.5 shrink-0" />
+              ) : state === 'uploading' ? (
+                <Upload className="h-3.5 w-3.5 shrink-0" />
               ) : state === 'skipped' ? (
                 <SkipForward className="h-3.5 w-3.5 shrink-0" />
               ) : (
@@ -529,6 +582,7 @@ export function ShootSession({
     return (
       <div className="mx-auto w-full max-w-xl space-y-4">
         {header}
+        {uploadBar}
         {noticeBar}
         <section className="space-y-3 rounded-2xl border bg-card shadow-card p-4">
           <h2 className="text-lg font-semibold">Terminaste</h2>
@@ -545,6 +599,8 @@ export function ShootSession({
                     <span className="flex items-center gap-2">
                       {stateOf(s.id) === 'done' ? (
                         <Check className="h-4 w-4 shrink-0 text-primary" />
+                      ) : stateOf(s.id) === 'uploading' ? (
+                        <Upload className="h-4 w-4 shrink-0 text-muted-foreground" />
                       ) : stateOf(s.id) === 'skipped' ? (
                         <SkipForward className="h-4 w-4 shrink-0 text-muted-foreground" />
                       ) : (
@@ -582,6 +638,7 @@ export function ShootSession({
     <div className="mx-auto w-full max-w-xl space-y-4">
       {header}
       {stepList}
+      {uploadBar}
       {noticeBar}
       <section className="space-y-3 rounded-2xl border bg-card shadow-card p-4">
         <div className="flex flex-wrap items-center gap-2">
@@ -621,12 +678,49 @@ export function ShootSession({
   );
 }
 
-/** Lo que tiene cada paso en el resumen: sus fotos o videos, Hecho, Salteado o Pendiente. */
-function stepNote(s: StepView, media: number, state: 'done' | 'skipped' | 'pending'): string {
+/** Lo que tiene cada paso en el resumen: sus fotos o videos, Hecho, Subiendo, Salteado o Pendiente. */
+function stepNote(s: StepView, media: number, state: 'done' | 'uploading' | 'skipped' | 'pending'): string {
+  if (state === 'uploading') return 'Subiendo';
   if (state === 'skipped') return 'Salteado';
   if (state === 'pending') return 'Pendiente';
   if (s.kind === 'CHECK' || media === 0) return 'Hecho';
   return s.kind === 'PHOTO' ? plural(media, 'foto') : plural(media, 'video');
+}
+
+/** La subida en curso o la que falló, arriba de todo, con su avance o con Reintentar y Descartar. */
+function UploadBar({ upload, productId }: { upload: ShotUpload; productId: string }) {
+  const failed = upload.status === 'failed';
+  const what = `${upload.kind === 'PHOTO' ? 'la foto' : 'el video'}${upload.stepTitle ? ` de “${upload.stepTitle}”` : ''}${upload.productId !== productId ? ` de ${upload.productLabel}` : ''}`;
+  return (
+    <div className={cn('space-y-2 rounded-lg border px-3 py-2 text-sm', failed ? 'border-destructive/40 bg-destructive/5' : 'border-primary/30 bg-primary/5')} role="status">
+      <p className="flex items-start gap-2">
+        {failed ? <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" /> : <Upload className="mt-0.5 h-4 w-4 shrink-0 animate-pulse text-primary" />}
+        <span>
+          {failed
+            ? `No se pudo subir ${what}. ${upload.error ?? ''}`
+            : upload.saving
+              ? `Guardando ${what}…`
+              : `Subiendo ${what}, ${upload.percent} %. Podés seguir con el paso siguiente.`}
+        </span>
+      </p>
+      {failed ? (
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" onClick={retryShotUpload}>
+            <RotateCcw />
+            Reintentar
+          </Button>
+          <Button size="sm" variant="outline" onClick={discardShotUpload}>
+            <Trash2 />
+            Descartar
+          </Button>
+        </div>
+      ) : (
+        <div className="h-1.5 overflow-hidden rounded-full bg-background">
+          <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${upload.percent}%` }} />
+        </div>
+      )}
+    </div>
+  );
 }
 
 function EndLinks({ base, productId, hasMeasures }: { base: string; productId: string; hasMeasures: boolean }) {

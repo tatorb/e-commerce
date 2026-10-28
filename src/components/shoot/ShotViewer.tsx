@@ -23,7 +23,24 @@ export type SessionShot = {
   by: string | null;
   // Cuándo, ya dicho en la hora de la cuenta.
   when: string;
+  // La que todavía se está subiendo desde este celular: cómo va.
+  pending?: { text: string; failed: boolean };
 };
+
+/** La marca de cómo va la que se está subiendo, arriba a la izquierda. */
+function PendingTag({ pending, small }: { pending: NonNullable<SessionShot['pending']>; small?: boolean }) {
+  return (
+    <span
+      className={cn(
+        'absolute left-1 top-1 rounded font-medium text-white',
+        pending.failed ? 'bg-destructive' : 'bg-black/70',
+        small ? 'px-1 text-[10px] leading-4' : 'px-2 py-1 text-xs',
+      )}
+    >
+      {small ? (pending.failed ? '!' : '↑') : pending.text}
+    </span>
+  );
+}
 
 /** Para qué medida, si el producto tiene varias, quién y cuándo. */
 export function shotByline(s: SessionShot, withMeasure: boolean): string {
@@ -42,7 +59,8 @@ export function ShotViewer({ title, items, withMeasure }: { title: string; items
       <p className="text-sm font-medium">
         {title} ({items.length})
       </p>
-      <div className="overflow-hidden rounded-lg border bg-black">
+      <div className="relative overflow-hidden rounded-lg border bg-black">
+        {current.pending ? <PendingTag pending={current.pending} /> : null}
         {current.kind === 'VIDEO' ? (
           <video key={current.id} src={current.src ?? undefined} controls playsInline preload="metadata" className="mx-auto max-h-[60vh] w-full" />
         ) : failed.has(current.id) ? (
@@ -97,6 +115,7 @@ export function ShotThumb({ shot, className }: { shot: SessionShot; className?: 
       ) : (
         <ShootKindIcon kind={shot.kind} className="h-5 w-5" />
       )}
+      {shot.pending ? <PendingTag pending={shot.pending} small /> : null}
       {shown && shot.kind === 'VIDEO' ? (
         <span className="absolute bottom-0.5 right-0.5 rounded bg-black/60 p-0.5 text-white">
           <Video className="h-3 w-3" />

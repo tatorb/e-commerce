@@ -1,6 +1,8 @@
 import type { z } from 'zod';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { parseMedia, photoKey, withVariants, type PhotoRef } from '@/domain/media';
+import { addToPipeline } from '@/domain/pipeline';
+import { createPipelinePublication } from '@/domain/pipeline-publications';
 import {
   illustrationType,
   inputProblem,
@@ -14,6 +16,7 @@ import {
   type ShootKind,
 } from '@/domain/shoot';
 import { driveRef, ensureFolder, getFile, protocolsFolder, startResumableUpload, withDriveToken } from '@/lib/drive';
+import { familyByMeasure } from '@/lib/families';
 import { measuresOf, productPublicationsMedia, readyPhotoIds, type Measure } from '@/lib/media';
 import { originalTypeFor, photoFolderId, photoOwner } from '@/lib/photo-files';
 import { photoFileHref } from '@/lib/photo-rules';
@@ -424,6 +427,65 @@ export async function undoShotCheck(db: Db, args: { accountId: string; productId
   await productIn(db, args.accountId, args.productId);
   await stepIn(db, args.accountId, args.stepId);
   await db.shootCheck.deleteMany({ where: { productId: args.productId, shootStepId: args.stepId, variantKey: args.variantKey } });
+}
+
+// ───────────────────────────── Al pipeline ─────────────────────────────
+
+/** Las publicaciones del producto que siguen en el canal o sin publicar: las finalizadas o borradas no vuelven al pipeline desde acá. */
+function livePublications(db: Prisma.TransactionClient, accountId: string, productId: string) {
+  return db.publication.findMany({
+    where: { productId, product: { accountId }, channelStatus: { notIn: ['CLOSED', 'DELETED'] } },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true, pipelineStatus: true, family: { select: { leadId: true } } },
+  });
+}
+
+/** La que se abre en el pipeline: la principal de su familia, o la primera. */
+const leadOf = (list: { id: string; family: { leadId: string | null } | null }[]) => (list.find((p) => p.family?.leadId === p.id) ?? list[0]).id;
+
+/**
+ * Cómo está el producto para el pipeline, para el interruptor del registro:
+ * sin publicaciones, con alguna fuera del pipeline, o todas adentro. Con la
+ * que se abre, si hay alguna adentro.
+ */
+export async function shootPipelineState(db: Db, accountId: string, productId: string): Promise<{ state: 'none' | 'out' | 'in'; openId: string | null }> {
+  const pubs = await livePublications(db, accountId, productId);
+  if (pubs.length === 0) return { state: 'none', openId: null };
+  const inside = pubs.filter((p) => p.pipelineStatus === 'IN_PIPELINE');
+  return { state: inside.length === pubs.length ? 'in' : 'out', openId: inside.length > 0 ? leadOf(inside) : null };
+}
+
+/**
+ * Deja el producto en el pipeline desde Registro de productos. Sin
+ * publicaciones, crea una sin publicar en la tienda (una por medida, en su
+ * familia) que entra en Información; con publicaciones fuera del pipeline, las
+ * agrega. Las fotos registradas que ya están listas se suman a las nuevas.
+ * Devuelve la que se abre.
+ */
+export async function shootToPipeline(
+  db: Db,
+  args: { accountId: string; productId: string; storeId: string | null; userId: string | null },
+): Promise<{ publicationId: string; outcome: 'created' | 'added' | 'already' }> {
+  await productIn(db, args.accountId, args.productId);
+  const r = await db.$transaction(async (tx) => {
+    // El mismo turno que usa el pipeline: dos personas a la vez no crean dos publicaciones.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`pipeline:${args.accountId}`}))`;
+    const pubs = await livePublications(tx, args.accountId, args.productId);
+    if (pubs.length === 0) {
+      const stores = await tx.store.findMany({ where: { accountId: args.accountId }, select: { id: true } });
+      const storeId = args.storeId ?? (stores.length === 1 ? stores[0].id : null);
+      if (!storeId) throw new ShootError(stores.length === 0 ? 'La cuenta todavía no tiene tiendas.' : 'Elegí en qué tienda va la publicación.');
+      const made = await createPipelinePublication(tx, { accountId: args.accountId, storeId, productId: args.productId, userId: args.userId });
+      // Con varias medidas, una publicación por medida, en su familia.
+      await familyByMeasure(tx, { publicationId: made.publicationId, userId: args.userId });
+      return { publicationId: made.publicationId, outcome: 'created' as const };
+    }
+    const out = pubs.filter((p) => p.pipelineStatus !== 'IN_PIPELINE');
+    if (out.length > 0) await addToPipeline(tx, { accountId: args.accountId, publicationIds: out.map((p) => p.id), userId: args.userId });
+    return { publicationId: leadOf(pubs), outcome: out.length > 0 ? ('added' as const) : ('already' as const) };
+  });
+  if (r.outcome !== 'already') await placeShotPhotosQuietly(db, args.productId);
+  return r;
 }
 
 // ───────────────────────────── A las publicaciones ─────────────────────────────

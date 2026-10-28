@@ -1,10 +1,12 @@
 import Link from 'next/link';
-import { Camera, Check, ChevronRight, ClipboardList, Search } from 'lucide-react';
+import { Check, ChevronRight, Search } from 'lucide-react';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PickLink } from '@/components/shoot/PickLink';
+import { ProtocolPicker } from '@/components/shoot/ProtocolPicker';
 import { ShootSession } from '@/components/shoot/ShootSession';
 import { ShotThumb, type SessionShot } from '@/components/shoot/ShotViewer';
 import { can } from '@/domain/access';
@@ -12,7 +14,7 @@ import { shotsPerStep } from '@/domain/shoot';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { prisma } from '@/lib/db';
 import { formatDateTime, plural } from '@/lib/format';
-import { searchShootProducts, shootPlan, type ShootPick, type ShootPlan } from '@/lib/shoot';
+import { searchShootProducts, shootPipelineState, shootPlan, type ShootPick, type ShootPlan } from '@/lib/shoot';
 
 export const dynamic = 'force-dynamic';
 
@@ -110,12 +112,20 @@ export default async function ShootPage({ params, searchParams }: { params: Prom
   const protocolChosen = protocolo === NONE || protocol !== null;
   const withProduct = `${base}?producto=${plan.product.id}`;
   const withMeasure = `${withProduct}${needsMeasure ? `&medida=${encodeURIComponent(measure?.key ?? ALL)}` : ''}`;
+  // El producto en el pipeline: para el interruptor al elegir el protocolo y la marca durante el registro.
+  const inPipeline = measureChosen ? await shootPipelineState(prisma, account.id, plan.product.id) : null;
+  const pipelineHref = inPipeline?.openId && can(user.access, 'pipeline', 'read') ? `/a/${account.slug}/pipeline/${inPipeline.openId}` : null;
 
   if (!measureChosen || !protocolChosen) {
     const done = (key: string | null) => (p: ShootPlan['protocols'][number]) => {
       const counts = shotsPerStep(plan.shots, key);
       return p.steps.filter((s) => counts[s.id]).length;
     };
+    // Las tiendas, solo si hay que crear la publicación y hay más de una para elegir.
+    const stores =
+      inPipeline?.state === 'none'
+        ? await prisma.store.findMany({ where: { accountId: account.id }, orderBy: { name: 'asc' }, select: { id: true, name: true, channel: { select: { name: true } } } })
+        : [];
     return (
       <>
         {header}
@@ -151,22 +161,27 @@ export default async function ShootPage({ params, searchParams }: { params: Prom
                   ) : null}
                 </div>
                 {plan.protocols.length === 0 ? <p className="text-sm text-muted-foreground">Todavía no hay protocolos armados. Podés seguir sin protocolo.</p> : null}
-                <ul className="space-y-2">
-                  {plan.protocols.map((p) => (
-                    <li key={p.id}>
-                      <PickLink
-                        href={`${withMeasure}&protocolo=${p.id}`}
-                        icon={<ClipboardList className="h-5 w-5" />}
-                        title={p.name}
-                        description={p.description}
-                        note={`${plural(p.steps.length, 'paso')}${done(measure?.key ?? null)(p) > 0 ? `, ${done(measure?.key ?? null)(p)} ya hechos` : ''}`}
-                      />
-                    </li>
-                  ))}
-                  <li>
-                    <PickLink href={`${withMeasure}&protocolo=${NONE}`} icon={<Camera className="h-5 w-5" />} title="Sin protocolo" description="Sacá las fotos y los videos que quieras, uno tras otro." />
-                  </li>
-                </ul>
+                <ProtocolPicker
+                  accountSlug={account.slug}
+                  productId={plan.product.id}
+                  pipeline={{
+                    state: inPipeline?.state ?? 'none',
+                    href: pipelineHref,
+                    stores: stores.length > 1 ? stores.map((st) => ({ id: st.id, label: `${st.name} · ${st.channel.name}` })) : [],
+                    byMeasure: plan.measures.length >= 2,
+                  }}
+                  options={[
+                    ...plan.protocols.map((p) => ({
+                      key: p.id,
+                      href: `${withMeasure}&protocolo=${p.id}`,
+                      title: p.name,
+                      description: p.description,
+                      note: `${plural(p.steps.length, 'paso')}${done(measure?.key ?? null)(p) > 0 ? `, ${done(measure?.key ?? null)(p)} ya hechos` : ''}`,
+                      withProtocol: true,
+                    })),
+                    { key: NONE, href: `${withMeasure}&protocolo=${NONE}`, title: 'Sin protocolo', description: 'Sacá las fotos y los videos que quieras, uno tras otro.', withProtocol: false },
+                  ]}
+                />
               </section>
             )}
             <ShotHistory plan={plan} shots={shots} />
@@ -189,6 +204,7 @@ export default async function ShootPage({ params, searchParams }: { params: Prom
             measureText={measureText}
             protocol={protocol}
             shots={shots}
+            pipeline={inPipeline?.openId ? { href: pipelineHref } : null}
           />
           <div className="mx-auto w-full max-w-xl space-y-4">
             <BeforeStarting collapsed />
@@ -209,20 +225,6 @@ function countText(list: { kind: string }[]): string | undefined {
     count('CHECK') ? plural(count('CHECK'), 'paso hecho', 'pasos hechos') : '',
   ].filter(Boolean);
   return `Ya tiene ${parts.length > 1 ? `${parts.slice(0, -1).join(', ')} y ${parts.at(-1)}` : parts[0]}`;
-}
-
-function PickLink({ href, title, description, note, icon }: { href: string; title: string; description?: string; note?: string; icon?: React.ReactNode }) {
-  return (
-    <Link href={href} className="flex min-h-14 items-center gap-3 rounded-lg border bg-background px-4 py-3 hover:bg-muted">
-      {icon ? <span className="shrink-0 text-muted-foreground">{icon}</span> : null}
-      <span className="min-w-0 flex-1">
-        <span className="block font-medium">{title}</span>
-        {description ? <span className="block text-sm text-muted-foreground">{description}</span> : null}
-        {note ? <span className="block text-xs text-muted-foreground">{note}</span> : null}
-      </span>
-      <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground" />
-    </Link>
-  );
 }
 
 function ProductList({ products, base }: { products: ShootPick[]; base: string }) {

@@ -18,7 +18,9 @@ import {
   removeStep,
   searchShootProducts,
   setIllustration,
+  shootPipelineState,
   shootPlan,
+  shootToPipeline,
   startIllustrationUpload,
   startShotUpload,
   undoShotCheck,
@@ -311,5 +313,44 @@ describe.skipIf(!url)('Registro de productos', () => {
     await expect(markShotCheck(db, { accountId, productId, stepId: clean, variantKey: 'sku:OTRO', userId })).rejects.toThrow('ya no está en la ficha');
     await expect(markShotCheck(db, { accountId: otherAccountId, productId, stepId: clean, variantKey: null, userId })).rejects.toThrow('no es de esta cuenta');
     await expect(undoShotCheck(db, { accountId: otherAccountId, productId, stepId: clean, variantKey: null })).rejects.toThrow('no es de esta cuenta');
+  });
+
+  it('Agregar al pipeline: sin publicación crea una por medida; con publicaciones, agrega las que siguen en el canal', async () => {
+    // Un producto sin publicaciones, con dos medidas.
+    const bare = (
+      await db.product.create({
+        data: { accountId, name: 'Juntas de prueba', variants: { create: [{ sku: 'JT-1-00', measure: 'STD', position: 0 }, { sku: 'JT-1-50', measure: '0.50', position: 1 }] } },
+      })
+    ).id;
+    expect(await shootPipelineState(db, accountId, bare)).toEqual({ state: 'none', openId: null });
+    const made = await shootToPipeline(db, { accountId, productId: bare, storeId: null, userId });
+    expect(made.outcome).toBe('created');
+    const family = await db.publication.findMany({ where: { productId: bare }, select: { id: true, familyId: true, variantKey: true, pipelineStatus: true, channelStatus: true } });
+    expect(family).toHaveLength(2);
+    expect(new Set(family.map((f) => f.familyId)).size).toBe(1);
+    expect(family.map((f) => [f.pipelineStatus, f.channelStatus])).toEqual([
+      ['IN_PIPELINE', 'UNPUBLISHED'],
+      ['IN_PIPELINE', 'UNPUBLISHED'],
+    ]);
+    expect(await shootPipelineState(db, accountId, bare)).toEqual({ state: 'in', openId: made.publicationId });
+    expect(await shootToPipeline(db, { accountId, productId: bare, storeId: null, userId })).toEqual({ publicationId: made.publicationId, outcome: 'already' });
+
+    // Con publicaciones: entran las que siguen en el canal; la finalizada no.
+    await db.publication.update({ where: { id: stdId }, data: { channelStatus: 'CLOSED' } });
+    expect(await shootPipelineState(db, accountId, productId)).toEqual({ state: 'out', openId: null });
+    expect((await shootToPipeline(db, { accountId, productId, storeId: null, userId })).outcome).toBe('added');
+    const status = async (id: string) => (await db.publication.findUniqueOrThrow({ where: { id }, select: { pipelineStatus: true } })).pipelineStatus;
+    expect([await status(bothId), await status(halfId), await status(stdId)]).toEqual(['IN_PIPELINE', 'IN_PIPELINE', 'UNTOUCHED']);
+    expect((await shootPipelineState(db, accountId, productId)).state).toBe('in');
+
+    // Con dos tiendas hay que elegir; la de otra cuenta no vale; el producto de otra cuenta tampoco.
+    const channel = await db.channel.findFirstOrThrow();
+    await db.store.create({ data: { accountId, channelId: channel.id, name: 'OTRA TIENDA' } });
+    const otherStore = await db.store.create({ data: { accountId: otherAccountId, channelId: channel.id, name: 'AJENA' } });
+    const second = (await db.product.create({ data: { accountId, name: 'Retén de prueba' } })).id;
+    await expect(shootToPipeline(db, { accountId, productId: second, storeId: null, userId })).rejects.toThrow('Elegí en qué tienda');
+    await expect(shootToPipeline(db, { accountId, productId: second, storeId: otherStore.id, userId })).rejects.toThrow('Elegí una tienda de esta cuenta.');
+    await expect(shootToPipeline(db, { accountId: otherAccountId, productId: second, storeId: null, userId })).rejects.toThrow('no es de esta cuenta');
+    expect(await db.publication.count({ where: { productId: second } })).toBe(0);
   });
 });
