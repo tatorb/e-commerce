@@ -10,11 +10,14 @@ export function PublicationFactsRow({
   facts,
   hideMeasures,
   hideStatus,
+  measuresLabel,
   className,
 }: {
   facts: PublicationFacts;
   hideMeasures?: boolean;
   hideStatus?: boolean;
+  // Otras palabras para las medidas, por ejemplo las de toda la familia en el Pipeline.
+  measuresLabel?: string;
   className?: string;
 }) {
   const chip = 'inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5';
@@ -29,7 +32,7 @@ export function PublicationFactsRow({
       {hideMeasures ? null : (
         <span className={cn(chip, 'text-muted-foreground')}>
           <Ruler className="h-3 w-3" aria-hidden />
-          {measuresText(facts.measures)}
+          {measuresLabel ?? measuresText(facts.measures)}
         </span>
       )}
       <span

@@ -1,8 +1,8 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
-import { AppWindow, ExternalLink, Lock, Package, Ruler, Tag } from 'lucide-react';
-import { EntityHero, HeroLink } from '@/components/navigation/EntityHero';
-import { InfoStrip } from '@/components/ui/info-strip';
+import { AppWindow, ExternalLink, Lock, Package, Tag } from 'lucide-react';
+import { EntityHero } from '@/components/navigation/EntityHero';
+import { HeroMenu } from '@/components/navigation/HeroMenu';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Breadcrumb } from '@/components/navigation/Breadcrumb';
@@ -16,11 +16,10 @@ import { loadCombo } from '@/lib/queries/combos';
 import { StepLine } from '@/components/pipeline/StepLine';
 import { JumpHereButton, StepActions } from '@/components/pipeline/StepActions';
 import { PublicationFactsRow } from '@/components/publication/PublicationFactsRow';
-import { FamilyMembersRow } from '@/components/families/FamilyMembersRow';
 import { FamilyPublishCard, type FamilyPublishRow } from '@/components/families/FamilyPublishCard';
 import { listScoredPublications } from '@/lib/queries/scoring';
 import { familyLeadId, familyOf } from '@/lib/families';
-import { loadPublicationFacts, measuresText } from '@/lib/publication-facts';
+import { familyMeasuresText, loadPublicationFacts } from '@/lib/publication-facts';
 import { firstPhoto, productCovers } from '@/lib/queries/products';
 import { PipelineHistory } from '@/components/pipeline/PipelineHistory';
 import { AddToPipelineButton } from '@/components/pipeline/AddToPipelineButton';
@@ -33,7 +32,7 @@ import { CreateInChannelCard } from '@/components/publication/CreateInChannelCar
 import { createChecks } from '@/lib/channel-create';
 import { loadPublicationFaces } from '@/lib/queries/publication-faces';
 import { channelInfo, getChannelAdapter } from '@/channels';
-import { codeOrUnpublished } from '@/domain/channel-status';
+import { CHANNEL_STATUS_LABEL, codeOrUnpublished } from '@/domain/channel-status';
 import { PIPELINE_REMOVAL_LABEL, PIPELINE_STEP_LABEL, PIPELINE_STEP_SLUG, stepFromSlug } from '@/domain/pipeline';
 import { titleLockText } from '@/domain/title-lock';
 import type { PipelineStep } from '@/generated/prisma/enums';
@@ -217,6 +216,22 @@ export default async function PipelineStepPage({
           <EntityHero
             photo={{ src: cover, alt: titleOrUntitled(pub.title) }}
             label={<EntityLabel kind="publication" channelName={pub.channelName} accent={pub.channelAccent} />}
+            // Cómo está: pipeline, puntaje, código, estado, medidas y respuesta automática.
+            badges={
+              <>
+                <PipelineBadge state={pub} />
+                <ScoreBadge score={pub.score} />
+                <KindBadge kind={pub.kind} />
+                {facts ? (
+                  <PublicationFactsRow
+                    facts={facts}
+                    hideMeasures={!family && facts.measures.kind === 'none'}
+                    measuresLabel={family ? familyMeasuresText(family.members) : undefined}
+                    className="contents"
+                  />
+                ) : null}
+              </>
+            }
             title={
               <span className="flex items-start gap-2">
                 <span className={pub.title ? undefined : 'text-muted-foreground'}>{titleOrUntitled(pub.title)}</span>
@@ -228,45 +243,35 @@ export default async function PipelineStepPage({
               </span>
             }
             meta={`${codeOrUnpublished(pub.externalId)} · ${pub.sales === null ? 'Ventas sin dato' : `${plural(pub.sales, 'venta')} en 90 días`}`}
-            facts={
-              <div className="flex flex-wrap items-center gap-1.5">
-                <PipelineBadge state={pub} />
-                <ScoreBadge score={pub.score} />
-                <KindBadge kind={pub.kind} />
-                {facts ? <PublicationFactsRow facts={facts} hideMeasures className="contents" /> : null}
-              </div>
-            }
-            stats={
-              <>
-                <HeroLink href={`/a/${account.slug}/productos/${pub.productId}`} icon={<Package />}>
-                  Producto
-                </HeroLink>
-                {pub.url ? (
-                  <HeroLink href={pub.url} icon={<ExternalLink />} external>
-                    Ver en {pub.channelName}
-                  </HeroLink>
-                ) : null}
-                {can(user.access, 'publicaciones', 'read') ? (
-                  <HeroLink href={`/a/${account.slug}/publicaciones/${pub.id}`} icon={<Tag />}>
-                    Fuera del pipeline
-                  </HeroLink>
-                ) : null}
-                <HeroLink href={viewHref} icon={<AppWindow />} external>
-                  Otra pestaña
-                </HeroLink>
-              </>
-            }
-          >
-            {facts && facts.measures.kind !== 'none' ? <InfoStrip icon={<Ruler />}>{measuresText(facts.measures)}</InfoStrip> : null}
-            {family ? (
-              <FamilyMembersRow
-                members={family.members}
-                accountSlug={account.slug}
-                channelName={pub.channelName}
-                linkToApp={can(user.access, 'publicaciones', 'read')}
+            menu={
+              <HeroMenu
+                label="Links de la publicación"
+                groups={[
+                  {
+                    items: [
+                      { href: `/a/${account.slug}/productos/${pub.productId}`, label: 'Producto', icon: <Package /> },
+                      // En una familia, cada medida con su link, abajo.
+                      ...(pub.url && !family ? [{ href: pub.url, label: `Ver en ${pub.channelName}`, icon: <ExternalLink />, external: true }] : []),
+                      ...(can(user.access, 'publicaciones', 'read')
+                        ? [{ href: `/a/${account.slug}/publicaciones/${pub.id}`, label: 'Fuera del pipeline', icon: <Tag /> }]
+                        : []),
+                      { href: viewHref, label: 'Otra pestaña', icon: <AppWindow />, external: true },
+                    ],
+                  },
+                  {
+                    title: `Ver cada medida en ${pub.channelName}`,
+                    items: (family?.members ?? []).map((m) => ({
+                      href: m.url,
+                      label: m.measure ?? 'Medida sin elegir',
+                      icon: <ExternalLink />,
+                      external: true,
+                      note: `${m.externalId ?? 'Sin publicar'}${m.channelStatus !== 'ACTIVE' ? ` · ${CHANNEL_STATUS_LABEL[m.channelStatus]}` : ''}`,
+                    })),
+                  },
+                ]}
               />
-            ) : null}
-          </EntityHero>
+            }
+          />
         </div>
         <StepLine
           current={pub.pipelineStep}

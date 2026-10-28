@@ -5,21 +5,27 @@ import { cn } from '@/lib/utils/cn';
 
 // La ficha de arriba de un producto o de una publicación: la foto chica, la
 // seña de qué es, el título, los datos que lo identifican, una fila de cifras
-// y las acciones. En el celular las acciones van a lo ancho.
+// y las acciones. En el celular las acciones van a lo ancho. El menú, si hay,
+// va arriba a la derecha. Las etiquetas de al lado de la seña van a su derecha
+// en la computadora y, en el celular, que no hay lugar, a lo ancho abajo.
 
 export function EntityHero({
   photo,
   label,
+  badges,
   title,
   meta,
   facts,
   stats,
   actions,
+  menu,
   className,
   children,
 }: {
   photo: { src: string | null; alt: string };
   label: React.ReactNode;
+  // Etiquetas al lado de la seña, por ejemplo cómo está la publicación.
+  badges?: React.ReactNode;
   title: React.ReactNode;
   // Lo que lo identifica, en gris: marca, tipo y código, o tienda y código.
   meta?: React.ReactNode;
@@ -28,6 +34,8 @@ export function EntityHero({
   // Cifras separadas por una línea fina, por ejemplo publicaciones y puntaje.
   stats?: React.ReactNode;
   actions?: React.ReactNode;
+  // El botón del menú de arriba a la derecha, por ejemplo con los links.
+  menu?: React.ReactNode;
   className?: string;
   // Avisos debajo de la ficha, antes de las acciones, como la medida que vende.
   children?: React.ReactNode;
@@ -37,11 +45,20 @@ export function EntityHero({
       <div className="flex items-start gap-3 md:gap-4">
         <Thumb src={photo.src} alt={photo.alt} size="lg" />
         <div className="min-w-0 flex-1 space-y-1.5">
-          {label}
+          {badges ? (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {label}
+              <div className="hidden md:contents">{badges}</div>
+            </div>
+          ) : (
+            label
+          )}
           <h1 className="break-words text-xl font-bold leading-tight tracking-tight md:text-2xl">{title}</h1>
           {meta ? <p className="text-sm text-muted-foreground">{meta}</p> : null}
         </div>
+        {menu}
       </div>
+      {badges ? <div className="mt-3 flex flex-wrap items-center gap-1.5 md:hidden">{badges}</div> : null}
       {facts ? <div className="mt-3">{facts}</div> : null}
       {stats ? <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 border-t pt-3 text-sm">{stats}</div> : null}
       {children ? <div className="mt-3 space-y-2">{children}</div> : null}

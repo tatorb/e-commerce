@@ -7,11 +7,12 @@ import { PIPELINE_STEPS, PIPELINE_STEP_LABEL, PIPELINE_STEP_SLUG } from '@/domai
 import type { PipelineStep } from '@/generated/prisma/enums';
 import { cn } from '@/lib/utils/cn';
 
-// La línea de los pasos, en una sola fila: cada uno con su número, su nombre
-// y cómo está, alineados a la izquierda bajo su círculo, y una raya hasta el
-// siguiente. Hecho: la publicación ya pasó por ahí; en curso: está ahí;
-// pendiente: todavía no pasó, aunque haya pasos después que sí, porque se
-// puede saltar a cualquiera. "active" es falso si la publicación no está en
+// La línea de los pasos, en una sola fila: cada uno con su círculo y su
+// nombre abajo, alineado a la izquierda, y una raya hasta el siguiente. El
+// círculo dice cómo está, sin palabras: tilde si está hecho, punto si está
+// en curso y el número si está pendiente. Hecho: la publicación ya pasó por
+// ahí; en curso: está ahí; pendiente: todavía no pasó, aunque haya pasos
+// después que sí, porque se puede saltar a cualquiera. "active" es falso si la publicación no está en
 // el pipeline: el paso guardado queda como "quedó acá". Cada paso es un link
 // para verlo; el que se está mirando es el único en negrita, y su círculo lleva un aro.
 // Si no entra, se desliza de costado y arranca en el que se mira.
@@ -90,18 +91,6 @@ export function StepLine({
                 ) : (
                   i + 1
                 )}
-              </span>
-              {/* El número y el estado en el mismo renglón: si el nombre ocupa dos, no corre nada. */}
-              <span className="whitespace-nowrap text-[11px] text-muted-foreground">
-                Paso {i + 1} ·{' '}
-                <span
-                  className={cn(
-                    state === 'done' && 'text-emerald-700 dark:text-emerald-400',
-                    state === 'current' && 'font-medium text-primary',
-                  )}
-                >
-                  {STATE_LABEL[state]}
-                </span>
               </span>
               <span
                 className={cn(

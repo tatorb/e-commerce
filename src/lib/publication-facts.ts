@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import type { ChannelStatus } from '@/generated/prisma/enums';
 import { parseVariantListings, parseVariations, type VariantLike } from '@/domain/media';
 import { singleMeasure } from '@/lib/stock-plan';
+import { plural } from '@/lib/format';
 
 // Lo que conviene ver siempre arriba de una publicación: el código con el que
 // se nombra el producto (por ejemplo SP-914), su estado en el canal, si tiene
@@ -90,9 +91,15 @@ export function measuresText(m: MeasuresFact): string {
   if (m.kind === 'sole') return `Solo la medida ${m.label}`;
   if (m.kind === 'member') return `${m.label ? `Medida ${m.label}` : 'Medida sin elegir'} de una familia de ${m.size}`;
   if (m.kind === 'none') return 'Sin medidas';
-  const list = m.labels.length > 1 ? `${m.labels.slice(0, -1).join(', ')} y ${m.labels[m.labels.length - 1]}` : m.labels[0];
-  return `${m.labels.length} medidas: ${list}${m.kind === 'family' ? ', una publicación por medida' : ''}`;
+  return `${m.labels.length} medidas: ${listText(m.labels)}${m.kind === 'family' ? ', una publicación por medida' : ''}`;
 }
+
+/** Las medidas de toda la familia, que el Pipeline trabaja junta: "Familia de 3 medidas: STD, 0.50 y 0.75". */
+export function familyMeasuresText(members: { measure: string | null }[]): string {
+  return `Familia de ${plural(members.length, 'medida')}: ${listText(members.map((m) => m.measure ?? 'medida sin elegir'))}`;
+}
+
+const listText = (labels: string[]) => (labels.length > 1 ? `${labels.slice(0, -1).join(', ')} y ${labels[labels.length - 1]}` : (labels[0] ?? ''));
 
 const FACTS_SELECT = {
   id: true,
