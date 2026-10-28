@@ -1,5 +1,5 @@
 {
-  "protocolo": 4,
+  "protocolo": 5,
   "id": "corrida-corregir",
   "turno": 2,
   "ok": true,
@@ -25,9 +25,10 @@
       "aplicado": true,
       "no_aplica": null,
       "propuesta": { "valores": { "giro": 0.3, "vertical": 0, "horizontal": 0 }, "razon": "La base está apenas torcida: con 0,3° queda derecha.", "origen": "claude", "aviso": null },
-      "valores": { "giro": 0.3, "vertical": 0, "horizontal": 0 },
+      "valores": { "cuartos": 1, "giro": 0.3, "vertical": 0, "horizontal": 0 },
       "medidas": { "angulo_lineas": -0.3, "lineas": 14 },
       "parametros": [
+        { "clave": "cuartos", "etiqueta": "Girar 90°", "ayuda": "Cuartos de vuelta en sentido horario, antes del giro fino.", "minimo": 0, "maximo": 3, "defecto": 0, "paso": 1, "unidad": "", "tipo": "cuartos" },
         { "clave": "giro", "etiqueta": "Giro", "ayuda": "Gira la foto. Positivo, en sentido horario.", "minimo": -10, "maximo": 10, "defecto": 0, "paso": 0.1, "unidad": "°", "tipo": "numero" },
         { "clave": "vertical", "etiqueta": "Perspectiva vertical", "ayuda": "Positivo abre la parte de arriba, para verticales que se juntan arriba.", "minimo": -15, "maximo": 15, "defecto": 0, "paso": 0.5, "unidad": " %", "tipo": "numero" },
         { "clave": "horizontal", "etiqueta": "Perspectiva horizontal", "ayuda": "Positivo abre el lado izquierdo.", "minimo": -15, "maximo": 15, "defecto": 0, "paso": 0.5, "unidad": " %", "tipo": "numero" }

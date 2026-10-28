@@ -54,9 +54,14 @@ def obtener_clave_claude() -> str | None:
         return None
 
 
+def _de_claude(paso: Paso):
+    """Los valores que propone Claude: los que decide solo la persona quedan afuera."""
+    return [p for p in paso.parametros if not p.persona]
+
+
 def esquema(paso: Paso) -> dict:
     propiedades = {}
-    for p in paso.parametros:
+    for p in _de_claude(paso):
         descripcion = p.ayuda + (" 1 = sí, 0 = no." if p.tipo == "si_no" else "")
         propiedades[p.clave] = {"type": "number", "description": descripcion}
     return {
@@ -65,7 +70,7 @@ def esquema(paso: Paso) -> dict:
             "valores": {
                 "type": "object",
                 "properties": propiedades,
-                "required": [p.clave for p in paso.parametros],
+                "required": [p.clave for p in _de_claude(paso)],
                 "additionalProperties": False,
             },
             "razon": {"type": "string", "description": "Por qué, en una sola línea."},
@@ -77,7 +82,7 @@ def esquema(paso: Paso) -> dict:
 
 def consigna_del_paso(paso: Paso, medicion: Medicion, ajustes: dict, contexto: str | None) -> str:
     rangos = []
-    for p in paso.parametros:
+    for p in _de_claude(paso):
         minimo, maximo = p.rango(ajustes)
         if p.tipo == "si_no":
             rangos.append(f"- {p.clave} ({p.etiqueta}): 0 o 1. {p.ayuda}")
@@ -88,7 +93,8 @@ def consigna_del_paso(paso: Paso, medicion: Medicion, ajustes: dict, contexto: s
         paso.consigna,
         "Valores a proponer:\n" + "\n".join(rangos),
         "Lo que midió el código:\n" + json.dumps(medicion.medidas, ensure_ascii=False),
-        "Lo que sugiere el código a partir de eso:\n" + json.dumps(medicion.sugeridos, ensure_ascii=False),
+        "Lo que sugiere el código a partir de eso:\n"
+        + json.dumps({p.clave: medicion.sugeridos[p.clave] for p in _de_claude(paso) if p.clave in medicion.sugeridos}, ensure_ascii=False),
     ]
     if contexto:
         partes.insert(0, f"Producto: {contexto}.")

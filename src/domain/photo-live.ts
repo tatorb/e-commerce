@@ -190,6 +190,27 @@ function project(m: Mat3, x: number, y: number): [number, number] {
   return [(m[0] * x + m[1] * y + m[2]) / z, (m[3] * x + m[4] * y + m[5]) / z];
 }
 
+/** Los cuartos de vuelta, de 0 a 3, como los deja la Mac: pasado el 3 vuelve a 0. */
+export const quarterTurns = (q: number): number => (((Math.round(q) % 4) + 4) % 4);
+
+/**
+ * girar_cuartos: lleva cada píxel de una foto de w × h a su lugar en la foto
+ * girada de a 90° en sentido horario, como np.rot90. Exacto: los píxeles
+ * cambian de lugar sin mezclarse.
+ */
+export function quarterTurnMatrix(w: number, h: number, quarters: number): Mat3 {
+  switch (quarterTurns(quarters)) {
+    case 1:
+      return [0, -1, h - 1, 1, 0, 0, 0, 0, 1];
+    case 2:
+      return [-1, 0, w - 1, 0, -1, h - 1, 0, 0, 1];
+    case 3:
+      return [0, 1, 0, -1, 0, w - 1, 0, 0, 1];
+    default:
+      return [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  }
+}
+
 /** homografia: gira y corrige la perspectiva alrededor del centro. */
 export function perspectiveMatrix(w: number, h: number, giro: number, vertical: number, horizontal: number): Mat3 {
   const cx = w / 2;
@@ -321,7 +342,8 @@ function sampleGray(src: Gray, x: number, y: number): number {
 }
 
 export type LensValues = { distorsion: number; aberracion: number; vineta: number };
-export type PerspectiveValues = { giro: number; vertical: number; horizontal: number };
+// cuartos: los giros de 90° en sentido horario que se hacen antes del giro fino.
+export type PerspectiveValues = { cuartos: number; giro: number; vertical: number; horizontal: number };
 
 // Cómo queda el encuadre: de qué copia de lente sale la foto, dónde está esa
 // copia dentro de la base (las copias están recortadas al centro), la
@@ -339,20 +361,27 @@ export function geometryOf(pkg: LivePackage, lens: LensValues | null, persp: Per
   const image = lensImage(pkg.header, lens);
   const f = pkg.files[image];
   const base = pkg.files[pkg.header.base];
+  // Primero los giros de 90°: con uno o tres, la foto queda acostada al revés.
+  const turns = persp ? quarterTurns(persp.cuartos) : 0;
+  const turn = turns ? quarterTurnMatrix(f.width, f.height, turns) : null;
+  const w = turns % 2 ? f.height : f.width;
+  const h = turns % 2 ? f.width : f.height;
   const plain: Geometry = {
     image,
     ox: Math.floor((base.width - f.width) / 2),
     oy: Math.floor((base.height - f.height) / 2),
-    fwd: null,
-    inv: null,
-    box: { x0: 0, y0: 0, x1: f.width, y1: f.height },
+    fwd: turn,
+    inv: turn ? invert3(turn) : null,
+    box: { x0: 0, y0: 0, x1: w, y1: h },
   };
   if (!persp || noChange(persp, ['giro', 'vertical', 'horizontal'], 0.05)) return plain;
-  const fwd = perspectiveMatrix(f.width, f.height, persp.giro, persp.vertical, persp.horizontal);
-  const inv = invert3(fwd);
-  const box = perspectiveBox(f.width, f.height, inv, radius);
-  // Sin foto útil, la Mac saltea la perspectiva.
-  return box ? { ...plain, fwd, inv, box } : plain;
+  // Después el giro fino y la perspectiva, sobre la foto ya girada, como en la Mac.
+  const tilt = perspectiveMatrix(w, h, persp.giro, persp.vertical, persp.horizontal);
+  const box = perspectiveBox(w, h, invert3(tilt), radius);
+  // Sin foto útil, la Mac no aplica el giro fino ni la perspectiva.
+  if (!box) return plain;
+  const fwd = turn ? mul3(tilt, turn) : tilt;
+  return { ...plain, fwd, inv: invert3(fwd), box };
 }
 
 /** La foto con el encuadre nuevo. */
@@ -1020,7 +1049,12 @@ export const LENS_NOTE =
   'Con otra corrección de lente, la silueta del fondo puede verse un poco corrida en los bordes. La Mac la rehace exacta al aplicar.';
 
 const lensOf = (v: Record<string, number>): LensValues => ({ distorsion: v.distorsion ?? 0, aberracion: v.aberracion ?? 0, vineta: v.vineta ?? 0 });
-const perspOf = (v: Record<string, number>): PerspectiveValues => ({ giro: v.giro ?? 0, vertical: v.vertical ?? 0, horizontal: v.horizontal ?? 0 });
+const perspOf = (v: Record<string, number>): PerspectiveValues => ({
+  cuartos: v.cuartos ?? 0,
+  giro: v.giro ?? 0,
+  vertical: v.vertical ?? 0,
+  horizontal: v.horizontal ?? 0,
+});
 const geometryKey = (g: Geometry) => JSON.stringify([g.image, g.fwd, g.box]);
 
 /**
@@ -1032,8 +1066,8 @@ export function liveRenderer(src: LiveSource, mac: { parts: MacPart[]; backgroun
   const { pkg } = src;
   const base = pkg.files[pkg.header.base];
   const scale = base.width / pkg.header.original.ancho;
+  const scaleY = base.height / pkg.header.original.alto;
   const cut = pkg.header.silueta;
-  const full = cut ? { w: cut.ancho_completo * scale, h: (cut.alto_completo * base.height) / pkg.header.original.alto } : null;
   // La Mac deja 4 píxeles de borde al girar; en la copia chica, a escala.
   const radius = Math.max(1, Math.round(4 * scale));
   const part = (paso: string) => mac.parts.find((p) => p.paso === paso);
@@ -1043,6 +1077,9 @@ export function liveRenderer(src: LiveSource, mac: { parts: MacPart[]; backgroun
   };
   const macLens = applied('lente');
   const macPersp = applied('perspectiva');
+  // Si la Mac giró 90°, el ancho de su silueta sale del alto del original.
+  const lying = quarterTurns(macPersp?.cuartos ?? 0) % 2 === 1;
+  const full = cut ? { w: cut.ancho_completo * (lying ? scaleY : scale), h: cut.alto_completo * (lying ? scale : scaleY) } : null;
   const macGeometry = geometryOf(pkg, macLens ? lensOf(macLens) : null, macPersp ? perspOf(macPersp) : null, radius);
   const silhouette = applied('fondo') ? src.silhouette : null;
   const crop = applied('recorte');

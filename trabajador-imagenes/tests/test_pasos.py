@@ -87,6 +87,37 @@ def test_perspectiva_vertical_no_deja_esquinas_vacias(foto):
     assert r.foto.rgb.min() > 0.05
 
 
+def test_perspectiva_gira_de_a_90_grados_sin_tocar_los_pixeles():
+    foto = foto_de_prueba(30, 40)
+    _, r = correr(Perspectiva(), foto, {"cuartos": 1, "giro": 0, "vertical": 0, "horizontal": 0})
+    # En sentido horario: lo que estaba abajo a la izquierda queda arriba a la izquierda.
+    assert (r.foto.alto, r.foto.ancho) == (40, 30)
+    assert np.array_equal(r.foto.rgb, np.rot90(foto.rgb, k=-1))
+    assert np.array_equal(r.foto.rgb[0, 0], foto.rgb[29, 0])
+    assert "90°" in r.nota and not r.salteado
+    _, r = correr(Perspectiva(), foto, {"cuartos": 2})
+    assert np.array_equal(r.foto.rgb, foto.rgb[::-1, ::-1])
+    _, r = correr(Perspectiva(), foto, {"cuartos": 3})
+    assert np.array_equal(r.foto.rgb, np.rot90(foto.rgb, k=1))
+
+
+def test_perspectiva_endereza_despues_de_girar_90_grados():
+    foto = foto_de_prueba(inclinacion=3.0)
+    _, solo = correr(Perspectiva(), foto, {"cuartos": 1, "giro": 0})
+    _, r = correr(Perspectiva(), foto, {"cuartos": 1, "giro": -3.0})
+    # El giro fino se hace sobre la foto ya girada, y recorta hacia adentro.
+    assert r.foto.alto < solo.foto.alto and r.foto.ancho < solo.foto.ancho
+    assert r.foto.alto > r.foto.ancho
+    assert r.foto.rgb.min() > 0.05
+
+
+def test_cuartos_de_vuelta_dan_la_vuelta_entera():
+    paso = Perspectiva()
+    assert paso.limitar({"cuartos": -1}, AJUSTES)[0]["cuartos"] == 3
+    assert paso.limitar({"cuartos": 5}, AJUSTES)[0]["cuartos"] == 1
+    assert paso.limitar({}, AJUSTES)[0]["cuartos"] == 0
+
+
 # ── 3. Blancos
 
 

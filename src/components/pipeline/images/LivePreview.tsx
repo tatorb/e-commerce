@@ -6,10 +6,11 @@ import { BrandMark } from '@/components/ui/brand-loader';
 import type { LiveEdits, MacPart } from '@/domain/photo-live';
 import { cn } from '@/lib/utils/cn';
 import type { WorkerIn, WorkerOut } from './live.worker';
+import { TURN_TEXT, TurnButtons } from './TurnButtons';
 
 // La foto en vivo. Las cuentas las hace live.worker.ts, aparte de la
 // pantalla; acá se le mandan los valores y se muestra lo que devuelve. Se
-// puede pasar a lo que hizo la Mac para comparar.
+// puede pasar a lo que hizo la Mac para comparar, y girar de a 90°.
 
 export function LivePreview({
   href,
@@ -17,12 +18,18 @@ export function LivePreview({
   parts,
   background,
   edits,
+  turn,
+  turnHint,
 }: {
   href: string;
   macHref: string | null;
   parts: MacPart[];
   background: string;
   edits: LiveEdits;
+  // Los botones de girar 90°, si la Mac sabe hacerlo.
+  turn?: { quarters: number; onTurn: (by: 1 | -1) => void; disabled: boolean } | null;
+  // Por qué no hay botones de girar, si no los hay.
+  turnHint?: string | null;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<'live' | 'mac'>('live');
@@ -79,24 +86,34 @@ export function LivePreview({
 
   return (
     <div className="space-y-2">
-      <div role="tablist" aria-label="Qué foto ver" className="inline-flex rounded-md border p-0.5 text-xs">
-        {(
-          [
-            ['live', 'En vivo'],
-            ['mac', 'Lo de la Mac'],
-          ] as const
-        ).map(([v, label]) => (
-          <button
-            key={v}
-            type="button"
-            role="tab"
-            aria-selected={view === v}
-            onClick={() => setView(v)}
-            className={cn('rounded px-2.5 py-1', view === v ? 'bg-muted font-medium' : 'text-muted-foreground hover:text-foreground')}
-          >
-            {label}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div role="tablist" aria-label="Qué foto ver" className="inline-flex rounded-md border p-0.5 text-xs">
+          {(
+            [
+              ['live', 'En vivo'],
+              ['mac', 'Lo de la Mac'],
+            ] as const
+          ).map(([v, label]) => (
+            <button
+              key={v}
+              type="button"
+              role="tab"
+              aria-selected={view === v}
+              onClick={() => setView(v)}
+              className={cn('rounded px-2.5 py-1', view === v ? 'bg-muted font-medium' : 'text-muted-foreground hover:text-foreground')}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {turn ? (
+          <div className="flex items-center gap-2">
+            {turn.quarters ? <span className="text-xs text-muted-foreground">{TURN_TEXT[turn.quarters]}</span> : null}
+            <TurnButtons onTurn={turn.onTurn} disabled={turn.disabled} />
+          </div>
+        ) : turnHint ? (
+          <span className="text-xs text-muted-foreground">{turnHint}</span>
+        ) : null}
       </div>
       <div className="relative mx-auto w-fit max-w-full overflow-hidden rounded-md border bg-muted">
         {/* Mientras se mueve un valor llega una copia a la mitad: el tamaño en pantalla lo fija el alto, no los píxeles. */}

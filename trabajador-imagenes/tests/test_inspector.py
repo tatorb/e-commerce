@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 from conftest import foto_de_prueba
 from mrb_imagenes.ajustes import leer_ajustes
-from mrb_imagenes.inspector import Inspector, costo, esquema
+from mrb_imagenes.inspector import Inspector, consigna_del_paso, costo, esquema
 from mrb_imagenes.linea import aplicar, medir_y_proponer
 from mrb_imagenes.pasos.perspectiva import Perspectiva
 
@@ -81,3 +81,11 @@ def test_esquema_pide_todos_los_valores_y_la_razon():
     assert e["required"] == ["valores", "razon"]
     assert e["properties"]["valores"]["required"] == ["giro", "vertical", "horizontal"]
     assert e["additionalProperties"] is False
+
+
+def test_claude_no_propone_girar_90_grados():
+    paso = Perspectiva()
+    medicion = paso.medir(foto_de_prueba(), leer_ajustes())
+    texto = consigna_del_paso(paso, medicion, leer_ajustes(), None)
+    assert "cuartos" not in texto and "Girar 90" not in texto
+    assert "cuartos" not in esquema(paso)["properties"]["valores"]["properties"]

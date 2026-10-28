@@ -8,11 +8,12 @@ import type { PhotoSettingsValues } from './photo-settings';
 
 // Sube cuando cambia la forma de los mensajes: un trabajador viejo recibe un
 // aviso para actualizarse en lugar de un error raro. El 3 suma el paquete para
-// editar en vivo y el 4, el ajuste Sombra. Un trabajador anterior sigue
-// andando, sin lo que todavía no sabe hacer.
-export const PHOTO_PROTOCOLS = [2, 3, 4] as const;
+// editar en vivo, el 4, el ajuste Sombra y el 5, girar de a 90° en
+// Perspectiva. Un trabajador anterior sigue andando, sin lo que todavía no
+// sabe hacer.
+export const PHOTO_PROTOCOLS = [2, 3, 4, 5] as const;
 export type PhotoProtocol = (typeof PHOTO_PROTOCOLS)[number];
-export const PHOTO_PROTOCOL: PhotoProtocol = 4;
+export const PHOTO_PROTOCOL: PhotoProtocol = 5;
 export const LIVE_PROTOCOL: PhotoProtocol = 3;
 // Desde qué protocolo sabe hacer el trabajador cada ajuste nuevo.
 export const PART_PROTOCOL: Record<string, PhotoProtocol> = { sombra: 4 };
@@ -93,7 +94,8 @@ export const paramSchema = z.object({
   defecto: z.number(),
   paso: z.number(),
   unidad: shortText(20),
-  tipo: z.enum(['numero', 'si_no']),
+  // cuartos: cuartos de vuelta, de 0 a 3. Lo decide solo la persona, con los botones de girar.
+  tipo: z.enum(['numero', 'si_no', 'cuartos']),
 });
 export type StepParam = z.infer<typeof paramSchema>;
 

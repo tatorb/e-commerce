@@ -26,11 +26,14 @@ class Parametro:
     defecto: float
     paso: float = 1
     unidad: str = ""
-    tipo: Literal["numero", "si_no"] = "numero"
+    # "cuartos": cuartos de vuelta, de 0 a 3. Pasado el 3 vuelve a 0, y antes del 0, a 3.
+    tipo: Literal["numero", "si_no", "cuartos"] = "numero"
     # El tope de Ajustes que limita este valor, si hay uno.
     tope: str | None = None
     # Si el tope también limita hacia abajo, por ejemplo un giro de -10 a 10.
     simetrico: bool = False
+    # Solo lo decide la persona: Claude no lo propone y queda en el valor por defecto.
+    persona: bool = False
 
     def rango(self, ajustes: dict) -> tuple[float, float]:
         minimo, maximo = self.minimo, self.maximo
@@ -109,6 +112,8 @@ class Paso:
                 v = self._ajustar_defecto(p, ajustes)
             if p.tipo == "si_no":
                 v = 1.0 if v >= 0.5 else 0.0
+            elif p.tipo == "cuartos":
+                v = float(round(v) % 4)
             elif v < minimo or v > maximo:
                 limitado = min(max(v, minimo), maximo)
                 avisos.append(f"{p.etiqueta}: se pidió {_numero(v)}{p.unidad} y el tope es {_numero(limitado)}{p.unidad}.")

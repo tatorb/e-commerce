@@ -19,9 +19,11 @@ import {
   perspectiveBox,
   perspectiveMatrix,
   pieceBox,
+  quarterTurns,
   readLivePackage,
   roundHalfEven,
   shadowLayer,
+  warp,
   whiteGains,
   type Gray,
   type LiveHeader,
@@ -86,6 +88,41 @@ describe('editar en vivo: las mismas cuentas que la Mac', () => {
       expect(box).not.toBeNull();
       expect(maxDiff([box!.x0, box!.y0, box!.x1, box!.y1], caja)).toBeLessThanOrEqual(1);
     }
+  });
+
+  it('perspectiva girada 90°: el mismo encuadre que la Mac y cada píxel en su lugar', () => {
+    const rgba = new Uint8ClampedArray(ref.ancho * ref.alto * 4);
+    (ref.foto as number[]).forEach((v, i) => (rgba[Math.floor(i / 3) * 4 + (i % 3)] = Math.round(v * 255)));
+    const src: Raster = { w: ref.ancho, h: ref.alto, rgba };
+    const header: LiveHeader = {
+      version: 1,
+      original: { ancho: ref.ancho, alto: ref.alto },
+      base: 0,
+      lente: null,
+      silueta: null,
+      imagenes: [{ tipo: 'image/jpeg', inicio: 0, largo: 1, ancho: ref.ancho, alto: ref.alto }],
+    };
+    const pkg: LivePackage = { header, files: [{ type: 'image/jpeg', bytes: new Uint8Array(1), width: ref.ancho, height: ref.alto }] };
+    for (const { valores, caja, ancho, alto, esquina } of ref.perspectiva_girada) {
+      const g = geometryOf(pkg, null, valores, 4);
+      expect([g.box.x1 - g.box.x0, g.box.y1 - g.box.y0]).toEqual([ancho, alto]);
+      if (caja) expect([g.box.x0, g.box.y0, g.box.x1, g.box.y1]).toEqual(caja);
+      // Sin giro fino, el mismo píxel salvo el redondeo a 255 tonos; con giro fino, mezclado parecido.
+      expect(maxDiff(warp(src, g).d.slice(0, 3), esquina)).toBeLessThan(valores.giro ? 0.05 : 0.5 / 255 + 1e-4);
+    }
+    // Sin giro fino es exacta: cada píxel de la girada es uno de la foto, el de abajo a la izquierda arriba a la izquierda.
+    const out = warp(src, geometryOf(pkg, null, { cuartos: 1, giro: 0, vertical: 0, horizontal: 0 }, 4));
+    expect([out.w, out.h]).toEqual([ref.alto, ref.ancho]);
+    let worst = 0;
+    for (let y = 0; y < out.h; y++) {
+      for (let x = 0; x < out.w; x++) {
+        const j = ((ref.alto - 1 - x) * ref.ancho + y) * 4;
+        for (let c = 0; c < 3; c++) worst = Math.max(worst, Math.abs(out.d[(y * out.w + x) * 3 + c] - Math.fround(rgba[j + c] / 255)));
+      }
+    }
+    expect(worst).toBe(0);
+    // Pasado el 3 vuelve a 0, y antes del 0, a 3.
+    expect([quarterTurns(4), quarterTurns(-1), quarterTurns(5)]).toEqual([0, 3, 1]);
   });
 
   it('recorte: la caja de la pieza y el cuadrado con margen parejo', () => {
@@ -226,6 +263,36 @@ describe('la vista en vivo armada', () => {
     expect(image.w).toBeGreaterThan(50);
     const c = Math.floor(image.w / 2);
     expect(image.d[(c * image.w + c) * 3]).toBeCloseTo(DARK, 2);
+  });
+
+  it('girada 90°, la pieza queda parada y la silueta la sigue', () => {
+    const render = liveRenderer(src, mac());
+    const at = (img: Rgb, x: number, y: number) => img.d[(y * img.w + x) * 3];
+    const acostada = render({ perspectiva: { on: true, values: { cuartos: 0, giro: 0, vertical: 0, horizontal: 0 } } }).image;
+    const parada = render({ perspectiva: { on: true, values: { cuartos: 1, giro: 0, vertical: 0, horizontal: 0 } } }).image;
+    // La pieza de 40 × 30 queda de 30 × 40: el mismo cuadrado de 50, con la pieza de punta.
+    expect([parada.w, parada.h]).toEqual([50, 50]);
+    expect(at(acostada, 7, 25)).toBeCloseTo(DARK, 2);
+    expect(at(acostada, 25, 7)).toBeCloseTo(1, 2);
+    expect(at(parada, 7, 25)).toBeCloseTo(1, 2);
+    expect(at(parada, 25, 7)).toBeCloseTo(DARK, 2);
+  });
+
+  it('si la Mac ya la giró, la silueta girada vuelve a su lugar al sacarle el giro', () => {
+    // La Mac giró 90° y quitó el fondo en la foto parada, de 90 × 120: la pieza quedó de 30 × 40.
+    const standing: Gray = { w: H, h: W, d: new Float32Array(W * H) };
+    for (let y = 40; y < 80; y++) for (let x = 30; x < 60; x++) standing.d[y * H + x] = 1;
+    const turned = { ...src, pkg: { ...pkg, header: { ...header, silueta: { imagen: 1, ancho_completo: 900, alto_completo: 1200 } } }, silhouette: standing };
+    const macParts = mac().parts.map((p) => (p.paso === 'perspectiva' ? { ...p, valores: { cuartos: 1, giro: 0, vertical: 0, horizontal: 0 } } : p));
+    const render = liveRenderer(turned, { ...mac(), parts: macParts });
+    const at = (img: Rgb, x: number, y: number) => img.d[(y * img.w + x) * 3];
+    const comoLaMac = render({ perspectiva: { on: true, values: { cuartos: 1, giro: 0, vertical: 0, horizontal: 0 } } }).image;
+    expect([comoLaMac.w, comoLaMac.h]).toEqual([50, 50]);
+    expect(at(comoLaMac, 25, 7)).toBeCloseTo(DARK, 2);
+    const sinGiro = render({ perspectiva: { on: true, values: { cuartos: 0, giro: 0, vertical: 0, horizontal: 0 } } }).image;
+    expect([sinGiro.w, sinGiro.h]).toEqual([50, 50]);
+    expect(at(sinGiro, 7, 25)).toBeCloseTo(DARK, 2);
+    expect(at(sinGiro, 25, 7)).toBeCloseTo(1, 2);
   });
 
   it('sin girar, la silueta movida es la misma', () => {

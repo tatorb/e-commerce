@@ -16,6 +16,7 @@
     },
     "pedidos": {
       "valores": {
+        "perspectiva": { "cuartos": 3, "giro": 0.3, "vertical": 0, "horizontal": 0 },
         "blancos": { "intensidad": 60, "temperatura": 0, "tinte": 2 },
         "fondo": { "detalle": 1, "refinar_bordes": 1, "rellenar_huecos": 0, "motas": 0, "dureza": 20 }
       },

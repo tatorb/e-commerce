@@ -116,15 +116,16 @@ Los valores son **Intensidad**, **Dirección** (0 hacia abajo, 90 a la derecha, 
 
 Con **Editar en vivo**, la foto queda arriba y cada valor de lente, perspectiva, blancos, luces, color y sombra tiene una barra. Al moverla, la foto cambia al instante, sin esperar a la Mac.
 - **Lo de la Mac**, arriba de la foto, muestra lo que hizo la Mac para comparar.
+- **Girar a la izquierda y Girar a la derecha**, arriba a la derecha de la foto, la giran de a 90°. Sirven para una foto que llegó acostada o de cabeza. También están en Perspectiva y enderezado. El giro de 90° lo decide solo una persona: Claude no lo propone. La Mac lo hace antes del enderezado fino y es exacto, solo reacomoda los píxeles, sin perder calidad ni recortar. Si apagás Perspectiva y enderezado, la foto vuelve a su posición.
 - **Quitar fondo, Recorte y Exportar** no se ven en vivo: se usa la silueta que hizo la Mac. Si cambiás el giro o la lente, la silueta se acomoda sola.
 - **Volver a lo de la Mac** deja los valores como estaban.
 - **Aplicar en la Mac** le pide a la Mac la foto final con esos valores. No le vuelve a preguntar a Claude, así que no tiene costo.
 - Es una vista previa en tamaño de pantalla: la foto final siempre la hace la Mac. Lo que ves en vivo y lo que hace la Mac se ven prácticamente iguales.
-- Funciona con las fotos que la Mac hizo después de actualizar el trabajador. En las anteriores, la app dice que hay que rehacerlas.
+- Funciona con las fotos que la Mac hizo después de actualizar el trabajador. En las anteriores, la app dice que hay que rehacerlas. Lo mismo con girar 90°: sale en las fotos que hizo un trabajador actualizado.
 
 ## Actualizar el trabajador
 
-Cuando la app avisa que el trabajador está desactualizado, o para estrenar algo nuevo, como editar en vivo:
+Cuando la app avisa que el trabajador está desactualizado, o para estrenar algo nuevo, como editar en vivo o girar 90°:
 1. Bajá el proyecto de nuevo, igual que en el paso 1 de la instalación. Reemplazá la carpeta vieja de Descargas.
 2. En la Terminal, entrá a la carpeta `trabajador-imagenes` nueva, igual que en el paso 3.
 3. Escribí `bash instalar.sh` y Enter.
@@ -208,6 +209,7 @@ Todo va **en una sola línea**, y recién al final se aprieta Enter:
 - **Los mensajes con la app** tienen ejemplos en `contrato/`, que prueban los dos lados.
 - **Editar en vivo:** con cada foto, `mrb_imagenes/vivo.py` sube un paquete con la foto preparada en tamaño de pantalla, una copia por cada combinación de correcciones de lente y la silueta. La app repite en el navegador las cuentas de lente, perspectiva, blancos, luces, color y sombra (`src/domain/photo-live.ts`). `tests/armar_referencia_vivo.py` saca números de referencia de las cuentas de la Mac, que la app compara con las suyas; si se cambia una cuenta, hay que volver a correrlo.
 - **La sombra** está en `mrb_imagenes/pasos/sombra.py`. Se dibuja sobre una copia de la silueta de a lo sumo 512 px, porque es borrosa, y se guarda en la foto aparte de la transparencia: Exportar la pone en el JPG y, si se pide, en el PNG. Desde el protocolo 4; a un trabajador anterior la app no se la pide.
+- **Girar 90°** es el valor `cuartos` de Perspectiva, en `mrb_imagenes/pasos/perspectiva.py`: los cuartos de vuelta en sentido horario, de 0 a 3, antes del giro fino. Es el primer valor marcado `persona`: Claude no lo ve ni lo propone, y queda en 0 si nadie lo cambia. Desde el protocolo 5; un trabajador anterior no lo muestra en sus fotos.
 - **La claridad** mide cada zona de la foto en tamaño de pantalla, 1200 px, y aplica la curva a la foto entera. Así da lo mismo en la Mac y en la vista en vivo.
 - **El arranque automático** es un servicio de usuario de macOS, `com.studiomrb.imagenes`, que arma `prender.sh` en `~/Library/LaunchAgents/`.
 - **Dónde vive:** el entorno de Python, el modelo, la dirección de la app y las fotos de trabajo quedan fuera del proyecto, en `~/Library/Application Support/MRB Imagenes/`. Las fotos de trabajo se borran solas a los 7 días sin uso; si faltan, se rearman desde el original.

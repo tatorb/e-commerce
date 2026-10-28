@@ -4,6 +4,9 @@ El código busca las líneas rectas de la foto (bordes de la mesa, de la caja de
 luz, de la pieza) y mide cuánto están torcidas. Claude decide cuánto girar y
 cuánto corregir la perspectiva. Las esquinas que quedan vacías no se rellenan:
 se recorta hacia adentro.
+
+Antes, si la persona lo pide, la foto se gira de a 90°: solo se reacomodan los
+píxeles, sin perder nada ni recortar. Eso no lo propone Claude.
 """
 
 from __future__ import annotations
@@ -98,6 +101,17 @@ class Perspectiva(Paso):
     )
     cambia_encuadre = True
     parametros = (
+        Parametro(
+            "cuartos",
+            "Girar 90°",
+            "Cuartos de vuelta en sentido horario, antes del giro fino.",
+            0,
+            3,
+            0,
+            1,
+            tipo="cuartos",
+            persona=True,
+        ),
         Parametro("giro", "Giro", "Gira la foto. Positivo, en sentido horario.", -45, 45, 0, 0.1, "°", tope="giro", simetrico=True),
         Parametro(
             "vertical",
@@ -134,8 +148,12 @@ class Perspectiva(Paso):
         return Medicion(medidas=medidas, sugeridos=sugeridos)
 
     def aplicar(self, foto: Foto, valores: dict[str, float], ajustes: dict, medicion: Medicion) -> Resultado:
+        cuartos = int(valores.get("cuartos", 0)) % 4
+        girada = f"Se giró {cuartos * 90}° en sentido horario." if cuartos else None
+        if cuartos:
+            foto = girar_cuartos(foto, cuartos)
         if sin_cambios(valores, ("giro", "vertical", "horizontal"), 0.05):
-            return Resultado(foto=foto, valores=valores, nota="Sin giro ni perspectiva: la foto queda igual.")
+            return Resultado(foto=foto, valores=valores, nota=girada or "Sin giro ni perspectiva: la foto queda igual.")
         alto, ancho = foto.alto, foto.ancho
         h = homografia(alto, ancho, valores["giro"], valores["vertical"], valores["horizontal"])
         inversa = np.linalg.inv(h)
@@ -146,6 +164,8 @@ class Perspectiva(Paso):
         rgb, valido = deformar(foto.rgb, mapa_x, mapa_y)
         caja = recorte_valido(valido)
         if caja is None:
+            if cuartos:
+                return Resultado(foto=foto, valores=valores, nota=f"{girada} Con esos valores de giro y perspectiva no quedaba foto útil: no se aplicaron.")
             return Resultado(foto=foto, valores=valores, nota="Con esos valores no quedaba foto útil: se salteó.", salteado=True)
         x0, y0, x1, y1 = caja
         perdida = 1 - (x1 - x0) * (y1 - y0) / (ancho * alto)
@@ -153,5 +173,11 @@ class Perspectiva(Paso):
             foto=Foto(rgb=np.ascontiguousarray(rgb[y0:y1, x0:x1]), datos=foto.datos),
             valores=valores,
             medidas={"recorte_bordes_pct": round(perdida * 100, 2)},
-            nota=f"Se recortó {perdida * 100:.1f} % de borde para que no quede zona sin foto.",
+            nota=" ".join(n for n in [girada, f"Se recortó {perdida * 100:.1f} % de borde para que no quede zona sin foto."] if n),
         )
+
+
+def girar_cuartos(foto: Foto, cuartos: int) -> Foto:
+    """Gira de a 90° en sentido horario. Exacto: cada píxel cambia de lugar, sin mezclarse con otros."""
+    rgb = np.ascontiguousarray(np.rot90(foto.rgb, k=-(cuartos % 4)))
+    return Foto(rgb=rgb, datos=foto.datos)

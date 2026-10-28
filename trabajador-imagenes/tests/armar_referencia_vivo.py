@@ -29,7 +29,7 @@ from mrb_imagenes.imagen import Foto  # noqa: E402
 from mrb_imagenes.pasos.blancos import Blancos, ganancias  # noqa: E402
 from mrb_imagenes.pasos.color import Color  # noqa: E402
 from mrb_imagenes.pasos.luces import Luces, curva  # noqa: E402
-from mrb_imagenes.pasos.perspectiva import homografia  # noqa: E402
+from mrb_imagenes.pasos.perspectiva import Perspectiva, homografia  # noqa: E402
 from mrb_imagenes.pasos.recorte import caja_de_la_pieza, encuadre  # noqa: E402
 from mrb_imagenes.pasos.sombra import dibujar_sombra  # noqa: E402
 
@@ -102,6 +102,18 @@ def armar() -> dict:
     for valores in ({"giro": 3.0, "vertical": 4.0, "horizontal": -2.0}, {"giro": -8.0, "vertical": 0.0, "horizontal": 0.0}, {"giro": 0.0, "vertical": -12.0, "horizontal": 6.0}):
         matriz, caja = _caja_de_perspectiva(60, 80, valores)
         salida["perspectiva"].append({"ancho": 80, "alto": 60, "valores": valores, "matriz": matriz, "caja": caja})
+
+    # Girada 90° antes del giro fino: la foto de 40 × 30 queda de 30 × 40, y
+    # el giro fino y su recorte se hacen sobre la girada.
+    perspectiva = Perspectiva()
+    salida["perspectiva_girada"] = []
+    for valores in ({"cuartos": 1.0, "giro": 0.0, "vertical": 0.0, "horizontal": 0.0}, {"cuartos": 3.0, "giro": 6.0, "vertical": 0.0, "horizontal": 4.0}):
+        r = perspectiva.aplicar(foto, valores, AJUSTES, perspectiva.medir(foto, AJUSTES))
+        girada = np.rot90(rgb, k=-int(valores["cuartos"]))
+        _, caja = _caja_de_perspectiva(girada.shape[0], girada.shape[1], valores) if valores["giro"] else (None, None)
+        salida["perspectiva_girada"].append(
+            {"valores": valores, "caja": caja, "ancho": r.foto.ancho, "alto": r.foto.alto, "esquina": _plana(r.foto.rgb[0, 0], 4)}
+        )
 
     # La sombra: una pieza en L chica y una más grande que 512 px, que se dibuja achicada.
     chica = np.zeros((70, 90), np.float32)

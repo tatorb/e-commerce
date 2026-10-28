@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { StatusText } from '@/components/pipeline/StatusText';
 import { useStepAction } from '@/components/pipeline/useStepAction';
 import { LIVE_PARTS, PHOTO_ADJUSTMENT_LABEL, PHOTO_STEPS, RUN_STATUS_LABEL } from '@/domain/photo-steps';
-import type { LiveEdits, LivePartKey } from '@/domain/photo-live';
+import { quarterTurns, type LiveEdits, type LivePartKey } from '@/domain/photo-live';
 import type { StepParam, StepPart, StepRequest } from '@/domain/photo-contract';
 import { formatUsd } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
@@ -20,6 +20,7 @@ import {
 } from '@/app/a/[cuenta]/pipeline/image-actions';
 import { CompareView } from './CompareView';
 import { LivePreview } from './LivePreview';
+import { TURN_TEXT, TurnButtons } from './TurnButtons';
 import type { PhotoView, RunView } from './types';
 import { BrandMark } from '@/components/ui/brand-loader';
 
@@ -132,7 +133,7 @@ function liveEditsFrom(parts: StepPart[], edits: Edits): LiveEdits {
     const values: Record<string, number> = {};
     for (const p of part.parametros) {
       const n = numberOf(edits[part.paso].values[p.clave]);
-      const v = Number.isFinite(n) ? Math.min(Math.max(n, p.minimo), p.maximo) : shownValue(part, p);
+      const v = Number.isFinite(n) ? (p.tipo === 'cuartos' ? quarterTurns(n) : Math.min(Math.max(n, p.minimo), p.maximo)) : shownValue(part, p);
       values[p.clave] = p.tipo === 'si_no' ? (v >= 0.5 ? 1 : 0) : v;
     }
     out[part.paso as LivePartKey] = { on: edits[part.paso].on && part.no_aplica === null, values };
@@ -188,6 +189,13 @@ function RunPanel({ accountSlug, run, photo, compact }: { accountSlug: string; r
   const ready = run.status === 'REVIEW' || run.status === 'APPROVED' || run.status === 'SKIPPED';
   const working = run.status === 'QUEUED' || run.status === 'PROCESSING';
   const liveOn = live && run.liveHref !== null;
+  // Girar de a 90° va en Perspectiva, si la Mac que la hizo sabe hacerlo.
+  const persp = run.parts.find((p) => p.paso === 'perspectiva' && p.no_aplica === null);
+  const canTurn = persp?.parametros.some((p) => p.tipo === 'cuartos') ?? false;
+  const quarters = canTurn ? quarterTurns(numberOf(edits.perspectiva.values.cuartos) || 0) : 0;
+  // Girar prende Perspectiva si estaba apagada.
+  const turn = (by: 1 | -1) =>
+    setEdits({ ...edits, perspectiva: { on: true, values: { ...edits.perspectiva.values, cuartos: String(quarterTurns(quarters + by)) } } });
 
   function redo() {
     const request = requestFrom(run.parts, edits, liveOn);
@@ -271,7 +279,15 @@ function RunPanel({ accountSlug, run, photo, compact }: { accountSlug: string; r
           {liveOn && run.liveHref ? (
             // Arriba de todo mientras se mueven los valores de abajo.
             <div className="sticky top-0 z-20 -mx-4 border-b bg-card px-4 py-2">
-              <LivePreview href={run.liveHref} macHref={run.afterHref} parts={run.parts} background={run.background} edits={liveEdits} />
+              <LivePreview
+                href={run.liveHref}
+                macHref={run.afterHref}
+                parts={run.parts}
+                background={run.background}
+                edits={liveEdits}
+                turn={canTurn ? { quarters, onTurn: turn, disabled: pending } : null}
+                turnHint={persp && !canTurn ? 'Para girar 90°, actualizá el trabajador de la Mac y rehacé la foto.' : null}
+              />
             </div>
           ) : (
             <CompareView
@@ -523,6 +539,18 @@ function ValuesForm({
       <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
         {params.map((p) => {
           const id = `valor-${idPrefix}-${p.clave}`;
+          if (p.tipo === 'cuartos') {
+            const q = quarterTurns(numberOf(values[p.clave]) || 0);
+            return (
+              <div key={p.clave} className="flex items-center justify-between gap-3 sm:col-span-2">
+                <div>
+                  <p className="text-sm font-medium">{p.etiqueta}</p>
+                  <p className="text-xs text-muted-foreground">{TURN_TEXT[q]}. Antes del giro fino.</p>
+                </div>
+                <TurnButtons onTurn={(by) => onChange({ ...values, [p.clave]: String(quarterTurns(q + by)) })} disabled={disabled} />
+              </div>
+            );
+          }
           if (p.tipo === 'si_no') {
             return (
               <label key={p.clave} htmlFor={id} className="flex items-start gap-2 text-sm">
