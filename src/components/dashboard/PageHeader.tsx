@@ -19,6 +19,8 @@ export function PageHeader({
 }) {
   return (
     <div
+      // Para lo que queda fijo debajo de él, como los títulos de una tabla.
+      data-page-header=""
       className={cn(
         'w-full bg-background border-b',
         staticOnMobile ? 'md:sticky md:top-0 md:z-20' : 'sticky top-0 z-20',

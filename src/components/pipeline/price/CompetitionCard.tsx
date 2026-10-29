@@ -1,22 +1,26 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { OpenLinkButton } from '@/components/ui/open-link-button';
 import { SectionBody, SectionCard } from '@/components/ui/section-card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { daysSince } from '@/domain/competitors';
 import { formatPercent, formatPrice } from '@/domain/money';
-import { brandKey, brandOptions, competitorAverage, copyablePlan, type ComparedRow, type Comparison } from '@/domain/price-comparison';
+import { brandKey, brandOptions, competitorAverage, copyablePlan, type ComparedRow, type Comparison, type Estimate } from '@/domain/price-comparison';
 import { planLabel, type InstallmentPlan, type PricingParams } from '@/domain/pricing';
 import { cn } from '@/lib/utils/cn';
+import { LEVEL } from './parts';
 
 // Mi precio frente al de la competencia que se cargó en el paso Información:
 // una fila mía arriba y una por competidor, lo que más importa en números y
 // un resumen en palabras. Los botones mueven el simulador. La lista se filtra
 // por marca y termina con el promedio de lo que se ve; los números de arriba
-// y los botones siguen mirando a toda la competencia.
+// y los botones siguen mirando a toda la competencia. Cada fila dice qué margen
+// te quedaría vendiendo a su precio y en sus condiciones. En la computadora,
+// los títulos de la tabla quedan fijos debajo del encabezado de la página.
 
 const MAX_DISCOUNT = 50;
 
@@ -35,11 +39,48 @@ function Diff({ value }: { value: number | null }) {
   const cheaper = value < -0.05;
   if (!pricier && !cheaper) return <span className="text-muted-foreground">Igual</span>;
   return (
-    <span className={cn('tabular-nums', pricier && 'text-red-700', cheaper && 'text-emerald-700')}>
+    <span className={cn('whitespace-nowrap tabular-nums', pricier && 'text-red-700', cheaper && 'text-emerald-700')}>
       {pricier ? '+' : ''}
       {formatPercent(value)}
     </span>
   );
+}
+
+const ESTIMATE_HELP = 'El margen sobre el costo que te quedaría vendiendo a su precio y en sus condiciones, con tu costo y tus costos. Supone que les cuesta lo mismo que a vos.';
+
+/** La rentabilidad estimada de una fila, con el color del semáforo del margen. */
+function EstimateCell({ value }: { value: Estimate | null }) {
+  if (!value) return <span className="text-muted-foreground">—</span>;
+  if (value.marginPct === null) {
+    return (
+      <span className="text-xs font-normal text-muted-foreground" title={value.why === 'plan' ? 'Ese plan de cuotas no tiene su costo cargado en Ajustes > Precios.' : undefined}>
+        {value.why === 'cost' ? 'Falta el costo' : 'Sin costo del plan'}
+      </span>
+    );
+  }
+  return <span className={cn('whitespace-nowrap tabular-nums', LEVEL[value.level].text)}>{formatPercent(value.marginPct)}</span>;
+}
+
+/**
+ * Cuánto ocupa arriba el encabezado de la página cuando queda fijo, para que
+ * los títulos de la tabla queden justo debajo. Cero si no queda fijo.
+ */
+function usePageHeaderHeight() {
+  const [height, setHeight] = useState(0);
+  useEffect(() => {
+    const header = document.querySelector<HTMLElement>('[data-page-header]');
+    if (!header) return;
+    const update = () => setHeight(getComputedStyle(header).position === 'sticky' ? header.offsetHeight : 0);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(header);
+    window.addEventListener('resize', update);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, []);
+  return height;
 }
 
 function surveyed(day: string | null, today: string): string {
@@ -71,6 +112,7 @@ export function CompetitionCard({
 }) {
   const others = comparison?.rows.filter((r) => !r.mine) ?? [];
   const [brand, setBrand] = useState(ALL);
+  const headerTop = usePageHeaderHeight();
   const missing = withoutPrice > 0 ? `${withoutPrice === 1 ? 'Un competidor no tiene' : `${withoutPrice} competidores no tienen`} precio cargado.` : null;
 
   if (!comparison || others.length === 0) {
@@ -96,7 +138,7 @@ export function CompetitionCard({
   // Si la marca elegida ya no está, por ejemplo porque se borró ese competidor, se ven todos.
   const chosen = brand === ALL ? null : (brands.find((b) => brandValue(b.key) === brand) ?? null);
   const rows = chosen ? comparison.rows.filter((r) => r.mine || brandKey(r) === chosen.key) : comparison.rows;
-  const average = competitorAverage(rows);
+  const average = competitorAverage(rows, params);
   const averageLabel = average
     ? chosen
       ? `Promedio de ${average.count} ${chosen.key === '' ? 'sin marca' : `de marca ${chosen.label}`}`
@@ -107,7 +149,9 @@ export function CompetitionCard({
     <SectionCard
       title="Comparación con la competencia"
       count={others.length}
-      description={`Por precio efectivo: lo que paga el comprador en total. El tuyo va con envío gratis; al de un competidor sin envío gratis se le suman ${formatPrice(params.shipping)}.`}
+      description={`Por precio efectivo: lo que paga el comprador en total. El tuyo va con envío gratis; al de un competidor sin envío gratis se le suman ${formatPrice(params.shipping)}. La rentabilidad estimada supone que les cuesta lo mismo que a vos.`}
+      // Recorta sin volverse una caja con scroll propio, así los títulos de la tabla quedan fijos al bajar.
+      className="overflow-clip"
     >
       <SectionBody className="space-y-4">
         <dl className="grid gap-3 sm:grid-cols-3">
@@ -182,26 +226,44 @@ export function CompetitionCard({
           </div>
         ) : null}
 
-        {/* En la computadora, una tabla; en el celular, una tarjeta por fila. */}
-        <div className="hidden overflow-x-auto sm:block">
+        {/* En la computadora, una tabla con los títulos fijos; en pantallas angostas, una tarjeta por fila. */}
+        <div className="hidden lg:block">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-                <th className="py-2 pr-2 font-normal">Vendedor</th>
-                <th className="py-2 pr-2 font-normal">Marca</th>
-                <th className="py-2 pr-2 text-right font-normal">Lista</th>
-                <th className="py-2 pr-2 text-right font-normal">Desc.</th>
-                <th className="py-2 pr-2 font-normal">Cuotas</th>
-                <th className="py-2 pr-2 font-normal">Envío</th>
-                <th className="py-2 pr-2 text-right font-normal">Precio efectivo</th>
-                <th className="py-2 pr-2 text-right font-normal">Cuota</th>
-                <th className="py-2 text-right font-normal">Vos vs. ellos</th>
+              <tr className="text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                {(
+                  [
+                    ['Vendedor', ''],
+                    ['Marca', ''],
+                    ['Lista', 'text-right'],
+                    ['Cuotas', ''],
+                    ['Envío', ''],
+                    ['Precio efectivo', 'text-right'],
+                    ['Rentabilidad estimada', 'text-right'],
+                    ['Vos vs. ellos', 'text-right'],
+                  ] as const
+                ).map(([label, align]) => (
+                  <th
+                    key={label}
+                    style={{ top: headerTop }}
+                    className={cn('sticky z-10 bg-card py-2 pr-2 align-bottom font-normal shadow-[inset_0_-1px_0_hsl(var(--border))] last:pr-0', align)}
+                  >
+                    {label === 'Rentabilidad estimada' ? (
+                      <span className="inline-flex items-center gap-1" title={ESTIMATE_HELP}>
+                        {label}
+                        <Info className="h-3 w-3 shrink-0" aria-label={ESTIMATE_HELP} />
+                      </span>
+                    ) : (
+                      label
+                    )}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {rows.map((r, i) => (
                 <tr key={i} className={cn('border-b last:border-0', r.mine && cn(MINE_ROW, 'font-medium'))}>
-                  <td className="max-w-48 py-2 pr-2">
+                  <td className="max-w-36 py-2 pr-2 xl:max-w-44">
                     <div className="flex items-center gap-1.5">
                       <span className="truncate" title={r.title ?? r.name}>
                         {r.name}
@@ -210,15 +272,24 @@ export function CompetitionCard({
                     </div>
                     {!r.mine ? <span className="block text-[11px] font-normal text-muted-foreground">{surveyed(r.surveyedAt, today)}</span> : null}
                   </td>
-                  <td className={cn('max-w-32 truncate py-2 pr-2', !r.brand && 'text-xs font-normal text-muted-foreground')} title={r.brand ?? undefined}>
+                  <td className={cn('max-w-28 truncate py-2 pr-2', !r.brand && 'text-xs font-normal text-muted-foreground')} title={r.brand ?? undefined}>
                     {r.brand ?? 'Sin marca'}
                   </td>
-                  <td className="py-2 pr-2 text-right tabular-nums">{formatPrice(Math.round(r.listPrice))}</td>
-                  <td className="py-2 pr-2 text-right tabular-nums">{r.discountPct > 0 ? formatPercent(r.discountPct) : '—'}</td>
-                  <td className="py-2 pr-2">{cuotas(r)}</td>
+                  <td className="whitespace-nowrap py-2 pr-2 text-right tabular-nums">
+                    {formatPrice(Math.round(r.listPrice))}
+                    {r.discountPct > 0 ? <span className="block text-[11px] font-normal text-muted-foreground">{formatPercent(r.discountPct)} off</span> : null}
+                  </td>
+                  <td className="py-2 pr-2">
+                    {cuotas(r)}
+                    {r.installmentValue !== null ? (
+                      <span className="block whitespace-nowrap text-[11px] font-normal tabular-nums text-muted-foreground">de {formatPrice(Math.round(r.installmentValue))}</span>
+                    ) : null}
+                  </td>
                   <td className="py-2 pr-2">{r.freeShipping ? 'Gratis' : 'Con costo'}</td>
-                  <td className="py-2 pr-2 text-right tabular-nums">{formatPrice(Math.round(r.effectivePrice))}</td>
-                  <td className="py-2 pr-2 text-right tabular-nums">{r.installmentValue === null ? '—' : formatPrice(Math.round(r.installmentValue))}</td>
+                  <td className="whitespace-nowrap py-2 pr-2 text-right tabular-nums">{formatPrice(Math.round(r.effectivePrice))}</td>
+                  <td className="py-2 pr-2 text-right">
+                    <EstimateCell value={r.estimate} />
+                  </td>
                   <td className="py-2 text-right">{r.mine ? <span className="text-muted-foreground">—</span> : <Diff value={r.diffPct} />}</td>
                 </tr>
               ))}
@@ -229,10 +300,12 @@ export function CompetitionCard({
                   <td colSpan={2} className="py-2 pr-2">
                     {averageLabel}
                   </td>
-                  <td className="py-2 pr-2 text-right tabular-nums">{formatPrice(Math.round(average.listPrice))}</td>
-                  <td colSpan={3} />
-                  <td className="py-2 pr-2 text-right tabular-nums">{formatPrice(Math.round(average.effectivePrice))}</td>
-                  <td />
+                  <td className="whitespace-nowrap py-2 pr-2 text-right tabular-nums">{formatPrice(Math.round(average.listPrice))}</td>
+                  <td colSpan={2} />
+                  <td className="whitespace-nowrap py-2 pr-2 text-right tabular-nums">{formatPrice(Math.round(average.effectivePrice))}</td>
+                  <td className="py-2 pr-2 text-right">
+                    <EstimateCell value={average.estimate} />
+                  </td>
                   <td className="py-2 text-right">
                     <Diff value={average.diffPct} />
                   </td>
@@ -241,7 +314,7 @@ export function CompetitionCard({
             ) : null}
           </table>
         </div>
-        <ul className="space-y-2 sm:hidden">
+        <ul className="space-y-2 lg:hidden">
           {rows.map((r, i) => (
             <li key={i} className={cn('rounded-md border px-3 py-2 text-sm', r.mine && cn(MINE_ROW, 'border-emerald-300 dark:border-emerald-800'))}>
               <div className="flex items-start justify-between gap-2">
@@ -268,6 +341,10 @@ export function CompetitionCard({
                 </span>
                 <span>Envío {r.freeShipping ? 'gratis' : 'con costo'}</span>
               </p>
+              <p className="mt-0.5 text-xs">
+                <span className="text-muted-foreground">{r.mine ? 'Tu margen ' : 'Rentabilidad estimada '}</span>
+                <EstimateCell value={r.estimate} />
+              </p>
             </li>
           ))}
           {average ? (
@@ -275,6 +352,10 @@ export function CompetitionCard({
               <div className="min-w-0">
                 <p className="font-medium">{averageLabel}</p>
                 <p className="text-xs text-muted-foreground">Lista {formatPrice(Math.round(average.listPrice))}</p>
+                <p className="text-xs">
+                  <span className="text-muted-foreground">Rentabilidad estimada </span>
+                  <EstimateCell value={average.estimate} />
+                </p>
               </div>
               <div className="text-right">
                 <p className="font-semibold tabular-nums">{formatPrice(Math.round(average.effectivePrice))}</p>
