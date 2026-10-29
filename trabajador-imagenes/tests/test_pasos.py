@@ -378,3 +378,68 @@ def test_la_claridad_da_lo_mismo_en_chico_y_en_grande():
     en_chico = np.clip(chica + 0.4 * _FUERZA * (aplicar_curvas(chica, curvas, cy, cx) - chica), 0, 1)
     achicado = cv2.resize(hecho, (1200, 900), interpolation=cv2.INTER_AREA)
     assert np.abs(en_chico - achicado).mean() < 0.002
+
+
+# ── 6. Fondo: recuperar partes
+
+
+def _caja_con_cuadricula(alto=600, ancho=800, linea=4, lado=40, con_borde_arriba=True):
+    """Una caja azul con cuadrícula blanca sobre fondo gris, y la máscara que haría un modelo que la toma por malla."""
+    rgb = np.full((alto, ancho, 3), 0.80, np.float32)
+    y0, y1, x0, x1 = 150, 450, 150, 650
+    rgb[y0:y1, x0:x1] = [0.10, 0.16, 0.60]
+    lineas = np.zeros((alto, ancho), bool)
+    for x in range(x0, x1, lado):
+        lineas[y0:y1, x : x + linea] = True
+    for y in range(y0 if con_borde_arriba else y0 + lado, y1, lado):
+        lineas[y : y + linea, x0:x1] = True
+    lineas[y0:y1, x1 - linea : x1] = True
+    lineas[y1 - linea : y1, x0:x1] = True
+    rgb[lineas] = [0.93, 0.93, 0.94]
+    # El modelo se queda con las líneas y deja transparentes los cuadrados azules.
+    mascara = lineas.astype(np.float32)
+    return Foto(rgb=rgb, datos={"camara": {}}), mascara, (y0, y1, x0, x1)
+
+
+SIN_EXTRAS = {"detalle": 0, "refinar_bordes": 0, "rellenar_huecos": 0, "motas": 0, "dureza": 0}
+
+
+def test_recuperar_partes_devuelve_los_cuadrados_de_una_caja_con_cuadricula():
+    foto, mascara, (y0, y1, x0, x1) = _caja_con_cuadricula()
+    paso = Fondo(lambda rgb: mascara)
+    _, sin = correr(paso, foto, {**SIN_EXTRAS, "recuperar": 0})
+    _, con = correr(paso, foto, {**SIN_EXTRAS, "recuperar": 1})
+    centro_de_un_cuadrado = (y0 + 60, x0 + 100)
+    assert sin.foto.alfa[centro_de_un_cuadrado] == 0
+    assert con.foto.alfa[centro_de_un_cuadrado] == 1
+    # La caja entera queda opaca, y el fondo de afuera sigue transparente.
+    assert (con.foto.alfa[y0 + 4 : y1 - 4, x0 + 4 : x1 - 4] == 1).mean() > 0.99
+    assert con.foto.alfa[50, 50] == 0 and con.foto.alfa[y1 + 40, (x0 + x1) // 2] == 0
+    assert con.medidas["partes_recuperadas"] > 50
+    # Solo cambia la transparencia: los colores son los mismos.
+    assert np.array_equal(con.foto.rgb, foto.rgb)
+
+
+def test_recuperar_partes_cierra_los_cuadrados_abiertos_del_borde_sin_tocar_el_fondo():
+    # Sin la línea de arriba, los cuadrados de la primera fila quedan abiertos al fondo.
+    foto, mascara, (y0, y1, x0, x1) = _caja_con_cuadricula(con_borde_arriba=False)
+    _, con = correr(Fondo(lambda rgb: mascara), foto, {**SIN_EXTRAS, "recuperar": 1})
+    assert con.foto.alfa[y0 + 10, x0 + 100] == 1
+    assert con.foto.alfa[y0 - 10, x0 + 100] == 0
+
+
+def test_recuperar_partes_no_tapa_el_centro_de_un_aro_ni_una_sombra():
+    alto, ancho = 600, 800
+    rgb = np.full((alto, ancho, 3), 0.82, np.float32)
+    yy, xx = np.mgrid[0:alto, 0:ancho]
+    r = np.hypot(yy - 300, xx - 400)
+    aro = (r > 120) & (r < 160)
+    rgb[aro] = [0.20, 0.20, 0.22]
+    # Adentro del aro se ve el fondo, con una sombra: más oscuro pero del mismo color.
+    sombra = (r <= 120) & (yy > 330)
+    rgb[sombra] = 0.55
+    paso = Fondo(lambda x: aro.astype(np.float32))
+    _, con = correr(paso, Foto(rgb=rgb, datos={"camara": {}}), {**SIN_EXTRAS, "recuperar": 1})
+    assert con.foto.alfa[300, 400] == 0
+    assert con.foto.alfa[380, 400] == 0
+    assert con.medidas["partes_recuperadas"] == 0

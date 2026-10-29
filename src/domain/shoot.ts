@@ -24,6 +24,8 @@ export const stepInput = z.object({
   title: z.string().trim().min(1, 'Poné un título.').max(120, 'El título es muy largo.'),
   kind: z.enum(['PHOTO', 'VIDEO', 'CHECK']),
   explanation: z.string().trim().max(4000, 'La explicación es muy larga.').default(''),
+  // Para Claude, en el trabajador de imágenes: qué tener en cuenta al corregir las fotos de este paso.
+  editorNotes: z.string().trim().max(2000, 'Las indicaciones para el editor son muy largas.').default(''),
 });
 
 // ───────────────────────────── Producto nuevo y medidas ─────────────────────────────

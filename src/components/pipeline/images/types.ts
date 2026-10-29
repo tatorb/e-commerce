@@ -12,6 +12,8 @@ export type RunView = {
   parts: StepPart[];
   // Si se rehízo con valores pedidos.
   requested: boolean;
+  // La indicación puntual para Claude que se escribió al procesar de cero.
+  note: string | null;
   // La foto que entró al paso y la que salió.
   beforeHref: string | null;
   afterHref: string | null;

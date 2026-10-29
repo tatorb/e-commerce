@@ -15,6 +15,7 @@ import { storageError } from '@/lib/stored-files';
 import { addChannelPhotosOf, asIsCheckFor, setPhotoAsIs, tidyCorrected } from '@/lib/photo-commands';
 import { placeShotPhotosQuietly } from '@/lib/shoot';
 import { plural } from '@/lib/format';
+import { cleanPhotoNote } from '@/domain/photo-steps';
 
 // Lo que se hace desde el paso Imágenes: sumar fotos y decidir cada paso de
 // su línea. Las fotos son del producto: las ven todas sus publicaciones, y se
@@ -244,14 +245,19 @@ export async function archivePhotoAction(accountSlug: string, editId: string): P
   });
 }
 
-/** Procesa una foto de cero, como recién llegada: Claude vuelve a proponer todos los ajustes. */
-export async function redoPhotoFromScratchAction(accountSlug: string, editId: string): Promise<Result> {
-  return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Pidió procesar una foto de cero' }, async () => {
+/**
+ * Procesa una foto de cero, como recién llegada: Claude vuelve a proponer todos
+ * los ajustes. Con una indicación, Claude la recibe solo en esta corrida.
+ */
+export async function redoPhotoFromScratchAction(accountSlug: string, editId: string, note?: string): Promise<Result> {
+  return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Pidió procesar una foto de cero', detail: typeof note === 'string' ? note.trim().slice(0, 200) || null : null }, async () => {
     await requireUser();
     const edit = await prisma.photoEdit.findFirst({ where: { id: editId, product: { account: { slug: accountSlug } } }, select: { id: true, productId: true } });
     if (!edit) return NOT_FOUND;
+    const cleaned = cleanPhotoNote(note);
+    if (!cleaned.ok) return { ok: false, error: cleaned.error };
     return guard(accountSlug, async () => {
-      await redoFromScratch(prisma, { editId: edit.id });
+      await redoFromScratch(prisma, { editId: edit.id, note: cleaned.note });
       await tidyCorrected(prisma, edit.productId);
       return 'En cola para procesar de cero.';
     });

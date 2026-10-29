@@ -15,9 +15,16 @@ pasaba a un pistón brillante sobre la caja de luz plateada). Por eso esa zona
 deja entorno alrededor, y si igual pierde un pedazo que la primera pasada sí
 vio, se descarta.
 
+Los modelos están hechos para recortar también rejas y mallas. Una caja con
+cuadrícula blanca les parece una malla, y toman los cuadrados de color por
+agujeros. Recuperar partes mira lo que el modelo dejó transparente dentro de la
+silueta de la pieza y, si no se parece al fondo que tiene cerca, lo vuelve
+opaco.
+
 No se usa el "refinado de bordes" de rembg (alpha matting), porque recalcula
 colores. El borde se ajusta con un filtro guiado que solo toca la transparencia.
-Rellenar huecos también: vuelve opaco lo que ya es de la pieza, no dibuja nada.
+Rellenar huecos y Recuperar partes tampoco dibujan nada: vuelven opaco lo que ya
+es de la pieza.
 """
 
 from __future__ import annotations
@@ -95,6 +102,11 @@ _OCUPA_HASTA = 0.5
 _PERDIDA_HASTA = 0.10
 # Rellenar huecos solo toca los que son a lo sumo esta parte de la pieza que los rodea.
 _HUECO_HASTA = 0.10
+# Recuperar partes: cuánto se tiene que alejar del fondo de al lado (en Lab, con la luz a la mitad) para ser pieza.
+_DISTINTO_DEL_FONDO = 25.0
+# Los entrantes del borde que se cierran, y desde dónde se toma el fondo de referencia, en partes de la pieza.
+_ENTRANTE_HASTA = 0.05
+_FONDO_DESDE = 0.02
 
 
 def zona_del_producto(mascara: np.ndarray) -> tuple[int, int, int, int] | None:
@@ -190,8 +202,84 @@ def rellenar_huecos(alfa: np.ndarray) -> tuple[np.ndarray, int]:
     return np.where(rellenar | ~cerca, 1.0, alfa).astype(np.float32), int(chicos.sum())
 
 
+def _disco(radio: int) -> np.ndarray:
+    return cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * radio + 1, 2 * radio + 1))
+
+
+def recuperar_partes(mascara: np.ndarray, rgb: np.ndarray) -> tuple[np.ndarray, int]:
+    """
+    Vuelve opaco lo que el modelo marcó como fondo dentro de la silueta de la
+    pieza (sus agujeros y los entrantes chicos del borde) cuando no se parece al
+    fondo que tiene cerca, como los cuadrados de una caja con cuadrícula. Lo que
+    se parece al fondo, como el centro de un aro, queda transparente. Solo toca
+    la transparencia. Devuelve cuántas zonas recuperó.
+    """
+    alto, ancho = mascara.shape
+    solido = mascara >= 0.5
+    if not solido.any():
+        return mascara, 0
+    # La silueta y el fondo de al lado se calculan en chico, para que sea rápido.
+    escala = min(1.0, 1000 / max(alto, ancho))
+    tam = (max(1, round(ancho * escala)), max(1, round(alto * escala)))
+    mascara_c = cv2.resize(mascara.astype(np.float32), tam, interpolation=cv2.INTER_AREA)
+    # Una línea fina de la pieza no se pierde al achicar: cuenta lo que tenga algo de pieza.
+    solido_c = (cv2.resize(solido.astype(np.float32), tam, interpolation=cv2.INTER_AREA) >= 0.25).astype(np.uint8)
+    ys, xs = np.where(solido_c)
+    if len(ys) == 0:
+        return mascara, 0
+    lado = max(int(ys.max() - ys.min()), int(xs.max() - xs.min())) + 1
+    # La silueta: la pieza con sus entrantes chicos cerrados y sus agujeros tapados.
+    silueta_c = cv2.morphologyEx(solido_c, cv2.MORPH_CLOSE, _disco(max(1, round(_ENTRANTE_HASTA * lado))))
+    afuera = silueta_c.copy()
+    cv2.floodFill(afuera, np.zeros((tam[1] + 2, tam[0] + 2), np.uint8), (0, 0), 2)
+    if (afuera == 2).any():
+        silueta_c = (afuera != 2).astype(np.uint8)
+    # El fondo de referencia, un poco lejos de la pieza: un canto oscuro pegado a ella no cuenta como fondo.
+    lejos = cv2.dilate(silueta_c, _disco(max(1, round(_FONDO_DESDE * lado)))) == 0
+    fondo_c = lejos & (mascara_c < 0.05)
+    if fondo_c.sum() < 50:
+        return mascara, 0
+    lab_c = cv2.cvtColor(cv2.resize(np.clip(rgb, 0, 1).astype(np.float32), tam, interpolation=cv2.INTER_AREA), cv2.COLOR_RGB2Lab)
+    # Para cada punto, el color del fondo de referencia más cercano.
+    _, cercano = cv2.distanceTransformWithLabels((~fondo_c).astype(np.uint8), cv2.DIST_L2, 5, labelType=cv2.DIST_LABEL_PIXEL)
+    colores = np.zeros((int(cercano.max()) + 1, 3), np.float32)
+    colores[cercano[fondo_c]] = lab_c[fondo_c]
+    fondo = cv2.resize(cv2.GaussianBlur(colores[cercano], (0, 0), 2), (ancho, alto), interpolation=cv2.INTER_LINEAR)
+    silueta = cv2.resize(silueta_c.astype(np.float32), (ancho, alto), interpolation=cv2.INTER_LINEAR) >= 0.5
+    casco_c = np.zeros_like(solido_c)
+    cv2.fillConvexPoly(casco_c, cv2.convexHull(np.column_stack([xs, ys]).astype(np.int32)), 1)
+    casco = cv2.resize(casco_c.astype(np.float32), (ancho, alto), interpolation=cv2.INTER_LINEAR) >= 0.5
+
+    # En grande: cuánto se aleja cada punto del fondo de al lado. La luz cuenta la
+    # mitad, así una sombra, que es el fondo más oscuro, no pasa por pieza.
+    d = cv2.cvtColor(np.clip(rgb, 0, 1).astype(np.float32), cv2.COLOR_RGB2Lab) - fondo
+    distancia = np.sqrt((0.5 * d[..., 0]) ** 2 + d[..., 1] ** 2 + d[..., 2] ** 2)
+    n, zonas = cv2.connectedComponents((silueta & ~solido).astype(np.uint8), connectivity=4)
+    if n <= 1:
+        return mascara, 0
+    # Una zona se recupera si la mayor parte no se parece al fondo; de ella, lo que no se parece.
+    distinto = np.bincount(zonas.ravel(), weights=(distancia > _DISTINTO_DEL_FONDO).ravel(), minlength=n)
+    sirve = distinto / np.maximum(np.bincount(zonas.ravel(), minlength=n), 1) > 0.5
+    sirve[0] = False
+    if not sirve.any():
+        return mascara, 0
+    llenar = sirve[zonas] & (distancia > _DISTINTO_DEL_FONDO / 2)
+    # Los entrantes abiertos del borde se cierran redondeados: se completan hasta el contorno de la
+    # pieza, a lo sumo un 1 % más allá, y ahí cuenta solo el color: una sombra pegada es del color del fondo.
+    color = np.sqrt(d[..., 1] ** 2 + d[..., 2] ** 2) > _DISTINTO_DEL_FONDO
+    g = max(3, 2 * round(0.01 * lado / escala) + 1)
+    llenar |= (cv2.dilate(llenar.astype(np.uint8), np.ones((g, g), np.uint8)) > 0) & casco & ~solido & color
+    # Las líneas finas entre partes recuperadas, que el modelo dejó a medias, también.
+    k = max(3, 2 * round(0.004 * max(alto, ancho)) + 1)
+    llenar = (cv2.morphologyEx(llenar.astype(np.uint8), cv2.MORPH_CLOSE, np.ones((k, k), np.uint8)) > 0) & (silueta | casco)
+    return np.where(llenar, 1.0, mascara).astype(np.float32), int(sirve.sum())
+
+
 def armar_alfa(mascara: np.ndarray, rgb: np.ndarray, valores: dict[str, float]) -> tuple[np.ndarray, dict]:
     alfa = mascara.astype(np.float32)
+    recuperadas = 0
+    if valores.get("recuperar"):
+        alfa, recuperadas = recuperar_partes(alfa, rgb)
     if valores.get("refinar_bordes"):
         gris = cv2.cvtColor(np.clip(rgb, 0, 1).astype(np.float32), cv2.COLOR_RGB2GRAY)
         r = max(2, round(min(alfa.shape) / 600))
@@ -207,6 +295,8 @@ def armar_alfa(mascara: np.ndarray, rgb: np.ndarray, valores: dict[str, float]) 
         alfa, rellenados = rellenar_huecos(alfa)
     alfa, piezas, sacadas = quitar_motas(alfa, float(valores.get("motas", 0)))
     medidas = {"piezas": piezas, "motas_sacadas": sacadas, "cubre_pct": round(float((alfa >= 0.5).mean()) * 100, 2)}
+    if valores.get("recuperar"):
+        medidas["partes_recuperadas"] = recuperadas
     if valores.get("rellenar_huecos"):
         medidas["huecos_rellenados"] = rellenados
     return alfa, medidas
@@ -219,7 +309,9 @@ class Fondo(Paso):
         "La foto muestra la pieza ya recortada sobre cuadros grises, que son transparencia. Revisá que el recorte "
         "incluya todo el producto (si es un kit, todas sus partes, incluida la caja si forma parte de lo que se vende) "
         "y nada del entorno. Proponé: detalle (1 para una segunda pasada sobre la zona del producto, que separa mejor "
-        "los espacios finos, como entre aros), refinar_bordes (1 para ajustar el borde a la foto), rellenar_huecos (1 "
+        "los espacios finos, como entre aros), recuperar (1 vuelve opaco lo que el modelo dejó transparente dentro de la "
+        "pieza cuando no se parece al fondo, como los cuadrados de una caja con cuadrícula o un dibujo de líneas; dejalo "
+        "en 1 salvo que se vea pieza donde de verdad hay fondo), refinar_bordes (1 para ajustar el borde a la foto), rellenar_huecos (1 "
         "si es una sola pieza maciza y se ven manchas o agujeritos transparentes dentro de ella, por ejemplo por "
         "reflejos en el metal; 0 si es un kit, si hay aros o si la pieza tiene agujeros que se ven de lado a lado), "
         "motas (tamaño mínimo de una pieza suelta en % de la foto; más chico que eso se borra, poné 0 si hay piezas "
@@ -230,6 +322,15 @@ class Fondo(Paso):
             "detalle",
             "Segunda pasada",
             "Vuelve a buscar el fondo solo en la zona del producto, para separar mejor los espacios finos.",
+            0,
+            1,
+            1,
+            tipo="si_no",
+        ),
+        Parametro(
+            "recuperar",
+            "Recuperar partes",
+            "Vuelve opaco lo que el modelo dejó transparente dentro de la pieza si no se parece al fondo, como los cuadrados de una caja con cuadrícula.",
             0,
             1,
             1,
@@ -287,10 +388,12 @@ class Fondo(Paso):
         return extra["mascara"]
 
     def vista_para_claude(self, foto: Foto, medicion: Medicion) -> Foto:
+        # Claude mira el recorte como quedaría con lo que sugiere el código, también con las partes recuperadas.
         chica = achicar(foto, 1600)
         mascara = self._mascara(medicion.extra, medicion.sugeridos)
         mascara = cv2.resize(mascara, (chica.ancho, chica.alto), interpolation=cv2.INTER_AREA)
-        return Foto(rgb=chica.rgb, alfa=mascara, datos=foto.datos)
+        alfa, _ = armar_alfa(mascara, chica.rgb, medicion.sugeridos)
+        return Foto(rgb=chica.rgb, alfa=alfa, datos=foto.datos)
 
     def aplicar(self, foto: Foto, valores: dict[str, float], ajustes: dict, medicion: Medicion) -> Resultado:
         alfa, medidas = armar_alfa(self._mascara(medicion.extra, valores), foto.rgb, valores)

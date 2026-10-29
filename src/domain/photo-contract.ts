@@ -8,13 +8,15 @@ import type { PhotoSettingsValues } from './photo-settings';
 
 // Sube cuando cambia la forma de los mensajes: un trabajador viejo recibe un
 // aviso para actualizarse en lugar de un error raro. El 3 suma el paquete para
-// editar en vivo, el 4, el ajuste Sombra y el 5, girar de a 90° en
-// Perspectiva. Un trabajador anterior sigue andando, sin lo que todavía no
-// sabe hacer.
-export const PHOTO_PROTOCOLS = [2, 3, 4, 5] as const;
+// editar en vivo, el 4, el ajuste Sombra, el 5, girar de a 90° en
+// Perspectiva y el 6, el paso del protocolo de la foto y las indicaciones para
+// Claude. Un trabajador anterior sigue andando, sin lo que todavía no sabe hacer.
+export const PHOTO_PROTOCOLS = [2, 3, 4, 5, 6] as const;
 export type PhotoProtocol = (typeof PHOTO_PROTOCOLS)[number];
-export const PHOTO_PROTOCOL: PhotoProtocol = 5;
+export const PHOTO_PROTOCOL: PhotoProtocol = 6;
 export const LIVE_PROTOCOL: PhotoProtocol = 3;
+// Desde qué protocolo el trabajador recibe aparte las indicaciones para Claude.
+export const GUIDANCE_PROTOCOL: PhotoProtocol = 6;
 // Desde qué protocolo sabe hacer el trabajador cada ajuste nuevo.
 export const PART_PROTOCOL: Record<string, PhotoProtocol> = { sombra: 4 };
 
@@ -50,6 +52,11 @@ export type Job = {
   pasos: string[];
   // Qué es la pieza, para que Claude tenga contexto. Nunca precios.
   producto: string | null;
+  // El paso del protocolo con que se sacó la foto y sus indicaciones para el
+  // editor, si se sacó siguiendo uno.
+  foto_del_protocolo: { titulo: string; indicaciones: string | null } | null;
+  // La indicación puntual que escribió la persona al procesar de cero: solo para esta corrida.
+  indicacion: string | null;
   ajustes: PhotoSettingsValues;
   pedidos: StepRequest | null;
   original: { nombre: string; tipo: string; bajar: Transfer };
@@ -154,3 +161,26 @@ const failedSchema = z.object({
 export const resultSchema = z.discriminatedUnion('ok', [doneSchema, failedSchema]);
 export type WorkerResult = z.infer<typeof resultSchema>;
 export type WorkerDone = z.infer<typeof doneSchema>;
+
+// ───────────────────────────── Indicaciones para Claude ─────────────────────────────
+
+/** Lo que se le indica a Claude en una foto: lo del paso del protocolo y lo puntual de esta corrida. */
+export type PhotoGuidance = Pick<Job, 'foto_del_protocolo' | 'indicacion'>;
+
+/**
+ * Para un trabajador anterior al protocolo 6, que no conoce las indicaciones:
+ * van a continuación de lo que es la pieza, que Claude ya lee.
+ */
+export function productWithGuidance(product: string | null, g: PhotoGuidance): string | null {
+  const step = g.foto_del_protocolo;
+  return (
+    [
+      product,
+      step ? `Foto del protocolo: ${step.titulo}` : null,
+      step?.indicaciones ? `Indicaciones de la tienda para esta foto: ${step.indicaciones}` : null,
+      g.indicacion ? `Indicación de la persona para esta corrida, que manda sobre las demás: ${g.indicacion}` : null,
+    ]
+      .filter(Boolean)
+      .join('. ') || null
+  );
+}

@@ -22,7 +22,8 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 # Sube cuando cambia la forma de los mensajes, igual que PHOTO_PROTOCOL en la app.
-PROTOCOLO = 5
+# El 6 suma el paso del protocolo de la foto y las indicaciones para Claude.
+PROTOCOLO = 6
 
 # "vivo" es el paquete para editar la foto en vivo en la app (vivo.py).
 TipoSubida = Literal["antes", "vista", "mascara", "png", "jpg", "vivo"]
@@ -63,6 +64,13 @@ class Pedidos(BaseModel):
     apagados: list[str] = Field(default_factory=list)
 
 
+class FotoDelProtocolo(BaseModel):
+    """El paso del protocolo con que se sacó la foto, con las indicaciones para el editor."""
+
+    titulo: str
+    indicaciones: str | None = None
+
+
 class Trabajo(BaseModel):
     id: str
     turno: int
@@ -72,6 +80,9 @@ class Trabajo(BaseModel):
     indice: int
     pasos: list[str]
     producto: str | None = None
+    foto_del_protocolo: FotoDelProtocolo | None = None
+    # La indicación puntual de la persona para esta corrida: manda sobre las demás.
+    indicacion: str | None = None
     ajustes: dict
     pedidos: Pedidos | None = None
     original: Original

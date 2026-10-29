@@ -3,6 +3,9 @@
 import { useState } from 'react';
 import { Archive, Images, Lock, RefreshCcw, Wand2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { PHOTO_NOTE_MAX } from '@/domain/photo-steps';
 import { StatusText } from '@/components/pipeline/StatusText';
 import { useStepAction } from '@/components/pipeline/useStepAction';
 import {
@@ -129,21 +132,41 @@ export function AsIsButton({
   );
 }
 
-// Procesar una foto de cero, como recién llegada: Claude vuelve a proponer todos los ajustes.
+// Procesar una foto de cero, como recién llegada: Claude vuelve a proponer todos
+// los ajustes. Se le puede dejar una indicación que recibe solo esta vez.
 export function FromScratchButton({ accountSlug, editId, missed }: { accountSlug: string; editId: string; missed: boolean }) {
   const { run, pending, status } = useStepAction();
   const [confirming, setConfirming] = useState(false);
+  const [note, setNote] = useState('');
+  const close = () => {
+    setConfirming(false);
+    setNote('');
+  };
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className={confirming ? 'w-full space-y-2 rounded-md border p-3' : 'flex flex-wrap items-center gap-2'}>
       {confirming ? (
         <>
-          <span className="text-sm">¿La procesás de cero? Se pierden los valores que cambiaste y el giro, y Claude vuelve a cobrar.</span>
-          <Button size="sm" pending={pending} disabled={pending} onClick={() => run(() => redoPhotoFromScratchAction(accountSlug, editId), () => setConfirming(false))}>
-            Procesar de cero
-          </Button>
-          <Button size="sm" variant="ghost" disabled={pending} onClick={() => setConfirming(false)}>
-            Cancelar
-          </Button>
+          <p className="text-sm">¿La procesás de cero? Se pierden los valores que cambiaste y el giro, y Claude vuelve a cobrar.</p>
+          <div className="space-y-1.5">
+            <Label htmlFor={`nota-${editId}`}>Indicación para Claude, solo para esta vez (opcional)</Label>
+            <Textarea
+              id={`nota-${editId}`}
+              rows={2}
+              maxLength={PHOTO_NOTE_MAX}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Por ejemplo: los cuadrados de la caja son parte del dibujo, no los borres. Apagá la segunda pasada."
+            />
+            <p className="text-xs text-muted-foreground">La recibe en esta corrida de esta foto, por encima de las indicaciones del protocolo.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" pending={pending} disabled={pending} onClick={() => run(() => redoPhotoFromScratchAction(accountSlug, editId, note), close)}>
+              Procesar de cero
+            </Button>
+            <Button size="sm" variant="ghost" disabled={pending} onClick={close}>
+              Cancelar
+            </Button>
+          </div>
         </>
       ) : (
         <Button size="sm" variant={missed ? 'outline' : 'ghost'} disabled={pending} onClick={() => setConfirming(true)}>

@@ -2,9 +2,12 @@ import type { PrismaClient } from '@/generated/prisma/client';
 import { Prisma } from '@/generated/prisma/client';
 import type { PhotoRunStatus } from '@/generated/prisma/enums';
 import {
+  GUIDANCE_PROTOCOL,
   LIVE_PROTOCOL,
   PART_PROTOCOL,
+  productWithGuidance,
   type Job,
+  type PhotoGuidance,
   type PhotoProtocol,
   type RecipeEntry,
   type StepPart,
@@ -59,14 +62,15 @@ async function settingsFor(tx: Tx, editId: string): Promise<PhotoSettingsValues>
 // trabajador no le vuelve a preguntar, y la explicación queda a la vista.
 type StoredRequest = StepRequest & { propuestas: Record<string, StepProposal> };
 
-/** Pone en cola un paso de una foto. Quien llama ya bloqueó la foto. */
-async function queueStep(tx: Tx, editId: string, step: number, requested: StoredRequest | null = null) {
+/** Pone en cola un paso de una foto, con la indicación puntual de la corrida, si hay. Quien llama ya bloqueó la foto. */
+async function queueStep(tx: Tx, editId: string, step: number, requested: StoredRequest | null = null, note: string | null = null) {
   return tx.photoStepRun.create({
     data: {
       editId,
       step,
       status: 'QUEUED',
       openFor: editId,
+      note,
       requested: requested ? (requested as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
       settings: (await settingsFor(tx, editId)) as unknown as Prisma.InputJsonValue,
     },
@@ -162,6 +166,7 @@ export async function buildJob(db: PrismaClient, runId: string, deps: JobDeps): 
       edit: {
         include: {
           product: { select: { id: true, name: true, productType: true } },
+          shootStep: { select: { title: true, editorNotes: true } },
           runs: { where: { status: { in: ['APPROVED', 'SKIPPED'] } }, orderBy: { createdAt: 'asc' } },
         },
       },
@@ -191,6 +196,11 @@ export async function buildJob(db: PrismaClient, runId: string, deps: JobDeps): 
   const subidas = await deps.uploads({ productId: edit.productId, editId: edit.id, runId: run.id, originalName: edit.originalName }, kinds);
   const product = [edit.product.productType, edit.product.name].filter(Boolean).join(': ') || null;
   const request = requestOf(run.requested);
+  // Lo que se le indica a Claude: el paso del protocolo con que se sacó, con sus indicaciones, y lo puntual de esta corrida.
+  const guidance: PhotoGuidance = {
+    foto_del_protocolo: edit.shootStep ? { titulo: edit.shootStep.title, indicaciones: edit.shootStep.editorNotes.trim() || null } : null,
+    indicacion: run.note?.trim() || null,
+  };
 
   return {
     id: run.id,
@@ -200,7 +210,9 @@ export async function buildJob(db: PrismaClient, runId: string, deps: JobDeps): 
     indice: run.step,
     // Un trabajador sin actualizar no recibe los ajustes que todavía no sabe hacer.
     pasos: step.parts.filter((p) => (PART_PROTOCOL[p] ?? 2) <= deps.protocol),
-    producto: product,
+    // Un trabajador que no conoce las indicaciones las lee junto a lo que es la pieza.
+    producto: deps.protocol >= GUIDANCE_PROTOCOL ? product : productWithGuidance(product, guidance),
+    ...guidance,
     ajustes: parsePhotoSettings(run.settings),
     pedidos: request ? { valores: request.valores, apagados: request.apagados } : null,
     original: { nombre: edit.originalName, tipo: edit.originalType, bajar: await deps.download(edit) },
@@ -396,7 +408,7 @@ export async function redoStep(db: PrismaClient, args: { runId: string; userId: 
       where: { editId: run.editId, step: { gte: run.step }, status: { not: 'REPLACED' } },
       data: { status: 'REPLACED', openFor: null },
     });
-    return queueStep(tx, run.editId, run.step, requested);
+    return queueStep(tx, run.editId, run.step, requested, run.note);
   });
 }
 
@@ -405,7 +417,7 @@ export async function retryStep(db: PrismaClient, args: { runId: string; userId:
   return db.$transaction(async (tx) => {
     const failed = await openRun(tx, args.runId, ['FAILED'], 'reintentar');
     await tx.photoStepRun.update({ where: { id: failed.id }, data: { status: 'REPLACED', openFor: null } });
-    return queueStep(tx, failed.editId, failed.step, requestOf(failed.requested));
+    return queueStep(tx, failed.editId, failed.step, requestOf(failed.requested), failed.note);
   });
 }
 
@@ -413,9 +425,10 @@ export async function retryStep(db: PrismaClient, args: { runId: string; userId:
  * Procesa una foto de cero, como recién llegada: lo que había queda
  * reemplazado, también lo aprobado y lo que estaba en cola, y la Mac parte del
  * original con Claude proponiendo todos los ajustes. Se pierden los valores
- * cambiados a mano y el giro de 90°. Sirve cuando Claude no respondió.
+ * cambiados a mano y el giro de 90°. Sirve cuando Claude no respondió o
+ * corrigió mal: con note, Claude recibe esa indicación solo en esta corrida.
  */
-export async function redoFromScratch(db: PrismaClient, args: { editId: string }) {
+export async function redoFromScratch(db: PrismaClient, args: { editId: string; note?: string | null }) {
   return db.$transaction(async (tx) => {
     await lockEdit(tx, args.editId);
     const edit = await tx.photoEdit.findUniqueOrThrow({ where: { id: args.editId }, select: { archivedAt: true, asIs: true } });
@@ -425,7 +438,7 @@ export async function redoFromScratch(db: PrismaClient, args: { editId: string }
       where: { editId: args.editId, status: { not: 'REPLACED' } },
       data: { status: 'REPLACED', openFor: null, workerId: null, leaseUntil: null },
     });
-    return queueStep(tx, args.editId, 0);
+    return queueStep(tx, args.editId, 0, null, args.note ?? null);
   });
 }
 

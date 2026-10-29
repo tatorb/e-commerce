@@ -26,8 +26,11 @@ describe('protocolos', () => {
     expect(protocolInput.safeParse({ name: '  ' }).success).toBe(false);
     expect(protocolInput.parse({ name: ' Aros ' })).toEqual({ name: 'Aros', description: '' });
     expect(stepInput.safeParse({ title: 'Frente', kind: 'AUDIO' }).success).toBe(false);
-    expect(stepInput.parse({ title: 'Limpiar el lugar', kind: 'CHECK' })).toEqual({ title: 'Limpiar el lugar', kind: 'CHECK', explanation: '' });
-    expect(stepInput.parse({ title: 'Frente', kind: 'VIDEO', explanation: ' Girarlo ' })).toEqual({ title: 'Frente', kind: 'VIDEO', explanation: 'Girarlo' });
+    expect(stepInput.parse({ title: 'Limpiar el lugar', kind: 'CHECK' })).toEqual({ title: 'Limpiar el lugar', kind: 'CHECK', explanation: '', editorNotes: '' });
+    // Las indicaciones para el editor, sin espacios de más y con un largo máximo.
+    expect(stepInput.parse({ title: 'Frente', kind: 'PHOTO', editorNotes: '  Sin brillos.  ' }).editorNotes).toBe('Sin brillos.');
+    expect(stepInput.safeParse({ title: 'Frente', kind: 'PHOTO', editorNotes: 'x'.repeat(2001) }).success).toBe(false);
+    expect(stepInput.parse({ title: 'Frente', kind: 'VIDEO', explanation: ' Girarlo ' })).toEqual({ title: 'Frente', kind: 'VIDEO', explanation: 'Girarlo', editorNotes: '' });
   });
 
   it('las ilustraciones son imágenes comunes de hasta 15 MB', () => {

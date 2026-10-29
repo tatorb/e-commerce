@@ -74,13 +74,13 @@ export async function moveProtocolAction(accountSlug: string, protocolId: string
   );
 }
 
-export async function addStepAction(accountSlug: string, protocolId: string, input: { title: string; kind: string; explanation: string }): Promise<Result<{ id: string }>> {
+export async function addStepAction(accountSlug: string, protocolId: string, input: { title: string; kind: string; explanation: string; editorNotes: string }): Promise<Result<{ id: string }>> {
   return act(accountSlug, { section, does: 'Agregó un paso a un protocolo de fotos', targetLabel: String(input?.title ?? '').slice(0, 120) }, ({ account }) =>
     guard(accountSlug, async () => ({ id: await addStep(prisma, { accountId: account.id, protocolId: String(protocolId), input }) })),
   );
 }
 
-export async function updateStepAction(accountSlug: string, stepId: string, input: { title: string; kind: string; explanation: string }): Promise<Result> {
+export async function updateStepAction(accountSlug: string, stepId: string, input: { title: string; kind: string; explanation: string; editorNotes: string }): Promise<Result> {
   return act(accountSlug, { section, does: 'Cambió un paso de un protocolo de fotos', targetLabel: String(input?.title ?? '').slice(0, 120) }, ({ account }) =>
     guard(accountSlug, async () => {
       await updateStep(prisma, { accountId: account.id, stepId: String(stepId), input });

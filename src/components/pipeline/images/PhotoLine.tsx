@@ -226,6 +226,12 @@ function RunPanel({ accountSlug, run, photo, compact }: { accountSlug: string; r
         </span>
       </div>
       <p className="text-xs text-muted-foreground">{step.parts.map((k) => PHOTO_ADJUSTMENT_LABEL[k]).join(', ')}.</p>
+      {run.note ? (
+        <p className="whitespace-pre-line rounded-md bg-muted/60 px-3 py-2 text-sm">
+          <span className="font-medium">Indicación para Claude en esta corrida: </span>
+          {run.note}
+        </p>
+      ) : null}
 
       {working ? (
         <div className="flex items-start gap-3 rounded-md border bg-muted/40 p-4 text-sm">

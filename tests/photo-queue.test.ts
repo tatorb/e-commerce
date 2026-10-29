@@ -5,6 +5,7 @@ import { PrismaClient } from '@/generated/prisma/client';
 import type { StepPart, Transfer, UploadKind, WorkerDone } from '@/domain/photo-contract';
 import { PHOTO_PROTOCOL } from '@/domain/photo-contract';
 import { DEFAULT_PHOTO_SETTINGS } from '@/domain/photo-settings';
+import { cleanPhotoNote, PHOTO_NOTE_MAX } from '@/domain/photo-steps';
 import {
   approveStep,
   archivePhoto,
@@ -52,7 +53,7 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
 
   beforeEach(async () => {
     await db.$executeRawUnsafe(
-      'TRUNCATE photo_step_runs, photo_edits, photo_settings, image_workers, assets, products, accounts, users CASCADE',
+      'TRUNCATE photo_step_runs, photo_edits, photo_settings, image_workers, assets, shoot_steps, shoot_protocols, products, accounts, users CASCADE',
     );
     accountId = (await db.account.create({ data: { slug: 'prueba', name: 'Cuenta de prueba' } })).id;
     productId = (await db.product.create({ data: { accountId, name: 'Kit de pistones', productType: 'Pistón' } })).id;
@@ -245,7 +246,13 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     await photo();
     const claimed = await claimNext(db, w);
     const job = await buildJob(db, claimed!.runId, deps);
-    const built = { ...job, pedidos: { valores: {}, apagados: ['luces'] }, subidas: { vista: job.subidas.vista } };
+    const built = {
+      ...job,
+      pedidos: { valores: {}, apagados: ['luces'] },
+      foto_del_protocolo: { titulo: 'Frente', indicaciones: 'Sin brillos.' },
+      indicacion: 'Más luz.',
+      subidas: { vista: job.subidas.vista },
+    };
     const expected = { ...example.trabajo, subidas: { vista: example.trabajo.subidas.vista } };
     expect(shape(built)).toEqual(shape(expected));
   });
@@ -412,6 +419,51 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     await expect(redoFromScratch(db, { editId: fine.id })).rejects.toThrow('tal cual');
     await archivePhoto(db, missed.id);
     await expect(redoFromScratch(db, { editId: missed.id })).rejects.toThrow('se sacó');
+  });
+
+  it('Claude recibe el paso del protocolo con sus indicaciones y la indicación puntual de la corrida', async () => {
+    const w = await worker();
+    const edit = await photo();
+    const protocol = await db.shootProtocol.create({ data: { accountId, name: 'Subconjuntos' } });
+    const notes = 'La caja tiene cuadrícula: los cuadrados son parte de la caja.';
+    const step = await db.shootStep.create({ data: { protocolId: protocol.id, title: 'Cajas del lado de la etiqueta', editorNotes: notes } });
+    await db.photoEdit.update({ where: { id: edit.id }, data: { shootStepId: step.id } });
+
+    let claimed = await claimNext(db, w);
+    let job = await buildJob(db, claimed!.runId, deps);
+    expect(job.foto_del_protocolo).toEqual({ titulo: 'Cajas del lado de la etiqueta', indicaciones: notes });
+    expect(job.indicacion).toBeNull();
+    expect(job.producto).toBe('Pistón: Kit de pistones');
+    // Un trabajador anterior las recibe junto a lo que es la pieza, que Claude ya lee.
+    expect((await buildJob(db, claimed!.runId, { ...deps, protocol: 5 })).producto).toBe(
+      `Pistón: Kit de pistones. Foto del protocolo: Cajas del lado de la etiqueta. Indicaciones de la tienda para esta foto: ${notes}`,
+    );
+
+    // De cero con una indicación: va en esa corrida, y las del protocolo como estén ahora.
+    await db.shootStep.update({ where: { id: step.id }, data: { editorNotes: '' } });
+    await redoFromScratch(db, { editId: edit.id, note: 'Apagá la segunda pasada.' });
+    claimed = await claimNext(db, w);
+    job = await buildJob(db, claimed!.runId, deps);
+    expect(job.foto_del_protocolo).toEqual({ titulo: 'Cajas del lado de la etiqueta', indicaciones: null });
+    expect(job.indicacion).toBe('Apagá la segunda pasada.');
+    expect((await buildJob(db, claimed!.runId, { ...deps, protocol: 5 })).producto).toBe(
+      'Pistón: Kit de pistones. Foto del protocolo: Cajas del lado de la etiqueta. Indicación de la persona para esta corrida, que manda sobre las demás: Apagá la segunda pasada.',
+    );
+
+    // Sigue al rehacer esa corrida; procesar de cero otra vez sin indicación la saca.
+    for (const kind of Object.keys(job.subidas) as UploadKind[]) uploaded.add(`${job.id}:${kind}`);
+    await submitResult(db, w, done(job, { archivos: Object.keys(job.subidas) as UploadKind[] }), { collect });
+    await redoStep(db, { runId: job.id, userId, request: null });
+    expect((await openRun(edit.id)).note).toBe('Apagá la segunda pasada.');
+    await redoFromScratch(db, { editId: edit.id });
+    expect((await openRun(edit.id)).note).toBeNull();
+  });
+
+  it('la indicación puntual se guarda sin espacios de más y tiene un largo máximo', () => {
+    expect(cleanPhotoNote('  Más luz.  ')).toEqual({ ok: true, note: 'Más luz.' });
+    expect(cleanPhotoNote('   ')).toEqual({ ok: true, note: null });
+    expect(cleanPhotoNote(undefined)).toEqual({ ok: true, note: null });
+    expect(cleanPhotoNote('x'.repeat(PHOTO_NOTE_MAX + 1)).ok).toBe(false);
   });
 
   it('exportar no se puede apagar', async () => {

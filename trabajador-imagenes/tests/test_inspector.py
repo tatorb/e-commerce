@@ -119,3 +119,24 @@ def test_claude_no_propone_girar_90_grados():
     texto = consigna_del_paso(paso, medicion, leer_ajustes(), None)
     assert "cuartos" not in texto and "Girar 90" not in texto
     assert "cuartos" not in esquema(paso)["properties"]["valores"]["properties"]
+
+
+def test_claude_recibe_el_paso_del_protocolo_y_las_indicaciones():
+    from mrb_imagenes.inspector import Contexto, consigna_del_paso
+    from mrb_imagenes.pasos.base import Medicion
+    from mrb_imagenes.pasos.fondo import Fondo
+
+    paso = Fondo(lambda rgb: rgb[..., 0])
+    medicion = Medicion(medidas={}, sugeridos=paso.defectos({}))
+    texto = consigna_del_paso(
+        paso,
+        medicion,
+        {},
+        Contexto(producto="Subconjunto: SP-433", foto="Cajas del lado de la etiqueta", indicaciones="La cuadrícula es parte de la caja.", indicacion="Apagá la segunda pasada."),
+    )
+    assert texto.startswith("Producto: Subconjunto: SP-433.\n\nFoto del protocolo: Cajas del lado de la etiqueta.")
+    assert "Indicaciones de la tienda para las fotos de este paso del protocolo:\nLa cuadrícula es parte de la caja." in texto
+    assert "Indicación de la persona para esta corrida, que manda sobre las demás:\nApagá la segunda pasada." in texto
+    # Sin más que el producto, como desde la terminal.
+    assert consigna_del_paso(paso, medicion, {}, "Kit de pistones").startswith("Producto: Kit de pistones.\n\nPaso: Quitar fondo.")
+    assert "Producto" not in consigna_del_paso(paso, medicion, {}, None)

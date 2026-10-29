@@ -73,6 +73,7 @@ function runView(run: PhotoStepRun & { decidedBy: { name: string } | null }, bef
     status: run.status,
     parts: partsOf(run.parts),
     requested: run.requested !== null,
+    note: run.note,
     beforeHref: before,
     afterHref: run.previewUrl ? photoFileHref('vista', { paso: run.id }) : null,
     maskHref: run.maskUrl ? photoFileHref('mascara', { paso: run.id }, true) : null,

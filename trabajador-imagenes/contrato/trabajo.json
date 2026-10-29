@@ -7,6 +7,8 @@
     "indice": 0,
     "pasos": ["lente", "perspectiva", "blancos", "luces", "color", "fondo", "recorte", "sombra", "exportar"],
     "producto": "Pistón: Kit de pistones de ejemplo",
+    "foto_del_protocolo": { "titulo": "Pistón desde arriba", "indicaciones": "Los aros se ven de canto: no rellenar huecos." },
+    "indicacion": "Apagá la segunda pasada.",
     "ajustes": {
       "margen": 8,
       "fondo": "#FFFFFF",

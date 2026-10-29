@@ -383,3 +383,23 @@ def test_un_ajuste_desconocido_pide_actualizar(tmp_path):
     t.pasos = ["lente", "otro"]
     with pytest.raises(ValueError, match="actualizarlo"):
         procesar(t, armar_pasos(_segmentador), _InspectorQueCuenta(), _ClienteEnMemoria(_original()), tmp_path)
+
+
+def test_el_trabajo_trae_el_paso_del_protocolo_y_la_indicacion_para_claude():
+    from mrb_imagenes.trabajo import contexto_de
+
+    t = Siguiente.model_validate(ejemplo("trabajo.json")).trabajo
+    assert t is not None
+    c = contexto_de(t)
+    assert (c.producto, c.foto, c.indicaciones, c.indicacion) == (
+        "Pistón: Kit de pistones de ejemplo",
+        "Pistón desde arriba",
+        "Los aros se ven de canto: no rellenar huecos.",
+        "Apagá la segunda pasada.",
+    )
+    # Una foto que no salió de un protocolo, de una app anterior, no trae nada de esto.
+    datos = ejemplo("trabajo.json")
+    for clave in ("foto_del_protocolo", "indicacion"):
+        del datos["trabajo"][clave]
+    viejo = Siguiente.model_validate(datos).trabajo
+    assert viejo is not None and contexto_de(viejo).texto() == "Producto: Pistón: Kit de pistones de ejemplo."

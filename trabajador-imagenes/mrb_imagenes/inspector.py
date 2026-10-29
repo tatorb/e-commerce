@@ -4,7 +4,8 @@ En cada paso Claude mira una copia achicada de la foto y lo que midió el
 código, propone los valores y explica en una línea por qué. El código los
 limita a los topes y los aplica. Claude nunca edita la foto.
 
-A Claude solo van la foto y las medidas: nunca precios ni datos del cliente.
+A Claude solo van la foto, las medidas, qué es la pieza y las indicaciones
+que escribió la tienda: nunca precios ni datos del cliente.
 """
 
 from __future__ import annotations
@@ -30,7 +31,32 @@ SISTEMA = """Sos el inspector de una línea que corrige fotos de producto de aut
 En cada paso mirás la foto y lo que midió el código, y proponés los valores de ese paso. El código los aplica: vos nunca editás la foto.
 Regla de oro: solo se corrige la foto original. Nada se genera, se rellena ni se inventa. La única excepción es el paso Sombra: agrega una sombra suave solo sobre el fondo, nunca sobre la pieza.
 Proponé valores moderados: la foto tiene que verse natural y fiel a la pieza real. Ante la duda, menos.
+Si hay indicaciones de la tienda para las fotos de ese paso del protocolo, o una indicación de la persona para esta corrida, seguilas: mandan sobre lo que sugiere el código, siempre dentro de los rangos. La de la persona manda sobre las de la tienda. Si una indicación no tiene que ver con el paso que estás haciendo, no la apliques en ese paso.
 Respetá los rangos indicados. La razón va en español rioplatense simple, en una sola línea, sin tecnicismos."""
+
+
+@dataclass
+class Contexto:
+    """Lo que se le cuenta a Claude de la foto, además de la foto y de lo que midió el código."""
+
+    producto: str | None = None
+    # El paso del protocolo con que se sacó la foto y las indicaciones de la tienda para ese paso.
+    foto: str | None = None
+    indicaciones: str | None = None
+    # La indicación puntual de la persona para esta corrida.
+    indicacion: str | None = None
+
+    def texto(self) -> str | None:
+        partes = []
+        if self.producto:
+            partes.append(f"Producto: {self.producto}.")
+        if self.foto:
+            partes.append(f"Foto del protocolo: {self.foto}.")
+        if self.indicaciones:
+            partes.append(f"Indicaciones de la tienda para las fotos de este paso del protocolo:\n{self.indicaciones}")
+        if self.indicacion:
+            partes.append(f"Indicación de la persona para esta corrida, que manda sobre las demás:\n{self.indicacion}")
+        return "\n\n".join(partes) or None
 
 
 @dataclass
@@ -81,7 +107,7 @@ def esquema(paso: Paso) -> dict:
     }
 
 
-def consigna_del_paso(paso: Paso, medicion: Medicion, ajustes: dict, contexto: str | None) -> str:
+def consigna_del_paso(paso: Paso, medicion: Medicion, ajustes: dict, contexto: Contexto | str | None) -> str:
     rangos = []
     for p in _de_claude(paso):
         minimo, maximo = p.rango(ajustes)
@@ -97,8 +123,10 @@ def consigna_del_paso(paso: Paso, medicion: Medicion, ajustes: dict, contexto: s
         "Lo que sugiere el código a partir de eso:\n"
         + json.dumps({p.clave: medicion.sugeridos[p.clave] for p in _de_claude(paso) if p.clave in medicion.sugeridos}, ensure_ascii=False),
     ]
-    if contexto:
-        partes.insert(0, f"Producto: {contexto}.")
+    # Sin más que el producto, como lo pasa la prueba en la terminal.
+    texto = (Contexto(producto=contexto) if isinstance(contexto, str) else contexto or Contexto()).texto()
+    if texto:
+        partes.insert(0, texto)
     return "\n\n".join(partes)
 
 
@@ -125,7 +153,7 @@ class Inspector:
 
         return cls(cliente=anthropic.Anthropic(api_key=clave, timeout=120, max_retries=2))
 
-    def proponer(self, paso: Paso, foto: Foto, medicion: Medicion, ajustes: dict, contexto: str | None = None) -> Propuesta:
+    def proponer(self, paso: Paso, foto: Foto, medicion: Medicion, ajustes: dict, contexto: Contexto | str | None = None) -> Propuesta:
         if self.simulado or self.cliente is None:
             return Propuesta(valores=dict(medicion.sugeridos), razon="Simulado: valores medidos por el código, sin consultar a Claude.", origen="simulado")
         imagen = base64.standard_b64encode(vista_jpeg(foto, LADO_CLAUDE, calidad=85)).decode("ascii")

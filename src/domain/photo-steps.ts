@@ -44,6 +44,16 @@ export const PHOTO_STEPS: readonly PhotoStep[] = [
 
 export const LAST_PHOTO_STEP = PHOTO_STEPS.length - 1;
 
+/** Lo más largo que puede ser la indicación puntual para Claude al procesar una foto de cero. */
+export const PHOTO_NOTE_MAX = 1000;
+
+/** La indicación puntual como se guarda: sin espacios de más; vacía no hay. Null si es muy larga. */
+export function cleanPhotoNote(raw: unknown): { ok: true; note: string | null } | { ok: false; error: string } {
+  const note = typeof raw === 'string' ? raw.trim() : '';
+  if (note.length > PHOTO_NOTE_MAX) return { ok: false, error: `La indicación es muy larga: hasta ${PHOTO_NOTE_MAX} letras.` };
+  return { ok: true, note: note || null };
+}
+
 /**
  * Si en algún ajuste del intento Claude no respondió y quedaron los valores
  * que midió el programa (origen «medido»). Al rehacer con valores, Claude no

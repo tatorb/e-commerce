@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass, field
 
 from .imagen import Foto
-from .inspector import Inspector, Propuesta
+from .inspector import Contexto, Inspector, Propuesta
 from .pasos.base import Medicion, Paso, Resultado
 
 
@@ -41,7 +41,7 @@ class Corrida:
 
 
 def medir_y_proponer(
-    paso: Paso, foto: Foto, ajustes: dict, inspector: Inspector, contexto: str | None = None
+    paso: Paso, foto: Foto, ajustes: dict, inspector: Inspector, contexto: Contexto | str | None = None
 ) -> tuple[Medicion, Propuesta | None]:
     medicion = paso.medir(foto, ajustes)
     if medicion.no_aplica:

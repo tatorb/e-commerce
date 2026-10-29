@@ -226,7 +226,7 @@ function ProtocolCard({ accountSlug, protocol, index, total }: { accountSlug: st
           {adding ? (
             <StepForm
               idPrefix={`new-${protocol.id}`}
-              initial={{ title: '', kind: 'PHOTO', explanation: '' }}
+              initial={{ title: '', kind: 'PHOTO', explanation: '', editorNotes: '' }}
               saveLabel="Agregar paso"
               onCancel={() => setAdding(false)}
               onSave={async (values) => {
@@ -252,7 +252,7 @@ function ProtocolCard({ accountSlug, protocol, index, total }: { accountSlug: st
   );
 }
 
-type StepValues = { title: string; kind: ShootKind; explanation: string };
+type StepValues = { title: string; kind: ShootKind; explanation: string; editorNotes: string };
 
 function StepForm({
   idPrefix,
@@ -311,6 +311,19 @@ function StepForm({
           }
         />
       </div>
+      {values.kind === 'PHOTO' ? (
+        <div className="space-y-1.5">
+          <Label htmlFor={`${idPrefix}-editor-notes`}>Indicaciones para el editor</Label>
+          <Textarea
+            id={`${idPrefix}-editor-notes`}
+            rows={3}
+            value={values.editorNotes}
+            onChange={(e) => setValues((v) => ({ ...v, editorNotes: e.target.value }))}
+            placeholder={'Lo que Claude tiene que tener en cuenta al corregir las fotos de este paso.\nPor ejemplo: la caja tiene una cuadrícula blanca; los cuadrados azules son parte de la caja, no agujeros.'}
+          />
+          <p className="text-xs text-muted-foreground">Claude las recibe en cada foto de este paso, también al procesarla de cero.</p>
+        </div>
+      ) : null}
       <div className="flex gap-2">
         <Button
           pending={pending}
@@ -362,7 +375,7 @@ function StepRow({ accountSlug, step, n, total, archived }: { accountSlug: strin
       <li className="px-4 py-4">
         <StepForm
           idPrefix={`step-${step.id}`}
-          initial={{ title: step.title, kind: step.kind, explanation: step.explanation }}
+          initial={{ title: step.title, kind: step.kind, explanation: step.explanation, editorNotes: step.editorNotes }}
           saveLabel="Guardar"
           onCancel={() => setEditing(false)}
           onSave={async (values) => {
@@ -423,6 +436,12 @@ function StepRow({ accountSlug, step, n, total, archived }: { accountSlug: strin
         </div>
         <p className="font-medium">{step.title}</p>
         {step.explanation ? <p className="whitespace-pre-line text-sm text-muted-foreground">{step.explanation}</p> : null}
+        {step.kind === 'PHOTO' && step.editorNotes ? (
+          <p className="whitespace-pre-line rounded-md bg-muted/60 px-2.5 py-1.5 text-sm">
+            <span className="font-medium">Para el editor: </span>
+            {step.editorNotes}
+          </p>
+        ) : null}
         {progress ? <p className="text-sm text-muted-foreground">{progress}</p> : <Status message={message} />}
       </div>
       {!archived ? (

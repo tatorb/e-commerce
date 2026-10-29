@@ -35,7 +35,7 @@ from .app import (
     Trabajo,
 )
 from .imagen import Foto, guardar_intermedia, leer_intermedia, leer_original, vista_jpeg
-from .inspector import Inspector
+from .inspector import Contexto, Inspector
 from .linea import aplicar, medir_y_proponer
 from .pasos.base import Paso
 from .vivo import armar_paquete
@@ -187,6 +187,17 @@ def _png_de_mascara(alfa: np.ndarray) -> bytes:
     return datos.tobytes()
 
 
+def contexto_de(trabajo: Trabajo) -> Contexto:
+    """Lo que Claude sabe de la foto: qué es la pieza, el paso del protocolo con sus indicaciones y la indicación de esta corrida."""
+    protocolo = trabajo.foto_del_protocolo
+    return Contexto(
+        producto=trabajo.producto,
+        foto=protocolo.titulo if protocolo else None,
+        indicaciones=protocolo.indicaciones if protocolo else None,
+        indicacion=trabajo.indicacion,
+    )
+
+
 def procesar(
     trabajo: Trabajo,
     pasos: list[Paso],
@@ -229,7 +240,7 @@ def procesar(
             medicion = paso.medir(foto, ajustes)
             corrida = aplicar(paso, foto, ajustes, medicion, None, pedidos=pedidos_del_ajuste)
         else:
-            medicion, propuesta = medir_y_proponer(paso, foto, ajustes, inspector, trabajo.producto)
+            medicion, propuesta = medir_y_proponer(paso, foto, ajustes, inspector, contexto_de(trabajo))
             corrida = aplicar(paso, foto, ajustes, medicion, propuesta)
         resultado = corrida.resultado
         receta = corrida.receta()

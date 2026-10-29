@@ -57,7 +57,7 @@ export async function listProtocols(db: Db, accountId: string, opts: { archived?
       steps: {
         where: { archivedAt: null },
         orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
-        select: { id: true, title: true, kind: true, explanation: true, illustrationUrl: true, illustrationName: true, updatedAt: true },
+        select: { id: true, title: true, kind: true, explanation: true, editorNotes: true, illustrationUrl: true, illustrationName: true, updatedAt: true },
       },
     },
   });
@@ -71,6 +71,7 @@ export async function listProtocols(db: Db, accountId: string, opts: { archived?
       title: s.title,
       kind: s.kind as ShootKind,
       explanation: s.explanation,
+      editorNotes: s.editorNotes,
       illustration: s.illustrationUrl ? { href: illustrationHref(s.id, s.updatedAt), name: s.illustrationName ?? 'Ilustración' } : null,
     })),
   }));

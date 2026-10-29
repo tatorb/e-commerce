@@ -1358,6 +1358,9 @@ model PhotoStepRun {
   // Lo que pidió la persona al rehacer: { valores, apagados, propuestas }.
   // Sin pedido, propone Claude.
   requested   Json?
+  // La indicación puntual para Claude que se escribió al procesar la foto de
+  // cero: va solo en esta corrida, y sigue si se reintenta o se rehace.
+  note        String?
   // Copia de los ajustes de la cuenta con los que corre.
   settings    Json
   // Lo que devolvió el trabajador en cada ajuste: lista de partes
@@ -1834,6 +1837,9 @@ model ShootStep {
   title            String
   kind             ShootKind      @default(PHOTO)
   explanation      String         @default("")
+  // Indicaciones para el editor: Claude las recibe en cada foto de este paso,
+  // en el trabajador de imágenes, junto con el título.
+  editorNotes      String         @default("")
   // La ilustración, en el Drive (drive:<id>), con su tipo y su nombre.
   illustrationUrl  String?
   illustrationType String?
