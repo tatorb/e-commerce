@@ -68,6 +68,9 @@ import { formatDateTime, plural } from '@/lib/format';
 import { loadPublicationFaces, type PublicationFaces } from '@/lib/queries/publication-faces';
 import { FamilyMembersRow } from '@/components/families/FamilyMembersRow';
 import { familyOf } from '@/lib/families';
+import { PublicationPromotions } from '@/components/publication/PublicationPromotions';
+import { loadPriceStep } from '@/lib/pricing';
+import { isInstallmentPlan, resolvePricing } from '@/domain/pricing';
 
 export const dynamic = 'force-dynamic';
 // Subir al canal hace varios pedidos y vuelve a leer la publicación, y generar
@@ -148,6 +151,17 @@ export default async function PublicationPage({
   const productHref = `/a/${account.slug}/productos/${p.product.id}`;
   // Las otras publicaciones del mismo producto, para pasar de una a otra.
   const canTask = can(user.access, 'tareas', 'write');
+  // Para el margen de las campañas: el costo, los parámetros y las cuotas del paso Precio. Solo en la cara del canal.
+  const priceStep = face === 'canal' && p.externalId && copy ? await loadPriceStep(prisma, account.id, p.id).catch(() => null) : null;
+  const priceGroup = priceStep?.groups.find((g) => g.publicationIds.includes(p.id)) ?? null;
+  const campaignMargin =
+    priceStep && priceGroup
+      ? {
+          cost: priceGroup.cost,
+          params: resolvePricing(priceStep.account, priceStep.overrides),
+          plan: priceGroup.installments !== null && isInstallmentPlan(priceGroup.installments) ? priceGroup.installments : 0,
+        }
+      : null;
   const [others, history, knowledge, qa, tasks, people, stockPlans, factsOf, family, covers] = await Promise.all([
     prisma.publication.findMany({
       where: { productId: p.product.id, id: { not: p.id } },
@@ -426,6 +440,17 @@ export default async function PublicationPage({
                 />
               ))}
             </div>
+            {p.externalId ? (
+              <PublicationPromotions
+                accountSlug={account.slug}
+                publicationId={p.id}
+                channelName={channelName}
+                channelListPrice={copy.price === null ? null : Number(copy.price)}
+                range={priceStep?.discountRange ?? null}
+                margin={campaignMargin}
+                timeZone={tz}
+              />
+            ) : null}
             {(['description', 'attributes'] as const).map((field) => (
               <CollapsibleCard key={field} title={FACE_FIELD_LABEL[field]} icon={FIELD_ICON[field]}>
                 <SectionBody>

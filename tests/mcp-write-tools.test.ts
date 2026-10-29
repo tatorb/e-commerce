@@ -35,7 +35,8 @@ describe('herramientas de escritura en la lista', () => {
     expect(tools.get('update_pricing_settings')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('set_publication_status')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('push_prices')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
-    expect(tools.size).toBe(48);
+    expect(tools.get('choose_campaign')).toMatchObject({ readOnlyHint: false, destructiveHint: false });
+    expect(tools.size).toBe(49);
   });
 });
 

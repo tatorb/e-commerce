@@ -441,7 +441,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     expect((await state(pub.id)).draft).toEqual(['photos']);
 
     const result = await pushDrafts(db, { accountId, publicationId: pub.id, userId: null });
-    expect(result).toEqual({ sent: ['photos'], rejected: [], confirmed: true });
+    expect(result).toEqual({ sent: ['photos'], rejected: [], confirmed: true, campaigns: [] });
     expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual(['POST /pictures/items/upload', 'PUT /items/MLA1']);
     expect(calls[1].body).toEqual({ pictures: [{ id: 'SUBIDA-1' }, { id: 'P2' }, { source: 'https://otra/foto.jpg' }] });
     // Después de subir, vuelve a seguir a las del canal, que ya son esas.
@@ -564,7 +564,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
       // En el canal, las que comparten el producto cambian junto con esta.
       items.MLA4.pictures = [{ id: 'P2', secure_url: 'https://ml/P2.jpg' }];
       calls.length = 0;
-      expect(await pushDrafts(db, { accountId, publicationId: std.id, userId: null })).toEqual({ sent: ['photos'], rejected: [], confirmed: true });
+      expect(await pushDrafts(db, { accountId, publicationId: std.id, userId: null })).toEqual({ sent: ['photos'], rejected: [], confirmed: true, campaigns: [] });
       const sibling = await db.publication.findFirstOrThrow({ where: { externalId: 'MLA4' }, include: { channelCopy: true } });
       expect(sibling.channelCopy?.photos).toEqual(['https://ml/P2.jpg']);
       // Todas a la publicación, sin variantes.
@@ -602,7 +602,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
       expect((await state(pub.id)).draft).toEqual(['photos']);
 
       const result = await pushDrafts(db, { accountId, publicationId: pub.id, userId: null });
-      expect(result).toEqual({ sent: ['photos'], rejected: [], confirmed: true });
+      expect(result).toEqual({ sent: ['photos'], rejected: [], confirmed: true, campaigns: [] });
       expect(calls[0].body).toEqual({
         pictures: [{ id: 'P1' }, { id: 'P2' }, { id: 'P3' }],
         variations: [
@@ -804,7 +804,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
 
     await saveMedia(db, { accountId, publicationId: pub.id, refs: [{ kind: 'edit', editId: ready.id }, { kind: 'edit', editId }] });
     const result = await pushDrafts(db, { accountId, publicationId: pub.id, userId: null });
-    expect(result).toEqual({ sent: ['photos'], rejected: [], confirmed: true });
+    expect(result).toEqual({ sent: ['photos'], rejected: [], confirmed: true, campaigns: [] });
     // El original va con su nombre y su tipo, y los mismos bytes que se guardaron.
     expect(uploadedFiles[0]).toContain('filename="editada en la Mac.jpg"');
     expect(uploadedFiles[0]).toContain('Content-Type: image/jpeg');

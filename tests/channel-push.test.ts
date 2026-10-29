@@ -10,6 +10,7 @@ import { discardDrafts, readOne, runSyncStep, startSync } from '@/lib/channel-sy
 import { encrypt } from '@/lib/crypto';
 import { savePriceDecision } from '@/lib/pricing';
 import { readPromotions } from '@/lib/channel-promotions';
+import { cancelCampaign, queueCampaign, sendCampaignNow } from '@/lib/channel-campaigns';
 import { formatPrice } from '@/domain/money';
 import { saveQuantities } from '@/lib/quantities';
 import { advanceStep } from '@/domain/pipeline';
@@ -80,6 +81,10 @@ type Item = {
   dealMaxPrice?: number;
   // Las campañas que informa, tal cual las manda.
   campaigns?: Record<string, unknown>[];
+  // Lo que dice cada campaña de esta publicación: el rango de precio o el código de la oferta.
+  campaignDetails?: Record<string, Record<string, unknown>>;
+  // El canal no acepta sumarla a una campaña: el motivo.
+  campaignRejected?: string;
 };
 
 const variationBody = (v: NonNullable<Item['variations']>[number]) => ({
@@ -93,6 +98,8 @@ describe.skipIf(!url)('subir al canal en la base', () => {
   const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: url! }) });
   let server: http.Server;
   const writes: { method: string; path: string; body: unknown }[] = [];
+  // Los cambios con su dirección completa, para ver lo que va en la consulta.
+  const urls: string[] = [];
   let items: Record<string, Item> = {};
   let accountId = '';
   let storeId = '';
@@ -107,7 +114,18 @@ describe.skipIf(!url)('subir al canal en la base', () => {
       let raw = '';
       for await (const chunk of req) raw += chunk;
       const body = raw ? JSON.parse(raw) : null;
-      if (req.method === 'PUT' || req.method === 'POST' || req.method === 'DELETE') writes.push({ method: req.method, path: u.pathname, body });
+      if (req.method === 'PUT' || req.method === 'POST' || req.method === 'DELETE') {
+        writes.push({ method: req.method, path: u.pathname, body });
+        urls.push(`${req.method} ${u.pathname}${u.search}`);
+      }
+
+      // Lo que dice una campaña de una publicación.
+      const campaignItems = u.pathname.match(/^\/seller-promotions\/promotions\/([\w-]+)\/items$/);
+      if (campaignItems) {
+        const it = items[u.searchParams.get('item_id') ?? ''];
+        const detail = it?.campaignDetails?.[campaignItems[1]];
+        return json(200, { results: detail ? [detail] : [], paging: {} });
+      }
 
       const item = u.pathname.match(/^\/items\/(\w+)$/);
       if (item && req.method === 'GET' && items[item[1]]) {
@@ -193,6 +211,22 @@ describe.skipIf(!url)('subir al canal en la base', () => {
           const own = it.deal || it.dealStale ? [{ id: 'P1', type: 'PRICE_DISCOUNT', status: 'started', price: it.deal?.price ?? 0, original_price: price }] : [];
           return json(200, [candidate, ...own, ...(it.campaigns ?? [])]);
         }
+        // Una campaña: sumarse o salir.
+        const campaignId = req.method === 'DELETE' ? u.searchParams.get('promotion_id') : body?.promotion_id;
+        if (campaignId) {
+          const entry = (it.campaigns ?? []).find((c) => c.id === campaignId);
+          if (req.method === 'DELETE') {
+            if (!entry || entry.status === 'candidate') return json(400, { message: 'No offers found for item', cause: [] });
+            it.campaigns = it.campaigns!.filter((c) => c !== entry);
+            return json(200, {});
+          }
+          if (!entry || entry.status !== 'candidate') return json(400, { message: 'Item is not a candidate', cause: [] });
+          if (it.campaignRejected) return json(400, { message: it.campaignRejected, cause: [] });
+          entry.status = 'started';
+          entry.ref_id = `OFFER-${promo[1]}-1`;
+          if (body.deal_price) entry.price = body.deal_price;
+          return json(201, { price: entry.price });
+        }
         if (req.method === 'DELETE') {
           if (!it.deal) return json(400, { message: 'No offers found for item', error: 'bad_request', status: 400, cause: [] });
           it.deal = null;
@@ -277,6 +311,7 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     );
     resetVisitsTogether();
     writes.length = 0;
+    urls.length = 0;
     items = {
       MLA1: {
         title: 'Kit Embrague Ford Ka',
@@ -337,7 +372,7 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     expect((await state('MLA1')).draft).toEqual(['title', 'description']);
 
     const result = await pushDrafts(db, { accountId, publicationId: p.id, userId: null });
-    expect(result).toEqual({ sent: ['title', 'description'], rejected: [], confirmed: true });
+    expect(result).toEqual({ sent: ['title', 'description'], rejected: [], confirmed: true, campaigns: [] });
     expect(writes.map((w) => `${w.method} ${w.path}`)).toEqual(['PUT /items/MLA1', 'PUT /items/MLA1/description']);
     expect(items.MLA1.description).toBe('Kit completo con disco y placa.');
     // El canal guardó el título un poco distinto: la lectura de confirmación lo trae.
@@ -442,7 +477,7 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     expect((await state('MLA1')).draft).toEqual(['attributes']);
 
     const result = await pushDrafts(db, { accountId, publicationId: p.id, userId: null });
-    expect(result).toEqual({ sent: ['attributes'], rejected: [], confirmed: true });
+    expect(result).toEqual({ sent: ['attributes'], rejected: [], confirmed: true, campaigns: [] });
     expect(writes).toEqual([
       {
         method: 'PUT',
@@ -536,7 +571,7 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     expect(Number((await db.priceDecision.findFirstOrThrow({ where: { publicationId: p.id } })).cost)).toBe(100_000);
 
     const result = await pushDrafts(db, { accountId, publicationId: p.id, userId: null });
-    expect(result).toEqual({ sent: ['price'], rejected: [], confirmed: true });
+    expect(result).toEqual({ sent: ['price'], rejected: [], confirmed: true, campaigns: [] });
     expect(writes.map((w) => w.body)).toEqual([{ price: 260_000 }]);
     expect(await state('MLA1')).toEqual({ draft: [], choose: [], rejected: [] });
     expect(await db.channelSyncChange.findFirst({ where: { publicationId: p.id, kind: 'SENT' } })).toMatchObject({ field: 'price', after: '260000' });
@@ -576,7 +611,7 @@ describe.skipIf(!url)('subir al canal en la base', () => {
 
     const started = Date.now();
     const result = await pushDrafts(db, { accountId, publicationId: p.id, userId: null });
-    expect(result).toEqual({ sent: ['price', 'installments', 'discount'], rejected: [], confirmed: true });
+    expect(result).toEqual({ sent: ['price', 'installments', 'discount'], rejected: [], confirmed: true, campaigns: [] });
     expect(writes.map((w) => `${w.method} ${w.path}`)).toEqual([
       'PUT /items/MLA1',
       'POST /items/MLA1/listing_type',
@@ -688,6 +723,165 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     ]);
   });
 
+  // ───────────────────────────── Campañas ─────────────────────────────
+
+  /** Por subir de la cuenta. Su módulo se conecta a la base al cargarse: se carga con la de prueba. */
+  async function listToPush(id: string, base: PrismaClient) {
+    process.env.DATABASE_URL ??= url;
+    return (await import('@/lib/queries/sync')).listToPush(id, base);
+  }
+
+  /** Una invitación a una tradicional, una a una co-fondeada automática, una en la que está y una que se maneja en el canal. */
+  function withCampaigns() {
+    items.MLA1.campaigns = [
+      { id: 'P-DEAL', type: 'DEAL', status: 'candidate', price: 0, original_price: 100, name: 'Semana del repuesto' },
+      { id: 'P-SMART', type: 'SMART', status: 'candidate', price: 80, original_price: 100, meli_percentage: 5, seller_percentage: 15, name: 'Compartida' },
+      { id: 'P-SMART2', type: 'SMART', status: 'started', ref_id: 'OFFER-MLA1-9', price: 85, original_price: 100, meli_percentage: 5, seller_percentage: 10, name: 'Compartida vieja' },
+      { id: 'P-VOL', type: 'VOLUME', status: 'candidate', price: 0, name: '3x2' },
+    ];
+    items.MLA1.campaignDetails = {
+      'P-DEAL': { id: 'MLA1', status: 'candidate', price: 0, original_price: 100, min_discounted_price: 50, max_discounted_price: 90, suggested_discounted_price: 85 },
+      'P-SMART': { id: 'MLA1', status: 'candidate', offer_id: 'CANDIDATE-MLA1-7', price: 80, original_price: 100, meli_percentage: 5, seller_percentage: 15 },
+    };
+  }
+
+  it('lee cómo sumarse a cada campaña: eligiendo el precio, aceptando, o solo desde el canal', async () => {
+    const p = await pub('MLA1');
+    withCampaigns();
+    const r = await readPromotions(db, { accountId, publicationIds: [p.id] });
+    if (!r.ok) throw new Error(r.error);
+    const byName = Object.fromEntries(r.read[0].promotions.campaigns.map((c) => [c.name, c]));
+    expect(byName['Semana del repuesto']).toMatchObject({ status: 'invited', join: 'price', canLeave: false, pausesOwnDiscount: true, range: { minPrice: 50, maxPrice: 90, suggestedPrice: 85 } });
+    expect(byName['Compartida']).toMatchObject({ status: 'invited', join: 'accept', range: null, channelPct: 5, sellerPct: 15 });
+    expect(byName['Compartida vieja']).toMatchObject({ status: 'active', join: null, canLeave: true });
+    expect(byName['3x2']).toMatchObject({ join: null, canLeave: false });
+    // La co-fondeada guarda el código de la oferta para sumarse.
+    expect(byName['Compartida'].ref).toContain('CANDIDATE-MLA1-7');
+    expect(r.pending).toEqual([]);
+    // Solo lee.
+    expect(writes).toEqual([]);
+  });
+
+  it('desde el Pipeline, sumarse y salir quedan en Por subir y se mandan con los demás cambios', async () => {
+    const p = await pub('MLA1');
+    withCampaigns();
+    const read = await readPromotions(db, { accountId, publicationIds: [p.id] });
+    if (!read.ok) throw new Error(read.error);
+    const ref = (name: string) => read.read[0].promotions.campaigns.find((c) => c.name === name)!.ref!;
+    await db.user.create({ data: { id: 'u3', name: 'Persona', email: 'persona3@example.com' } });
+    await queueCampaign(db, { accountId, publicationId: p.id, userId: 'u3', choice: { action: 'join', ref: ref('Semana del repuesto'), name: 'Semana del repuesto', kind: 'Campaña tradicional', price: 85 } });
+    await queueCampaign(db, { accountId, publicationId: p.id, userId: 'u3', choice: { action: 'join', ref: ref('Compartida'), name: 'Compartida', kind: 'Co-fondeada automática', price: null } });
+    await queueCampaign(db, { accountId, publicationId: p.id, userId: 'u3', choice: { action: 'leave', ref: ref('Compartida vieja'), name: 'Compartida vieja', kind: 'Co-fondeada automática', price: null } });
+    // Nada llegó al canal todavía.
+    expect(writes).toEqual([]);
+    const row = (await listToPush(accountId, db)).find((x) => x.id === p.id)!;
+    expect(row.draft).toEqual([]);
+    expect(row.campaigns.map((c) => c.text)).toEqual([
+      `Sumarse a Semana del repuesto (Campaña tradicional), el comprador paga ${formatPrice(85)}`,
+      'Sumarse a Compartida (Co-fondeada automática)',
+      'Salir de Compartida vieja (Co-fondeada automática)',
+    ]);
+
+    // Se suben con el botón de Por subir.
+    const result = await pushDrafts(db, { accountId, publicationId: p.id, userId: 'u3' });
+    expect(result.campaigns).toEqual([
+      { name: 'Semana del repuesto', action: 'join', ok: true },
+      { name: 'Compartida', action: 'join', ok: true },
+      { name: 'Compartida vieja', action: 'leave', ok: true },
+    ]);
+    expect(writes.map((w) => w.body)).toEqual([{ promotion_id: 'P-DEAL', promotion_type: 'DEAL', deal_price: 85 }, { promotion_id: 'P-SMART', promotion_type: 'SMART', offer_id: 'CANDIDATE-MLA1-7' }, null]);
+    expect(urls[2]).toBe('DELETE /seller-promotions/items/MLA1?promotion_type=SMART&promotion_id=P-SMART2&offer_id=OFFER-MLA1-9&app_version=v2');
+    expect(await db.campaignRequest.count()).toBe(0);
+    // En el Registro, a nombre de la persona.
+    const logged = await db.channelSyncChange.findMany({ where: { publicationId: p.id, field: 'campaign' }, orderBy: { id: 'asc' } });
+    expect(logged.map((c) => [c.kind, c.after, c.userId])).toEqual([
+      ['SENT', `Sumarse a Semana del repuesto (Campaña tradicional), el comprador paga ${formatPrice(85)}`, 'u3'],
+      ['SENT', 'Sumarse a Compartida (Co-fondeada automática)', 'u3'],
+      ['SENT', 'Salir de Compartida vieja (Co-fondeada automática)', 'u3'],
+    ]);
+    expect((await listToPush(accountId, db)).find((x) => x.id === p.id)).toBeUndefined();
+  });
+
+  it('si el canal no acepta sumarla, el pedido queda en Por subir con el motivo; se puede sacar sin mandarlo', async () => {
+    const p = await pub('MLA1');
+    withCampaigns();
+    items.MLA1.campaignRejected = 'The seller reputation is not green';
+    const read = await readPromotions(db, { accountId, publicationIds: [p.id] });
+    if (!read.ok) throw new Error(read.error);
+    const c = read.read[0].promotions.campaigns.find((x) => x.name === 'Compartida')!;
+    const queued = await queueCampaign(db, { accountId, publicationId: p.id, userId: null, choice: { action: 'join', ref: c.ref!, name: 'Compartida', kind: c.kind, price: null } });
+    const result = await pushDrafts(db, { accountId, publicationId: p.id, userId: null });
+    expect(result.campaigns).toEqual([{ name: 'Compartida', action: 'join', ok: false, message: 'Mercado Libre no aceptó la campaña: The seller reputation is not green' }]);
+    const row = (await listToPush(accountId, db)).find((x) => x.id === p.id)!;
+    expect(row.campaigns).toEqual([{ text: 'Sumarse a Compartida (Co-fondeada automática)', rejection: 'Mercado Libre no aceptó la campaña: The seller reputation is not green' }]);
+    expect(await db.channelSyncChange.findFirst({ where: { publicationId: p.id, field: 'campaign' } })).toMatchObject({ kind: 'REJECTED' });
+    await cancelCampaign(db, { accountId, requestId: queued.id });
+    expect(await db.campaignRequest.count()).toBe(0);
+    await expect(cancelCampaign(db, { accountId, requestId: queued.id })).rejects.toThrow('ya no está en Por subir');
+  });
+
+  it('desde la página de la publicación se manda en el momento', async () => {
+    const p = await pub('MLA1');
+    withCampaigns();
+    const read = await readPromotions(db, { accountId, publicationIds: [p.id] });
+    if (!read.ok) throw new Error(read.error);
+    const deal = read.read[0].promotions.campaigns.find((x) => x.name === 'Semana del repuesto')!;
+    // Lo que había quedado pedido para esa campaña deja de estarlo.
+    await queueCampaign(db, { accountId, publicationId: p.id, userId: null, choice: { action: 'join', ref: deal.ref!, name: 'Semana del repuesto', kind: deal.kind, price: 80 } });
+    const r = await sendCampaignNow(db, { accountId, publicationId: p.id, userId: null, choice: { action: 'join', ref: deal.ref!, name: 'Semana del repuesto', kind: deal.kind, price: 88 } });
+    expect(r).toEqual({ ok: true });
+    expect(writes.map((w) => w.body)).toEqual([{ promotion_id: 'P-DEAL', promotion_type: 'DEAL', deal_price: 88 }]);
+    expect(await db.campaignRequest.count()).toBe(0);
+    // Ahora está adentro: se puede salir.
+    const again = await readPromotions(db, { accountId, publicationIds: [p.id] });
+    if (!again.ok) throw new Error(again.error);
+    expect(again.read[0].promotions.campaigns.find((x) => x.name === 'Semana del repuesto')).toMatchObject({ status: 'active', canLeave: true, price: 88 });
+    // Un rechazo vuelve con su motivo y queda en el Registro.
+    items.MLA1.campaignRejected = 'Campaign finished';
+    const smart = again.read[0].promotions.campaigns.find((x) => x.name === 'Compartida')!;
+    expect(await sendCampaignNow(db, { accountId, publicationId: p.id, userId: null, choice: { action: 'join', ref: smart.ref!, name: 'Compartida', kind: smart.kind, price: null } })).toEqual({
+      ok: false,
+      error: 'Mercado Libre no aceptó la campaña: Campaign finished',
+    });
+    expect(await db.channelSyncChange.count({ where: { publicationId: p.id, field: 'campaign', kind: 'REJECTED' } })).toBe(1);
+  });
+
+  it('Claude ve cómo sumarse, deja pedido sumarse con un precio que entre y push_prices lo manda', async () => {
+    process.env.DATABASE_URL ??= url;
+    const { PRICE_TOOLS } = await import('@/lib/mcp/price-tools');
+    const tool = (name: string) => PRICE_TOOLS.find((t) => t.name === name)!;
+    await db.user.create({ data: { id: 'u4', name: 'Persona', email: 'persona4@example.com' } });
+    const ctx: McpContext = { db, userId: 'u4', access: { isAdmin: true, permissions: {}, accountIds: [] }, baseUrl: 'https://app.ejemplo.com' };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const run = async (name: string, args: Record<string, unknown>): Promise<any> => tool(name).run(ctx, tool(name).input.parse(args));
+    expect(tool('choose_campaign')).toMatchObject({ section: 'pipeline', readOnly: false, destructive: false });
+    const p = await pub('MLA1');
+    withCampaigns();
+    const step = await run('get_price_step', { cuenta: 'prueba', publicacion: p.id });
+    const campaigns = step.pestanas[0].lo_que_acepta_el_canal.campanas;
+    const deal = campaigns.find((c: { nombre: string }) => c.nombre === 'Semana del repuesto');
+    expect(deal).toMatchObject({ estado: 'la_invitan', como_sumarse: 'eligiendo_el_precio', precio_que_acepta: { desde: 50, hasta: 90, sugerido: 85 }, frena_el_descuento_propio: true });
+    expect(campaigns.find((c: { nombre: string }) => c.nombre === '3x2')).toMatchObject({ como_sumarse: 'desde_el_canal' });
+    expect(campaigns.find((c: { nombre: string }) => c.nombre === 'Compartida vieja')).toMatchObject({ estado: 'esta_adentro', se_puede_salir: true });
+
+    // Un precio fuera de lo que acepta no queda pedido.
+    await expect(run('choose_campaign', { cuenta: 'prueba', publicacion: p.id, campana: deal.campana, accion: 'sumarse', precio: 95 })).rejects.toThrow('Es más alto de lo que acepta el canal.');
+    await expect(run('choose_campaign', { cuenta: 'prueba', publicacion: p.id, campana: 'otra', accion: 'sumarse' })).rejects.toThrow('ya no aparece');
+    const chosen = await run('choose_campaign', { cuenta: 'prueba', publicacion: p.id, campana: deal.campana, accion: 'sumarse', precio: 85 });
+    expect(chosen).toMatchObject({ en_por_subir: `Sumarse a Semana del repuesto (Campaña tradicional), el comprador paga ${formatPrice(85)}`, aviso: expect.stringContaining('frena el descuento propio') });
+    expect(writes).toEqual([]);
+    // get_price_step lo muestra pedido.
+    const after = await run('get_price_step', { cuenta: 'prueba', publicacion: p.id });
+    expect(after.pestanas[0].lo_que_acepta_el_canal.campanas.find((c: { nombre: string }) => c.nombre === 'Semana del repuesto').en_por_subir).toContain('Sumarse');
+
+    // push_prices lo manda, aunque no haya precio por subir.
+    const pushed = await run('push_prices', { cuenta: 'prueba' });
+    expect(pushed.subidas).toEqual([
+      expect.objectContaining({ publicacion: 'MLA1', resultado: 'subido', subio: [], campanas: [{ campana: 'Semana del repuesto', accion: 'sumarse', resultado: 'hecho' }] }),
+    ]);
+    expect(writes.map((w) => w.body)).toEqual([{ promotion_id: 'P-DEAL', promotion_type: 'DEAL', deal_price: 85 }]);
+  });
+
   // ───────────────────────────── Desde Claude ─────────────────────────────
 
   it('Claude sube solo el precio, las cuotas y el descuento de Por subir; un descuento rechazado no corta el resto', async () => {
@@ -729,7 +923,7 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     ]);
     expect(r.salteadas).toEqual([
       { publicacion: 'MLA999999999', motivo: 'La publicación MLA999999999 no está en las Publicaciones de la cuenta.' },
-      { publicacion: 'MLA3', motivo: 'No tiene precio, cuotas ni descuento por subir.' },
+      { publicacion: 'MLA3', motivo: 'No tiene precio, cuotas, descuento ni campañas por subir.' },
       { publicacion: nueva.id, motivo: 'Todavía no está publicada en Mercado Libre: primero hay que crearla allá.' },
     ]);
     // El título no se subió: sigue en Por subir.
@@ -758,7 +952,7 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     delete items.MLA1.dealRejected;
     again = await run({ cuenta: 'prueba' });
     expect(again.subidas).toEqual([expect.objectContaining({ publicacion: 'MLA1', resultado: 'subido', subio: ['descuento'] })]);
-    expect(await run({ cuenta: 'prueba' })).toEqual({ subidas: [], aviso: 'No hay precios, cuotas ni descuentos por subir en la cuenta.' });
+    expect(await run({ cuenta: 'prueba' })).toEqual({ subidas: [], aviso: 'No hay precios, cuotas, descuentos ni campañas por subir en la cuenta.' });
   });
 
   it('antes de que venza, el descuento se renueva solo y queda en el Registro', async () => {
@@ -830,7 +1024,7 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     expect(await saveQuantities(db, { accountId, publicationIds: [p.id], change: { all: 9 } })).toEqual({ saved: [p.id], skipped: [] });
     expect((await state('MLA1')).draft).toEqual(['quantity']);
     const result = await pushDrafts(db, { accountId, publicationId: p.id, userId: null });
-    expect(result).toEqual({ sent: ['quantity'], rejected: [], confirmed: true });
+    expect(result).toEqual({ sent: ['quantity'], rejected: [], confirmed: true, campaigns: [] });
     expect(writes.map((w) => w.body)).toEqual([{ available_quantity: 9 }]);
     expect(await state('MLA1')).toEqual(clean);
     const after = await pub('MLA1');

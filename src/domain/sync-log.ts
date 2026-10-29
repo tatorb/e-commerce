@@ -141,6 +141,7 @@ export function dayRange(f: Pick<LogFilters, 'from' | 'to'>, timeZone: string): 
 export function fieldLabel(field: string): string {
   if (isFaceField(field)) return FACE_FIELD_LABEL[field];
   if (field === 'status') return 'Estado';
+  if (field === 'campaign') return 'Campaña';
   return field === 'publication' ? 'Publicación' : field === 'question' ? 'Pregunta de un comprador' : field;
 }
 

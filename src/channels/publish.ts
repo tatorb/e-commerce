@@ -15,6 +15,7 @@ export {
   type ChannelNewMember,
   type ChannelPicture,
   type ChannelPictureLayout,
+  type ChannelPriceRange,
   type ChannelPromotions,
   type ChannelPublisher,
   type ChannelRelist,

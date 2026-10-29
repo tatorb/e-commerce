@@ -8,6 +8,8 @@ import { pricingInputSchema } from '@/domain/pricing';
 import { getAccountBySlug } from '@/lib/queries/accounts';
 import { PricingError, savePriceDecision, savePricingSettings } from '@/lib/pricing';
 import { readPromotions, type PromotionsResult } from '@/lib/channel-promotions';
+import { CampaignError, cancelCampaign, queueCampaign, type CampaignChoice } from '@/lib/channel-campaigns';
+import { z } from 'zod';
 
 // Lo que se hace desde el paso Precio y desde Ajustes > Precios.
 
@@ -69,5 +71,46 @@ export async function savePriceDecisionAction(accountSlug: string, publicationId
 /** Lo que el canal deja hacer hoy con el descuento de las publicaciones de una pestaña. Solo lee. */
 export async function readPromotionsAction(accountSlug: string, publicationIds: string[]): Promise<PromotionsResult> {
   const ids = Array.isArray(publicationIds) ? publicationIds.filter((id): id is string => typeof id === 'string').slice(0, 20) : [];
-  return act(accountSlug, { section: ['pipeline'], level: 'read' }, ({ account }) => readPromotions(prisma, { accountId: account.id, publicationIds: ids }));
+  return act(accountSlug, { section: ['pipeline', 'publicaciones'], level: 'read' }, ({ account }) => readPromotions(prisma, { accountId: account.id, publicationIds: ids }));
+}
+
+type CampaignResult = { ok: true } | { ok: false; error: string };
+
+const campaignChoice = z.object({
+  action: z.enum(['join', 'leave']),
+  ref: z.string().min(1).max(500),
+  name: z.string().max(200),
+  kind: z.string().max(200),
+  price: z.number().positive().max(999_999_999).nullable(),
+});
+
+/** Desde el paso Precio: sumarse a una campaña o salir queda en Por subir. */
+export async function queueCampaignAction(accountSlug: string, publicationId: string, choice: CampaignChoice): Promise<CampaignResult> {
+  const parsed = campaignChoice.safeParse(choice);
+  const does = parsed.success && parsed.data.action === 'leave' ? 'Dejó para subir: salir de una campaña' : 'Dejó para subir: sumarse a una campaña';
+  return act(accountSlug, { section: ['pipeline'], does, publicationId, detail: parsed.success ? parsed.data.name : null }, async ({ user, account }) => {
+    if (!parsed.success) return { ok: false, error: 'Revisá la campaña y el precio.' };
+    try {
+      await queueCampaign(prisma, { accountId: account.id, publicationId, choice: parsed.data, userId: user.id });
+    } catch (e) {
+      if (e instanceof CampaignError) return { ok: false, error: e.message };
+      throw e;
+    }
+    revalidatePath(`/a/${accountSlug}`, 'layout');
+    return { ok: true };
+  });
+}
+
+/** Saca de Por subir un pedido de sumarse o salir, sin mandarlo. */
+export async function cancelCampaignAction(accountSlug: string, requestId: string): Promise<CampaignResult> {
+  return act(accountSlug, { section: ['pipeline', 'subir'], does: 'Sacó de Por subir un pedido de campaña' }, async ({ account }) => {
+    try {
+      await cancelCampaign(prisma, { accountId: account.id, requestId: String(requestId ?? '') });
+    } catch (e) {
+      if (e instanceof CampaignError) return { ok: false, error: e.message };
+      throw e;
+    }
+    revalidatePath(`/a/${accountSlug}`, 'layout');
+    return { ok: true };
+  });
 }

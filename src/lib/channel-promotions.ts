@@ -4,6 +4,7 @@ import { getChannelPublisher, PublishError, type ChannelPromotions } from '@/cha
 import { ConnectError } from '@/channels/connect';
 import { withAccessToken } from '@/lib/connections';
 import { CryptoError } from '@/lib/crypto';
+import { pendingCampaigns, type PendingCampaign } from '@/lib/channel-campaigns';
 
 // Lo que el canal deja hacer hoy con los descuentos de unas publicaciones: el
 // rango de precio con descuento que acepta, el descuento propio que tienen y
@@ -20,6 +21,8 @@ export type PromotionsResult =
       read: PromotionsRead[];
       // Cuántas todavía no están en el canal.
       unpublished: number;
+      // Sumarse o salir de una campaña, pedido desde el Pipeline y todavía en Por subir.
+      pending: PendingCampaign[];
     }
   | { ok: false; error: string };
 
@@ -37,14 +40,15 @@ export async function readPromotions(db: PrismaClient, args: { accountId: string
   const byId = new Map(pubs.map((p) => [p.id, p]));
   // Las de la misma tienda, publicadas, en el orden pedido.
   const published = ids.map((id) => byId.get(id)!).filter((p) => p.externalId && p.store.id === store.id);
-  if (published.length === 0) return { ok: true, channelName, read: [], unpublished: pubs.length };
+  if (published.length === 0) return { ok: true, channelName, read: [], unpublished: pubs.length, pending: [] };
+  const pending = await pendingCampaigns(db, published.map((p) => p.id));
   try {
     const read = await withAccessToken(db, store.id, async (token) => {
       const out: PromotionsRead[] = [];
       for (const p of published) out.push({ publicationId: p.id, externalId: p.externalId!, promotions: await publisher.readPromotions!(token, p.externalId!) });
       return out;
     });
-    return { ok: true, channelName, read, unpublished: pubs.length - published.length };
+    return { ok: true, channelName, read, unpublished: pubs.length - published.length, pending };
   } catch (e) {
     if (e instanceof PublishError || e instanceof ConnectError || e instanceof CryptoError) return { ok: false, error: e.message };
     // Solo se lee: un error inesperado no corta la pantalla ni lo que pidió Claude.

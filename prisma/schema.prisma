@@ -76,6 +76,7 @@ model User {
   descriptionDrafts  DescriptionDraft[]
   pricingSettings    PricingSettings[]    @relation("PricingSettingsUpdatedBy")
   priceDecisions     PriceDecision[]      @relation("PriceDecidedBy")
+  campaignRequests   CampaignRequest[]    @relation("CampaignRequestedBy")
   tasksCreated       Task[]               @relation("TaskCreatedBy")
   tasks              TaskAssignee[]
   stockMoves         StockMovement[]
@@ -550,6 +551,7 @@ model Publication {
   syncChanges       ChannelSyncChange[]
   buyerQuestions    BuyerQuestion[]
   priceDecisions    PriceDecision[]
+  campaignRequests  CampaignRequest[]
   clips             PublicationClip[]
   descriptionDraft  DescriptionDraft?
   tasks             TaskPublication[]
@@ -1926,6 +1928,36 @@ model PricingSettings {
   updatedAt   DateTime @updatedAt
 
   @@map("pricing_settings")
+}
+
+enum CampaignAction {
+  JOIN
+  LEAVE
+}
+
+// Sumarse a una campaña del canal o salir, pedido desde el Pipeline: queda en
+// Por subir y se manda con los demás cambios. Desde la página de la
+// publicación se manda en el momento y no pasa por acá.
+model CampaignRequest {
+  id            String         @id @default(cuid())
+  publicationId String
+  publication   Publication    @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  action        CampaignAction
+  // Cómo identifica el canal a la campaña: la app no lo interpreta.
+  ref           String
+  // Para mostrarla: su nombre y qué tipo de campaña es.
+  name          String
+  kind          String
+  // El precio para el comprador, en las campañas donde lo elige la tienda.
+  price         Decimal?       @db.Decimal(14, 2)
+  // Por qué el canal no lo aceptó la última vez que se quiso subir.
+  rejection     String?
+  requestedById String?
+  requestedBy   User?          @relation("CampaignRequestedBy", fields: [requestedById], references: [id], onDelete: SetNull)
+  createdAt     DateTime       @default(now())
+
+  @@unique([publicationId, ref])
+  @@map("campaign_requests")
 }
 
 // El precio que se decidió en el paso Precio para una publicación: el precio

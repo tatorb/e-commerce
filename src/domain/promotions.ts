@@ -82,3 +82,23 @@ export function discountOptions(
   const suggested = bounds.suggestedPrice !== null ? inRange(pctForPrice(listPrice, bounds.suggestedPrice)) : null;
   return { smallest, largest: largest !== null && largest > 0 ? largest : null, suggested };
 }
+
+/**
+ * Lo que recibe la tienda por cada venta en una campaña: lo que paga el
+ * comprador más la parte del descuento que pone el canal, que se calcula
+ * sobre el precio publicado. Es una estimación: el canal no detalla sobre qué
+ * precio cobra su cargo.
+ */
+export function campaignRevenue(c: { price: number | null; channelPct: number | null; listPrice: number | null }): number | null {
+  if (c.price === null || !(c.price > 0)) return null;
+  return c.price + (c.channelPct && c.listPrice ? (c.listPrice * c.channelPct) / 100 : 0);
+}
+
+/** Si el precio elegido para una campaña entra en lo que acepta el canal: el motivo si no entra. */
+export function campaignPriceProblem(price: number, range: DiscountBounds | null, listPrice: number | null): string | null {
+  if (!(price > 0)) return 'Falta el precio para el comprador.';
+  if (listPrice !== null && price >= listPrice) return 'Tiene que ser menor que el precio publicado.';
+  if (range?.maxPrice != null && price > range.maxPrice) return 'Es más alto de lo que acepta el canal.';
+  if (range?.minPrice != null && price < range.minPrice) return 'Es más bajo de lo que acepta el canal.';
+  return null;
+}

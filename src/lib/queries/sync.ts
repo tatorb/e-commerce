@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@/generated/prisma/client';
+import { campaignText } from '@/lib/channel-campaigns';
 import { prisma } from '@/lib/db';
 import { photoVariants } from '@/domain/media';
 import { channelFaceValues, faceSummary, faceValues, fingerprintsOf, priceFaceText, type FaceField, type FaceValues } from '@/domain/channel-sync';
@@ -146,6 +147,8 @@ export type ToPushRow = {
   draft: FaceField[];
   choose: FaceField[];
   rejected: { field: FaceField; message: string }[];
+  // Sumarse a una campaña o salir, pedido desde el Pipeline, y por qué no se pudo la última vez.
+  campaigns: { text: string; rejection: string | null }[];
   // Por qué no se puede subir desde la app, si no se puede.
   blocked: string | null;
   pipeline: { pipelineStatus: PipelineStatus; pipelineStep: PipelineStep | null; pipelineRemoval: PipelineRemoval | null };
@@ -171,13 +174,14 @@ export async function listToPush(accountId: string, db: PrismaClient = prisma): 
       pipelineRemoval: true,
       store: { select: { name: true, channel: { select: { kind: true, name: true } }, connection: { select: { status: true } } } },
       channelCopy: { select: { fingerprints: true, agreed: true, rejections: true, price: true, installments: true, discount: true } },
+      campaignRequests: { orderBy: { createdAt: 'asc' }, select: { action: true, name: true, kind: true, price: true, rejection: true } },
     },
     orderBy: { updatedAt: 'desc' },
   });
   const rows: ToPushRow[] = [];
   for (const p of publications) {
     const summary = faceSummary(fingerprintsOf(faceValues(p)), p.channelCopy);
-    if (summary.draft.length === 0 && summary.choose.length === 0) continue;
+    if (summary.draft.length === 0 && summary.choose.length === 0 && p.campaignRequests.length === 0) continue;
     const channelName = p.store.channel.name;
     rows.push({
       id: p.id,
@@ -188,6 +192,10 @@ export async function listToPush(accountId: string, db: PrismaClient = prisma): 
       draft: summary.draft,
       choose: summary.choose,
       rejected: summary.rejected.map(({ field, message }) => ({ field, message })),
+      campaigns: p.campaignRequests.map((c) => ({
+        text: campaignText({ action: c.action === 'JOIN' ? 'join' : 'leave', name: c.name, kind: c.kind, price: c.price === null ? null : Number(c.price) }),
+        rejection: c.rejection,
+      })),
       blocked: !getChannelPublisher(p.store.channel.kind)
         ? `Todavía no se pueden subir cambios a ${channelName}.`
         : p.store.connection?.status !== 'ACTIVE'

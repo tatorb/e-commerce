@@ -25,6 +25,7 @@ import { PipelineHistory } from '@/components/pipeline/PipelineHistory';
 import { AddToPipelineButton } from '@/components/pipeline/AddToPipelineButton';
 import { PublicationCodeCard } from '@/components/pipeline/PublicationCodeCard';
 import { PendingChangesCard } from '@/components/publication/PendingChangesCard';
+import { campaignText, pendingCampaigns } from '@/lib/channel-campaigns';
 import { MediaOrganizer } from '@/components/publication/MediaOrganizer';
 import { loadMediaSources } from '@/lib/media';
 import { loadFamilyMedia } from '@/lib/family-media';
@@ -188,6 +189,9 @@ export default async function PipelineStepPage({
       productCovers([pub.productId]),
     ]).then(([copy, covers]) => firstPhoto(copy?.photos) ?? covers.get(pub.productId) ?? null),
   ]);
+  // Sumarse a una campaña o salir, pedido en Precio: se sube con los demás cambios.
+  const pendingCampaignTexts =
+    viewing === 'PUBLISH' ? (await pendingCampaigns(prisma, [pub.id])).map((c) => ({ text: campaignText(c), rejection: c.rejection })) : [];
   const facts = factsOf.get(pub.id) ?? null;
   const auto = ctx && viewing === 'TITLE' ? await autoAvailable(prisma, ctx.channel, ctx.storeId) : null;
   // En Publicación, cada medida de la familia con su código, su estado y sus cambios sin subir.
@@ -443,7 +447,7 @@ export default async function PipelineStepPage({
               externalId={pub.externalId}
               url={pub.url}
             />
-            {faces ? <PendingChangesCard accountSlug={account.slug} faces={faces} /> : null}
+            {faces ? <PendingChangesCard accountSlug={account.slug} faces={faces} campaigns={pendingCampaignTexts} /> : null}
           </>
         ) : viewing ? (
           <Card>

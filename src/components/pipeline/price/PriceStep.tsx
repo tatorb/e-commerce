@@ -536,8 +536,12 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
         </SectionCard>
         <div className="md:col-span-2">
           <ChannelPromotionsCard
+            accountSlug={accountSlug}
+            mode="queue"
+            margin={{ cost, params, plan }}
             state={promotions.state}
             reload={promotions.reload}
+            refresh={promotions.refresh}
             channelName={data.channelName}
             listPrice={listPrice}
             channelListPrice={group.channelPrice}

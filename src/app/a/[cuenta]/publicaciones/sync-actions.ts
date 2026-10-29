@@ -23,6 +23,7 @@ import { plannedText } from '@/lib/stock-plan';
 import { settleReactivations } from '@/lib/restock';
 import { saveFamilyMedia } from '@/lib/family-media';
 import { familyMemberIds } from '@/domain/family-members';
+import { CampaignError, sendCampaignNow, type CampaignChoice } from '@/lib/channel-campaigns';
 
 // Lo que se hace desde la página de una publicación y desde Por subir: cambiar
 // el borrador, subirlo al canal, descartarlo y volver a leer del canal.
@@ -309,6 +310,31 @@ export async function setFollowsStockAction(accountSlug: string, publicationId: 
     } catch (e) {
       if (e instanceof StockError) return { ok: false, error: e.message };
       return failure(e);
+    }
+  });
+}
+
+const campaignChoiceSchema = z.object({
+  action: z.enum(['join', 'leave']),
+  ref: z.string().min(1).max(500),
+  name: z.string().max(200),
+  kind: z.string().max(200),
+  price: z.number().positive().max(999_999_999).nullable(),
+});
+
+/** Desde la página de la publicación: sumarse a una campaña o salir se manda al canal en el momento. */
+export async function sendCampaignNowAction(accountSlug: string, publicationId: string, choice: CampaignChoice): Promise<Result> {
+  const parsed = campaignChoiceSchema.safeParse(choice);
+  const does = parsed.success && parsed.data.action === 'leave' ? 'Salió de una campaña del canal' : 'Se sumó a una campaña del canal';
+  return act(accountSlug, { section: 'subir', does, publicationId, detail: parsed.success ? parsed.data.name : null }, async ({ user, account }) => {
+    if (!parsed.success) return { ok: false, error: 'Revisá la campaña y el precio.' };
+    try {
+      const r = await sendCampaignNow(prisma, { accountId: account.id, publicationId, choice: parsed.data, userId: user.id });
+      refresh(accountSlug, publicationId);
+      return r;
+    } catch (e) {
+      if (e instanceof CampaignError || e instanceof ConnectError) return { ok: false, error: e.message };
+      throw e;
     }
   });
 }

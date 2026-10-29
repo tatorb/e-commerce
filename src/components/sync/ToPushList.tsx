@@ -29,20 +29,30 @@ export function ToPushList({ accountSlug, rows }: { accountSlug: string; rows: T
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [outcomes, setOutcomes] = useState<Record<string, Outcome>>({});
   const stop = useRef(false);
-  const pushable = rows.filter((r) => !r.blocked && r.draft.length > 0);
+  const canPushRow = (r: ToPushRow) => !r.blocked && (r.draft.length > 0 || r.campaigns.length > 0);
+  const pushable = rows.filter(canPushRow);
 
   async function push(ids: string[]) {
     stop.current = false;
     setProgress({ done: 0, total: ids.length });
     for (let i = 0; i < ids.length && !stop.current; i++) {
       const r = await pushDraftsAction(accountSlug, ids[i]).catch(() => null);
+      const campaignsFailed = r && r.ok ? r.campaigns.filter((c) => !c.ok) : [];
+      const campaignsDone = r && r.ok ? r.campaigns.filter((c) => c.ok) : [];
+      const done = [
+        r && r.ok && r.sent.length > 0 ? labels(r.sent) : null,
+        ...campaignsDone.map((c) => `${c.action === 'join' ? 'se sumó a' : 'salió de'} ${c.name}`),
+      ].filter(Boolean);
       const outcome: Outcome = !r
         ? { kind: 'error', text: 'Se cortó la conexión con la app.' }
         : !r.ok
           ? { kind: 'error', text: r.error }
-          : r.rejected.length > 0
-            ? { kind: 'error', text: r.rejected.map((x) => `${FACE_FIELD_LABEL[x.field]}: ${x.message}`).join(' ') }
-            : { kind: 'ok', text: `Subido: ${labels(r.sent)}.` };
+          : r.rejected.length > 0 || campaignsFailed.length > 0
+            ? {
+                kind: 'error',
+                text: [...r.rejected.map((x) => `${FACE_FIELD_LABEL[x.field]}: ${x.message}`), ...campaignsFailed.map((c) => `${c.name}: ${c.message}`)].join(' '),
+              }
+            : { kind: 'ok', text: `Subido: ${done.join(', ')}.` };
       setOutcomes((prev) => ({ ...prev, [ids[i]]: outcome }));
       setProgress({ done: i + 1, total: ids.length });
     }
@@ -95,7 +105,7 @@ export function ToPushList({ accountSlug, rows }: { accountSlug: string; rows: T
       <ul className="divide-y">
         {rows.map((row) => {
           const outcome = outcomes[row.id];
-          const canPush = !row.blocked && row.draft.length > 0;
+          const canPush = canPushRow(row);
           return (
             <li key={row.id} className="flex gap-3 px-4 py-3">
               <input
@@ -121,7 +131,19 @@ export function ToPushList({ accountSlug, rows }: { accountSlug: string; rows: T
                 <div className="flex flex-wrap gap-1.5 text-xs">
                   {row.draft.length > 0 ? <Badge variant="secondary">Sin subir: {labels(row.draft)}</Badge> : null}
                   {row.choose.length > 0 ? <Badge variant="destructive">Para elegir: {labels(row.choose)}</Badge> : null}
+                  {row.campaigns.map((c) => (
+                    <Badge key={c.text} variant="secondary">
+                      Campaña: {c.text.charAt(0).toLowerCase() + c.text.slice(1)}
+                    </Badge>
+                  ))}
                 </div>
+                {row.campaigns
+                  .filter((c) => c.rejection)
+                  .map((c) => (
+                    <p key={c.text} className="text-sm text-destructive">
+                      Campaña: {c.rejection}
+                    </p>
+                  ))}
                 {row.rejected.map((r) => (
                   <p key={r.field} className="text-sm text-destructive">
                     {FACE_FIELD_LABEL[r.field]}: {r.message}

@@ -4,17 +4,17 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { BrandMark } from '@/components/ui/brand-loader';
 import { SectionBody, SectionCard } from '@/components/ui/section-card';
-import type { ChannelCampaign } from '@/channels/publish-types';
 import { formatPercent, formatPrice } from '@/domain/money';
 import { combinedBounds, dealPrice, discountFit, discountOptions, type DiscountBounds } from '@/domain/promotions';
 import type { PromotionsResult } from '@/lib/channel-promotions';
 import { readPromotionsAction } from '@/app/a/[cuenta]/pipeline/price-actions';
-import { cn } from '@/lib/utils/cn';
+import { CampaignList, type CampaignItem, type MarginContext } from './CampaignList';
 
-// En el paso Precio: lo que el canal deja hacer hoy con el descuento de las
-// publicaciones de la pestaña. Se pregunta al abrir la pantalla, sin frenar la
-// carga, y se puede volver a preguntar. Las campañas son solo para ver: para
-// sumarse, por ahora, se hace en el canal.
+// Lo que el canal deja hacer hoy con el descuento de unas publicaciones: en el
+// paso Precio, las de la pestaña; en la página de la publicación, esa. Se
+// pregunta al abrir la pantalla, sin frenar la carga, y se puede volver a
+// preguntar. De las campañas, sumarse o salir: en el Pipeline queda en Por
+// subir, en la página de la publicación se manda en el momento.
 
 export type PromotionsState = { kind: 'loading' } | { kind: 'done'; result: PromotionsResult };
 
@@ -35,7 +35,8 @@ export function usePromotions(accountSlug: string, publicationIds: string[]) {
     setState({ kind: 'loading' });
     ask();
   };
-  return { state, reload };
+  // Después de sumarse o salir: se vuelve a preguntar sin borrar lo que se ve.
+  return { state, reload, refresh: ask };
 }
 
 /** Lo que aceptan todas las publicadas de la pestaña juntas. undefined si todavía no se sabe. */
@@ -62,63 +63,36 @@ export function promotionWarning(state: PromotionsState, listPrice: number, pct:
   return null;
 }
 
-const STATUS: Record<ChannelCampaign['status'], { text: string; className: string }> = {
-  active: { text: 'Está adentro', className: 'bg-emerald-100 text-emerald-900' },
-  scheduled: { text: 'Programada', className: 'bg-sky-100 text-sky-900' },
-  invited: { text: 'La invitan', className: 'bg-amber-100 text-amber-900' },
-};
-
-/** "del 3/11 al 16/11", en la hora de la cuenta. */
-function datesText(start: Date | null, finish: Date | null, timeZone: string): string | null {
-  const day = (d: Date) => new Intl.DateTimeFormat('es-AR', { day: 'numeric', month: 'numeric', timeZone }).format(d);
-  if (start && finish) return `Del ${day(start)} al ${day(finish)}`;
-  if (finish) return `Hasta el ${day(finish)}`;
-  if (start) return `Desde el ${day(start)}`;
-  return null;
-}
-
-function CampaignRow({ c, code, channelName, timeZone }: { c: ChannelCampaign; code: string | null; channelName: string; timeZone: string }) {
-  const status = STATUS[c.status];
-  const parts = [
-    c.price !== null ? `El comprador paga ${formatPrice(c.price)}` : null,
-    c.channelPct ? `${channelName} pone ${formatPercent(c.channelPct)}${c.sellerPct !== null ? ` y la tienda ${formatPercent(c.sellerPct)}` : ''}` : null,
-    datesText(c.start, c.finish, timeZone),
-  ].filter(Boolean);
-  return (
-    <li className="space-y-0.5 px-3 py-2">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span className="font-medium">{c.name ?? c.kind}</span>
-        <span className={cn('rounded-full px-2 py-0.5 text-[11px] font-medium', status.className)}>{status.text}</span>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        {[code, c.name ? c.kind : null].filter(Boolean).join(' · ')}
-        {code || c.name ? '. ' : ''}
-        {parts.length > 0 ? `${parts.join(', ')}.` : null}
-      </p>
-    </li>
-  );
-}
-
 export function ChannelPromotionsCard({
+  accountSlug,
   state,
   reload,
+  refresh,
   channelName,
   listPrice,
   channelListPrice,
   range,
   onUse,
+  mode,
+  margin,
   timeZone,
 }: {
+  accountSlug: string;
   state: PromotionsState;
   reload: () => void;
+  refresh: () => void;
   channelName: string;
-  // El precio publicado de la pestaña, como está ahora en la pantalla.
+  // El precio publicado, como está ahora en la pantalla.
   listPrice: number;
   // El que tiene hoy en el canal.
   channelListPrice: number | null;
   // El descuento en % que acepta el canal.
   range: { min: number; max: number } | null;
-  onUse: (pct: number) => void;
+  // Para elegir el descuento propio desde acá, si se puede.
+  onUse?: (pct: number) => void;
+  // Las campañas: queue las deja en Por subir, now las manda en el momento.
+  mode: 'queue' | 'now';
+  margin: MarginContext | null;
   timeZone: string;
 }) {
   const loading = state.kind === 'loading';
@@ -147,12 +121,16 @@ export function ChannelPromotionsCard({
           <p className="text-sm text-muted-foreground">Cuando la publicación esté en {channelName}, acá vas a ver qué descuento acepta.</p>
         ) : (
           <Result
+            accountSlug={accountSlug}
             result={state.result}
             listPrice={listPrice}
             channelListPrice={channelListPrice}
             range={range}
             onUse={onUse}
+            mode={mode}
+            margin={margin}
             timeZone={timeZone}
+            onChanged={refresh}
           />
         )}
       </SectionBody>
@@ -161,26 +139,36 @@ export function ChannelPromotionsCard({
 }
 
 function Result({
+  accountSlug,
   result,
   listPrice,
   channelListPrice,
   range,
   onUse,
+  mode,
+  margin,
   timeZone,
+  onChanged,
 }: {
+  accountSlug: string;
   result: Extract<PromotionsResult, { ok: true }>;
   listPrice: number;
   channelListPrice: number | null;
   range: { min: number; max: number } | null;
-  onUse: (pct: number) => void;
+  onUse?: (pct: number) => void;
+  mode: 'queue' | 'now';
+  margin: MarginContext | null;
   timeZone: string;
+  onChanged: () => void;
 }) {
-  const { channelName, read, unpublished } = result;
+  const { channelName, read, unpublished, pending } = result;
   const several = read.length > 1;
   const bounds = combinedBounds(read.map((r) => r.promotions.discount));
   const current = read.map((r) => r.promotions.current).find(Boolean) ?? null;
   const { smallest, largest, suggested } = discountOptions(listPrice, bounds, range);
-  const campaigns = read.flatMap((r) => r.promotions.campaigns.map((c) => ({ c, code: several ? r.externalId : null })));
+  const campaigns: CampaignItem[] = read.flatMap((r) =>
+    r.promotions.campaigns.map((campaign) => ({ publicationId: r.publicationId, code: several ? r.externalId : null, campaign })),
+  );
   const differs = channelListPrice !== null && listPrice > 0 && Math.round(listPrice) !== Math.round(channelListPrice);
 
   return (
@@ -226,7 +214,7 @@ function Result({
                 </div>
               ) : null}
             </dl>
-            {smallest !== null || suggested !== null ? (
+            {onUse && (smallest !== null || suggested !== null) ? (
               <div className="flex flex-wrap gap-2">
                 {smallest !== null ? (
                   <Button size="sm" variant="outline" onClick={() => onUse(smallest)}>
@@ -263,18 +251,16 @@ function Result({
 
       <div className="space-y-2">
         <p className="text-sm font-medium">Campañas</p>
-        {campaigns.length > 0 ? (
-          <>
-            <ul className="divide-y rounded-md border text-sm">
-              {campaigns.map(({ c, code }, i) => (
-                <CampaignRow key={i} c={c} code={code} channelName={channelName} timeZone={timeZone} />
-              ))}
-            </ul>
-            <p className="text-xs text-muted-foreground">Para sumarse a una, por ahora, se hace en {channelName}.</p>
-          </>
-        ) : (
-          <p className="text-sm text-muted-foreground">No está en ninguna campaña y no la invitan a ninguna.</p>
-        )}
+        <CampaignList
+          accountSlug={accountSlug}
+          items={campaigns}
+          pending={pending}
+          mode={mode}
+          channelName={channelName}
+          margin={margin}
+          timeZone={timeZone}
+          onChanged={onChanged}
+        />
       </div>
       {unpublished > 0 ? (
         <p className="text-xs text-muted-foreground md:col-span-2">

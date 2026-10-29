@@ -75,8 +75,13 @@ export type ChannelRelist = {
   variants: (VariantLike & { quantity: number })[];
 };
 
+/** Entre qué precios con descuento acepta el canal, y el que sugiere. null en un lado: no pone límite ahí. */
+export type ChannelPriceRange = { minPrice: number | null; maxPrice: number | null; suggestedPrice: number | null };
+
 /** Una campaña del canal en la que está la publicación o a la que la invitan. */
 export type ChannelCampaign = {
+  // Cómo la identifica el canal para sumarse o salir: la app lo guarda y lo devuelve sin interpretarlo.
+  ref: string | null;
   name: string | null;
   // Qué tipo de campaña es, en castellano: "Campaña tradicional", "Co-fondeada".
   kind: string;
@@ -89,6 +94,16 @@ export type ChannelCampaign = {
   sellerPct: number | null;
   start: Date | null;
   finish: Date | null;
+  // Cómo se suma desde la app: price, eligiendo el precio dentro de range; accept,
+  // aceptando el que propone el canal. null: solo desde el canal.
+  join: 'price' | 'accept' | null;
+  range: ChannelPriceRange | null;
+  // Si se puede salir desde la app.
+  canLeave: boolean;
+  // Si mientras está en la campaña el canal frena el descuento propio.
+  pausesOwnDiscount: boolean;
+  // El precio publicado sobre el que se calcula la campaña.
+  listPrice: number | null;
 };
 
 /**
@@ -100,7 +115,7 @@ export type ChannelPromotions = {
   // El precio publicado que tiene hoy en el canal, sobre el que informa el rango.
   listPrice: number | null;
   // null: hoy el canal no deja ponerle un descuento propio, o no lo informa.
-  discount: { minPrice: number | null; maxPrice: number | null; suggestedPrice: number | null } | null;
+  discount: ChannelPriceRange | null;
   // El descuento propio puesto, o programado para empezar.
   current: { price: number | null; scheduled: boolean } | null;
   campaigns: ChannelCampaign[];
@@ -149,6 +164,13 @@ export interface ChannelPublisher {
   setDiscount(accessToken: string, externalId: string, discount: { pct: number; listPrice: number }, now: Date): Promise<{ until: Date | null }>;
   /** Lo que el canal deja hacer hoy con los descuentos de la publicación. Lanza PublishError si no lo puede leer. */
   readPromotions?(accessToken: string, externalId: string): Promise<ChannelPromotions>;
+  /**
+   * Suma la publicación a una campaña, por su ref. Con price, el precio para el
+   * comprador, en las que lo elige la tienda. Lanza PublishError si el canal no lo acepta.
+   */
+  joinCampaign?(accessToken: string, externalId: string, ref: string, price: number | null): Promise<void>;
+  /** Saca la publicación de una campaña. Si ya no estaba, no hace nada. Lanza PublishError si el canal no lo acepta. */
+  leaveCampaign?(accessToken: string, externalId: string, ref: string): Promise<void>;
   /**
    * Deja la cantidad disponible. Sin medidas, una sola con la clave vacía; con
    * medidas en la misma publicación, la de cada una por su clave (quantityKey).

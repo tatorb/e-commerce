@@ -45,6 +45,7 @@ import { listingTargets } from '@/lib/variant-listings';
 import { loadTitleRules } from '@/lib/title-rules';
 import { STOCK_MANAGED, stockManaged } from '@/lib/stock-plan';
 import { afterRestock } from '@/lib/restock';
+import { CampaignError, sendPendingCampaigns, type CampaignOutcome } from '@/lib/channel-campaigns';
 
 // Subir al canal el borrador de una publicación: lo que cambió en la app y
 // todavía no está allá. Antes de subir se revisa lo mismo que en la app (el
@@ -245,6 +246,8 @@ export type PushResult = {
   rejected: { field: FaceField; message: string }[];
   // Si se pudo volver a leer la publicación después de subir.
   confirmed: boolean;
+  // Las campañas pedidas desde el Pipeline: a cuáles se sumó o de cuáles salió, o por qué no.
+  campaigns: CampaignOutcome[];
 };
 
 /**
@@ -253,7 +256,8 @@ export type PushResult = {
  */
 export async function pushDrafts(
   db: Db,
-  args: { accountId: string; publicationId: string; fields?: FaceField[]; userId: string | null; now?: Date },
+  // campaigns: si también van las campañas pedidas; sin decirlo, van cuando se sube todo.
+  args: { accountId: string; publicationId: string; fields?: FaceField[]; campaigns?: boolean; userId: string | null; now?: Date },
 ): Promise<PushResult> {
   const now = args.now ?? new Date();
   const p = await loadForPush(db, args.accountId, args.publicationId);
@@ -272,7 +276,7 @@ export async function pushDrafts(
   const summary = faceSummary(appPrints, copy);
   const adapter = getChannelAdapter(p.store.channel.kind, p.store.channel.name);
   const wanted = args.fields ?? [...summary.draft, ...summary.choose];
-  const result: PushResult = { sent: [], rejected: [], confirmed: false };
+  const result: PushResult = { sent: [], rejected: [], confirmed: false, campaigns: [] };
 
   // Anota lo que no se subió y por qué, mientras la app tenga ese mismo valor.
   const reject = async (field: FaceField, message: string) => {
@@ -454,6 +458,16 @@ export async function pushDrafts(
     throw e;
   }
   await logRejected();
+
+  // Las campañas, después del precio: sumarse depende del precio que quedó.
+  if (args.campaigns ?? !args.fields) {
+    try {
+      result.campaigns = await sendPendingCampaigns(db, { accountId: args.accountId, publicationId: p.id, userId: args.userId });
+    } catch (e) {
+      if (!(e instanceof CampaignError)) throw e;
+      result.campaigns = [{ name: 'Campañas', action: 'join', ok: false, message: e.message }];
+    }
+  }
 
   if (result.sent.length > 0) {
     // Desde cuándo está en el canal: el punto de partida para medir el antes y el después.

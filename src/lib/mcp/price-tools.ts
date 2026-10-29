@@ -7,6 +7,7 @@ import {
   isInstallmentPlan,
   LOW_INTEREST_PLAN,
   marginLevel,
+  marginOf,
   planLabel,
   PRICING_KEYS,
   PRICING_LABEL,
@@ -18,9 +19,10 @@ import {
   type PricingKey,
   type PricingParams,
 } from '@/domain/pricing';
-import { combinedBounds, discountOptions } from '@/domain/promotions';
+import { campaignPriceProblem, campaignRevenue, combinedBounds, discountOptions } from '@/domain/promotions';
 import { logActivity } from '@/lib/activity';
 import { readPromotions, type PromotionsResult } from '@/lib/channel-promotions';
+import { CampaignError, campaignText, queueCampaign } from '@/lib/channel-campaigns';
 import { pushDrafts, PushError } from '@/lib/channel-push';
 import { loadPricingSettings, loadPriceStep, PricingError, savePriceDecision, savePricingSettings, type PriceGroupData } from '@/lib/pricing';
 import { listToPush } from '@/lib/queries/sync';
@@ -197,17 +199,28 @@ function promotionsForClaude(r: PromotionsResult, listPrice: number | null, rang
       : { se_puede: false },
     ...(current ? { descuento_puesto: { precio_para_el_comprador: current.price, programado: current.scheduled } } : {}),
     campanas: r.read.flatMap((x) =>
-      x.promotions.campaigns.map((c) => ({
-        publicacion: x.externalId,
-        nombre: c.name,
-        tipo: c.kind,
-        estado: CAMPAIGN_STATUS[c.status],
-        precio_para_el_comprador: c.price,
-        pone_el_canal_pct: c.channelPct,
-        pone_la_tienda_pct: c.sellerPct,
-        desde: c.start?.toISOString() ?? null,
-        hasta: c.finish?.toISOString() ?? null,
-      })),
+      x.promotions.campaigns.map((c) => {
+        const queued = r.pending.find((q) => q.publicationId === x.publicationId && q.ref === c.ref);
+        return {
+          publicacion: x.externalId,
+          ...(c.ref ? { campana: c.ref } : {}),
+          nombre: c.name,
+          tipo: c.kind,
+          estado: CAMPAIGN_STATUS[c.status],
+          precio_para_el_comprador: c.price,
+          pone_el_canal_pct: c.channelPct,
+          pone_la_tienda_pct: c.sellerPct,
+          desde: c.start?.toISOString() ?? null,
+          hasta: c.finish?.toISOString() ?? null,
+          como_sumarse: c.join === 'price' ? 'eligiendo_el_precio' : c.join === 'accept' ? 'aceptando' : c.status === 'invited' ? 'desde_el_canal' : null,
+          ...(c.join === 'price' && c.range
+            ? { precio_que_acepta: { desde: c.range.minPrice, hasta: c.range.maxPrice, sugerido: c.range.suggestedPrice } }
+            : {}),
+          se_puede_salir: c.canLeave,
+          ...(c.pausesOwnDiscount ? { frena_el_descuento_propio: true } : {}),
+          ...(queued ? { en_por_subir: campaignText(queued), ...(queued.rejection ? { rechazo_anterior: queued.rejection } : {}) } : {}),
+        };
+      }),
     ),
     ...(r.unpublished > 0 ? { sin_consultar: `${r.unpublished} todavía no están en ${r.channelName}.` } : {}),
   };
@@ -360,12 +373,73 @@ const SENT_NAME = { price: 'precio', installments: 'cuotas', discount: 'descuent
 // cada publicación tarda unos segundos porque después se vuelve a leer del canal.
 export const PUSH_BUDGET_MS = 45_000;
 
+const chooseCampaign = defineTool({
+  name: 'choose_campaign',
+  section: 'pipeline',
+  title: 'Sumarse a una campaña o salir',
+  description:
+    'Deja en Por subir sumarse a una campaña del canal o salir de una, como los botones de la tarjeta Lo que acepta el canal en el paso Precio. La campaña es su campana en lo_que_acepta_el_canal de get_price_step. Para sumarse: si como_sumarse es eligiendo_el_precio, mandá precio, el precio para el comprador dentro de precio_que_acepta; si es aceptando, el precio lo pone el canal; si es desde_el_canal, no se puede desde la app. Para salir, se_puede_salir tiene que ser true. Devuelve el margen estimado con lo que recibe la tienda, que suma lo que pone el canal. Se manda al canal con push_prices o desde Por subir. Antes, mostrale a la persona la campaña, el precio y el margen, y esperá que confirme.',
+  input: z.object({
+    cuenta: accountArg,
+    publicacion: publicationArg,
+    campana: z.string().min(1).max(500).describe('La campaña: su campana en lo_que_acepta_el_canal de get_price_step.'),
+    accion: z.enum(['sumarse', 'salir']),
+    precio: z.number().positive().max(999_999_999).optional().describe('El precio para el comprador, en pesos, en las campañas que se suman eligiendo el precio.'),
+  }),
+  readOnly: false,
+  destructive: false,
+  run: async (ctx, args) => {
+    const account = await resolveAccount(ctx, args.cuenta);
+    const id = await resolvePublication(ctx, account.id, args.publicacion);
+    const read = await readPromotions(ctx.db, { accountId: account.id, publicationIds: [id] });
+    if (!read.ok) throw new McpToolError(read.error);
+    const c = read.read[0]?.promotions.campaigns.find((x) => x.ref === args.campana);
+    if (!c) throw new McpToolError(`Esa campaña ya no aparece en ${read.channelName}: volvé a mirar get_price_step.`);
+    const name = c.name ?? c.kind;
+    if (args.accion === 'salir' && !c.canLeave) throw new McpToolError(`De ${name} no se puede salir desde la app: se hace en ${read.channelName}.`);
+    if (args.accion === 'sumarse' && !c.join) throw new McpToolError(`A ${name} no se puede sumar desde la app: se hace en ${read.channelName}.`);
+    const withPrice = args.accion === 'sumarse' && c.join === 'price';
+    if (withPrice) {
+      const problem = campaignPriceProblem(args.precio ?? 0, c.range, c.listPrice);
+      if (problem) throw new McpToolError(`${problem} ${c.range ? `${read.channelName} acepta de ${c.range.minPrice ?? '?'} a ${c.range.maxPrice ?? '?'}.` : ''}`.trim());
+    }
+    const price = withPrice ? Math.round(args.precio!) : null;
+    try {
+      const queued = await queueCampaign(ctx.db, {
+        accountId: account.id,
+        publicationId: id,
+        choice: { action: args.accion === 'sumarse' ? 'join' : 'leave', ref: c.ref!, name, kind: c.kind, price },
+        userId: ctx.userId,
+      });
+      // El margen, con lo que recibe la tienda: lo que paga el comprador más lo que pone el canal.
+      let margin: number | null = null;
+      if (args.accion === 'sumarse') {
+        const step = await loadPriceStep(ctx.db, account.id, id);
+        const group = step?.groups.find((g) => g.publicationIds.includes(id));
+        const revenue = campaignRevenue({ price: price ?? c.price, channelPct: c.channelPct, listPrice: c.listPrice });
+        if (step && group?.cost && revenue !== null) {
+          const plan = group.installments !== null && isInstallmentPlan(group.installments) ? group.installments : 0;
+          margin = marginOf(revenue, group.cost, resolvePricing(step.account, step.overrides), plan);
+        }
+      }
+      return {
+        en_por_subir: campaignText(queued),
+        ...(margin !== null ? { margen_estimado_pct: round(margin) } : {}),
+        ...(args.accion === 'sumarse' && c.pausesOwnDiscount ? { aviso: `Mientras esté en esta campaña, ${read.channelName} frena el descuento propio.` } : {}),
+      };
+    } catch (e) {
+      if (e instanceof CampaignError) throw new McpToolError(e.message);
+      throw e;
+    }
+  },
+});
+
 const pushPrices = defineTool({
   name: 'push_prices',
   section: 'subir',
   title: 'Subir precios al canal',
   description:
-    'Manda al canal el precio publicado, el descuento y las cuotas sin interés que quedaron en Por subir, como el botón de subir de Por subir, pero solo esos tres datos: lo demás que esté por subir (título, descripción, fotos) queda donde está. Se mandan los valores del último precio guardado (save_price). En publicaciones pasá ids de la app o códigos del canal (por ejemplo MLA123456789), hasta 100; sin la lista, van todas las de la cuenta que tienen precio, cuotas o descuento por subir. Saltea las que todavía no están publicadas en el canal y las que no tienen esos cambios pendientes, y dice por qué. Si cambia el precio, el descuento se vuelve a mandar, porque el canal lo calcula sobre el precio. Por cada una devuelve qué se mandó y si quedó bien, o el motivo exacto del rechazo del canal; si el canal rechaza el descuento, lo dice y sigue con lo demás. Si son muchas, sube las que entran en una vuelta y devuelve en quedan las que faltan: volvé a llamar con esa lista. Cambia la publicación en el canal de verdad: antes de subir, mostrale a la persona qué se va a mandar y esperá que confirme.',
+    'Manda al canal el precio publicado, el descuento y las cuotas sin interés que quedaron en Por subir, y sumarse o salir de las campañas pedidas (choose_campaign), como el botón de subir de Por subir, pero solo eso: lo demás que esté por subir (título, descripción, fotos) queda donde está. Se mandan los valores del último precio guardado (save_price). En publicaciones pasá ids de la app o códigos del canal (por ejemplo MLA123456789), hasta 100; sin la lista, van todas las de la cuenta que tienen precio, cuotas o descuento por subir. Saltea las que todavía no están publicadas en el canal y las que no tienen esos cambios pendientes, y dice por qué. Si cambia el precio, el descuento se vuelve a mandar, porque el canal lo calcula sobre el precio. Por cada una devuelve qué se mandó y si quedó bien, o el motivo exacto del rechazo del canal; si el canal rechaza el descuento, lo dice y sigue con lo demás. Si son muchas, sube las que entran en una vuelta y devuelve en quedan las que faltan: volvé a llamar con esa lista. Cambia la publicación en el canal de verdad: antes de subir, mostrale a la persona qué se va a mandar y esperá que confirme.',
   input: z.object({
     cuenta: accountArg,
     publicaciones: z
@@ -387,6 +461,8 @@ const pushPrices = defineTool({
       const row = pending.get(id);
       return row ? [...new Set([...row.draft, ...row.choose])].filter(isPriceField) : [];
     };
+    // Sumarse o salir de campañas, pedido desde el Pipeline.
+    const campaignsOf = (id: string) => pending.get(id)?.campaigns.length ?? 0;
 
     const salteadas: { publicacion: string; motivo: string }[] = [];
     let ids: string[] = [];
@@ -400,7 +476,7 @@ const pushPrices = defineTool({
           salteadas.push({ publicacion: ref, motivo: e.message });
         }
       }
-    } else ids = [...pending.keys()].filter((id) => priceFields(id).length > 0);
+    } else ids = [...pending.keys()].filter((id) => priceFields(id).length > 0 || campaignsOf(id) > 0);
 
     const pubs = new Map(
       (
@@ -421,8 +497,8 @@ const pushPrices = defineTool({
         continue;
       }
       const fields = priceFields(id);
-      if (fields.length === 0) {
-        salteadas.push({ publicacion: code, motivo: 'No tiene precio, cuotas ni descuento por subir.' });
+      if (fields.length === 0 && campaignsOf(id) === 0) {
+        salteadas.push({ publicacion: code, motivo: 'No tiene precio, cuotas, descuento ni campañas por subir.' });
         continue;
       }
       if (Date.now() - started > PUSH_BUDGET_MS) {
@@ -436,15 +512,27 @@ const pushPrices = defineTool({
       };
       const base = { publicacion: code, titulo: p.title };
       try {
-        const r = await pushDrafts(ctx.db, { accountId: account.id, publicationId: id, fields, userId: ctx.userId });
+        const r = await pushDrafts(ctx.db, { accountId: account.id, publicationId: id, fields, campaigns: true, userId: ctx.userId });
         const tried = [...r.sent, ...r.rejected.map((x) => x.field)].filter(isPriceField);
         const sent = r.sent.filter(isPriceField);
+        const failed = r.rejected.length + r.campaigns.filter((c) => !c.ok).length;
+        const done = sent.length + r.campaigns.filter((c) => c.ok).length;
         subidas.push({
           ...base,
           se_mando: Object.fromEntries(PRICE_ORDER.filter((f) => tried.includes(f)).map((f) => [SENT_NAME[f], value[f]])),
-          resultado: r.rejected.length === 0 ? 'subido' : sent.length > 0 ? 'subido_en_parte' : 'rechazado',
+          resultado: failed === 0 ? 'subido' : done > 0 ? 'subido_en_parte' : 'rechazado',
           subio: sent.map((f) => PRICE_FIELDS[f]),
           ...(r.rejected.length > 0 ? { rechazos: r.rejected.map((x) => ({ dato: isPriceField(x.field) ? PRICE_FIELDS[x.field] : x.field, motivo: x.message })) } : {}),
+          ...(r.campaigns.length > 0
+            ? {
+                campanas: r.campaigns.map((c) => ({
+                  campana: c.name,
+                  accion: c.action === 'join' ? 'sumarse' : 'salir',
+                  resultado: c.ok ? 'hecho' : 'rechazado',
+                  ...(c.message ? { motivo: c.message } : {}),
+                })),
+              }
+            : {}),
           confirmado_en_el_canal: r.confirmed,
         });
         // Como el botón de Por subir: queda en la actividad de la persona, hecho por Claude.
@@ -454,7 +542,14 @@ const pushPrices = defineTool({
           section: 'subir',
           summary: 'Subió cambios al canal',
           publicationId: id,
-          detail: [sent.length > 0 ? `Subió ${sent.map((f) => PRICE_FIELDS[f]).join(', ')}` : null, ...r.rejected.map((x) => x.message)].filter(Boolean).join('. ') || null,
+          detail:
+            [
+              sent.length > 0 ? `Subió ${sent.map((f) => PRICE_FIELDS[f]).join(', ')}` : null,
+              ...r.campaigns.map((c) => (c.ok ? `${c.action === 'join' ? 'Se sumó a' : 'Salió de'} ${c.name}` : `${c.name}: ${c.message}`)),
+              ...r.rejected.map((x) => x.message),
+            ]
+              .filter(Boolean)
+              .join('. ') || null,
           via: 'CLAUDE',
         });
       } catch (e) {
@@ -473,9 +568,9 @@ const pushPrices = defineTool({
       subidas,
       ...(salteadas.length > 0 ? { salteadas } : {}),
       ...(quedan.length > 0 ? { quedan, aviso: 'No entraron todas en esta vuelta: volvé a llamar con la lista de quedan.' } : {}),
-      ...(ids.length === 0 && salteadas.length === 0 ? { aviso: 'No hay precios, cuotas ni descuentos por subir en la cuenta.' } : {}),
+      ...(ids.length === 0 && salteadas.length === 0 ? { aviso: 'No hay precios, cuotas, descuentos ni campañas por subir en la cuenta.' } : {}),
     };
   },
 });
 
-export const PRICE_TOOLS = [getPriceStep, savePrice, getPricingSettings, updatePricingSettings, pushPrices];
+export const PRICE_TOOLS = [getPriceStep, savePrice, getPricingSettings, updatePricingSettings, chooseCampaign, pushPrices];

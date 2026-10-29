@@ -4,11 +4,12 @@ import { measureText, variantKey, type VariantLike } from '@/domain/media';
 import { formatPrice } from '@/domain/money';
 import { isInstallmentPlan, LOW_INTEREST_PLAN } from '@/domain/pricing';
 import { dealPrice } from '@/domain/promotions';
-import { parsePromotions } from './promotions';
+import { JOIN_WITH_PRICE, needsDetail, NEEDS_OFFER, parsePromotions, readRef, withDetail } from './promotions';
 import { MAX_QUANTITY, quantityKey } from '@/domain/quantities';
 import {
   PublishError,
   type ChannelAttributeUpdate,
+  type ChannelCampaign,
   type ChannelCreated,
   type ChannelNewListing,
   type ChannelPicture,
@@ -220,14 +221,36 @@ export function discountDates(externalId: string, now: Date): { start: string; f
   return { start: `${today}T00:00:00`, finish, until: fromWallClock(finish, timeZone) };
 }
 
-/** Las promociones de la publicación. Sin ninguna, Mercado Libre puede responder que no la encuentra. */
-async function promotionsOf(id: string, token: string): Promise<ChannelPromotions> {
+/**
+ * Las promociones de la publicación. Sin ninguna, Mercado Libre puede
+ * responder que no la encuentra. Con details, las invitaciones se completan
+ * con lo que hace falta para sumarse desde la app.
+ */
+async function promotionsOf(id: string, token: string, details = false): Promise<ChannelPromotions> {
+  let promotions: ChannelPromotions;
   try {
-    return parsePromotions(await mlGet(`/seller-promotions/items/${id}?app_version=v2`, token));
+    promotions = parsePromotions(await mlGet(`/seller-promotions/items/${id}?app_version=v2`, token));
   } catch (e) {
     if (e instanceof MercadoLibreRequestError && e.status === 404) return parsePromotions([]);
     throw e;
   }
+  if (!details) return promotions;
+  const campaigns: ChannelCampaign[] = [];
+  for (const c of promotions.campaigns) {
+    const ref = needsDetail(c);
+    if (!ref) {
+      campaigns.push(c);
+      continue;
+    }
+    const query = new URLSearchParams({ promotion_type: ref.type, item_id: decodeURIComponent(id), app_version: 'v2' });
+    const raw = await mlGet(`/seller-promotions/promotions/${encodeURIComponent(ref.promotion)}/items?${query}`, token).catch((e) => {
+      // Sin el detalle se ve igual, pero no se puede sumar desde la app.
+      if (e instanceof MercadoLibreRequestError && e.status !== 401 && e.status !== 429) return null;
+      throw e;
+    });
+    campaigns.push(withDetail(c, ref, raw));
+  }
+  return { ...promotions, campaigns };
 }
 
 /**
@@ -521,13 +544,50 @@ export const mercadolibrePublisher: ChannelPublisher = {
 
   async readPromotions(accessToken, externalId) {
     try {
-      return await promotionsOf(encodeURIComponent(externalId), accessToken);
+      return await promotionsOf(encodeURIComponent(externalId), accessToken, true);
     } catch (e) {
       // Una llave vencida o "demasiados pedidos" siguen como error de conexión.
       if (e instanceof MercadoLibreRequestError && e.status !== 401 && e.status !== 429) {
         throw new PublishError(`No se pudieron leer las promociones de Mercado Libre (código ${e.status}).`);
       }
       throw e;
+    }
+  },
+
+  async joinCampaign(accessToken, externalId, ref, price) {
+    const campaign = readRef(ref);
+    if (!campaign) throw new PublishError('No se reconoce la campaña: volvé a consultar las promociones.');
+    const withPrice = JOIN_WITH_PRICE.has(campaign.type);
+    if (withPrice && !(price !== null && price > 0)) throw new PublishError('Falta el precio para el comprador en la campaña.');
+    const id = encodeURIComponent(externalId);
+    try {
+      await mlSend('POST', `/seller-promotions/items/${id}?app_version=v2`, accessToken, {
+        promotion_id: campaign.promotion,
+        promotion_type: campaign.type,
+        ...(withPrice ? { deal_price: Math.round(price!) } : {}),
+        ...(campaign.offer && NEEDS_OFFER.has(campaign.type) ? { offer_id: campaign.offer } : {}),
+      });
+    } catch (e) {
+      if (notCredible(e)) throw new PublishError('Mercado Libre no acepta ese precio en la campaña porque le parece poco descuento. Elegí uno dentro del rango que informa.');
+      throw rejectedAs('la campaña', e);
+    }
+  },
+
+  async leaveCampaign(accessToken, externalId, ref) {
+    const campaign = readRef(ref);
+    if (!campaign) throw new PublishError('No se reconoce la campaña: volvé a consultar las promociones.');
+    const query = new URLSearchParams({
+      promotion_type: campaign.type,
+      promotion_id: campaign.promotion,
+      ...(campaign.offer && NEEDS_OFFER.has(campaign.type) ? { offer_id: campaign.offer } : {}),
+      app_version: 'v2',
+    });
+    try {
+      await mlSend('DELETE', `/seller-promotions/items/${encodeURIComponent(externalId)}?${query}`, accessToken);
+    } catch (e) {
+      // Ya no estaba: no hay nada que sacar.
+      if (e instanceof MercadoLibreRequestError && (e.status === 404 || /no offers? found/i.test(detailOf(e.body) ?? ''))) return;
+      throw rejectedAs('la salida de la campaña', e);
     }
   },
 

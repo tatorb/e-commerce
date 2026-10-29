@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { parsePromotions } from '@/channels/mercadolibre/promotions';
-import { combinedBounds, dealPrice, discountFit, discountOptions, pctForPrice, pctUpToPrice } from '@/domain/promotions';
+import { needsDetail, parsePromotions, readRef, withDetail } from '@/channels/mercadolibre/promotions';
+import { campaignPriceProblem, campaignRevenue, combinedBounds, dealPrice, discountFit, discountOptions, pctForPrice, pctUpToPrice } from '@/domain/promotions';
 
 // Lo que Mercado Libre informa de las promociones de una publicación, y las
 // cuentas del descuento frente a lo que acepta. Datos inventados, con la forma
@@ -82,5 +82,46 @@ describe('el descuento frente a lo que acepta el canal', () => {
     ).toEqual({ minPrice: 70_000, maxPrice: 170_000, suggestedPrice: null });
     expect(combinedBounds([bounds, null])).toBeNull();
     expect(combinedBounds([])).toBeNull();
+  });
+});
+
+describe('campañas', () => {
+  it('cómo se suma a cada una y qué guarda para sumarse o salir', () => {
+    const p = parsePromotions([
+      { id: 'P-1', type: 'DEAL', status: 'candidate', price: 0, original_price: 100 },
+      { id: 'P-2', type: 'SMART', status: 'candidate', price: 80, original_price: 100 },
+      { id: 'P-3', type: 'SMART', status: 'started', ref_id: 'OFFER-1', price: 80 },
+      { id: 'P-4', type: 'LIGHTNING', status: 'candidate', price: 0 },
+      { type: 'DEAL', status: 'candidate' },
+    ]);
+    const [smartIn, deal, smart, lightning, noId] = p.campaigns;
+    expect(deal).toMatchObject({ join: 'price', canLeave: false, pausesOwnDiscount: true });
+    // La co-fondeada necesita el código de la oferta, que sale de la campaña.
+    expect(smart).toMatchObject({ join: null });
+    expect(needsDetail(smart)).toEqual({ type: 'SMART', promotion: 'P-2', offer: null });
+    expect(withDetail(smart, needsDetail(smart)!, { results: [{ offer_id: 'CANDIDATE-1', meli_percentage: 5, seller_percentage: 15 }] })).toMatchObject({
+      join: 'accept',
+      channelPct: 5,
+      sellerPct: 15,
+    });
+    // Sin el detalle no se puede sumar desde la app.
+    expect(withDetail(deal, needsDetail(deal)!, { results: [] }).join).toBeNull();
+    expect(smartIn).toMatchObject({ status: 'active', canLeave: true });
+    expect(readRef(smartIn.ref!)).toEqual({ type: 'SMART', promotion: 'P-3', offer: 'OFFER-1' });
+    expect(lightning).toMatchObject({ join: null, canLeave: false });
+    expect(noId).toMatchObject({ ref: null, join: null });
+    expect(readRef('cualquier cosa')).toBeNull();
+  });
+
+  it('lo que recibe la tienda suma lo que pone el canal, y el precio tiene que entrar en el rango', () => {
+    expect(campaignRevenue({ price: 80, channelPct: 5, listPrice: 100 })).toBe(85);
+    expect(campaignRevenue({ price: 80, channelPct: null, listPrice: 100 })).toBe(80);
+    expect(campaignRevenue({ price: null, channelPct: 5, listPrice: 100 })).toBeNull();
+    const range = { minPrice: 50, maxPrice: 90, suggestedPrice: 85 };
+    expect(campaignPriceProblem(85, range, 100)).toBeNull();
+    expect(campaignPriceProblem(95, range, 100)).toBe('Es más alto de lo que acepta el canal.');
+    expect(campaignPriceProblem(40, range, 100)).toBe('Es más bajo de lo que acepta el canal.');
+    expect(campaignPriceProblem(100, null, 100)).toBe('Tiene que ser menor que el precio publicado.');
+    expect(campaignPriceProblem(0, range, 100)).toBe('Falta el precio para el comprador.');
   });
 });
