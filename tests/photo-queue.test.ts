@@ -14,11 +14,13 @@ import {
   idlePollSeconds,
   LEASE_MS,
   PhotoQueueError,
+  redoFromScratch,
   redoStep,
   retryStep,
   setAsIs,
   submitFailure,
   submitResult,
+  unansweredPhotos,
   type JobDeps,
 } from '@/lib/photo-queue';
 import { addChannelPhotos, addDriveOriginal } from '@/lib/photos';
@@ -370,6 +372,46 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     const parts = run.parts as StepPart[];
     expect(parts[1]).toMatchObject({ paso: 'perspectiva', valores: { giro: -2 }, propuesta: { razon: 'Propuesta para perspectiva.' } });
     expect(parts[3]).toMatchObject({ paso: 'luces', aplicado: false });
+  });
+
+  it('procesar de cero: las fotos en que Claude no respondió se vuelven a hacer como recién llegadas', async () => {
+    const w = await worker();
+    const missed = await photo('IMG_1.HEIC');
+    const fine = await photo('IMG_2.HEIC');
+    const sinClaude = { valores: { giro: -1.4 }, razon: 'Claude no respondió y se usan los valores medidos.', origen: 'medido' as const, aviso: 'Claude no respondió.' };
+    // La primera, con Claude sin saldo en la perspectiva; la segunda, bien.
+    const { job } = await work(w, { partes: ['lente', 'perspectiva', 'blancos', 'luces', 'color', 'fondo', 'recorte', 'sombra', 'exportar'].map((p) => part(p, p === 'perspectiva' ? { propuesta: sinClaude } : {})) });
+    await work(w);
+    expect(await unansweredPhotos(db, productId)).toEqual([missed.id]);
+
+    // Rehacer con valores no lo arregla: Claude no vuelve a mirar y sigue figurando.
+    await approveStep(db, { runId: job.id, userId });
+    await redoStep(db, { runId: job.id, userId, request: { valores: { perspectiva: { giro: 2 } }, apagados: [] } });
+    // Mientras está en cola no se ofrece; ya hecha, sí.
+    expect(await unansweredPhotos(db, productId)).toEqual([]);
+    const { job: again } = await work(w, { partes: ['lente', 'perspectiva', 'blancos', 'luces', 'color', 'fondo', 'recorte', 'sombra', 'exportar'].map((p) => part(p, p === 'perspectiva' ? { propuesta: null } : {})) });
+    expect(await unansweredPhotos(db, productId)).toEqual([missed.id]);
+
+    // De cero: lo pedido y lo de antes se descartan, y el trabajador recibe la foto sin valores, para que Claude proponga todo.
+    await redoFromScratch(db, { editId: missed.id });
+    expect((await runsOf(missed.id)).map((r) => r.status)).toEqual(['REPLACED', 'REPLACED', 'QUEUED']);
+    const claimed = await claimNext(db, w);
+    const next = await buildJob(db, claimed!.runId, deps);
+    expect(next.id).not.toBe(again.id);
+    expect(next.pedidos).toBeNull();
+    for (const kind of Object.keys(next.subidas) as UploadKind[]) uploaded.add(`${next.id}:${kind}`);
+    await submitResult(db, w, done(next, { archivos: Object.keys(next.subidas) as UploadKind[] }), { collect });
+    expect(((await db.photoStepRun.findUniqueOrThrow({ where: { id: next.id } })).parts as StepPart[])[1].propuesta?.origen).toBe('claude');
+    expect(await unansweredPhotos(db, productId)).toEqual([]);
+
+    // También corta lo que estaba en cola, pero no una foto que se usa tal cual o que se sacó.
+    await redoFromScratch(db, { editId: fine.id });
+    await redoFromScratch(db, { editId: fine.id });
+    expect((await runsOf(fine.id)).filter((r) => r.status !== 'REPLACED').map((r) => r.status)).toEqual(['QUEUED']);
+    await setAsIs(db, { editId: fine.id, asIs: true });
+    await expect(redoFromScratch(db, { editId: fine.id })).rejects.toThrow('tal cual');
+    await archivePhoto(db, missed.id);
+    await expect(redoFromScratch(db, { editId: missed.id })).rejects.toThrow('se sacó');
   });
 
   it('exportar no se puede apagar', async () => {

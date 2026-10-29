@@ -13,9 +13,9 @@ import { buildPhotoView } from './build-views';
 import { photosHref, toggledPhotos } from './open-photos';
 import { PhotoLine } from './PhotoLine';
 import { PhotoUploader } from './PhotoUploader';
-import { ArchivePhotoButton, AsIsButton, ChannelPhotosButton } from './PhotoListActions';
+import { ArchivePhotoButton, AsIsButton, ChannelPhotosButton, RedoUnansweredButton } from './PhotoListActions';
 import { asIsProblem, type ChannelPhotoRules } from '@/domain/media';
-import { photoTone, type PhotoTone } from '@/domain/photo-steps';
+import { missedByClaude, photoTone, type PhotoTone } from '@/domain/photo-steps';
 import { PHOTO_TONE as TONE } from './tone';
 import { WorkerStatusLine } from './WorkerStatusLine';
 import { BrandMark } from '@/components/ui/brand-loader';
@@ -69,6 +69,8 @@ export function ImagesStep({
   const pending = photos.filter((p) => p.progress.kind !== 'done').length;
   const tones = photos.map((p) => photoTone(p.progress));
   const counts = (Object.keys(TONE) as PhotoTone[]).map((t) => ({ tone: t, n: tones.filter((x) => x === t).length })).filter((c) => c.n > 0);
+  // Las que Claude no miró, por ejemplo porque la cuenta se quedó sin saldo.
+  const unanswered = edits.filter(missedByClaude).length;
 
   return (
     <div className="space-y-6">
@@ -135,6 +137,16 @@ export function ImagesStep({
                 </span>
               ))}
             </p>
+          ) : null}
+
+          {unanswered > 0 ? (
+            <div className="space-y-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:bg-amber-950/30">
+              <p>
+                {unanswered === 1 ? 'En 1 foto Claude no respondió' : `En ${unanswered} fotos Claude no respondió`} y se usaron los valores que midió el programa. Para
+                que Claude las mire, procesalas de cero.
+              </p>
+              <RedoUnansweredButton accountSlug={accountSlug} publicationId={publicationId} count={unanswered} />
+            </div>
           ) : null}
 
           {photos.length > 0 ? (

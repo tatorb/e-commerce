@@ -90,6 +90,8 @@ Todo se guarda en el Google Drive del estudio, en la carpeta de cada producto. S
 
 Una foto ya aprobada también se puede rehacer. Las fotos del iPhone saltean solas el ajuste del lente, porque el teléfono ya lo corrige.
 
+**Procesar de cero** vuelve a hacer la foto como si recién llegara: la Mac parte del original y Claude propone de nuevo los 9 ajustes. Se pierden los valores que cambiaste a mano y el giro de 90°, y Claude vuelve a cobrar. Sirve cuando Claude no respondió, por ejemplo porque la cuenta se quedó sin saldo: rehacer con valores usa los mismos números que midió el programa y no le vuelve a preguntar. Si hay fotos así, arriba de la lista aparece un aviso con un botón para procesarlas todas de cero.
+
 ### Fotos que ya vienen editadas
 
 Si una foto ya la trajiste editada, usala **tal cual**: la Mac no la procesa, Claude no la mira y no se le cambia nada.
@@ -183,7 +185,7 @@ Todo va **en una sola línea**, y recién al final se aprieta Enter:
 - **macOS pide permiso** para que la Terminal use el Escritorio o Descargas: tocá Permitir.
 - **El Llavero pregunta si Python puede usar la clave** guardada en "MRB Imagenes": tocá Permitir siempre.
 - **"Falta la clave de Claude":** corré de nuevo `bash configurar.sh`.
-- **"Claude no respondió":** el ajuste sigue con los valores que midió el programa y lo avisa, con el motivo y lo que dijo Claude. Los más comunes:
+- **"Claude no respondió":** el ajuste sigue con los valores que midió el programa y lo avisa, con el motivo y lo que dijo Claude. Cuando esté resuelto, tocá **Procesar de cero** para que Claude mire la foto. Los motivos más comunes:
   - **"La cuenta de Claude no tiene saldo":** cargalo en [console.anthropic.com](https://console.anthropic.com), en Billing.
   - **"Llegó a su límite de gasto":** subilo en console.anthropic.com, en Limits.
   - **"La clave de Claude no vale":** corré de nuevo `bash configurar.sh` con una clave nueva.

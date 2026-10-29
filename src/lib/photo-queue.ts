@@ -14,7 +14,7 @@ import {
   type UploadKind,
   type WorkerDone,
 } from '@/domain/photo-contract';
-import { LAST_PHOTO_STEP, LIVE_PARTS, OPEN_RUN_STATUSES, PHOTO_STEPS, photoProgress } from '@/domain/photo-steps';
+import { LAST_PHOTO_STEP, LIVE_PARTS, missedByClaude, OPEN_RUN_STATUSES, PHOTO_STEPS, photoProgress } from '@/domain/photo-steps';
 import { parsePhotoSettings, type PhotoSettingsValues } from '@/domain/photo-settings';
 import { loadPhotoSettings } from './photo-settings';
 
@@ -407,6 +407,40 @@ export async function retryStep(db: PrismaClient, args: { runId: string; userId:
     await tx.photoStepRun.update({ where: { id: failed.id }, data: { status: 'REPLACED', openFor: null } });
     return queueStep(tx, failed.editId, failed.step, requestOf(failed.requested));
   });
+}
+
+/**
+ * Procesa una foto de cero, como recién llegada: lo que había queda
+ * reemplazado, también lo aprobado y lo que estaba en cola, y la Mac parte del
+ * original con Claude proponiendo todos los ajustes. Se pierden los valores
+ * cambiados a mano y el giro de 90°. Sirve cuando Claude no respondió.
+ */
+export async function redoFromScratch(db: PrismaClient, args: { editId: string }) {
+  return db.$transaction(async (tx) => {
+    await lockEdit(tx, args.editId);
+    const edit = await tx.photoEdit.findUniqueOrThrow({ where: { id: args.editId }, select: { archivedAt: true, asIs: true } });
+    if (edit.archivedAt) throw new PhotoQueueError('Esa foto se sacó de la lista.');
+    if (edit.asIs) throw new PhotoQueueError('Esa foto se usa tal cual: no pasa por la Mac.');
+    await tx.photoStepRun.updateMany({
+      where: { editId: args.editId, status: { not: 'REPLACED' } },
+      data: { status: 'REPLACED', openFor: null, workerId: null, leaseUntil: null },
+    });
+    return queueStep(tx, args.editId, 0);
+  });
+}
+
+/**
+ * Las fotos de un producto en que Claude no respondió en algún ajuste, y que
+ * la Mac no está procesando: las que se pueden procesar de cero.
+ */
+export async function unansweredPhotos(db: PrismaClient | Tx, productId: string): Promise<string[]> {
+  const edits = await db.photoEdit.findMany({
+    where: { productId, archivedAt: null, asIs: false },
+    // En el orden de la lista, así la Mac las hace en ese orden.
+    orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+    select: { id: true, asIs: true, runs: { select: { step: true, status: true, createdAt: true, parts: true } } },
+  });
+  return edits.filter(missedByClaude).map((e) => e.id);
 }
 
 /**

@@ -44,6 +44,25 @@ export const PHOTO_STEPS: readonly PhotoStep[] = [
 
 export const LAST_PHOTO_STEP = PHOTO_STEPS.length - 1;
 
+/**
+ * Si en algún ajuste del intento Claude no respondió y quedaron los valores
+ * que midió el programa (origen «medido»). Al rehacer con valores, Claude no
+ * vuelve a mirar: sigue así hasta procesarla de cero.
+ */
+export function claudeMissed(parts: unknown): boolean {
+  return Array.isArray(parts) && parts.some((p) => (p as { propuesta?: { origen?: unknown } | null } | null)?.propuesta?.origen === 'medido');
+}
+
+/**
+ * Si conviene procesar la foto de cero para que Claude la mire: no respondió
+ * en algún ajuste y la Mac no la está procesando ahora.
+ */
+export function missedByClaude(edit: { asIs: boolean; runs: (RunLike & { createdAt: Date; parts: unknown })[] }): boolean {
+  if (edit.asIs) return false;
+  const runs = currentRuns(edit.runs).filter((r) => r !== null);
+  return !runs.some((r) => r.status === 'QUEUED' || r.status === 'PROCESSING') && runs.some((r) => claudeMissed(r.parts));
+}
+
 /** Los estados en que un intento sigue abierto: hay uno solo por foto. */
 export const OPEN_RUN_STATUSES: PhotoRunStatus[] = ['QUEUED', 'PROCESSING', 'REVIEW', 'FAILED'];
 

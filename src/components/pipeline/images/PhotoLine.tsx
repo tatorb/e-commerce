@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { StatusText } from '@/components/pipeline/StatusText';
 import { useStepAction } from '@/components/pipeline/useStepAction';
-import { LIVE_PARTS, PHOTO_ADJUSTMENT_LABEL, PHOTO_STEPS, RUN_STATUS_LABEL } from '@/domain/photo-steps';
+import { claudeMissed, LIVE_PARTS, PHOTO_ADJUSTMENT_LABEL, PHOTO_STEPS, RUN_STATUS_LABEL } from '@/domain/photo-steps';
 import { quarterTurns, type LiveEdits, type LivePartKey } from '@/domain/photo-live';
 import type { StepParam, StepPart, StepRequest } from '@/domain/photo-contract';
 import { formatUsd } from '@/lib/format';
@@ -20,6 +20,7 @@ import {
 } from '@/app/a/[cuenta]/pipeline/image-actions';
 import { CompareView } from './CompareView';
 import { LivePreview } from './LivePreview';
+import { FromScratchButton } from './PhotoListActions';
 import { TURN_TEXT, TurnButtons } from './TurnButtons';
 import type { PhotoView, RunView } from './types';
 import { BrandMark } from '@/components/ui/brand-loader';
@@ -188,6 +189,8 @@ function RunPanel({ accountSlug, run, photo, compact }: { accountSlug: string; r
   );
   const ready = run.status === 'REVIEW' || run.status === 'APPROVED' || run.status === 'SKIPPED';
   const working = run.status === 'QUEUED' || run.status === 'PROCESSING';
+  // Claude no respondió en algún ajuste: rehacer usa los mismos valores, procesar de cero hace que la mire.
+  const missed = claudeMissed(run.parts);
   const liveOn = live && run.liveHref !== null;
   // Girar de a 90° va en Perspectiva, si la Mac que la hizo sabe hacerlo.
   const persp = run.parts.find((p) => p.paso === 'perspectiva' && p.no_aplica === null);
@@ -258,6 +261,7 @@ function RunPanel({ accountSlug, run, photo, compact }: { accountSlug: string; r
               <RotateCcw className="h-4 w-4" />
               Reintentar
             </Button>
+            <FromScratchButton accountSlug={accountSlug} editId={photo.id} missed={missed} />
             {run.step < PHOTO_STEPS.length - 1 ? (
               <Button
                 size="sm"
@@ -408,7 +412,13 @@ function RunPanel({ accountSlug, run, photo, compact }: { accountSlug: string; r
                 </Button>
               ) : null}
               <StatusText status={status} />
+              <FromScratchButton accountSlug={accountSlug} editId={photo.id} missed={missed} />
             </div>
+            {missed ? (
+              <p className="text-xs text-amber-700">
+                Claude no respondió en algunos ajustes y se usaron los valores que midió el programa. Rehacer usa esos mismos valores: para que Claude la mire, procesala de cero.
+              </p>
+            ) : null}
             {edited && liveOn ? (
               <p className="text-xs text-muted-foreground">Así se vería. Aplicá en la Mac para que haga la foto final con estos valores.</p>
             ) : edited && run.status === 'REVIEW' ? (

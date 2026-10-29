@@ -9,7 +9,7 @@ import { getAccountBySlug } from '@/lib/queries/accounts';
 import { startResumableUpload, withDriveToken } from '@/lib/drive';
 import { originalTypeFor, photoFolderId, photoOwner } from '@/lib/photo-files';
 import { addUploadedOriginals, originalProblem, PhotoError, syncOriginals } from '@/lib/photos';
-import { approveStep, archivePhoto, PhotoQueueError, redoStep, retryStep, skipStep } from '@/lib/photo-queue';
+import { approveStep, archivePhoto, PhotoQueueError, redoFromScratch, redoStep, retryStep, skipStep, unansweredPhotos } from '@/lib/photo-queue';
 import { publicAppUrl } from '@/lib/public-url';
 import { storageError } from '@/lib/stored-files';
 import { addChannelPhotosOf, asIsCheckFor, setPhotoAsIs, tidyCorrected } from '@/lib/photo-commands';
@@ -240,6 +240,43 @@ export async function archivePhotoAction(accountSlug: string, editId: string): P
       await archivePhoto(prisma, edit.id);
       await tidyCorrected(prisma, edit.productId);
       return 'Se sacó de la lista.';
+    });
+  });
+}
+
+/** Procesa una foto de cero, como recién llegada: Claude vuelve a proponer todos los ajustes. */
+export async function redoPhotoFromScratchAction(accountSlug: string, editId: string): Promise<Result> {
+  return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Pidió procesar una foto de cero' }, async () => {
+    await requireUser();
+    const edit = await prisma.photoEdit.findFirst({ where: { id: editId, product: { account: { slug: accountSlug } } }, select: { id: true, productId: true } });
+    if (!edit) return NOT_FOUND;
+    return guard(accountSlug, async () => {
+      await redoFromScratch(prisma, { editId: edit.id });
+      await tidyCorrected(prisma, edit.productId);
+      return 'En cola para procesar de cero.';
+    });
+  });
+}
+
+/** Procesa de cero todas las fotos del producto en que Claude no respondió. */
+export async function redoUnansweredPhotosAction(accountSlug: string, publicationId: string): Promise<Result> {
+  return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Pidió procesar de cero las fotos en que Claude no respondió', publicationId }, async () => {
+    await requireUser();
+    const productId = await productOf(accountSlug, publicationId);
+    if (!productId) return NOT_FOUND;
+    return guard(accountSlug, async () => {
+      let queued = 0;
+      for (const editId of await unansweredPhotos(prisma, productId)) {
+        try {
+          await redoFromScratch(prisma, { editId });
+          queued++;
+        } catch (e) {
+          // Una que cambió mientras tanto, por ejemplo porque alguien la sacó de la lista, se deja.
+          if (!(e instanceof PhotoQueueError)) throw e;
+        }
+      }
+      await tidyCorrected(prisma, productId);
+      return queued === 0 ? 'No quedaba ninguna para procesar de cero.' : `${plural(queued, 'foto', 'fotos')} en cola para procesar de cero.`;
     });
   });
 }
