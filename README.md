@@ -165,7 +165,11 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
   `write-tools.ts` son las herramientas, y `media-tools.ts` las de fotos y videos (ver lo elegido y lo que hay para
   elegir, elegir y ordenar las fotos con sus medidas y los clips, sumar al paso Imágenes las fotos del canal y usar
   una tal cual; copiar fotos y clips va en `copy_publication_data`): una capa fina sobre las mismas consultas y la misma lógica de las
-  pantallas, con las mismas reglas y avisos. No devuelven el precio de la publicación ni datos de las conexiones con los canales; sí los precios de la competencia, que son públicos,
+  pantallas, con las mismas reglas y avisos. `price-tools.ts` es el paso Precio: ver sus pestañas con el costo, el
+  margen y los costos del precio (`get_price_step`), guardar el precio de una pestaña, que queda en Por subir
+  (`save_price`), y ver y cambiar los costos de la cuenta de Ajustes > Precios (`get_pricing_settings`,
+  `update_pricing_settings`); el costo de cada medida va en `stock-tools.ts` (`set_product_cost`). Claude ve el precio
+  de la publicación, el costo y los costos del precio; nunca datos de proveedores ni de las conexiones con los canales,
   y cada cambio queda a nombre de la persona que conectó a Claude. No usan la IA de la app. `server.ts` resuelve el protocolo a mano, una respuesta por pedido.
   La pantalla de permiso es `/conectar-claude`.
 - `src/importers/`: el único lugar que sabe leer archivos. Lee Excel y CSV en el navegador,

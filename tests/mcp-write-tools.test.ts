@@ -4,7 +4,7 @@ import { PrismaClient } from '@/generated/prisma/client';
 import { wordKey } from '@/domain/titles';
 import type { McpContext } from '@/lib/mcp/tool';
 
-// Datos inventados. El número raro hace de precio: no puede aparecer en lo que ve Claude.
+// Datos inventados.
 
 const url = process.env.TEST_DATABASE_URL;
 
@@ -31,8 +31,10 @@ describe('herramientas de escritura en la lista', () => {
     expect(tools.get('update_task')).toMatchObject({ readOnlyHint: false, destructiveHint: false });
     expect(tools.get('set_product_stock')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('set_product_cost')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+    expect(tools.get('save_price')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+    expect(tools.get('update_pricing_settings')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('set_publication_status')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
-    expect(tools.size).toBe(43);
+    expect(tools.size).toBe(47);
   });
 });
 
@@ -93,7 +95,6 @@ describe.skipIf(!url)('herramientas de escritura', () => {
       result: { content: { text: string }[]; isError?: boolean };
     };
     const text = r.result.content[0].text;
-    expect(text).not.toContain('987654');
     return { text, isError: r.result.isError === true, data: r.result.isError ? null : JSON.parse(text) };
   }
   const state = (id: string) =>
@@ -639,5 +640,60 @@ describe.skipIf(!url)('herramientas de escritura', () => {
     const wrong = await call('set_product_cost', { publicacion: 'MLA3330003', medidas: [{ medida: '0.75', costo: 1 }] });
     expect(wrong.isError).toBe(true);
     expect(wrong.text).toContain('Medidas: STD, 0.50');
+  });
+
+  it('precios: ver el paso Precio, guardar un precio con los costos propios del producto y cambiar los de la cuenta', async () => {
+    // Sin costo no se puede guardar.
+    const empty = await call('get_price_step', { publicacion: 'MLA1110001' });
+    expect(empty.data.pestanas).toHaveLength(1);
+    expect(empty.data.pestanas[0]).toMatchObject({ publicacion_para_guardar: 'MLA1110001', costo_de_reposicion_sin_iva: null, hoy: { precio_publicado: 987654 } });
+    expect((await call('save_price', { publicacion: 'MLA1110001', precio_publicado: 200000 })).text).toContain('Cargá el costo');
+
+    await call('set_product_cost', { publicacion: 'MLA1110001', costo: 100000 });
+    const step = await call('get_price_step', { publicacion: 'MLA1110001' });
+    const tab = step.data.pestanas[0];
+    expect(tab).toMatchObject({ costo_de_reposicion_sin_iva: 100000, de_donde_sale_el_costo: 'el del producto', hoy: { precio_publicado: 987654, cuotas: 'sin_cuotas', nivel: 'en el objetivo o arriba' } });
+    expect(tab.precio_piso_sin_cuotas_ni_descuento).toBeGreaterThan(100000);
+    expect(step.data.costos.de_la_cuenta).toMatchObject({ cargo_del_canal_pct: 14.3, iva_pct: 21 });
+    expect(step.data.costos.propios_del_producto).toEqual({});
+    expect(step.data.cuotas_que_se_pueden_usar).toContain('sin_cuotas');
+
+    // Debajo del mínimo no guarda sin confirmar.
+    const low = await call('save_price', { publicacion: 'MLA1110001', precio_publicado: 120000 });
+    expect(low.isError).toBe(true);
+    expect(low.text).toContain('debajo del mínimo');
+    // Con un costo propio del producto y confirmando.
+    const saved = await call('save_price', {
+      publicacion: 'MLA1110001',
+      precio_publicado: 250000,
+      descuento_pct: 10,
+      cuotas: 'sin_cuotas',
+      costos_propios_del_producto: { publicidad_pct: 3 },
+    });
+    expect(saved.data).toMatchObject({ guardado: true, precio_final: 225000, nivel: expect.any(String) });
+    const pub = await db.publication.findUniqueOrThrow({ where: { id: kitId }, include: { product: true } });
+    expect([Number(pub.price), Number(pub.discount), pub.installments]).toEqual([250000, 10, 0]);
+    expect(pub.product.pricingOverrides).toEqual({ adsPct: 3 });
+    // get_publication muestra el precio y el último guardado.
+    const seen = (await call('get_publication', { publicacion: 'MLA1110001' })).data.precio;
+    expect(seen.en_la_app).toEqual({ precio_publicado: 250000, descuento_pct: 10, cuotas: 'Sin cuotas' });
+    expect(seen.ultimo_guardado).toMatchObject({ precio_publicado: 250000, descuento_pct: 10, precio_final: 225000, quien: 'Persona' });
+    // null vuelve al de la cuenta; lo que no se manda queda.
+    await call('save_price', { publicacion: 'MLA1110001', precio_publicado: 250000, descuento_pct: 10, costos_propios_del_producto: { publicidad_pct: null, embalaje: 500 } });
+    expect((await db.product.findUniqueOrThrow({ where: { id: productId } })).pricingOverrides).toEqual({ packaging: 500 });
+    await call('save_price', { publicacion: 'MLA1110001', precio_publicado: 260000 });
+    expect((await db.product.findUniqueOrThrow({ where: { id: productId } })).pricingOverrides).toEqual({ packaging: 500 });
+
+    // Los de la cuenta: solo cambia lo que se manda; un plan de cuotas en null queda sin cargar.
+    const before = await call('get_pricing_settings', {});
+    expect(before.data.costos).toMatchObject({ cargo_del_canal_pct: 14.3, cuotas_3_pct: expect.any(Number) });
+    const changed = await call('update_pricing_settings', { costos: { cargo_del_canal_pct: 15, cuotas_3_pct: null } });
+    expect(changed.data.costos).toMatchObject({ cargo_del_canal_pct: 15, cuotas_3_pct: null, iva_pct: 21 });
+    expect((await call('get_pricing_settings', {})).data.cargados_a_mano.sort()).toEqual(['cargo_del_canal_pct', 'cuotas_3_pct']);
+    expect((await call('update_pricing_settings', { costos: { cargo_del_canal_pct: null } })).data.costos).toMatchObject({ cargo_del_canal_pct: 14.3, cuotas_3_pct: null });
+    expect((await call('update_pricing_settings', { costos: { margen_minimo_pct: 90, margen_objetivo_pct: 50 } })).text).toContain('no puede ser menor');
+    expect((await call('update_pricing_settings', { costos: {} })).isError).toBe(true);
+    // Con 3 cuotas sin costo, no se puede guardar en 3 cuotas.
+    expect((await call('save_price', { publicacion: 'MLA1110001', precio_publicado: 260000, cuotas: '3' })).text).toContain('Ajustes > Precios');
   });
 });

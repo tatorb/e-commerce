@@ -16,7 +16,8 @@ vi.hoisted(() => {
 
 const { handleRpc, toolList } = await import('@/lib/mcp/server');
 
-const SECRETS = ['987654', '777001', '777002', '777003', 'clave-secreta-inventada'];
+// Lo del proveedor y las claves no salen nunca. El precio de la publicación sí: 987654.
+const SECRETS = ['777001', '777002', '777003', 'clave-secreta-inventada'];
 
 describe('lista de herramientas', () => {
   it('las de lectura, cada una con su esquema y marcada como de lectura', () => {
@@ -31,6 +32,8 @@ describe('lista de herramientas', () => {
       'check_title',
       'list_tasks',
       'get_publication_media',
+      'get_price_step',
+      'get_pricing_settings',
     ]);
     for (const t of tools) {
       expect(t.inputSchema.type).toBe('object');
@@ -193,7 +196,7 @@ describe.skipIf(!url)('herramientas para Claude', () => {
     expect(data.pasos).toHaveLength(9);
   });
 
-  it('get_publication: ficha, puntaje, medición e historial, sin precios ni datos internos', async () => {
+  it('get_publication: ficha, precio, puntaje, medición e historial, sin datos del proveedor', async () => {
     for (const ref of ['MLA1110001', 'https://articulo.mercadolibre.com.ar/MLA-1110001-kit', kitId]) {
       const { data } = await call('get_publication', { publicacion: ref });
       expect(data.id).toBe(kitId);
@@ -209,8 +212,9 @@ describe.skipIf(!url)('herramientas para Claude', () => {
     expect(data.ultima_medicion.metricas).toMatchObject({ 'Visitas (90 días)': '120', 'Ventas (90 días)': '3' });
     expect(data.pipeline.historial.map((m: { paso: string }) => m.paso)).toEqual(['Información', 'Título']);
     expect(data.competencia).toMatchObject([{ titulo: 'Kit Embrague Modelo X Original', vendidos: 50, link: null, precio_de_lista: null }]);
-    // El precio de la publicación no va; el de la competencia sí, porque es público.
-    expect(text.replace(/"competencia":\[.*?\](?=,"investigacion")/s, '')).not.toMatch(/price|precio|notes|currency/i);
+    // El precio de la publicación va; lo del proveedor, no.
+    expect(data.precio).toEqual({ en_la_app: { precio_publicado: 987654, descuento_pct: null, cuotas: null }, en_el_canal: null, ultimo_guardado: null });
+    expect(text).not.toMatch(/notes|currency/i);
     expect((await call('get_publication', { publicacion: 'MLA9990009' })).text).toContain('no está en las Publicaciones');
     expect((await call('get_publication', {})).isError).toBe(true);
   });

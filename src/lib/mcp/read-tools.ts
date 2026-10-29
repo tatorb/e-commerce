@@ -38,6 +38,8 @@ import { comboForAi, comboParts, PRODUCT_KIND_LABEL } from '@/domain/combos';
 import { loadCatalogData } from '@/lib/catalog-data';
 import { plannedText, plansFor } from '@/lib/stock-plan';
 import { COST_SELECT, costLines, costsForClaude } from '@/lib/costs';
+import { planLabel } from '@/domain/pricing';
+import { decisionForClaude } from './price-tools';
 import { stockSlots, stockText } from '@/domain/stock';
 import { owedText } from '@/domain/stock-cushion';
 import { fieldLabel, kindLabel } from '@/domain/sync-log';
@@ -62,18 +64,21 @@ import {
 const LOG_SHOWN = 15;
 
 // Las herramientas que solo leen. Son una capa fina sobre las mismas
-// consultas que usan las pantallas. Nunca devuelven precios ni nada de las
+// consultas que usan las pantallas. Muestran el precio de la publicación y el
+// costo del producto, pero nunca datos de proveedores ni nada de las
 // conexiones con los canales.
 
 const LOCK_DECISION_LABEL = { KEEP: 'Mantener el título', TRY_IN_COPY: 'Probar el título nuevo en la copia con cuotas' };
 const WORD_STATUS_LABEL = { use: 'usar', discard: 'descartar' } as const;
 const MAX_WORDS = 150;
 
-// Por las dudas: ningún dato con nombre de precio o costo sale de la app.
+// Por las dudas: en la ficha técnica y los atributos, ningún dato con nombre
+// de precio, costo o proveedor sale de la app: puede ser una lista del proveedor.
 const CONFIDENTIAL = /precio|costo|price|cost|proveedor|supplier/i;
 const safeList = (list: NameValue[]) => list.filter((nv) => !CONFIDENTIAL.test(nv.name));
 
 const labels = (entries: [string, string][]) => entries.map(([v, l]) => `${v} = ${l}`).join('; ');
+const num = (d: { toString(): string } | null) => (d === null ? null : Number(d));
 
 // Una publicación de la competencia, con su precio final y el valor de la cuota si tiene precio.
 function competitorOut(c: Parameters<typeof storedCompetitor>[0]) {
@@ -343,7 +348,7 @@ const getPublication = defineTool({
   section: ['publicaciones', 'pipeline', 'productos'],
   title: 'Ver una publicación',
   description:
-    'Muestra todo de una publicación: la ficha del producto (la fuente de verdad), el título y la descripción actuales, los atributos del canal, los datos de catálogo del canal (cada campo del formulario de su categoría, con sus opciones y lo cargado), el puntaje y lo que le falta, la última medición, el estado e historial del pipeline, el candado del título, la competencia cargada, las preguntas frecuentes y las reglas de la publicación (paso Preguntas y respuestas) y la investigación del producto: lo del fabricante, las aclaraciones para las imágenes, las preguntas de los compradores (las que llegaron solas del canal, con su respuesta, y las pegadas) y sus dolores y objeciones. La ficha y la investigación son del producto y las comparten todas sus publicaciones; las preguntas de la publicación propia son solo de esta.',
+    'Muestra todo de una publicación: la ficha del producto (la fuente de verdad), el título y la descripción actuales, los atributos del canal, los datos de catálogo del canal (cada campo del formulario de su categoría, con sus opciones y lo cargado), el precio (el de la app, el que leyó del canal y el último guardado en el paso Precio, con su margen), el puntaje y lo que le falta, la última medición, el estado e historial del pipeline, el candado del título, la competencia cargada, las preguntas frecuentes y las reglas de la publicación (paso Preguntas y respuestas) y la investigación del producto: lo del fabricante, las aclaraciones para las imágenes, las preguntas de los compradores (las que llegaron solas del canal, con su respuesta, y las pegadas) y sus dolores y objeciones. La ficha y la investigación son del producto y las comparten todas sus publicaciones; las preguntas de la publicación propia son solo de esta.',
   input: z.object({ cuenta: accountArg, publicacion: publicationArg }),
   readOnly: true,
   async run(ctx, args) {
@@ -364,7 +369,11 @@ const getPublication = defineTool({
             take: LOG_SHOWN,
             select: { createdAt: true, field: true, kind: true, message: true, user: { select: { name: true } } },
           },
-          channelCopy: { select: { readAt: true, photos: true } },
+          channelCopy: { select: { readAt: true, photos: true, price: true, discount: true, installments: true, missingSince: true } },
+          price: true,
+          discount: true,
+          installments: true,
+          priceDecisions: { orderBy: { decidedAt: 'desc' }, take: 1, include: { decidedBy: { select: { name: true } } } },
           faq: true,
           answerRules: true,
           autoAnswer: true,
@@ -465,6 +474,28 @@ const getPublication = defineTool({
           ? { sale_del_stock_del_producto: true, cantidad: plannedText(plan), ...(plan.measure ? { vende_solo_la_medida: plan.measure.label } : {}) }
           : { sale_del_stock_del_producto: false, motivo: plan?.reason ?? null }),
       },
+      // El precio de la app (el borrador para subir) y el que leyó del canal. Se decide con get_price_step y save_price.
+      precio: (() => {
+        const copy = pub.channelCopy && !pub.channelCopy.missingSince ? pub.channelCopy : null;
+        const d = pub.priceDecisions[0] ?? null;
+        return {
+          en_la_app: { precio_publicado: num(pub.price), descuento_pct: num(pub.discount), cuotas: pub.installments === null ? null : planLabel(pub.installments) },
+          en_el_canal: copy ? { precio_publicado: num(copy.price), descuento_pct: num(copy.discount), cuotas: copy.installments === null ? null : planLabel(copy.installments) } : null,
+          ultimo_guardado: d
+            ? decisionForClaude({
+                listPrice: Number(d.listPrice),
+                discountPct: Number(d.discountPct),
+                installments: d.installments,
+                finalPrice: Number(d.finalPrice),
+                marginPct: Number(d.marginPct),
+                minMarginPct: Number(d.minMarginPct),
+                belowMinConfirmed: d.belowMinConfirmed,
+                decidedAt: d.decidedAt,
+                decidedBy: d.decidedBy?.name ?? null,
+              })
+            : null,
+        };
+      })(),
       ficha: {
         producto_id: product.id,
         nombre: product.name,
