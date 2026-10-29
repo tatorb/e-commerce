@@ -9,6 +9,8 @@ import { DraftError, pushDrafts, PushError, renewDiscounts, saveDraft } from '@/
 import { discardDrafts, readOne, runSyncStep, startSync } from '@/lib/channel-sync';
 import { encrypt } from '@/lib/crypto';
 import { savePriceDecision } from '@/lib/pricing';
+import { readPromotions } from '@/lib/channel-promotions';
+import { formatPrice } from '@/domain/money';
 import { saveQuantities } from '@/lib/quantities';
 import { advanceStep } from '@/domain/pipeline';
 import { resetVisitsTogether } from '@/channels/mercadolibre/listings';
@@ -74,6 +76,10 @@ type Item = {
   dealRejected?: string;
   // El canal dice que tiene un descuento que ya no está: al sacarlo, no lo encuentra.
   dealStale?: boolean;
+  // El precio con descuento más alto que acepta; si no, el 95 % del precio.
+  dealMaxPrice?: number;
+  // Las campañas que informa, tal cual las manda.
+  campaigns?: Record<string, unknown>[];
 };
 
 const variationBody = (v: NonNullable<Item['variations']>[number]) => ({
@@ -174,8 +180,18 @@ describe.skipIf(!url)('subir al canal en la base', () => {
         if (!it) return json(404, {});
         if (req.method === 'GET') {
           // Como en Mercado Libre: a la que se le puede poner un descuento, figura como candidata.
-          const candidate = { type: 'PRICE_DISCOUNT', status: 'candidate', price: 0, original_price: it.price ?? 100 };
-          return json(200, it.deal || it.dealStale ? [candidate, { id: 'P1', type: 'PRICE_DISCOUNT', status: 'started' }] : [candidate]);
+          const price = it.price ?? 100;
+          const candidate = {
+            type: 'PRICE_DISCOUNT',
+            status: 'candidate',
+            price: 0,
+            original_price: price,
+            min_discounted_price: Math.round(price * 0.2),
+            max_discounted_price: it.dealMaxPrice ?? Math.round(price * 0.95),
+            suggested_discounted_price: Math.round(price * 0.88),
+          };
+          const own = it.deal || it.dealStale ? [{ id: 'P1', type: 'PRICE_DISCOUNT', status: 'started', price: it.deal?.price ?? 0, original_price: price }] : [];
+          return json(200, [candidate, ...own, ...(it.campaigns ?? [])]);
         }
         if (req.method === 'DELETE') {
           if (!it.deal) return json(400, { message: 'No offers found for item', error: 'bad_request', status: 400, cause: [] });
@@ -183,6 +199,14 @@ describe.skipIf(!url)('subir al canal en la base', () => {
           return json(200, {});
         }
         if (it.dealRejected) return json(400, { message: it.dealRejected, cause: [] });
+        if (it.dealMaxPrice && body.deal_price > it.dealMaxPrice) {
+          return json(400, {
+            message: 'Errors: ERROR_CREDIBILITY_DISCOUNTED_PRICE - The discounted price is not credible.',
+            error: 'bad_request',
+            status: 400,
+            cause: [{ error_code: 'ERROR_CREDIBILITY_DISCOUNTED_PRICE', error_message: 'The discounted price is not credible.' }],
+          });
+        }
         if (it.deal) return json(400, { message: 'Item already has a PRICE_DISCOUNT' });
         if (!(body.deal_price < (it.price ?? 100))) return json(400, { message: 'deal_price must be lower than price' });
         if (!it.dealLater) it.deal = { price: body.deal_price, finish: body.finish_date };
@@ -613,6 +637,55 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     expect(result).toMatchObject({ sent: ['discount'], rejected: [] });
     expect(promoWrites()).toEqual(['DELETE', 'POST 239200']);
     expect(await state('MLA1')).toEqual({ draft: [], choose: [], rejected: [] });
+  });
+
+  it('lee lo que acepta el canal para el descuento y, si lo rechaza por chico, dice hasta qué precio acepta', async () => {
+    const p = await pub('MLA1');
+    const nueva = await db.publication.create({ data: { productId, storeId, title: 'Sin publicar', attributes: [], price: 99_000 } });
+    items.MLA1.dealMaxPrice = 240_000;
+    items.MLA1.campaigns = [
+      { id: 'P-MLA9', type: 'DEAL', status: 'candidate', price: 0, original_price: 100, name: 'Hot Sale', finish_date: '2026-11-10T23:59:59-03:00' },
+      { id: 'P-MLA8', type: 'SMART', status: 'started', price: 90, original_price: 100, meli_percentage: 4, seller_percentage: 6 },
+    ];
+    const r = await readPromotions(db, { accountId, publicationIds: [p.id, nueva.id] });
+    if (!r.ok) throw new Error(r.error);
+    expect(r.unpublished).toBe(1);
+    expect(r.read).toHaveLength(1);
+    expect(r.read[0]).toMatchObject({ publicationId: p.id, externalId: 'MLA1', promotions: { listPrice: 100, discount: { minPrice: 20, maxPrice: 240_000, suggestedPrice: 88 }, current: null } });
+    expect(r.read[0].promotions.campaigns.map((c) => [c.kind, c.status])).toEqual([
+      ['Co-fondeada automática', 'active'],
+      ['Campaña tradicional', 'invited'],
+    ]);
+    // No es de la cuenta.
+    expect(await readPromotions(db, { accountId, publicationIds: ['otra'] })).toEqual({ ok: false, error: 'La publicación no es de esta cuenta.' });
+    // Claude lo ve igual en el paso Precio.
+    process.env.DATABASE_URL ??= url;
+    const { PRICE_TOOLS } = await import('@/lib/mcp/price-tools');
+    const tool = PRICE_TOOLS.find((t) => t.name === 'get_price_step')!;
+    await db.user.create({ data: { id: 'u2', name: 'Persona', email: 'persona2@example.com' } });
+    const ctx: McpContext = { db, userId: 'u2', access: { isAdmin: true, permissions: {}, accountIds: [] }, baseUrl: 'https://app.ejemplo.com' };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const step: any = await tool.run(ctx, tool.input.parse({ cuenta: 'prueba', publicacion: p.id }));
+    expect(step.pestanas[0].lo_que_acepta_el_canal).toMatchObject({
+      descuento_propio: { se_puede: true, precio_con_descuento_desde: 20, precio_con_descuento_hasta: 240_000 },
+      campanas: [
+        expect.objectContaining({ publicacion: 'MLA1', tipo: 'Co-fondeada automática', estado: 'esta_adentro', pone_el_canal_pct: 4 }),
+        expect.objectContaining({ nombre: 'Hot Sale', estado: 'la_invitan', hasta: '2026-11-11T02:59:59.000Z' }),
+      ],
+    });
+    // Solo lee: no cambia nada en el canal.
+    expect(writes).toEqual([]);
+
+    // Con 5 % el comprador pagaría 247.000: lo rechaza, con el máximo en el motivo.
+    await decide(p.id, 260_000, { discountPct: 5, plan: 3 });
+    const result = await pushDrafts(db, { accountId, publicationId: p.id, userId: null });
+    expect(result.sent).toEqual(['price', 'installments']);
+    expect(result.rejected).toEqual([
+      {
+        field: 'discount',
+        message: `Mercado Libre no acepta este descuento porque le parece chico para los precios que tuvo la publicación. El precio con descuento tiene que ser de ${formatPrice(240_000)} o menos.`,
+      },
+    ]);
   });
 
   // ───────────────────────────── Desde Claude ─────────────────────────────

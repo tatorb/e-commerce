@@ -75,6 +75,37 @@ export type ChannelRelist = {
   variants: (VariantLike & { quantity: number })[];
 };
 
+/** Una campaña del canal en la que está la publicación o a la que la invitan. */
+export type ChannelCampaign = {
+  name: string | null;
+  // Qué tipo de campaña es, en castellano: "Campaña tradicional", "Co-fondeada".
+  kind: string;
+  // invited: la invitan; scheduled: está anotada y todavía no empezó; active: está adentro.
+  status: 'invited' | 'scheduled' | 'active';
+  // El precio para el comprador en la campaña, si el canal lo informa.
+  price: number | null;
+  // La parte del descuento que pone el canal y la que pone la tienda, en %.
+  channelPct: number | null;
+  sellerPct: number | null;
+  start: Date | null;
+  finish: Date | null;
+};
+
+/**
+ * Lo que el canal deja hacer hoy con los descuentos de una publicación, como
+ * lo informa: el rango de precio con descuento que acepta, el descuento propio
+ * que tiene y las campañas. Los precios son para el comprador, con IVA.
+ */
+export type ChannelPromotions = {
+  // El precio publicado que tiene hoy en el canal, sobre el que informa el rango.
+  listPrice: number | null;
+  // null: hoy el canal no deja ponerle un descuento propio, o no lo informa.
+  discount: { minPrice: number | null; maxPrice: number | null; suggestedPrice: number | null } | null;
+  // El descuento propio puesto, o programado para empezar.
+  current: { price: number | null; scheduled: boolean } | null;
+  campaigns: ChannelCampaign[];
+};
+
 export interface ChannelPublisher {
   /** Los tipos de publicación que ofrece el canal, el primero es el de siempre. */
   listingTypes: { value: string; label: string }[];
@@ -116,6 +147,8 @@ export interface ChannelPublisher {
    * Lanza PublishError si el canal no lo acepta.
    */
   setDiscount(accessToken: string, externalId: string, discount: { pct: number; listPrice: number }, now: Date): Promise<{ until: Date | null }>;
+  /** Lo que el canal deja hacer hoy con los descuentos de la publicación. Lanza PublishError si no lo puede leer. */
+  readPromotions?(accessToken: string, externalId: string): Promise<ChannelPromotions>;
   /**
    * Deja la cantidad disponible. Sin medidas, una sola con la clave vacía; con
    * medidas en la misma publicación, la de cada una por su clave (quantityKey).

@@ -1,7 +1,10 @@
 import { MercadoLibreRequestError, mlGet, mlSend } from './http';
 import { CAMPAIGN_TAG, CLASSIC, inFull, INSTALLMENT_TAGS, LOW_INTEREST_TAG, PREMIUM, tagsOf, variationsOf } from './listings';
 import { measureText, variantKey, type VariantLike } from '@/domain/media';
+import { formatPrice } from '@/domain/money';
 import { isInstallmentPlan, LOW_INTEREST_PLAN } from '@/domain/pricing';
+import { dealPrice } from '@/domain/promotions';
+import { parsePromotions } from './promotions';
 import { MAX_QUANTITY, quantityKey } from '@/domain/quantities';
 import {
   PublishError,
@@ -9,6 +12,7 @@ import {
   type ChannelCreated,
   type ChannelNewListing,
   type ChannelPicture,
+  type ChannelPromotions,
   type ChannelPublisher,
   type ChannelStatusChange,
 } from '../publish-types';
@@ -216,20 +220,39 @@ export function discountDates(externalId: string, now: Date): { start: string; f
   return { start: `${today}T00:00:00`, finish, until: fromWallClock(finish, timeZone) };
 }
 
-// Los estados de un descuento propio que está puesto, por empezar o activándose.
-// "candidate" solo dice que se le puede poner uno: no hay nada para sacar.
-const DISCOUNT_ON = new Set(['started', 'pending', 'sync_requested']);
-
-/** Si la publicación tiene un descuento propio puesto o por empezar. */
-async function hasDiscount(id: string, token: string): Promise<boolean> {
-  let list: unknown;
+/** Las promociones de la publicación. Sin ninguna, Mercado Libre puede responder que no la encuentra. */
+async function promotionsOf(id: string, token: string): Promise<ChannelPromotions> {
   try {
-    list = await mlGet(`/seller-promotions/items/${id}?app_version=v2`, token);
+    return parsePromotions(await mlGet(`/seller-promotions/items/${id}?app_version=v2`, token));
   } catch (e) {
-    if (e instanceof MercadoLibreRequestError && e.status === 404) return false;
+    if (e instanceof MercadoLibreRequestError && e.status === 404) return parsePromotions([]);
+    throw e;
+  }
+}
+
+/**
+ * Si la publicación tiene un descuento propio puesto o por empezar. La que
+ * solo puede llevar uno figura como candidata: ahí no hay nada para sacar.
+ */
+async function hasDiscount(id: string, token: string): Promise<boolean> {
+  try {
+    return (await promotionsOf(id, token)).current !== null;
+  } catch (e) {
     throw rejectedAs('el descuento', e);
   }
-  return Array.isArray(list) && list.some((p) => isObj(p) && p.type === 'PRICE_DISCOUNT' && typeof p.status === 'string' && DISCOUNT_ON.has(p.status));
+}
+
+// Mercado Libre no acepta un descuento chico para los precios que tuvo la publicación.
+const notCredible = (e: unknown) => e instanceof MercadoLibreRequestError && /credib/i.test(JSON.stringify(e.body ?? ''));
+
+/** Por qué no aceptó el descuento, con el precio con descuento más alto que acepta si lo informa. */
+async function notCredibleMessage(id: string, token: string): Promise<string> {
+  const why = 'Mercado Libre no acepta este descuento porque le parece chico para los precios que tuvo la publicación.';
+  const max = await promotionsOf(id, token).then(
+    (p) => p.discount?.maxPrice ?? null,
+    () => null,
+  );
+  return max ? `${why} El precio con descuento tiene que ser de ${formatPrice(max)} o menos.` : why;
 }
 
 /** Saca el descuento propio. Si Mercado Libre ya no lo tiene, no hay nada que sacar. */
@@ -475,7 +498,7 @@ export const mercadolibrePublisher: ChannelPublisher = {
     if (pct !== 0 && !(pct >= DISCOUNT_RANGE.min && pct <= DISCOUNT_RANGE.max)) {
       throw new PublishError(`Mercado Libre acepta descuentos de ${DISCOUNT_RANGE.min} a ${DISCOUNT_RANGE.max} %.`);
     }
-    const deal = Math.round(listPrice * (1 - pct / 100));
+    const deal = dealPrice(listPrice, pct);
     if (pct !== 0 && !(deal > 0 && deal < listPrice)) throw new PublishError('Falta el precio publicado para calcular el descuento.');
     const id = encodeURIComponent(externalId);
     try {
@@ -491,7 +514,20 @@ export const mercadolibrePublisher: ChannelPublisher = {
       });
       return { until: dates.until };
     } catch (e) {
+      if (notCredible(e)) throw new PublishError(await notCredibleMessage(id, accessToken));
       throw rejectedAs('el descuento', e);
+    }
+  },
+
+  async readPromotions(accessToken, externalId) {
+    try {
+      return await promotionsOf(encodeURIComponent(externalId), accessToken);
+    } catch (e) {
+      // Una llave vencida o "demasiados pedidos" siguen como error de conexión.
+      if (e instanceof MercadoLibreRequestError && e.status !== 401 && e.status !== 429) {
+        throw new PublishError(`No se pudieron leer las promociones de Mercado Libre (código ${e.status}).`);
+      }
+      throw e;
     }
   },
 

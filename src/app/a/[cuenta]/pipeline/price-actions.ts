@@ -7,6 +7,7 @@ import { requireUser } from '@/lib/auth/session';
 import { pricingInputSchema } from '@/domain/pricing';
 import { getAccountBySlug } from '@/lib/queries/accounts';
 import { PricingError, savePriceDecision, savePricingSettings } from '@/lib/pricing';
+import { readPromotions, type PromotionsResult } from '@/lib/channel-promotions';
 
 // Lo que se hace desde el paso Precio y desde Ajustes > Precios.
 
@@ -63,4 +64,10 @@ export async function savePriceDecisionAction(accountSlug: string, publicationId
     revalidatePath(`/a/${accountSlug}`, 'layout');
     return { ok: true, message: 'Precio guardado.' };
   });
+}
+
+/** Lo que el canal deja hacer hoy con el descuento de las publicaciones de una pestaña. Solo lee. */
+export async function readPromotionsAction(accountSlug: string, publicationIds: string[]): Promise<PromotionsResult> {
+  const ids = Array.isArray(publicationIds) ? publicationIds.filter((id): id is string => typeof id === 'string').slice(0, 20) : [];
+  return act(accountSlug, { section: ['pipeline'], level: 'read' }, ({ account }) => readPromotions(prisma, { accountId: account.id, publicationIds: ids }));
 }

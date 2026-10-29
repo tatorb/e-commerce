@@ -38,6 +38,7 @@ import type { PriceGroupData, PriceStepData } from '@/lib/pricing';
 import { savePriceDecisionAction } from '@/app/a/[cuenta]/pipeline/price-actions';
 import { formatDateTime } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
+import { ChannelPromotionsCard, promotionWarning, usePromotions } from './ChannelPromotionsCard';
 import { CompetitionCard } from './CompetitionCard';
 import { costRows, CostTable } from './CostTable';
 import { CompositionBar, LEVEL, MarginBadge, ProfitKnob } from './parts';
@@ -168,6 +169,9 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
   const below = ready && sim.level === 'below';
   const range = data.discountRange;
   const outOfRange = range !== null && discount > 0 && (discount < range.min || discount > range.max);
+  // Lo que el canal deja hacer hoy con el descuento: se pregunta al abrir.
+  const promotions = usePromotions(accountSlug, group.publicationIds);
+  const promoWarning = outOfRange ? null : promotionWarning(promotions.state, listPrice, discount);
   const own = ownValues(account, overrides);
   const saved = start ? start.listPrice === Math.round(listPrice) && start.discountPct === discount && start.installments === plan : false;
   const dirty = !saved || JSON.stringify(own) !== JSON.stringify(ownValues(account, initialOverrides));
@@ -316,6 +320,11 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
               {outOfRange ? (
                 <p className="text-xs text-destructive" role="alert">
                   {data.channelName} acepta descuentos de {range.min} a {range.max} %, o sin descuento.
+                </p>
+              ) : null}
+              {promoWarning ? (
+                <p className="text-xs text-amber-700" role="status">
+                  {promoWarning}
                 </p>
               ) : null}
             </div>
@@ -525,6 +534,18 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
             )}
           </SectionBody>
         </SectionCard>
+        <div className="md:col-span-2">
+          <ChannelPromotionsCard
+            state={promotions.state}
+            reload={promotions.reload}
+            channelName={data.channelName}
+            listPrice={listPrice}
+            channelListPrice={group.channelPrice}
+            range={range}
+            onUse={(pct) => change(() => setDiscount(pct))}
+            timeZone={timeZone}
+          />
+        </div>
       </div>
 
       <SectionCard
@@ -544,6 +565,11 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
           ) : null}
           {group.pricesDiffer ? (
             <p className="text-sm text-muted-foreground">Hoy {measuresText(group.measures)} tienen precios distintos: al guardar quedan todas con este.</p>
+          ) : null}
+          {promoWarning ? (
+            <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
+              {promoWarning} Se puede guardar igual.
+            </p>
           ) : null}
           {below && dirty ? (
             <label className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">

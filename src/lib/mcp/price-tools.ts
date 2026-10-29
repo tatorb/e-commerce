@@ -18,7 +18,9 @@ import {
   type PricingKey,
   type PricingParams,
 } from '@/domain/pricing';
+import { combinedBounds, discountOptions } from '@/domain/promotions';
 import { logActivity } from '@/lib/activity';
+import { readPromotions, type PromotionsResult } from '@/lib/channel-promotions';
 import { pushDrafts, PushError } from '@/lib/channel-push';
 import { loadPricingSettings, loadPriceStep, PricingError, savePriceDecision, savePricingSettings, type PriceGroupData } from '@/lib/pricing';
 import { listToPush } from '@/lib/queries/sync';
@@ -167,12 +169,56 @@ function groupForClaude(g: PriceGroupData, params: PricingParams, ref: (id: stri
   };
 }
 
+const CAMPAIGN_STATUS = { invited: 'la_invitan', scheduled: 'programada', active: 'esta_adentro' } as const;
+
+/** Lo que el canal deja hacer hoy con el descuento de una pestaña, como lo ve Claude. */
+function promotionsForClaude(r: PromotionsResult, listPrice: number | null, range: { min: number; max: number } | null) {
+  if (!r.ok) return { no_se_pudo_consultar: r.error };
+  if (r.read.length === 0) return { aviso: `Todavía no está publicada en ${r.channelName}: se consulta cuando esté.` };
+  const bounds = combinedBounds(r.read.map((x) => x.promotions.discount));
+  const options = discountOptions(listPrice ?? 0, bounds, range);
+  const current = r.read.map((x) => x.promotions.current).find(Boolean) ?? null;
+  return {
+    descuento_propio: bounds
+      ? {
+          se_puede: true,
+          precio_con_descuento_desde: bounds.minPrice,
+          precio_con_descuento_hasta: bounds.maxPrice,
+          precio_con_descuento_sugerido: bounds.suggestedPrice,
+          ...(listPrice
+            ? {
+                sobre_el_precio_publicado: listPrice,
+                descuento_pct_mas_chico_que_acepta: options.smallest,
+                descuento_pct_mas_grande_que_acepta: options.largest,
+                descuento_pct_sugerido: options.suggested,
+              }
+            : {}),
+        }
+      : { se_puede: false },
+    ...(current ? { descuento_puesto: { precio_para_el_comprador: current.price, programado: current.scheduled } } : {}),
+    campanas: r.read.flatMap((x) =>
+      x.promotions.campaigns.map((c) => ({
+        publicacion: x.externalId,
+        nombre: c.name,
+        tipo: c.kind,
+        estado: CAMPAIGN_STATUS[c.status],
+        precio_para_el_comprador: c.price,
+        pone_el_canal_pct: c.channelPct,
+        pone_la_tienda_pct: c.sellerPct,
+        desde: c.start?.toISOString() ?? null,
+        hasta: c.finish?.toISOString() ?? null,
+      })),
+    ),
+    ...(r.unpublished > 0 ? { sin_consultar: `${r.unpublished} todavía no están en ${r.channelName}.` } : {}),
+  };
+}
+
 const getPriceStep = defineTool({
   name: 'get_price_step',
   section: 'pipeline',
   title: 'Ver el paso Precio',
   description:
-    'Muestra el paso Precio de una publicación, como la pantalla: una pestaña por costo (si las medidas de una familia cuestan distinto, cada una tiene su precio, sus cuotas y su descuento; si no, hay una sola), con el costo de reposición sin IVA, el precio publicado, el descuento y las cuotas de hoy y el margen que dejan, lo que tiene el canal, los precios piso y objetivo y el último precio guardado. También los costos del precio: los de la cuenta (Ajustes > Precios), los propios del producto y los que se usan al final. El margen es sobre el costo, sin IVA.',
+    'Muestra el paso Precio de una publicación, como la pantalla: una pestaña por costo (si las medidas de una familia cuestan distinto, cada una tiene su precio, sus cuotas y su descuento; si no, hay una sola), con el costo de reposición sin IVA, el precio publicado, el descuento y las cuotas de hoy y el margen que dejan, lo que tiene el canal, los precios piso y objetivo y el último precio guardado. En lo_que_acepta_el_canal, lo que el canal informa hoy, consultado en el momento: si deja poner un descuento propio y entre qué precios con descuento (si queda más caro de lo que acepta, lo rechaza por parecerle chico), el sugerido, y las campañas en las que está o a las que la invitan (solo para ver: sumarse se hace en el canal). Antes de proponer un descuento, mirá que entre en ese rango. También los costos del precio: los de la cuenta (Ajustes > Precios), los propios del producto y los que se usan al final. El margen es sobre el costo, sin IVA.',
   input: z.object({ cuenta: accountArg, publicacion: publicationArg }),
   readOnly: true,
   run: async (ctx, args) => {
@@ -189,7 +235,16 @@ const getPriceStep = defineTool({
     return {
       canal: data.channelName,
       ...(data.discountRange ? { descuento_que_acepta_el_canal: { minimo_pct: data.discountRange.min, maximo_pct: data.discountRange.max } } : {}),
-      pestanas: data.groups.map((g) => groupForClaude(g, params, (x) => codes.get(x) ?? x)),
+      pestanas: await Promise.all(
+        data.groups.map(async (g) => ({
+          ...groupForClaude(g, params, (x) => codes.get(x) ?? x),
+          lo_que_acepta_el_canal: promotionsForClaude(
+            await readPromotions(ctx.db, { accountId: account.id, publicationIds: g.publicationIds }),
+            g.price,
+            data.discountRange,
+          ),
+        })),
+      ),
       costos: {
         de_la_cuenta: pricingForClaude(data.account),
         propios_del_producto: pricingForClaude(data.overrides),
