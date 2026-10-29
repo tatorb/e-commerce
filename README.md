@@ -167,7 +167,9 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
   una tal cual; copiar fotos y clips va en `copy_publication_data`): una capa fina sobre las mismas consultas y la misma lógica de las
   pantallas, con las mismas reglas y avisos. `price-tools.ts` es el paso Precio: ver sus pestañas con el costo, el
   margen y los costos del precio (`get_price_step`), guardar el precio de una pestaña, que queda en Por subir
-  (`save_price`), y ver y cambiar los costos de la cuenta de Ajustes > Precios (`get_pricing_settings`,
+  (`save_price`), mandar al canal el precio, las cuotas y el descuento que están en Por subir (`push_prices`: usa
+  `pushDrafts`, la misma función del botón de Por subir, con solo esos tres datos; sube en tandas de unos 45 segundos y
+  anota la actividad de cada publicación), y ver y cambiar los costos de la cuenta de Ajustes > Precios (`get_pricing_settings`,
   `update_pricing_settings`); el costo de cada medida va en `stock-tools.ts` (`set_product_cost`). Claude ve el precio
   de la publicación, el costo y los costos del precio; nunca datos de proveedores ni de las conexiones con los canales,
   y cada cambio queda a nombre de la persona que conectó a Claude. No usan la IA de la app. `server.ts` resuelve el protocolo a mano, una respuesta por pedido.

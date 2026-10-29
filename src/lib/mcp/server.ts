@@ -84,7 +84,7 @@ async function callTool(ctx: McpContext, name: string, rawArgs: unknown) {
     ctx.touched = {};
     const out = await tool.run(ctx, parsed.data);
     // Lo que cambia queda en la actividad de la persona, hecho por Claude.
-    if (!tool.readOnly) {
+    if (!tool.readOnly && !tool.logsItself) {
       await logActivity(ctx.db, {
         userId: ctx.userId,
         accountId: ctx.touched?.accountId ?? null,

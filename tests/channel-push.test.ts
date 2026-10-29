@@ -12,6 +12,7 @@ import { savePriceDecision } from '@/lib/pricing';
 import { saveQuantities } from '@/lib/quantities';
 import { advanceStep } from '@/domain/pipeline';
 import { resetVisitsTogether } from '@/channels/mercadolibre/listings';
+import type { McpContext } from '@/lib/mcp/tool';
 
 // Subir al canal el borrador de una publicación, contra un Mercado Libre
 // simulado. Los datos son de prueba.
@@ -591,6 +592,79 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     expect(result.sent).toEqual(['price']);
     expect(result.rejected).toEqual([{ field: 'discount', message: 'Mercado Libre no aceptó el descuento: The seller reputation is not green' }]);
     expect((await state('MLA1')).rejected).toHaveLength(1);
+  });
+
+  // ───────────────────────────── Desde Claude ─────────────────────────────
+
+  it('Claude sube solo el precio, las cuotas y el descuento de Por subir; un descuento rechazado no corta el resto', async () => {
+    process.env.DATABASE_URL ??= url;
+    const { PRICE_TOOLS } = await import('@/lib/mcp/price-tools');
+    const tool = PRICE_TOOLS.find((t) => t.name === 'push_prices')!;
+    expect(tool).toMatchObject({ section: 'subir', readOnly: false, destructive: true });
+    await db.user.create({ data: { id: 'u1', name: 'Persona', email: 'persona@example.com' } });
+    const ctx: McpContext = { db, userId: 'u1', access: { isAdmin: true, permissions: {}, accountIds: [] }, baseUrl: 'https://app.ejemplo.com' };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const run = async (args: Record<string, unknown>): Promise<any> => tool.run(ctx, tool.input.parse(args));
+
+    // MLA1: precio, 3 cuotas y 10 % de descuento, que el canal rechaza.
+    const p1 = await pub('MLA1');
+    items.MLA1.dealRejected = 'The seller reputation is not green';
+    await decide(p1.id, 260_000, { discountPct: 10, plan: 3 });
+    // MLA2: el precio, y un título nuevo en el borrador, que no es del precio.
+    const p2 = await pub('MLA2');
+    await decide(p2.id, 280_000);
+    await saveDraft(db, { accountId, publicationId: p2.id, field: 'title', value: 'Bomba de Agua Fiat Uno' });
+    // Una que todavía no está publicada.
+    const nueva = await db.publication.create({ data: { productId, storeId, title: 'Bomba nueva', attributes: [], price: 99_000 } });
+    writes.length = 0;
+
+    // Por id de la app (los códigos de prueba son más cortos que los del canal) y uno que no está en la cuenta.
+    const p3 = await pub('MLA3');
+    const r = await run({ cuenta: 'prueba', publicaciones: [p1.id, p2.id, p3.id, nueva.id, 'MLA999999999'] });
+    expect(r.subidas).toEqual([
+      {
+        publicacion: 'MLA1',
+        titulo: 'Kit Embrague Ford Ka',
+        se_mando: { precio: 260_000, cuotas: '3', descuento_pct: 10 },
+        resultado: 'subido_en_parte',
+        subio: ['precio', 'cuotas'],
+        rechazos: [{ dato: 'descuento', motivo: 'Mercado Libre no aceptó el descuento: The seller reputation is not green' }],
+        confirmado_en_el_canal: true,
+      },
+      { publicacion: 'MLA2', titulo: 'Bomba de Agua Fiat Uno', se_mando: { precio: 280_000 }, resultado: 'subido', subio: ['precio'], confirmado_en_el_canal: true },
+    ]);
+    expect(r.salteadas).toEqual([
+      { publicacion: 'MLA999999999', motivo: 'La publicación MLA999999999 no está en las Publicaciones de la cuenta.' },
+      { publicacion: 'MLA3', motivo: 'No tiene precio, cuotas ni descuento por subir.' },
+      { publicacion: nueva.id, motivo: 'Todavía no está publicada en Mercado Libre: primero hay que crearla allá.' },
+    ]);
+    // El título no se subió: sigue en Por subir.
+    expect(writes.some((w) => (w.body as { title?: string } | null)?.title !== undefined)).toBe(false);
+    expect((await state('MLA2')).draft).toEqual(['title']);
+    expect((await state('MLA1')).draft).toEqual(['discount']);
+    // En el historial de cada publicación, a nombre de la persona; en la actividad, hecho por Claude.
+    const changes = await db.channelSyncChange.findMany({ where: { publicationId: { in: [p1.id, p2.id] }, kind: { in: ['SENT', 'REJECTED'] } }, orderBy: { createdAt: 'asc' } });
+    expect(changes.map((c) => [c.publicationId === p1.id ? 'MLA1' : 'MLA2', c.field, c.kind, c.userId])).toEqual([
+      ['MLA1', 'price', 'SENT', 'u1'],
+      ['MLA1', 'installments', 'SENT', 'u1'],
+      ['MLA1', 'discount', 'REJECTED', 'u1'],
+      ['MLA2', 'price', 'SENT', 'u1'],
+    ]);
+    const activity = await db.activityLog.findMany({ orderBy: { createdAt: 'asc' } });
+    expect(activity.map((a) => [a.publicationId, a.summary, a.section, a.via, a.userId])).toEqual([
+      [p1.id, 'Subió cambios al canal', 'subir', 'CLAUDE', 'u1'],
+      [p2.id, 'Subió cambios al canal', 'subir', 'CLAUDE', 'u1'],
+    ]);
+
+    // Sin la lista: las de la cuenta con precio, cuotas o descuento por subir. MLA2 solo tiene el título.
+    let again = await run({ cuenta: 'prueba' });
+    expect(again.subidas).toEqual([
+      expect.objectContaining({ publicacion: 'MLA1', se_mando: { descuento_pct: 10 }, resultado: 'rechazado', subio: [] }),
+    ]);
+    delete items.MLA1.dealRejected;
+    again = await run({ cuenta: 'prueba' });
+    expect(again.subidas).toEqual([expect.objectContaining({ publicacion: 'MLA1', resultado: 'subido', subio: ['descuento'] })]);
+    expect(await run({ cuenta: 'prueba' })).toEqual({ subidas: [], aviso: 'No hay precios, cuotas ni descuentos por subir en la cuenta.' });
   });
 
   it('antes de que venza, el descuento se renueva solo y queda en el Registro', async () => {

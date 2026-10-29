@@ -1,3 +1,4 @@
+import type { PrismaClient } from '@/generated/prisma/client';
 import { prisma } from '@/lib/db';
 import { photoVariants } from '@/domain/media';
 import { channelFaceValues, faceSummary, faceValues, fingerprintsOf, priceFaceText, type FaceField, type FaceValues } from '@/domain/channel-sync';
@@ -151,8 +152,8 @@ export type ToPushRow = {
 };
 
 /** Las publicaciones con cambios de la app sin subir al canal, o con datos para elegir. */
-export async function listToPush(accountId: string): Promise<ToPushRow[]> {
-  const publications = await prisma.publication.findMany({
+export async function listToPush(accountId: string, db: PrismaClient = prisma): Promise<ToPushRow[]> {
+  const publications = await db.publication.findMany({
     where: { product: { accountId }, channelCopy: { is: { missingSince: null } } },
     select: {
       id: true,

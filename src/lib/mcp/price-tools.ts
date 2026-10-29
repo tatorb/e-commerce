@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { ConnectError } from '@/channels/connect';
+import type { FaceField } from '@/domain/channel-sync';
 import { measuresText } from '@/domain/costs';
 import {
   installmentCostPct,
@@ -16,12 +18,16 @@ import {
   type PricingKey,
   type PricingParams,
 } from '@/domain/pricing';
+import { logActivity } from '@/lib/activity';
+import { pushDrafts, PushError } from '@/lib/channel-push';
 import { loadPricingSettings, loadPriceStep, PricingError, savePriceDecision, savePricingSettings, type PriceGroupData } from '@/lib/pricing';
-import { McpToolError, accountArg, defineTool, publicationArg, resolveAccount, resolvePublication } from './tool';
+import { listToPush } from '@/lib/queries/sync';
+import { McpToolError, accountArg, defineTool, findPublication, publicationArg, resolveAccount, resolvePublication } from './tool';
 
 // El precio desde Claude: lo mismo que el paso Precio y Ajustes > Precios, con
 // los mismos permisos. Guardar un precio lo deja en Por subir, como la
-// pantalla: Claude no lo manda al canal.
+// pantalla; push_prices lo manda al canal como el botón de Por subir, pero
+// solo el precio, las cuotas y el descuento.
 
 /** Cómo se llama cada costo del precio para Claude, en lo que lee y en lo que manda. */
 export const PRICING_NAME: Record<PricingKey, string> = {
@@ -199,7 +205,7 @@ const savePrice = defineTool({
   section: 'pipeline',
   title: 'Guardar el precio',
   description:
-    'Guarda el precio de una pestaña del paso Precio, como el botón Guardar precio: el precio publicado (con IVA), el descuento y las cuotas van a todas las publicaciones de la pestaña y quedan en Por subir; no se mandan al canal. Pasá en publicacion la de publicacion_para_guardar de get_price_step, o cualquiera de esa pestaña. El costo sale de Costo y Stock del producto (set_product_cost). Con costos_propios_del_producto se cambian los costos que valen solo para este producto: los que no se mandan quedan como están y null vuelve al de la cuenta. Si el margen queda debajo del mínimo, no guarda: decíselo a la persona y, si confirma, volvé a llamar con confirmar_debajo_del_minimo. Antes de guardar, mostrale a la persona qué vas a cambiar y esperá que confirme.',
+    'Guarda el precio de una pestaña del paso Precio, como el botón Guardar precio: el precio publicado (con IVA), el descuento y las cuotas van a todas las publicaciones de la pestaña y quedan en Por subir; para mandarlos al canal, push_prices. Pasá en publicacion la de publicacion_para_guardar de get_price_step, o cualquiera de esa pestaña. El costo sale de Costo y Stock del producto (set_product_cost). Con costos_propios_del_producto se cambian los costos que valen solo para este producto: los que no se mandan quedan como están y null vuelve al de la cuenta. Si el margen queda debajo del mínimo, no guarda: decíselo a la persona y, si confirma, volvé a llamar con confirmar_debajo_del_minimo. Antes de guardar, mostrale a la persona qué vas a cambiar y esperá que confirme.',
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg,
@@ -234,7 +240,7 @@ const savePrice = defineTool({
         nivel: LEVEL_TEXT[r.simulation.level],
         ganancia_por_venta: round(r.simulation.profit),
         ...(r.belowMin ? { se_confirmo_debajo_del_minimo: true } : {}),
-        queda: 'En Por subir: el precio, las cuotas y el descuento se mandan al canal desde la app.',
+        queda: 'En Por subir: el precio, las cuotas y el descuento se mandan al canal desde la app o con push_prices.',
       };
     } catch (e) {
       if (e instanceof PricingError) throw new McpToolError(e.message);
@@ -284,4 +290,137 @@ const updatePricingSettings = defineTool({
   },
 });
 
-export const PRICE_TOOLS = [getPriceStep, savePrice, getPricingSettings, updatePricingSettings];
+// ───────────────────────────── Subir al canal ─────────────────────────────
+
+/** Lo del paso Precio que se sube al canal, con el nombre que ve Claude. */
+const PRICE_FIELDS = { price: 'precio', installments: 'cuotas', discount: 'descuento' } as const satisfies Partial<Record<FaceField, string>>;
+type PriceField = keyof typeof PRICE_FIELDS;
+const isPriceField = (f: FaceField): f is PriceField => f in PRICE_FIELDS;
+/** En el orden en que se suben: el precio antes que las cuotas y el descuento. */
+const PRICE_ORDER: PriceField[] = ['price', 'installments', 'discount'];
+/** Cómo se llama cada valor en lo que devuelve push_prices. */
+const SENT_NAME = { price: 'precio', installments: 'cuotas', discount: 'descuento_pct' } as const;
+
+// Cuánto sube en una vuelta: el pedido de Claude a la app tiene 60 segundos, y
+// cada publicación tarda unos segundos porque después se vuelve a leer del canal.
+export const PUSH_BUDGET_MS = 45_000;
+
+const pushPrices = defineTool({
+  name: 'push_prices',
+  section: 'subir',
+  title: 'Subir precios al canal',
+  description:
+    'Manda al canal el precio publicado, el descuento y las cuotas sin interés que quedaron en Por subir, como el botón de subir de Por subir, pero solo esos tres datos: lo demás que esté por subir (título, descripción, fotos) queda donde está. Se mandan los valores del último precio guardado (save_price). En publicaciones pasá ids de la app o códigos del canal (por ejemplo MLA123456789), hasta 100; sin la lista, van todas las de la cuenta que tienen precio, cuotas o descuento por subir. Saltea las que todavía no están publicadas en el canal y las que no tienen esos cambios pendientes, y dice por qué. Si cambia el precio, el descuento se vuelve a mandar, porque el canal lo calcula sobre el precio. Por cada una devuelve qué se mandó y si quedó bien, o el motivo exacto del rechazo del canal; si el canal rechaza el descuento, lo dice y sigue con lo demás. Si son muchas, sube las que entran en una vuelta y devuelve en quedan las que faltan: volvé a llamar con esa lista. Cambia la publicación en el canal de verdad: antes de subir, mostrale a la persona qué se va a mandar y esperá que confirme.',
+  input: z.object({
+    cuenta: accountArg,
+    publicaciones: z
+      .array(z.string().min(1))
+      .min(1)
+      .max(100)
+      .optional()
+      .describe('Las publicaciones: su id en la app o su código en el canal, hasta 100. Sin la lista, todas las de la cuenta con precio, cuotas o descuento por subir.'),
+  }),
+  readOnly: false,
+  destructive: true,
+  logsItself: true,
+  run: async (ctx, args) => {
+    const account = await resolveAccount(ctx, args.cuenta);
+    const started = Date.now();
+    const pending = new Map((await listToPush(account.id, ctx.db)).map((r) => [r.id, r]));
+    // Lo que tiene para subir del precio: lo que cambió en la app, y lo que cambió también en el canal, que avisa que hay que elegir.
+    const priceFields = (id: string) => {
+      const row = pending.get(id);
+      return row ? [...new Set([...row.draft, ...row.choose])].filter(isPriceField) : [];
+    };
+
+    const salteadas: { publicacion: string; motivo: string }[] = [];
+    let ids: string[] = [];
+    if (args.publicaciones) {
+      for (const ref of args.publicaciones) {
+        try {
+          const id = await findPublication(ctx.db, account.id, ref);
+          if (!ids.includes(id)) ids.push(id);
+        } catch (e) {
+          if (!(e instanceof McpToolError)) throw e;
+          salteadas.push({ publicacion: ref, motivo: e.message });
+        }
+      }
+    } else ids = [...pending.keys()].filter((id) => priceFields(id).length > 0);
+
+    const pubs = new Map(
+      (
+        await ctx.db.publication.findMany({
+          where: { id: { in: ids } },
+          select: { id: true, externalId: true, title: true, price: true, installments: true, discount: true, store: { select: { channel: { select: { name: true } } } } },
+        })
+      ).map((p) => [p.id, p]),
+    );
+
+    const subidas: unknown[] = [];
+    const quedan: string[] = [];
+    for (const id of ids) {
+      const p = pubs.get(id)!;
+      const code = p.externalId ?? id;
+      if (!p.externalId) {
+        salteadas.push({ publicacion: code, motivo: `Todavía no está publicada en ${p.store.channel.name}: primero hay que crearla allá.` });
+        continue;
+      }
+      const fields = priceFields(id);
+      if (fields.length === 0) {
+        salteadas.push({ publicacion: code, motivo: 'No tiene precio, cuotas ni descuento por subir.' });
+        continue;
+      }
+      if (Date.now() - started > PUSH_BUDGET_MS) {
+        quedan.push(code);
+        continue;
+      }
+      const value: Record<PriceField, unknown> = {
+        price: p.price === null ? null : Number(p.price),
+        installments: p.installments === null ? null : planName(p.installments),
+        discount: p.discount === null ? null : Number(p.discount),
+      };
+      const base = { publicacion: code, titulo: p.title };
+      try {
+        const r = await pushDrafts(ctx.db, { accountId: account.id, publicationId: id, fields, userId: ctx.userId });
+        const tried = [...r.sent, ...r.rejected.map((x) => x.field)].filter(isPriceField);
+        const sent = r.sent.filter(isPriceField);
+        subidas.push({
+          ...base,
+          se_mando: Object.fromEntries(PRICE_ORDER.filter((f) => tried.includes(f)).map((f) => [SENT_NAME[f], value[f]])),
+          resultado: r.rejected.length === 0 ? 'subido' : sent.length > 0 ? 'subido_en_parte' : 'rechazado',
+          subio: sent.map((f) => PRICE_FIELDS[f]),
+          ...(r.rejected.length > 0 ? { rechazos: r.rejected.map((x) => ({ dato: isPriceField(x.field) ? PRICE_FIELDS[x.field] : x.field, motivo: x.message })) } : {}),
+          confirmado_en_el_canal: r.confirmed,
+        });
+        // Como el botón de Por subir: queda en la actividad de la persona, hecho por Claude.
+        await logActivity(ctx.db, {
+          userId: ctx.userId,
+          accountId: account.id,
+          section: 'subir',
+          summary: 'Subió cambios al canal',
+          publicationId: id,
+          detail: [sent.length > 0 ? `Subió ${sent.map((f) => PRICE_FIELDS[f]).join(', ')}` : null, ...r.rejected.map((x) => x.message)].filter(Boolean).join('. ') || null,
+          via: 'CLAUDE',
+        });
+      } catch (e) {
+        if (!(e instanceof PushError || e instanceof ConnectError)) {
+          console.error('push_prices: no se pudo subir', e instanceof Error ? e.message : e);
+        }
+        subidas.push({
+          ...base,
+          se_mando: Object.fromEntries(PRICE_ORDER.filter((f) => fields.includes(f)).map((f) => [SENT_NAME[f], value[f]])),
+          resultado: 'error',
+          error: e instanceof PushError || e instanceof ConnectError ? e.message : 'No se pudo subir: hubo un error en la app. Probá de nuevo.',
+        });
+      }
+    }
+    return {
+      subidas,
+      ...(salteadas.length > 0 ? { salteadas } : {}),
+      ...(quedan.length > 0 ? { quedan, aviso: 'No entraron todas en esta vuelta: volvé a llamar con la lista de quedan.' } : {}),
+      ...(ids.length === 0 && salteadas.length === 0 ? { aviso: 'No hay precios, cuotas ni descuentos por subir en la cuenta.' } : {}),
+    };
+  },
+});
+
+export const PRICE_TOOLS = [getPriceStep, savePrice, getPricingSettings, updatePricingSettings, pushPrices];

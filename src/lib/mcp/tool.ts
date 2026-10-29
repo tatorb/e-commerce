@@ -37,6 +37,8 @@ export type McpTool<S extends z.ZodType = z.ZodType> = {
   // La puede usar cualquiera: la herramienta mira ella misma qué puede la
   // persona, como con sus tareas. La sección queda para la actividad.
   own?: boolean;
+  // Anota ella misma la actividad, una vez por publicación que toca.
+  logsItself?: boolean;
   run: (ctx: McpContext, args: z.output<S>) => Promise<unknown>;
 };
 
@@ -95,7 +97,8 @@ export async function resolvePublication(ctx: McpContext, accountId: string, ref
   return id;
 }
 
-async function findPublication(db: PrismaClient, accountId: string, ref: string): Promise<string> {
+/** Como resolvePublication, para las que trabajan con varias: no la anota en la actividad. */
+export async function findPublication(db: PrismaClient, accountId: string, ref: string): Promise<string> {
   const text = ref.trim();
   const byId = await db.publication.findFirst({ where: { id: text, product: { accountId } }, select: { id: true } });
   if (byId) return byId.id;
