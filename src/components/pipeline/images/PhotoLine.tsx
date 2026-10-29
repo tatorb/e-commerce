@@ -480,8 +480,10 @@ function PartCard({
               <div className="flex items-start gap-2 text-sm">
                 <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
                 <p>
-                  <span className="font-medium">{ORIGIN_LABEL[part.propuesta.origen] ?? part.propuesta.origen}:</span> {part.propuesta.razon}
-                  {part.propuesta.aviso ? <span className="block text-amber-700">{part.propuesta.aviso}</span> : null}
+                  <span className="font-medium">{ORIGIN_LABEL[part.propuesta.origen] ?? part.propuesta.origen}:</span>{' '}
+                  {/* Cuando Claude no respondió, el aviso es la razón: va una vez, como aviso. */}
+                  <span className={part.propuesta.aviso === part.propuesta.razon ? 'text-amber-700' : undefined}>{part.propuesta.razon}</span>
+                  {part.propuesta.aviso && part.propuesta.aviso !== part.propuesta.razon ? <span className="block text-amber-700">{part.propuesta.aviso}</span> : null}
                 </p>
               </div>
             ) : !part.aplicado && !liveHere ? (

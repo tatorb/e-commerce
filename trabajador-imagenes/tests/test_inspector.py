@@ -71,6 +71,36 @@ def test_si_claude_no_responde_se_usan_los_valores_medidos():
         assert "valores medidos" in propuesta.razon
 
 
+def _error_de_claude(clase, estado, mensaje):
+    import anthropic
+    import httpx2
+
+    pedido = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    cuerpo = {"type": "error", "error": {"type": "invalid_request_error", "message": mensaje}}
+    return getattr(anthropic, clase)(f"Error code: {estado}", response=httpx2.Response(estado, request=pedido), body=cuerpo)
+
+
+def test_si_claude_rechaza_el_pedido_dice_por_que():
+    foto = foto_de_prueba(inclinacion=3)
+    casos = [
+        (_error_de_claude("BadRequestError", 400, "Your credit balance is too low to access the Anthropic API."), "no tiene saldo"),
+        (_error_de_claude("BadRequestError", 400, "You have reached your specified API usage limits."), "límite de gasto"),
+        (_error_de_claude("BadRequestError", 400, "output_config.format: schema is not supported"), "Claude rechazó el pedido"),
+        (_error_de_claude("AuthenticationError", 401, "invalid x-api-key"), "La clave de Claude no vale"),
+        (RuntimeError("algo raro"), "Falló algo inesperado (RuntimeError: algo raro)"),
+    ]
+    for error, motivo in casos:
+        medicion, propuesta = medir_y_proponer(Perspectiva(), foto, AJUSTES, Inspector(cliente=ClienteFalso(error=error)))
+        assert propuesta.origen == "medido"
+        assert propuesta.valores == medicion.sugeridos
+        assert propuesta.razon.startswith("Claude no respondió y se usan los valores medidos.")
+        assert motivo in propuesta.razon
+        # Lo que dijo Claude va tal cual, para poder revisarlo.
+        dicho = getattr(error, "body", None)
+        if dicho:
+            assert f"Claude dijo «{dicho['error']['message']}»" in propuesta.razon
+
+
 def test_simulado_no_llama_a_nadie():
     medicion, propuesta = medir_y_proponer(Perspectiva(), foto_de_prueba(), AJUSTES, Inspector(simulado=True))
     assert propuesta.origen == "simulado" and propuesta.valores == medicion.sugeridos

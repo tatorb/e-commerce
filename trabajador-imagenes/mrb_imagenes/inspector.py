@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 from dataclasses import dataclass
 
@@ -131,8 +132,9 @@ class Inspector:
         texto = consigna_del_paso(paso, medicion, ajustes, contexto)
         try:
             respuesta = self._pedir(paso, imagen, texto)
-        except Exception as e:  # sin conexión, clave inválida, Claude ocupado
-            return self._medido(medicion, f"Claude no respondió ({type(e).__name__}): se usan los valores medidos.")
+        except Exception as e:  # sin conexión, clave inválida, sin saldo, Claude ocupado
+            logging.getLogger("trabajador").info(f"Claude no respondió (pedido {getattr(e, 'request_id', None) or 'sin número'}): {e}")
+            return self._medido(medicion, aviso_sin_claude(e))
         uso = _uso(respuesta)
         if respuesta.stop_reason == "refusal":
             return self._medido(medicion, "Claude no quiso responder: se usan los valores medidos.", uso)
@@ -175,6 +177,52 @@ class Inspector:
 
     def _medido(self, medicion: Medicion, aviso: str, uso: dict | None = None) -> Propuesta:
         return Propuesta(valores=dict(medicion.sugeridos), razon=aviso, origen="medido", uso=uso, aviso=aviso)
+
+
+def _dicho_por_claude(e: Exception) -> str:
+    """El mensaje que devolvió Claude con el error, tal cual. Vacío si no hay."""
+    cuerpo = getattr(e, "body", None)
+    error = cuerpo.get("error") if isinstance(cuerpo, dict) else None
+    if isinstance(error, dict) and error.get("message"):
+        return " ".join(str(error["message"]).split())[:300]
+    return ""
+
+
+def motivo_sin_claude(e: Exception) -> str:
+    """Por qué Claude no respondió, en palabras simples."""
+    import anthropic
+
+    dicho = _dicho_por_claude(e).lower()
+    if isinstance(e, anthropic.APITimeoutError):
+        return "Claude tardó demasiado en contestar. Probá de nuevo en un rato"
+    if isinstance(e, anthropic.APIConnectionError):
+        return "No se pudo conectar con Claude. Revisá la conexión a internet de la Mac"
+    if not isinstance(e, anthropic.APIStatusError):
+        return f"Falló algo inesperado ({type(e).__name__}: {' '.join(str(e).split())[:200]})"
+    estado = e.status_code
+    if estado == 402 or "credit balance" in dicho:
+        return "La cuenta de Claude no tiene saldo. Se carga en console.anthropic.com, en Billing"
+    if "usage limit" in dicho or "spend limit" in dicho:
+        return "La cuenta de Claude llegó a su límite de gasto. Se cambia en console.anthropic.com, en Limits"
+    if estado == 401:
+        return "La clave de Claude no vale. Cargala de nuevo con bash configurar.sh"
+    if estado == 403:
+        return "La cuenta de Claude no tiene permiso para esto"
+    if estado == 404:
+        return "Claude no encontró el modelo que pide el trabajador"
+    if estado == 413:
+        return "La foto que se le mandó a Claude es demasiado grande"
+    if estado == 429:
+        return "La cuenta de Claude llegó al máximo de pedidos por minuto. Probá de nuevo en un rato"
+    if estado >= 500:
+        return "Claude está con problemas o saturado. Probá de nuevo en un rato"
+    return "Claude rechazó el pedido"
+
+
+def aviso_sin_claude(e: Exception) -> str:
+    """El aviso del ajuste cuando Claude no respondió: el motivo y lo que dijo Claude, para poder revisarlo."""
+    dicho = _dicho_por_claude(e)
+    return f"Claude no respondió y se usan los valores medidos. {motivo_sin_claude(e)}." + (f" Claude dijo «{dicho}»." if dicho else "")
 
 
 def _uso(respuesta) -> dict:

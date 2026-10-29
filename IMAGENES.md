@@ -183,7 +183,12 @@ Todo va **en una sola línea**, y recién al final se aprieta Enter:
 - **macOS pide permiso** para que la Terminal use el Escritorio o Descargas: tocá Permitir.
 - **El Llavero pregunta si Python puede usar la clave** guardada en "MRB Imagenes": tocá Permitir siempre.
 - **"Falta la clave de Claude":** corré de nuevo `bash configurar.sh`.
-- **"Claude no respondió":** el ajuste sigue con los valores que midió el programa y lo avisa. Revisá la conexión a internet o la clave.
+- **"Claude no respondió":** el ajuste sigue con los valores que midió el programa y lo avisa, con el motivo y lo que dijo Claude. Los más comunes:
+  - **"La cuenta de Claude no tiene saldo":** cargalo en [console.anthropic.com](https://console.anthropic.com), en Billing.
+  - **"Llegó a su límite de gasto":** subilo en console.anthropic.com, en Limits.
+  - **"La clave de Claude no vale":** corré de nuevo `bash configurar.sh` con una clave nueva.
+  - **"No se pudo conectar con Claude":** revisá la conexión a internet de la Mac.
+  - **"Claude rechazó el pedido":** pasale el aviso completo al equipo técnico. El registro de la Mac también lo guarda, con el número de pedido.
 - **"permission denied" con el nombre de la foto:** la foto quedó sola en una línea. Volvé a escribir todo junto, empezando por `bash probar.sh`.
 - **"Falta la foto":** se apretó Enter antes de arrastrar la foto. Escribí todo en una sola línea.
 - **La Mac se pone lenta en el ajuste del fondo:** es el modelo trabajando. Si forzaste `--modelo completo` en una Mac de 8 GB, volvé al liviano.
