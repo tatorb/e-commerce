@@ -1,10 +1,12 @@
 import { z } from 'zod';
 import { matchSlot, StockError, stockSlots, stockText } from '@/domain/stock';
 import { setProductStock, setShowMore } from '@/lib/stock';
+import { CostError, costsForClaude, loadProductCosts, setProductCosts } from '@/lib/costs';
 import { McpToolError, accountArg, defineTool, publicationArg, resolveAccount, resolvePublication } from './tool';
 
-// El stock del producto desde Claude: se cambia en el producto y se sube solo
-// a todas sus publicaciones, con los mismos permisos que en la app.
+// El stock y el costo del producto desde Claude, con los mismos permisos que
+// en la app. El stock se cambia en el producto y se sube solo a todas sus
+// publicaciones; el costo lo heredan en el paso Precio.
 
 const setProductStockTool = defineTool({
   name: 'set_product_stock',
@@ -67,4 +69,53 @@ const setProductStockTool = defineTool({
   },
 });
 
-export const STOCK_TOOLS = [setProductStockTool];
+const setProductCostTool = defineTool({
+  name: 'set_product_cost',
+  section: 'productos',
+  title: 'Guardar el costo del producto',
+  description:
+    'Guarda el costo de reposición sin IVA del producto de una publicación, en pesos: uno solo si el producto no tiene medidas, o el de cada medida. Lo heredan sus publicaciones en el paso Precio. Usalo solo con los costos que te da la persona: no los supongas. Las medidas que no se mandan quedan como están. Los costos guardados se ven en get_publication, y al guardar te dice cómo quedaron. Antes de guardar, mostrale a la persona qué vas a cambiar y esperá que confirme.',
+  input: z.object({
+    cuenta: accountArg,
+    publicacion: publicationArg,
+    costo: z.number().positive().max(999_999_999).optional().describe('El costo sin IVA, en pesos, si el producto no tiene medidas.'),
+    medidas: z
+      .array(z.object({ medida: z.string().min(1).describe('La medida o el SKU, por ejemplo STD o 0.50.'), costo: z.number().positive().max(999_999_999).describe('El costo sin IVA, en pesos.') }))
+      .max(100)
+      .optional()
+      .describe('El costo de cada medida, si el producto tiene medidas.'),
+  }),
+  readOnly: false,
+  destructive: true,
+  run: async (ctx, args) => {
+    const account = await resolveAccount(ctx, args.cuenta);
+    const publicationId = await resolvePublication(ctx, account.id, args.publicacion);
+    const pub = await ctx.db.publication.findUniqueOrThrow({
+      where: { id: publicationId },
+      select: { product: { select: { id: true, variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } } } } },
+    });
+    const slots = stockSlots(pub.product.variants);
+    const costs: Record<string, number> = {};
+    if (slots.length === 1) {
+      if (args.costo === undefined) throw new McpToolError('El producto no tiene medidas: pasá el costo.');
+      costs[slots[0].key] = args.costo;
+    } else {
+      if (!args.medidas?.length) throw new McpToolError(`El producto tiene medidas: pasá el costo de cada una (${slots.map((s) => s.label).join(', ')}).`);
+      for (const m of args.medidas) {
+        const key = matchSlot(slots, { sku: m.medida, measure: m.medida });
+        if (key === null) throw new McpToolError(`"${m.medida}" no es una medida del producto. Medidas: ${slots.map((s) => s.label).join(', ')}.`);
+        costs[key] = m.costo;
+      }
+    }
+    try {
+      const r = await setProductCosts(ctx.db, { accountId: account.id, productId: pub.product.id, costs, keepMissing: true });
+      const now = await loadProductCosts(ctx.db, { accountId: account.id, productId: pub.product.id });
+      return { guardado: true, medidas_cambiadas: r.changed, costo_de_reposicion_sin_iva: costsForClaude(now!.lines) };
+    } catch (e) {
+      if (e instanceof CostError) throw new McpToolError(e.message);
+      throw e;
+    }
+  },
+});
+
+export const STOCK_TOOLS = [setProductStockTool, setProductCostTool];

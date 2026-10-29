@@ -37,6 +37,7 @@ import { loadCombo } from '@/lib/queries/combos';
 import { comboForAi, comboParts, PRODUCT_KIND_LABEL } from '@/domain/combos';
 import { loadCatalogData } from '@/lib/catalog-data';
 import { plannedText, plansFor } from '@/lib/stock-plan';
+import { COST_SELECT, costLines, costsForClaude } from '@/lib/costs';
 import { stockSlots, stockText } from '@/domain/stock';
 import { owedText } from '@/domain/stock-cushion';
 import { fieldLabel, kindLabel } from '@/domain/sync-log';
@@ -420,7 +421,7 @@ const getPublication = defineTool({
       plansFor(ctx.db, [id]),
       ctx.db.product.findUniqueOrThrow({
         where: { id: product.id },
-        select: { stockSince: true, showMore: true, stock: { select: { key: true, quantity: true, outSince: true, cutAt: true } } },
+        select: { stockSince: true, showMore: true, stock: { select: { key: true, quantity: true, outSince: true, cutAt: true } }, ...COST_SELECT },
       }),
     ]);
     const plan = plans.get(id) ?? null;
@@ -495,6 +496,8 @@ const getPublication = defineTool({
         stock: stock.stockSince
           ? stockText(stockSlots(product.variants).map((s) => ({ label: s.label, quantity: stock.stock.find((x) => x.key === s.key)?.quantity ?? 0 })))
           : 'La app todavía no lleva el stock de este producto.',
+        // El costo de reposición sin IVA, el de cada medida si tiene: la base del paso Precio.
+        costo_de_reposicion_sin_iva: costsForClaude(costLines(stock).lines),
         // Con la opción, los canales muestran 6 aunque haya de 1 a 5, y cada medida tiene su alarma.
         mostrar_mas_de_5: stock.showMore,
         ...(stock.showMore

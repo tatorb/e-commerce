@@ -30,8 +30,9 @@ describe('herramientas de escritura en la lista', () => {
     expect(tools.get('create_task')).toMatchObject({ readOnlyHint: false, destructiveHint: false });
     expect(tools.get('update_task')).toMatchObject({ readOnlyHint: false, destructiveHint: false });
     expect(tools.get('set_product_stock')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+    expect(tools.get('set_product_cost')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('set_publication_status')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
-    expect(tools.size).toBe(42);
+    expect(tools.size).toBe(43);
   });
 });
 
@@ -605,5 +606,38 @@ describe.skipIf(!url)('herramientas de escritura', () => {
     expect((await call('update_title_rules', { canal: 'Otro canal', largo_maximo: 50 })).isError).toBe(true);
     const reset = await call('update_title_rules', { restablecer: true });
     expect(reset.data.reglas).toMatchObject({ largo_maximo: 60, son_de_la_cuenta: false });
+  });
+
+  it('set_product_cost: guarda el costo, uno solo o el de cada medida, y Claude lo ve', async () => {
+    const single = await call('set_product_cost', { publicacion: 'MLA1110001', costo: 123456.78 });
+    expect(single.data).toEqual({ guardado: true, medidas_cambiadas: 1, costo_de_reposicion_sin_iva: 123456.78 });
+    expect(Number((await db.productCost.findFirstOrThrow({ where: { productId } })).cost)).toBe(123456.78);
+    expect((await call('get_publication', { publicacion: 'MLA1110001' })).data.ficha.costo_de_reposicion_sin_iva).toBe(123456.78);
+    expect((await call('set_product_cost', { publicacion: 'MLA1110001', medidas: [{ medida: 'STD', costo: 10 }] })).text).toContain('pasá el costo');
+
+    // Con medidas: las que no se mandan quedan como estaban.
+    const store = await db.store.findFirstOrThrow();
+    const piston = await db.product.create({
+      data: { accountId, name: 'Pistones de prueba', variants: { create: [{ sku: 'PI-00', measure: 'STD', position: 0 }, { sku: 'PI-50', measure: '0.50', position: 1 }] } },
+    });
+    await db.publication.create({ data: { productId: piston.id, storeId: store.id, externalId: 'MLA3330003', title: 'Pistones' } });
+    const first = await call('set_product_cost', { publicacion: 'MLA3330003', medidas: [{ medida: 'STD', costo: 4321 }] });
+    expect(first.data.costo_de_reposicion_sin_iva).toEqual([
+      { medida: 'STD', costo: 4321 },
+      { medida: '0.50', costo: null },
+    ]);
+    const both = await call('set_product_cost', { publicacion: 'MLA3330003', medidas: [{ medida: 'PI-50', costo: 1975.5 }] });
+    expect(both.data).toEqual({
+      guardado: true,
+      medidas_cambiadas: 1,
+      costo_de_reposicion_sin_iva: [
+        { medida: 'STD', costo: 4321 },
+        { medida: '0.50', costo: 1975.5 },
+      ],
+    });
+    expect((await call('get_publication', { publicacion: 'MLA3330003' })).data.ficha.costo_de_reposicion_sin_iva).toEqual(both.data.costo_de_reposicion_sin_iva);
+    const wrong = await call('set_product_cost', { publicacion: 'MLA3330003', medidas: [{ medida: '0.75', costo: 1 }] });
+    expect(wrong.isError).toBe(true);
+    expect(wrong.text).toContain('Medidas: STD, 0.50');
   });
 });

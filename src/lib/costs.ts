@@ -32,29 +32,48 @@ export function costLines(p: { replacementCost: Prisma.Decimal | null; variants:
   return { lines, fromGeneral: general !== null && lines.some((l) => !costs.has(l.key)) };
 }
 
+/** El costo como lo ve Claude: el monto si el producto no tiene medidas, o el de cada medida. Null es sin cargar. */
+export function costsForClaude(lines: ProductCostLine[]): number | null | { medida: string; costo: number | null }[] {
+  return lines.length === 1 ? lines[0].cost : lines.map((l) => ({ medida: l.label, costo: l.cost }));
+}
+
 /** Lo que muestra la pestaña Costo y Stock. Null si el producto no es de la cuenta. */
 export async function loadProductCosts(db: Db, args: { accountId: string; productId: string }) {
   const p = await db.product.findFirst({ where: { id: args.productId, accountId: args.accountId }, select: COST_SELECT });
   return p ? costLines(p) : null;
 }
 
+/** Un costo como llega: escrito como "99.627,50" desde la pantalla, o un monto desde Claude. Vacío o null lo borra. */
+export type CostInput = string | number | null;
+
+function parseCost(value: CostInput): number | null | 'invalid' {
+  if (value === null) return null;
+  const n = typeof value === 'number' ? value : parsePrice(String(value).trim());
+  if (n === null) return null;
+  return typeof n === 'number' && Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : 'invalid';
+}
+
 /**
- * Guarda el costo de cada medida, escrito como "99.627,50". Una medida vacía
- * queda sin costo. Desde acá el costo general de antes deja de usarse.
- * Devuelve cuántas medidas cambiaron.
+ * Guarda el costo de cada medida, por la clave de la medida. Una medida vacía
+ * queda sin costo; con keepMissing, las que no vienen quedan como estaban.
+ * Desde acá el costo general de antes deja de usarse. Devuelve cuántas
+ * medidas cambiaron.
  */
-export async function setProductCosts(db: PrismaClient, args: { accountId: string; productId: string; costs: Record<string, string> }): Promise<{ changed: number }> {
+export async function setProductCosts(
+  db: PrismaClient,
+  args: { accountId: string; productId: string; costs: Record<string, CostInput>; keepMissing?: boolean },
+): Promise<{ changed: number }> {
   return db.$transaction(async (tx) => {
     const p = await tx.product.findFirst({ where: { id: args.productId, accountId: args.accountId }, select: { id: true, ...COST_SELECT } });
     if (!p) throw new CostError('El producto no existe en esta cuenta.');
     const { lines } = costLines(p);
     const single = lines.length === 1;
     const next = lines.map((l) => {
-      const text = String(args.costs?.[l.key] ?? '').trim();
-      const n = parsePrice(text);
-      if (n === null) return { key: l.key, cost: null };
-      if (typeof n !== 'number' || !(n > 0)) throw new CostError(`${single ? 'El costo' : `El costo de ${l.label || 'la medida'}`} tiene que ser un monto, por ejemplo 99.627,50.`);
-      return { key: l.key, cost: Math.round(n * 100) / 100 };
+      const sent = Object.prototype.hasOwnProperty.call(args.costs ?? {}, l.key);
+      if (!sent && args.keepMissing) return { key: l.key, cost: l.cost };
+      const cost = parseCost(sent ? args.costs[l.key] : null);
+      if (cost === 'invalid') throw new CostError(`${single ? 'El costo' : `El costo de ${l.label || 'la medida'}`} tiene que ser un monto, por ejemplo 99.627,50.`);
+      return { key: l.key, cost };
     });
     const changed = next.filter((n, i) => n.cost !== lines[i].cost).length;
     await tx.productCost.deleteMany({ where: { productId: p.id, key: { in: lines.map((l) => l.key) } } });
