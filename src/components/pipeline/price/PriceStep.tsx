@@ -390,33 +390,36 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
         </SectionCard>
       </div>
 
-      <SectionCard banded title="Perilla de ganancia" description="Arrastrala para llevar la ganancia sobre el costo adonde quieras: el precio publicado se acomoda solo.">
-        <SectionBody>
-          {ready ? (
-            <>
-              <p className="text-sm">
-                <span className="font-medium tabular-nums">{formatPercent(sim.marginPct)}</span> sobre el costo ·{' '}
-                <span className="tabular-nums">{formatPercent(sim.profitShareOfPrice)}</span> del precio final ·{' '}
-                <span className="tabular-nums">{formatPrice(Math.round(sim.profit))}</span>
-              </p>
-              <ProfitKnob
-                marginPct={sim.marginPct}
-                minPct={params.minMarginPct}
-                targetPct={params.targetMarginPct}
-                onChange={(m) => change(() => setList(listPriceForMargin({ marginPct: m, discountPct: discount, plan, cost: cost!, params })))}
-              />
-            </>
-          ) : (
-            <p className="text-sm text-muted-foreground">Cargá el costo y el precio publicado para usarla.</p>
-          )}
-        </SectionBody>
-      </SectionCard>
+      {/* En la computadora, la perilla y la composición del precio van una al lado de la otra. */}
+      <div className="grid gap-4 md:gap-6 lg:grid-cols-2">
+        <SectionCard banded title="Perilla de ganancia" description="Arrastrala para llevar la ganancia sobre el costo adonde quieras: el precio publicado se acomoda solo.">
+          <SectionBody>
+            {ready ? (
+              <>
+                <p className="text-sm">
+                  <span className="font-medium tabular-nums">{formatPercent(sim.marginPct)}</span> sobre el costo ·{' '}
+                  <span className="tabular-nums">{formatPercent(sim.profitShareOfPrice)}</span> del precio final ·{' '}
+                  <span className="tabular-nums">{formatPrice(Math.round(sim.profit))}</span>
+                </p>
+                <ProfitKnob
+                  marginPct={sim.marginPct}
+                  minPct={params.minMarginPct}
+                  targetPct={params.targetMarginPct}
+                  onChange={(m) => change(() => setList(listPriceForMargin({ marginPct: m, discountPct: discount, plan, cost: cost!, params })))}
+                />
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">Cargá el costo y el precio publicado para usarla.</p>
+            )}
+          </SectionBody>
+        </SectionCard>
 
-      <SectionCard banded title="De qué se compone el precio final">
-        <SectionBody>
-          {listPrice > 0 ? <CompositionBar parts={parts} finalPrice={sim.finalPrice} /> : <p className="text-sm text-muted-foreground">Cargá el precio publicado.</p>}
-        </SectionBody>
-      </SectionCard>
+        <SectionCard banded title="De qué se compone el precio final">
+          <SectionBody>
+            {listPrice > 0 ? <CompositionBar parts={parts} finalPrice={sim.finalPrice} /> : <p className="text-sm text-muted-foreground">Cargá el precio publicado.</p>}
+          </SectionBody>
+        </SectionCard>
+      </div>
 
       <CollapsibleCard
         banded

@@ -50,11 +50,12 @@ export function CompositionBar({ parts, finalPrice }: { parts: Record<BreakdownP
           />
         ))}
       </div>
-      <ul className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-4">
+      {/* En cuatro columnas solo cuando la tarjeta ocupa todo el ancho; en la computadora va a media pantalla. */}
+      <ul className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-4 lg:grid-cols-2">
         {BREAKDOWN_PARTS.map((k) => (
           <li key={k} className="flex items-center gap-1.5">
             <span aria-hidden className={cn('h-2.5 w-2.5 shrink-0 rounded-sm', PART[k].color)} />
-            <span className="min-w-0 truncate">{PART[k].label}</span>
+            <span className="min-w-0 leading-tight">{PART[k].label}</span>
             <span className={cn('ml-auto shrink-0 whitespace-nowrap tabular-nums', parts[k] < 0 ? 'text-red-700' : 'text-muted-foreground')}>
               {finalPrice > 0 ? formatPercent((parts[k] / finalPrice) * 100) : '—'}
             </span>
