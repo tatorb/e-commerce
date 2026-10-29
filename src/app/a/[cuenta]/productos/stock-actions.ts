@@ -5,12 +5,28 @@ import { act } from '@/lib/auth/guard';
 import { prisma } from '@/lib/db';
 import { StockError } from '@/domain/stock';
 import { dropOrphanStock, markStockReviewed, setProductStock, setShowMore } from '@/lib/stock';
+import { CostError, setProductCosts } from '@/lib/costs';
 
-// El stock del producto: cambiarlo a mano, que se sube solo a sus
-// publicaciones, marcar como revisado lo que había para revisar, borrar el
-// de medidas que ya no están en la ficha y prender "Mostrar más de 5".
+// El costo y el stock del producto: cambiar el costo de cada medida, que
+// heredan sus publicaciones en el paso Precio; cambiar el stock a mano, que se
+// sube solo a sus publicaciones; marcar como revisado lo que había para
+// revisar, borrar el de medidas que ya no están en la ficha y prender
+// "Mostrar más de 5".
 
 type Result = { ok: true; message: string } | { ok: false; error: string };
+
+export async function setProductCostsAction(accountSlug: string, productId: string, costs: Record<string, string>): Promise<Result> {
+  return act(accountSlug, { section: 'productos', does: 'Cambió el costo del producto', productId }, async ({ account }) => {
+    try {
+      const r = await setProductCosts(prisma, { accountId: account.id, productId: String(productId), costs: costs ?? {} });
+      revalidatePath(`/a/${accountSlug}`, 'layout');
+      return { ok: true, message: r.changed === 0 ? 'Guardado, sin cambios.' : 'Costo guardado. Lo usa el paso Precio de sus publicaciones.' };
+    } catch (e) {
+      if (e instanceof CostError) return { ok: false, error: e.message };
+      throw e;
+    }
+  });
+}
 
 export async function setProductStockAction(accountSlug: string, productId: string, stock: Record<string, string>): Promise<Result> {
   return act(accountSlug, { section: 'productos', does: 'Cambió el stock del producto', productId }, async ({ user, account }) => {

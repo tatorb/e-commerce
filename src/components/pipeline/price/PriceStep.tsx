@@ -1,12 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SectionBody, SectionCard } from '@/components/ui/section-card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { measuresText } from '@/domain/costs';
 import { formatPercent, formatPrice, parsePrice } from '@/domain/money';
 import { compare } from '@/domain/price-comparison';
 import {
@@ -31,7 +33,7 @@ import {
   type PricingKey,
   type PricingParams,
 } from '@/domain/pricing';
-import type { PriceStepData } from '@/lib/pricing';
+import type { PriceGroupData, PriceStepData } from '@/lib/pricing';
 import { savePriceDecisionAction } from '@/app/a/[cuenta]/pipeline/price-actions';
 import { formatDateTime } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
@@ -39,12 +41,14 @@ import { CompetitionCard } from './CompetitionCard';
 import { CostTable } from './CostTable';
 import { CompositionBar, LEVEL, MarginBadge, ProfitKnob } from './parts';
 
-// El paso Precio. Con el costo de reposición y los parámetros de la cuenta (o
-// los propios del producto), el simulador muestra el precio final, el margen y
-// de qué se compone el precio; la perilla mueve el precio hasta la ganancia
-// que se quiere, y la competencia que se cargó en Información sirve para
-// comparar. Al guardar, el precio, las cuotas y el descuento quedan para
-// subir desde Por subir. Arranca con lo que tiene hoy la publicación.
+// El paso Precio. Con el costo de reposición, que sale de la pestaña Costo y
+// Stock del producto, y los parámetros de la cuenta (o los propios del
+// producto), el simulador muestra el precio final, el margen y de qué se
+// compone el precio; la perilla mueve el precio hasta la ganancia que se
+// quiere, y la competencia que se cargó en Información sirve para comparar.
+// Al guardar, el precio, las cuotas y el descuento quedan para subir desde Por
+// subir. Arranca con lo que tiene hoy la publicación. Si las medidas cuestan
+// distinto, hay una pestaña por costo, cada una con su precio.
 
 const MAX_DISCOUNT = 50;
 
@@ -82,38 +86,66 @@ function ownValues(account: PricingParams, overrides: Overrides): Record<string,
   return out;
 }
 
-export function PriceStep({
-  accountSlug,
-  data,
-  today,
-  timeZone,
-  infoHref,
-  settingsHref,
-}: {
+type StepProps = {
   accountSlug: string;
   data: PriceStepData;
   today: string;
   timeZone: string;
   infoHref: string;
   settingsHref: string;
-}) {
+};
+
+/** El nombre de una pestaña: sus medidas y su costo. */
+const groupLabel = (g: PriceGroupData) => `${measuresText(g.measures) || 'Sin medida'} · ${g.cost !== null ? formatPrice(g.cost) : 'sin costo'}`;
+
+export function PriceStep(props: StepProps) {
+  const { groups } = props.data;
+  const [chosen, setChosen] = useState(groups[0].anchorId);
+  if (groups.length === 1) return <PriceCalculator {...props} group={groups[0]} />;
+  // Si las pestañas cambiaron, por ejemplo porque se cambió un costo, vuelve a la primera.
+  const active = groups.some((g) => g.anchorId === chosen) ? chosen : groups[0].anchorId;
+  return (
+    <Tabs value={active} onValueChange={setChosen} className="space-y-4">
+      <div className="space-y-2">
+        <TabsList aria-label="Medidas con distinto costo">
+          {groups.map((g) => (
+            <TabsTrigger key={g.anchorId} value={g.anchorId} className="tabular-nums">
+              {groupLabel(g)}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        <p className="text-sm text-muted-foreground">Las medidas cuestan distinto: cada pestaña tiene su precio, sus cuotas y su descuento.</p>
+      </div>
+      {/* Todas quedan armadas, así lo que se cambió en una no se pierde al pasar a otra. */}
+      {groups.map((g) => (
+        <TabsContent key={g.anchorId} value={g.anchorId} forceMount className="mt-0 data-[state=inactive]:hidden">
+          <PriceCalculator {...props} group={g} />
+        </TabsContent>
+      ))}
+    </Tabs>
+  );
+}
+
+function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, settingsHref }: StepProps & { group: PriceGroupData }) {
   const router = useRouter();
   const account = data.account;
+  const costHref = `/a/${accountSlug}/productos/${data.productId}?seccion=stock`;
+  // Con varias pestañas armadas a la vez, cada casillero necesita su propio id.
+  const uid = useId();
+  const several = data.groups.length > 1 || group.measures.length > 1;
   const initialOverrides = Object.fromEntries(
     Object.entries(data.overrides).map(([k, v]) => [k, pricingText(k as PricingKey, v as number | null)]),
   ) as Overrides;
   const [overrides, setOverrides] = useState<Overrides>(initialOverrides);
-  const [costText, setCostText] = useState(amountText(data.cost));
   const { params, bad } = withOverrides(account, overrides);
-  const costParsed = parsePrice(costText);
-  const cost = typeof costParsed === 'number' && costParsed > 0 ? costParsed : null;
+  const cost = group.cost;
 
   // Lo que tiene hoy la publicación, que puede haber llegado del canal; si no, lo último que se guardó.
-  const start = data.decision ?? null;
-  const firstPlan = data.installments !== null && isInstallmentPlan(data.installments) ? data.installments : (start?.installments ?? 0);
+  const start = group.decision ?? null;
+  const firstPlan = group.installments !== null && isInstallmentPlan(group.installments) ? group.installments : (start?.installments ?? 0);
   const [plan, setPlan] = useState<InstallmentPlan>(isInstallmentPlan(firstPlan) ? firstPlan : 0);
-  const [discount, setDiscount] = useState(data.discount ?? start?.discountPct ?? 0);
-  const firstPrice = data.price ?? start?.listPrice ?? (cost ? targetListPrice(cost, params, 0, 0) : null) ?? 0;
+  const [discount, setDiscount] = useState(group.discount ?? start?.discountPct ?? 0);
+  const firstPrice = group.price ?? start?.listPrice ?? (cost ? targetListPrice(cost, params, 0, 0) : null) ?? 0;
   const [listText, setListText] = useState(firstPrice ? amountText(firstPrice) : '');
   const listParsed = parsePrice(listText);
   const listPrice = typeof listParsed === 'number' ? listParsed : 0;
@@ -136,8 +168,7 @@ export function PriceStep({
   const outOfRange = range !== null && discount > 0 && (discount < range.min || discount > range.max);
   const own = ownValues(account, overrides);
   const saved = start ? start.listPrice === Math.round(listPrice) && start.discountPct === discount && start.installments === plan : false;
-  const dirty =
-    !saved || costText !== amountText(data.cost) || JSON.stringify(own) !== JSON.stringify(ownValues(account, initialOverrides));
+  const dirty = !saved || JSON.stringify(own) !== JSON.stringify(ownValues(account, initialOverrides));
 
   const change = (fn: () => void) => {
     fn();
@@ -148,11 +179,10 @@ export function PriceStep({
   async function save() {
     setPending(true);
     setMessage(null);
-    const r = await savePriceDecisionAction(accountSlug, data.publicationId, {
+    const r = await savePriceDecisionAction(accountSlug, group.anchorId, {
       listPrice: Math.round(listPrice),
       discountPct: discount,
       plan,
-      cost: costText,
       overrides: own,
       confirmBelowMin: confirm,
     }).catch(() => null);
@@ -162,7 +192,7 @@ export function PriceStep({
     setMessage({
       kind: 'ok',
       text:
-        data.channelPrice !== null
+        group.channelPrice !== null
           ? `Guardado. El precio, las cuotas y el descuento quedan en Por subir para mandarlos a ${data.channelName}.`
           : 'Guardado. El precio va con la publicación cuando la crees en el canal; las cuotas y el descuento, después, desde Por subir.',
     });
@@ -177,26 +207,31 @@ export function PriceStep({
       <div className="grid gap-4 md:gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
         <SectionCard
           title="Simulador"
-          description={`El costo es del producto${data.sharedWith > 0 ? ` y lo comparten sus ${data.sharedWith + 1} publicaciones` : ''}. El precio publicado incluye IVA.`}
+          description={`${several && group.measures.length > 0 ? `Este precio vale para ${group.measures.length === 1 ? 'la medida' : 'las medidas'} ${measuresText(group.measures)}. ` : ''}El precio publicado incluye IVA.`}
         >
           <SectionBody>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <Label htmlFor="price-cost">Costo de reposición sin IVA</Label>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-sm text-muted-foreground">$</span>
-                  <Input id="price-cost" inputMode="decimal" value={costText} placeholder="99.627,50" onChange={(e) => change(() => setCostText(e.target.value))} />
-                </div>
+                <p className="text-sm font-medium">Costo de reposición sin IVA</p>
+                <p className={cn('flex h-10 items-center text-base tabular-nums sm:h-9', cost === null && 'text-muted-foreground')}>
+                  {cost !== null ? formatPrice(cost) : 'Sin cargar'}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {cost !== null ? `Es ${group.costNote}. ` : group.missing.length > 0 && group.measures.length > 0 ? `Falta el de ${measuresText(group.missing)}. ` : ''}
+                  <Link href={costHref} className="text-primary underline-offset-4 hover:underline">
+                    {cost !== null ? 'Cambiarlo en Costo y Stock' : 'Cargarlo en Costo y Stock'}
+                  </Link>
+                </p>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="price-list">Precio publicado</Label>
+                <Label htmlFor={`${uid}-list`}>Precio publicado</Label>
                 <div className="flex items-center gap-1.5">
                   <span className="text-sm text-muted-foreground">$</span>
-                  <Input id="price-list" inputMode="decimal" value={listText} placeholder="221.304" onChange={(e) => change(() => setListText(e.target.value))} />
+                  <Input id={`${uid}-list`} inputMode="decimal" value={listText} placeholder="221.304" onChange={(e) => change(() => setListText(e.target.value))} />
                 </div>
-                {data.channelPrice !== null ? (
+                {group.channelPrice !== null ? (
                   <p className="text-xs text-muted-foreground">
-                    En {data.channelName} está a {formatPrice(data.channelPrice)}.
+                    En {data.channelName} está a {formatPrice(group.channelPrice)}.
                   </p>
                 ) : null}
               </div>
@@ -233,9 +268,9 @@ export function PriceStep({
                   );
                 })}
               </div>
-              {data.channelInstallments !== null ? (
+              {group.channelInstallments !== null ? (
                 <p className="text-xs text-muted-foreground">
-                  En {data.channelName}: {planLabel(data.channelInstallments).toLowerCase()}.
+                  En {data.channelName}: {planLabel(group.channelInstallments).toLowerCase()}.
                 </p>
               ) : null}
               {plans.length < INSTALLMENT_PLANS.length ? (
@@ -251,11 +286,11 @@ export function PriceStep({
 
             <div className="space-y-1.5">
               <div className="flex items-baseline justify-between">
-                <Label htmlFor="price-discount">Descuento</Label>
+                <Label htmlFor={`${uid}-discount`}>Descuento</Label>
                 <span className="text-sm font-medium tabular-nums">{formatPercent(discount)}</span>
               </div>
               <input
-                id="price-discount"
+                id={`${uid}-discount`}
                 type="range"
                 min={0}
                 max={MAX_DISCOUNT}
@@ -268,9 +303,9 @@ export function PriceStep({
                 <span>0 %</span>
                 <span>{MAX_DISCOUNT} %</span>
               </div>
-              {data.channelDiscount !== null ? (
+              {group.channelDiscount !== null ? (
                 <p className="text-xs text-muted-foreground">
-                  En {data.channelName}: {data.channelDiscount > 0 ? `${formatPercent(data.channelDiscount)} de descuento` : 'sin descuento'}.
+                  En {data.channelName}: {group.channelDiscount > 0 ? `${formatPercent(group.channelDiscount)} de descuento` : 'sin descuento'}.
                 </p>
               ) : null}
               {outOfRange ? (
@@ -311,7 +346,13 @@ export function PriceStep({
         <SectionCard title="Resultado">
           <SectionBody>
             {!cost ? (
-              <p className="text-sm text-muted-foreground">Cargá el costo de reposición sin IVA para ver el margen.</p>
+              <p className="text-sm text-muted-foreground">
+                Falta el costo de reposición sin IVA para ver el margen: se carga en{' '}
+                <Link href={costHref} className="text-primary underline-offset-4 hover:underline">
+                  Costo y Stock
+                </Link>
+                .
+              </p>
             ) : null}
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">Precio final al comprador</p>
@@ -390,8 +431,6 @@ export function PriceStep({
               }),
             )
           }
-          costText={costText}
-          onCost={(text) => change(() => setCostText(text))}
           plan={plan}
           finalPrice={sim.finalPrice}
           cost={cost}
@@ -474,6 +513,9 @@ export function PriceStep({
               {start.decidedBy ? ` por ${start.decidedBy}` : ''}.
               {start.belowMinConfirmed ? ' Se confirmó debajo del mínimo.' : ''}
             </p>
+          ) : null}
+          {group.pricesDiffer ? (
+            <p className="text-sm text-muted-foreground">Hoy {measuresText(group.measures)} tienen precios distintos: al guardar quedan todas con este.</p>
           ) : null}
           {below && dirty ? (
             <label className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">

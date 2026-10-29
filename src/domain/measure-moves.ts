@@ -3,7 +3,7 @@ import { measureText, variantKey, type VariantLike } from './media';
 import { stockSlots } from './stock';
 
 // La app reconoce cada medida por su SKU y su medida juntos (variantKey), y
-// así la nombran el stock y su historial, las fotos y los videos marcados
+// así la nombran el stock y su historial, el costo, las fotos y los videos marcados
 // para una medida, el orden de las fotos de cada medida, la medida que vende
 // cada publicación de una familia y lo que se registró en Registro de
 // productos. Si la ficha le cambia el nombre o el SKU a una medida, todo eso
@@ -131,6 +131,7 @@ const markLabel = (v: VariantLike) => v.measure?.trim() || v.sku?.trim() || '';
 export async function moveMeasureRefs(tx: Tx, productId: string, before: MeasureRow[], after: MeasureRow[], opts: { byPosition?: boolean } = {}): Promise<void> {
   const { keys, stock } = measureMoves(before, after, opts);
   await moveStock(tx, productId, stock, after);
+  await moveCosts(tx, productId, stock);
   if (keys.size === 0) return;
   const from = [...keys.keys()];
   const label = new Map(after.flatMap((v) => (variantKey(v) ? [[variantKey(v)!, markLabel(v)] as const] : [])));
@@ -195,4 +196,14 @@ async function moveStock(tx: Tx, productId: string, keys: Map<string, string>, a
     const name = labelOf.get(r.key);
     if (name !== undefined && name !== r.label) await tx.productStock.update({ where: { productId_key: { productId, key: r.key } }, data: { label: name } });
   }
+}
+
+/** El costo de cada medida pasa a su clave nueva, como el stock. */
+async function moveCosts(tx: Tx, productId: string, keys: Map<string, string>): Promise<void> {
+  if (keys.size === 0) return;
+  const moving = await tx.productCost.findMany({ where: { productId, key: { in: [...keys.keys()] } }, select: { key: true, cost: true } });
+  if (moving.length === 0) return;
+  const gone = new Set([...moving.map((r) => r.key), ...moving.map((r) => keys.get(r.key)!)]);
+  await tx.productCost.deleteMany({ where: { productId, key: { in: [...gone] } } });
+  await tx.productCost.createMany({ data: moving.map((r) => ({ productId, key: keys.get(r.key)!, cost: r.cost })) });
 }

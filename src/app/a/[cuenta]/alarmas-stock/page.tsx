@@ -63,7 +63,7 @@ export default async function StockAlarmsPage({ params, searchParams }: { params
             {filter === 'sin-stock'
               ? 'Ninguna publicación se quedó sin stock mostrando más de 5.'
               : filter === 'todas'
-                ? 'Ninguna publicación muestra más stock del que hay. «Mostrar más de 5» se prende en la pestaña Stock de cada producto.'
+                ? 'Ninguna publicación muestra más stock del que hay. «Mostrar más de 5» se prende en la pestaña Costo y Stock de cada producto.'
                 : `Ninguna publicación con ${filter === 'queda-1' ? '1 unidad' : '2 unidades'} muestra más de 5.`}
           </Card>
         ) : (

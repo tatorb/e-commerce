@@ -476,8 +476,12 @@ describe.skipIf(!url)('subir al canal en la base', () => {
   });
   // ───────────────────────────── Precio ─────────────────────────────
 
-  const decide = (publicationId: string, listPrice: number, extra: Partial<Parameters<typeof savePriceDecision>[1]> = {}) =>
-    savePriceDecision(db, { accountId, publicationId, userId: null, listPrice, discountPct: 0, plan: 0, cost: 100_000, overrides: {}, confirmBelowMin: false, ...extra });
+  /** Decide el precio, con el costo cargado en el producto. */
+  async function decide(publicationId: string, listPrice: number, extra: Partial<Parameters<typeof savePriceDecision>[1]> = {}) {
+    const { productId: id } = await db.publication.findUniqueOrThrow({ where: { id: publicationId }, select: { productId: true } });
+    await db.product.update({ where: { id }, data: { replacementCost: 100_000 } });
+    return savePriceDecision(db, { accountId, publicationId, userId: null, listPrice, discountPct: 0, plan: 0, overrides: {}, confirmBelowMin: false, ...extra });
+  }
 
   it('la primera lectura toma el precio del canal, y una copia de antes del precio no muestra cambios', async () => {
     expect(Number((await pub('MLA1')).price)).toBe(100);
@@ -496,7 +500,8 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     // Sin cuotas ni descuento, como ya estaba en el canal: solo cambia el precio.
     expect((await state('MLA1')).draft).toEqual(['price']);
     expect(await db.priceDecision.findFirst({ where: { publicationId: p.id } })).toMatchObject({ installments: 0, belowMinConfirmed: false });
-    expect(Number((await db.product.findUniqueOrThrow({ where: { id: productId } })).replacementCost)).toBe(100_000);
+    // Con el costo del producto.
+    expect(Number((await db.priceDecision.findFirstOrThrow({ where: { publicationId: p.id } })).cost)).toBe(100_000);
 
     const result = await pushDrafts(db, { accountId, publicationId: p.id, userId: null });
     expect(result).toEqual({ sent: ['price'], rejected: [], confirmed: true });

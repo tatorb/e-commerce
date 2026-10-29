@@ -118,6 +118,12 @@ describe.skipIf(!url)('cambiarle el nombre a una medida, en la base', () => {
         { productId: product.id, key: half, kind: 'INITIAL', delta: 4, after: 4 },
       ],
     });
+    await db.productCost.createMany({
+      data: [
+        { productId: product.id, key: sin, cost: 1000 },
+        { productId: product.id, key: half, cost: 1250 },
+      ],
+    });
     const pub = await db.publication.create({
       data: {
         productId: product.id,
@@ -142,7 +148,7 @@ describe.skipIf(!url)('cambiarle el nombre a una medida, en la base', () => {
     compatibilities: [],
   });
 
-  it('desde el paso Información o Claude: el stock, el historial, la publicación y sus fotos pasan a STD', async () => {
+  it('desde el paso Información o Claude: el stock, el historial, el costo, la publicación y sus fotos pasan a STD', async () => {
     const { product, pub, sin, half } = await aros();
     const std = key('AROS-1', 'STD');
     await db.$transaction((tx) =>
@@ -164,6 +170,8 @@ describe.skipIf(!url)('cambiarle el nombre a una medida, en la base', () => {
     );
     expect(await db.stockMovement.count({ where: { productId: product.id, key: sin } })).toBe(0);
     expect(await db.stockMovement.count({ where: { productId: product.id, key: std } })).toBe(1);
+    const costs = await db.productCost.findMany({ where: { productId: product.id } });
+    expect(new Map(costs.map((c) => [c.key, Number(c.cost)]))).toEqual(new Map([[std, 1000], [half, 1250]]));
     const after = await db.publication.findUniqueOrThrow({ where: { id: pub.id } });
     expect(after.variantKey).toBe(std);
     expect(after.media).toEqual([{ kind: 'asset', url: 'https://ejemplo.com/aros.jpg', variants: [std], positions: { [std]: 0 } }]);

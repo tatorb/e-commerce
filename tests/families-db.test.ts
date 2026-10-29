@@ -7,7 +7,8 @@ import { familyDetails } from '@/domain/families';
 import { addToPipeline, advanceStep, removeFromPipeline } from '@/domain/pipeline';
 import { applyFamilies } from '@/lib/family-apply';
 import { familyByMeasure, fillFamilyCode, joinKnownFamilies, planFamilies } from '@/lib/families';
-import { savePriceDecision, setMeasurePrice } from '@/lib/pricing';
+import { setProductCosts } from '@/lib/costs';
+import { loadPriceStep, priceGroups, savePriceDecision } from '@/lib/pricing';
 import { saveQaTexts } from '@/lib/publication-qa';
 
 // La vista previa de las familias contra la base de prueba: qué se junta, qué
@@ -269,33 +270,51 @@ describe.skipIf(!url)('juntar y separar familias', () => {
     expect(added).toMatchObject({ resumed: 2, related: [] });
   });
 
-  it('el precio de la familia va a las medidas sin precio propio, y una medida puede tener el suyo', async () => {
+  it('las medidas que cuestan lo mismo comparten el precio, y la que cuesta distinto tiene su pestaña con su precio, cuotas y descuento', async () => {
     const p = await product([
       { sku: 'SP-2-00', measure: 'STD' },
       { sku: 'SP-2-50', measure: '0.50' },
       { sku: 'SP-2-75', measure: '0.75' },
     ]);
-    await db.product.update({ where: { id: p.id }, data: { replacementCost: 100 } });
     const a = await listing(p.id, 'MLA11', 'SP-2-00', 'F2', { price: 500 });
     const b = await listing(p.id, 'MLA12', 'SP-2-50', 'F2', { price: 500 });
     const c = await listing(p.id, 'MLA13', 'SP-2-75', 'F2', { price: 500 });
     await applyFamilies(db, { accountId, storeId, userId: null, now: () => now });
     const family = await db.listingFamily.findFirstOrThrow();
-    await setMeasurePrice(db, { accountId, publicationId: c.id === family.leadId ? a.id : c.id, own: true, price: 700 });
-    const own = c.id === family.leadId ? a.id : c.id;
+    const lead = family.leadId!;
 
-    await savePriceDecision(db, { accountId, publicationId: b.id, userId: null, listPrice: 900, discountPct: 10, plan: 0, cost: 100, overrides: {}, confirmBelowMin: true });
-    const rows = await db.publication.findMany({ select: { id: true, price: true, discount: true } });
-    for (const r of rows) {
-      expect(Number(r.price)).toBe(r.id === own ? 700 : 900);
-      expect(Number(r.discount)).toBe(10);
-    }
-    // La decisión queda en la principal.
-    expect(await db.priceDecision.findFirstOrThrow()).toMatchObject({ publicationId: family.leadId });
-    // Sin precio propio, vuelve al de la familia.
-    await setMeasurePrice(db, { accountId, publicationId: own, own: false });
-    expect(await db.publication.findUniqueOrThrow({ where: { id: own } })).toMatchObject({ ownPrice: false });
-    expect(Number((await db.publication.findUniqueOrThrow({ where: { id: own } })).price)).toBe(900);
+    // Todas con el costo de antes, el general del producto: una sola pestaña.
+    await db.product.update({ where: { id: p.id }, data: { replacementCost: 100 } });
+    expect((await priceGroups(db, lead)).map((g) => [g.measures, g.cost])).toEqual([[['STD', '0.50', '0.75'], 100]]);
+
+    // La 0.75 cuesta más: va aparte.
+    await setProductCosts(db, { accountId, productId: p.id, costs: { 'sku:SP-2-00 medida:std': '100', 'sku:SP-2-50 medida:0.50': '100', 'sku:SP-2-75 medida:0.75': '120,50' } });
+    const groups = await priceGroups(db, lead);
+    expect(groups.map((g) => [g.measures, g.cost, g.costNote])).toEqual([
+      [['STD', '0.50'], 100, 'el de las medidas STD y 0.50'],
+      [['0.75'], 120.5, 'el de la medida 0.75'],
+    ]);
+    expect(groups[0].publicationIds.sort()).toEqual([a.id, b.id].sort());
+    expect(groups[1]).toMatchObject({ anchorId: c.id, publicationIds: [c.id] });
+    expect((await loadPriceStep(db, accountId, lead))!.groups.map((g) => g.price)).toEqual([500, 500]);
+
+    // Cada pestaña guarda en sus medidas: precio, cuotas y descuento.
+    await savePriceDecision(db, { accountId, publicationId: groups[0].anchorId, userId: null, listPrice: 900, discountPct: 10, plan: 0, overrides: {}, confirmBelowMin: true });
+    await savePriceDecision(db, { accountId, publicationId: c.id, userId: null, listPrice: 1100, discountPct: 0, plan: 0, overrides: {}, confirmBelowMin: true });
+    const rows = new Map((await db.publication.findMany({ select: { id: true, price: true, discount: true, ownPrice: true } })).map((r) => [r.id, r]));
+    for (const id of [a.id, b.id]) expect([Number(rows.get(id)!.price), Number(rows.get(id)!.discount)]).toEqual([900, 10]);
+    expect([Number(rows.get(c.id)!.price), Number(rows.get(c.id)!.discount)]).toEqual([1100, 0]);
+    // La pestaña de la principal lleva el precio de la familia; la otra, el suyo.
+    for (const [id, r] of rows) expect(r.ownPrice).toBe(!groups.find((g) => g.publicationIds.includes(id))!.publicationIds.includes(lead));
+    // Cada publicación guarda su decisión, con el costo de su pestaña.
+    const decisions = await db.priceDecision.findMany({ select: { publicationId: true, cost: true } });
+    expect(new Map(decisions.map((d) => [d.publicationId, Number(d.cost)]))).toEqual(new Map([[a.id, 100], [b.id, 100], [c.id, 120.5]]));
+
+    // Sin costo no se puede guardar, y dice de qué medida falta.
+    await setProductCosts(db, { accountId, productId: p.id, costs: { 'sku:SP-2-00 medida:std': '100', 'sku:SP-2-50 medida:0.50': '100', 'sku:SP-2-75 medida:0.75': '' } });
+    await expect(
+      savePriceDecision(db, { accountId, publicationId: c.id, userId: null, listPrice: 1100, discountPct: 0, plan: 0, overrides: {}, confirmBelowMin: true }),
+    ).rejects.toThrow('Cargá el costo de reposición sin IVA de 0.75 en la pestaña Costo y Stock del producto.');
   });
 
   it('separa una familia que creó la app: una publicación por medida, con sus fotos y sus preguntas', async () => {

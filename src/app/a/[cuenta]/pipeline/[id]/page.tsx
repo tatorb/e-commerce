@@ -61,7 +61,6 @@ import { loadDescriptionStep } from '@/lib/descriptions';
 import { QaPanel } from '@/components/pipeline/qa/QaPanel';
 import { loadQaStep } from '@/lib/publication-qa';
 import { PriceStep } from '@/components/pipeline/price/PriceStep';
-import { FamilyPricesCard } from '@/components/pipeline/price/FamilyPricesCard';
 import { latestPriceDecision, loadPriceStep, productPricing } from '@/lib/pricing';
 import { PriceDecisionCard } from '@/components/pipeline/price/PriceDecisionCard';
 import { QuantityCard } from '@/components/pipeline/QuantityCard';
@@ -407,17 +406,14 @@ export default async function PipelineStepPage({
             knowledgeHref={`${pageHref}?paso=${PIPELINE_STEP_SLUG.INFO}`}
           />
         ) : price && viewing === 'PRICE' ? (
-          <>
-            <PriceStep
-              accountSlug={account.slug}
-              data={price}
-              today={todayIn(account.timezone)}
-              timeZone={account.timezone}
-              infoHref={`${pageHref}?paso=${PIPELINE_STEP_SLUG.INFO}`}
-              settingsHref={`/a/${account.slug}/precios`}
-            />
-            {family ? <FamilyPricesCard accountSlug={account.slug} members={family.members} /> : null}
-          </>
+          <PriceStep
+            accountSlug={account.slug}
+            data={price}
+            today={todayIn(account.timezone)}
+            timeZone={account.timezone}
+            infoHref={`${pageHref}?paso=${PIPELINE_STEP_SLUG.INFO}`}
+            settingsHref={`/a/${account.slug}/precios`}
+          />
         ) : channel && viewing === 'PUBLISH' ? (
           <>
             {familyRows ? <FamilyPublishCard accountSlug={account.slug} channelName={pub.channelName} rows={familyRows} /> : null}

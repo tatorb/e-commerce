@@ -8,8 +8,9 @@ import { cn } from '@/lib/utils/cn';
 
 // La lista de costos del precio final: concepto, % del precio y monto. En
 // cada fila se escribe el dato que se conoce (el % para cargos e impuestos, el
-// monto para costo, envío y embalaje) y el otro se calcula. Lo que se cambia
-// acá es solo para este producto; lo demás sigue a la cuenta.
+// monto para envío y embalaje) y el otro se calcula. Lo que se cambia acá es
+// solo para este producto; lo demás sigue a la cuenta. El costo de reposición
+// no se escribe acá: sale de la pestaña Costo y Stock del producto.
 
 type Row = {
   key: PricingKey | 'cost';
@@ -59,8 +60,6 @@ export function CostTable({
   account,
   overrides,
   onOverride,
-  costText,
-  onCost,
   plan,
   finalPrice,
   cost,
@@ -70,8 +69,6 @@ export function CostTable({
   account: PricingParams;
   overrides: Partial<Record<PricingKey, string>>;
   onOverride: (key: PricingKey, text: string | null) => void;
-  costText: string;
-  onCost: (text: string) => void;
   plan: InstallmentPlan;
   finalPrice: number;
   cost: number | null;
@@ -91,7 +88,7 @@ export function CostTable({
         {rows.map((r) => {
           const key = r.key;
           const own = key !== 'cost' && overrides[key] !== undefined;
-          const value = key === 'cost' ? costText : (overrides[key] ?? pricingText(key, account[key] as number | null));
+          const value = key === 'cost' ? '' : (overrides[key] ?? pricingText(key, account[key] as number | null));
           const input = (
             <div className="flex items-center justify-end gap-1">
               {r.edit === 'amount' ? <span className="text-xs text-muted-foreground">$</span> : null}
@@ -100,7 +97,7 @@ export function CostTable({
                 inputMode="decimal"
                 value={value}
                 placeholder={key !== 'cost' && account[key] === null ? 'Sin cargar' : ''}
-                onChange={(e) => (key === 'cost' ? onCost(e.target.value) : onOverride(key, e.target.value))}
+                onChange={(e) => key !== 'cost' && onOverride(key, e.target.value)}
                 disabled={disabled}
                 className="h-8 px-2 text-right tabular-nums"
               />
@@ -117,6 +114,7 @@ export function CostTable({
             >
               <span className="min-w-0">
                 <span className="block">{r.label}</span>
+                {key === 'cost' ? <span className="block text-[11px] text-muted-foreground">Sale de Costo y Stock</span> : null}
                 {key === 'vatRatePct' ? <span className="block text-[11px] text-muted-foreground">Tasa {pricingText('vatRatePct', params.vatRatePct)} %, como parte del precio</span> : null}
                 {!r.counts ? <span className="block text-[11px]">No suma: {r.pct === null ? 'sin cargar' : 'no es el plan elegido'}</span> : null}
                 {own ? (
@@ -142,7 +140,13 @@ export function CostTable({
               ) : (
                 <span className="text-right tabular-nums">{pct(r.pct)}</span>
               )}
-              {r.edit === 'amount' ? input : <span className="text-right tabular-nums">{money(r.amount)}</span>}
+              {key === 'cost' ? (
+                <span className="pr-2 text-right tabular-nums">{money(r.amount)}</span>
+              ) : r.edit === 'amount' ? (
+                input
+              ) : (
+                <span className="text-right tabular-nums">{money(r.amount)}</span>
+              )}
             </li>
           );
         })}

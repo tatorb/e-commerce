@@ -8,19 +8,27 @@ import type { ProductStockView } from '@/lib/stock';
 import { plannedText } from '@/lib/stock-plan';
 import { cn } from '@/lib/utils/cn';
 import { DropOrphanStockButton, ShowMoreSwitch, StockForm, StockReviewedButton } from './StockForm';
+import { CostForm } from './CostForm';
+import { formatPrice } from '@/domain/money';
+import type { ProductCostLine } from '@/lib/costs';
 import { cushionDeadlines, cushionText, owed, owedText, SELL_WITHOUT_STOCK, SHOWN_WHEN_SHORT } from '@/domain/stock-cushion';
 
-// El stock del producto: cuánto hay, qué muestra cada publicación y lo que fue
-// pasando. Un combo no tiene stock propio: sale de sus piezas.
+// El costo y el stock del producto. El costo de reposición sin IVA, uno por
+// medida, lo heredan sus publicaciones en el paso Precio. El stock: cuánto
+// hay, qué muestra cada publicación y lo que fue pasando. Un combo no tiene
+// stock propio: sale de sus piezas.
 
 export function ProductStockPanel({
   accountSlug,
   view,
+  costs,
   timeZone,
   canEdit,
 }: {
   accountSlug: string;
   view: ProductStockView;
+  // El costo de cada medida, y si alguna todavía usa el general de antes.
+  costs: { lines: ProductCostLine[]; fromGeneral: boolean };
   timeZone: string;
   canEdit: boolean;
 }) {
@@ -30,6 +38,31 @@ export function ProductStockPanel({
 
   return (
     <>
+      <SectionCard
+        title="Costo de reposición sin IVA"
+        description={`${costs.lines.length > 1 ? 'Uno por medida. ' : ''}Lo heredan sus publicaciones en el paso Precio: si las medidas cuestan distinto, cada una tiene su precio. Guardarlo no sube nada al canal.`}
+      >
+        <SectionBody>
+          {costs.fromGeneral ? (
+            <p className="text-sm text-muted-foreground">
+              {costs.lines.length > 1 ? 'Arranca con el costo que estaba cargado para todo el producto. Cambiá las medidas que cuesten distinto.' : 'Es el costo que estaba cargado en el paso Precio.'}
+            </p>
+          ) : null}
+          {canEdit ? (
+            <CostForm accountSlug={accountSlug} productId={view.id} lines={costs.lines} />
+          ) : (
+            <ul className="space-y-1 text-sm">
+              {costs.lines.map((l) => (
+                <li key={l.key} className="tabular-nums">
+                  {costs.lines.length > 1 ? `${l.label || 'Sin medida'}: ` : ''}
+                  {l.cost !== null ? formatPrice(l.cost) : 'Sin cargar'}
+                </li>
+              ))}
+            </ul>
+          )}
+        </SectionBody>
+      </SectionCard>
+
       <SectionCard
         title="Stock"
         description={

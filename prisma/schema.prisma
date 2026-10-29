@@ -312,7 +312,9 @@ model Product {
   origin           String? // país de origen
   warranty         String?
   kitContents      String?
-  // Lo que cuesta reponerlo, sin IVA: la base del precio.
+  // Lo que cuesta reponerlo, sin IVA, para todo el producto: es el de antes
+  // de cargarlo por medida (ProductCost). Vale para las medidas sin el suyo
+  // hasta que se guarda el costo en la pestaña Costo y Stock.
   replacementCost  Decimal?         @db.Decimal(14, 2)
   // Los parámetros del precio que cambian solo para este producto; lo demás sigue a la cuenta.
   pricingOverrides Json             @default("{}")
@@ -354,6 +356,7 @@ model Product {
   showMore    Boolean  @default(false)
   stock       ProductStock[]
   stockMoves  StockMovement[]
+  costs       ProductCost[]
 
   @@index([accountId])
   @@index([importRunId])
@@ -2022,6 +2025,20 @@ model TaskPublication {
 // ───────────────────────────── Stock ─────────────────────────────
 // El stock es del producto: sus publicaciones lo heredan, y las ventas del
 // canal lo descuentan (src/domain/stock.ts, src/lib/stock.ts).
+
+// El costo de reposición sin IVA de cada medida del producto: la base del
+// precio. La clave es la misma del stock: la de la medida, o vacía si el
+// producto no tiene medidas. Sus publicaciones lo heredan en el paso Precio.
+model ProductCost {
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  key       String
+  cost      Decimal  @db.Decimal(14, 2)
+  updatedAt DateTime @updatedAt
+
+  @@id([productId, key])
+  @@map("product_costs")
+}
 
 model ProductStock {
   productId String

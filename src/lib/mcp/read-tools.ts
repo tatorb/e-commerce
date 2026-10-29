@@ -442,7 +442,7 @@ const getPublication = defineTool({
                 es_esta: m.id === id,
               })),
               que_es_de_la_familia:
-                'El paso del pipeline, el título, la descripción, los datos de catálogo, las preguntas frecuentes, las reglas del bot, responder solo y el precio (salvo las medidas con precio propio). Se guardan en todas las medidas a la vez.',
+                'El paso del pipeline, el título, la descripción, los datos de catálogo, las preguntas frecuentes, las reglas del bot, responder solo y el precio, salvo las medidas que cuestan distinto, que llevan su propio precio, cuotas y descuento. Se guardan en todas las medidas a la vez.',
             },
           }
         : {}),

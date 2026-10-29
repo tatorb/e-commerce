@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 import { ProductStockPanel } from '@/components/products/ProductStockPanel';
 import { loadProductStock } from '@/lib/stock';
+import { loadProductCosts } from '@/lib/costs';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Breadcrumb } from '@/components/navigation/Breadcrumb';
@@ -87,7 +88,7 @@ export default async function ProductPage({
 }) {
   const [{ cuenta, id }, { seccion }] = await Promise.all([params, searchParams]);
   const { account, canWrite } = await requireAccount(cuenta, 'productos');
-  const [product, stores, rules, combo, research, photos, videos, stock, covers] = await Promise.all([
+  const [product, stores, rules, combo, research, photos, videos, stock, covers, costs] = await Promise.all([
     getProduct(account.id, id),
     listStores(account.id),
     loadRulesByChannel(account.id),
@@ -101,8 +102,9 @@ export default async function ProductPage({
     }),
     loadProductStock(prisma, { accountId: account.id, productId: id }),
     productCovers([id]),
+    loadProductCosts(prisma, { accountId: account.id, productId: id }),
   ]);
-  if (!product || !combo || !stock) notFound();
+  if (!product || !combo || !stock || !costs) notFound();
   // Lo que le toca a cada publicación del stock del producto, para su cantidad.
   const plans = await plansFor(prisma, product.publications.map((p) => p.id));
 
@@ -126,7 +128,7 @@ export default async function ProductPage({
   const tabs: { key: ProductTabKey; label: string; count?: number | null }[] = [
     { key: 'publicaciones', label: 'Publicaciones', count: pubs.length },
     // El total del producto; un combo no tiene stock propio.
-    { key: 'stock', label: 'Stock', count: !isCombo && stock.managed ? stock.lines.reduce((sum, l) => sum + Math.max(l.quantity ?? 0, 0), 0) : null },
+    { key: 'stock', label: 'Costo y Stock', count: !isCombo && stock.managed ? stock.lines.reduce((sum, l) => sum + Math.max(l.quantity ?? 0, 0), 0) : null },
     { key: 'ficha', label: 'Ficha' },
     { key: 'compatibilidades', label: 'Compatibilidades', count: product.compatibilities.length },
     { key: 'investigacion', label: 'Investigación' },
@@ -186,7 +188,7 @@ export default async function ProductPage({
                   {newPublication('Agregar publicación')}
                 </div>
               ),
-            stock: <ProductStockPanel accountSlug={account.slug} view={stock} timeZone={account.timezone} canEdit={canWrite} />,
+            stock: <ProductStockPanel accountSlug={account.slug} view={stock} costs={costs} timeZone={account.timezone} canEdit={canWrite} />,
             investigacion: (
               <ProductResearchPanel
                 accountSlug={account.slug}
