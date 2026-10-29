@@ -216,6 +216,10 @@ export function discountDates(externalId: string, now: Date): { start: string; f
   return { start: `${today}T00:00:00`, finish, until: fromWallClock(finish, timeZone) };
 }
 
+// Los estados de un descuento propio que está puesto, por empezar o activándose.
+// "candidate" solo dice que se le puede poner uno: no hay nada para sacar.
+const DISCOUNT_ON = new Set(['started', 'pending', 'sync_requested']);
+
 /** Si la publicación tiene un descuento propio puesto o por empezar. */
 async function hasDiscount(id: string, token: string): Promise<boolean> {
   let list: unknown;
@@ -225,7 +229,17 @@ async function hasDiscount(id: string, token: string): Promise<boolean> {
     if (e instanceof MercadoLibreRequestError && e.status === 404) return false;
     throw rejectedAs('el descuento', e);
   }
-  return Array.isArray(list) && list.some((p) => isObj(p) && p.type === 'PRICE_DISCOUNT' && p.status !== 'finished');
+  return Array.isArray(list) && list.some((p) => isObj(p) && p.type === 'PRICE_DISCOUNT' && typeof p.status === 'string' && DISCOUNT_ON.has(p.status));
+}
+
+/** Saca el descuento propio. Si Mercado Libre ya no lo tiene, no hay nada que sacar. */
+async function removeDiscount(id: string, token: string): Promise<void> {
+  try {
+    await mlSend('DELETE', `/seller-promotions/items/${id}?promotion_type=PRICE_DISCOUNT&app_version=v2`, token);
+  } catch (e) {
+    const gone = e instanceof MercadoLibreRequestError && (e.status === 404 || /no offers? found/i.test(detailOf(e.body) ?? ''));
+    if (!gone) throw e;
+  }
 }
 
 /**
@@ -466,7 +480,7 @@ export const mercadolibrePublisher: ChannelPublisher = {
     const id = encodeURIComponent(externalId);
     try {
       // Mercado Libre no deja dos a la vez: el que había se saca antes.
-      if (await hasDiscount(id, accessToken)) await mlSend('DELETE', `/seller-promotions/items/${id}?promotion_type=PRICE_DISCOUNT&app_version=v2`, accessToken);
+      if (await hasDiscount(id, accessToken)) await removeDiscount(id, accessToken);
       if (pct === 0) return { until: null };
       const dates = discountDates(externalId, now);
       await mlSend('POST', `/seller-promotions/items/${id}?app_version=v2`, accessToken, {

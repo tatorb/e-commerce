@@ -72,6 +72,8 @@ type Item = {
   dealLater?: boolean;
   // El canal no acepta descuentos: el motivo.
   dealRejected?: string;
+  // El canal dice que tiene un descuento que ya no está: al sacarlo, no lo encuentra.
+  dealStale?: boolean;
 };
 
 const variationBody = (v: NonNullable<Item['variations']>[number]) => ({
@@ -170,8 +172,13 @@ describe.skipIf(!url)('subir al canal en la base', () => {
       if (promo) {
         const it = items[promo[1]];
         if (!it) return json(404, {});
-        if (req.method === 'GET') return json(200, it.deal ? [{ id: 'P1', type: 'PRICE_DISCOUNT', status: 'started' }] : []);
+        if (req.method === 'GET') {
+          // Como en Mercado Libre: a la que se le puede poner un descuento, figura como candidata.
+          const candidate = { type: 'PRICE_DISCOUNT', status: 'candidate', price: 0, original_price: it.price ?? 100 };
+          return json(200, it.deal || it.dealStale ? [candidate, { id: 'P1', type: 'PRICE_DISCOUNT', status: 'started' }] : [candidate]);
+        }
         if (req.method === 'DELETE') {
+          if (!it.deal) return json(400, { message: 'No offers found for item', error: 'bad_request', status: 400, cause: [] });
           it.deal = null;
           return json(200, {});
         }
@@ -592,6 +599,20 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     expect(result.sent).toEqual(['price']);
     expect(result.rejected).toEqual([{ field: 'discount', message: 'Mercado Libre no aceptó el descuento: The seller reputation is not green' }]);
     expect((await state('MLA1')).rejected).toHaveLength(1);
+  });
+
+  it('un descuento candidato no se toma como puesto, y si al sacarlo ya no está, se pone el nuevo igual', async () => {
+    // Sin descuento: el canal la muestra como candidata y no hay nada que sacar.
+    const { p } = await uploadDiscount();
+    expect((await pub('MLA1')).channelCopy!.discountUntil).not.toBeNull();
+    // El canal dice que tiene uno, pero al sacarlo no lo encuentra.
+    items.MLA1.deal = null;
+    items.MLA1.dealStale = true;
+    await decide(p.id, 260_000, { discountPct: 8, plan: 3 });
+    const result = await pushDrafts(db, { accountId, publicationId: p.id, userId: null });
+    expect(result).toMatchObject({ sent: ['discount'], rejected: [] });
+    expect(promoWrites()).toEqual(['DELETE', 'POST 239200']);
+    expect(await state('MLA1')).toEqual({ draft: [], choose: [], rejected: [] });
   });
 
   // ───────────────────────────── Desde Claude ─────────────────────────────
