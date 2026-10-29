@@ -168,7 +168,10 @@ export async function moveMeasureRefs(tx: Tx, productId: string, before: Measure
 async function moveStock(tx: Tx, productId: string, keys: Map<string, string>, after: MeasureRow[]): Promise<void> {
   const slots = stockSlots(after);
   const labelOf = new Map(slots.map((s) => [s.key, s.label]));
-  const rows = await tx.productStock.findMany({ where: { productId }, select: { key: true, label: true, quantity: true } });
+  const rows = await tx.productStock.findMany({
+    where: { productId },
+    select: { key: true, label: true, quantity: true, lowAt: true, outSince: true, remindedAt: true, cutAt: true },
+  });
   const moving = rows.filter((r) => keys.has(r.key));
   if (moving.length > 0) {
     const gone = new Set([...moving.map((r) => r.key), ...moving.map((r) => keys.get(r.key)!)]);
@@ -176,7 +179,8 @@ async function moveStock(tx: Tx, productId: string, keys: Map<string, string>, a
     await tx.productStock.createMany({
       data: moving.map((r) => {
         const key = keys.get(r.key)!;
-        return { productId, key, label: labelOf.get(key) ?? r.label, quantity: r.quantity };
+        // Con sus alarmas de stock, que siguen corriendo.
+        return { ...r, productId, key, label: labelOf.get(key) ?? r.label };
       }),
     });
     // El historial, de una vez por medida: así dos medidas que se cambian el nombre no se mezclan.

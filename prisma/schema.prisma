@@ -348,6 +348,10 @@ model Product {
   // Algo para revisar del stock, por ejemplo que al empezar sus publicaciones
   // tenían cantidades distintas.
   stockReview String?
+  // Mostrar más de 5 en los canales aunque haya menos: con stock de 1 a 5 se
+  // sube 6, para que la publicación no se pause al vender la última. Con
+  // alarmas para reponer (src/domain/stock-cushion.ts).
+  showMore    Boolean  @default(false)
   stock       ProductStock[]
   stockMoves  StockMovement[]
 
@@ -2030,8 +2034,17 @@ model ProductStock {
   // Puede quedar negativo si se vendió más de lo que había.
   quantity  Int
   updatedAt DateTime @updatedAt
+  // Las alarmas de stock, con "Mostrar más de 5" en el producto: cuándo una
+  // venta dejó 1 (aviso temprano), cuándo una venta dejó 0 o menos, cuándo
+  // salió el recordatorio del primer día y cuándo se pausó por no reponer en
+  // dos días. Cargar stock las borra.
+  lowAt      DateTime?
+  outSince   DateTime?
+  remindedAt DateTime?
+  cutAt      DateTime?
 
   @@id([productId, key])
+  @@index([outSince])
   @@map("product_stock")
 }
 

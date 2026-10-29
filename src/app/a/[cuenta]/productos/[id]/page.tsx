@@ -126,7 +126,7 @@ export default async function ProductPage({
   const tabs: { key: ProductTabKey; label: string; count?: number | null }[] = [
     { key: 'publicaciones', label: 'Publicaciones', count: pubs.length },
     // El total del producto; un combo no tiene stock propio.
-    { key: 'stock', label: 'Stock', count: !isCombo && stock.managed ? stock.lines.reduce((sum, l) => sum + (l.quantity ?? 0), 0) : null },
+    { key: 'stock', label: 'Stock', count: !isCombo && stock.managed ? stock.lines.reduce((sum, l) => sum + Math.max(l.quantity ?? 0, 0), 0) : null },
     { key: 'ficha', label: 'Ficha' },
     { key: 'compatibilidades', label: 'Compatibilidades', count: product.compatibilities.length },
     { key: 'investigacion', label: 'Investigación' },

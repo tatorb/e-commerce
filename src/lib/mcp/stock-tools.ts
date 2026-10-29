@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { matchSlot, stockSlots, stockText } from '@/domain/stock';
-import { setProductStock } from '@/lib/stock';
+import { matchSlot, StockError, stockSlots, stockText } from '@/domain/stock';
+import { setProductStock, setShowMore } from '@/lib/stock';
 import { McpToolError, accountArg, defineTool, publicationArg, resolveAccount, resolvePublication } from './tool';
 
 // El stock del producto desde Claude: se cambia en el producto y se sube solo
@@ -11,7 +11,7 @@ const setProductStockTool = defineTool({
   section: 'productos',
   title: 'Cambiar el stock del producto',
   description:
-    'Cambia el stock del producto de una publicación: las unidades que hay, o las de cada medida. Lo heredan todas sus publicaciones y las de los combos en que está, y la cantidad nueva se sube sola al canal. Las ventas del canal lo descuentan solas: usalo solo para lo que la persona te dice que cambió, por ejemplo mercadería que entró. Un combo no tiene stock propio: se cambia en sus piezas. Antes de cambiarlo, mostrale a la persona qué vas a cambiar y esperá que confirme.',
+    'Cambia el stock del producto de una publicación: las unidades que hay, o las de cada medida. Lo heredan todas sus publicaciones y las de los combos en que está, y la cantidad nueva se sube sola al canal. Las ventas del canal lo descuentan solas: usalo solo para lo que la persona te dice que cambió, por ejemplo mercadería que entró. Un combo no tiene stock propio: se cambia en sus piezas. También prende o apaga "Mostrar más de 5" (mostrar_mas_de_5): con stock de 1 a 5, los canales muestran 6 para que la publicación no se pause al vender la última, con alarmas para reponer; se pueden vender 2 sin tenerlas y, sin reponer, a los dos días se pausa. Cargar el stock resuelve sus alarmas. Antes de cambiarlo, mostrale a la persona qué vas a cambiar y esperá que confirme.',
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg,
@@ -21,6 +21,7 @@ const setProductStockTool = defineTool({
       .max(100)
       .optional()
       .describe('Las unidades de cada medida, si el producto tiene medidas. Las que no se mandan quedan como están.'),
+    mostrar_mas_de_5: z.boolean().optional().describe('Prende o apaga "Mostrar más de 5" en el producto. Sin mandar, queda como está.'),
   }),
   readOnly: false,
   destructive: true,
@@ -32,6 +33,16 @@ const setProductStockTool = defineTool({
       select: { product: { select: { id: true, variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } } } } },
     });
     const slots = stockSlots(pub.product.variants);
+    const onlySwitch = args.unidades === undefined && !args.medidas?.length && args.mostrar_mas_de_5 !== undefined;
+    if (onlySwitch) {
+      try {
+        const sync = await setShowMore(ctx.db, { accountId: account.id, productId: pub.product.id, on: args.mostrar_mas_de_5!, userId: ctx.userId });
+        return { guardado: true, mostrar_mas_de_5: args.mostrar_mas_de_5, publicaciones_actualizadas: sync.sent };
+      } catch (e) {
+        if (e instanceof StockError) throw new McpToolError(e.message);
+        throw e;
+      }
+    }
     const stock: Record<string, number> = {};
     if (slots.length === 1) {
       if (args.unidades === undefined) throw new McpToolError('El producto no tiene medidas: pasá las unidades.');
@@ -45,6 +56,7 @@ const setProductStockTool = defineTool({
       }
     }
     const r = await setProductStock(ctx.db, { accountId: account.id, productId: pub.product.id, userId: ctx.userId, stock });
+    if (args.mostrar_mas_de_5 !== undefined) await setShowMore(ctx.db, { accountId: account.id, productId: pub.product.id, on: args.mostrar_mas_de_5, userId: ctx.userId });
     const now = await ctx.db.productStock.findMany({ where: { productId: pub.product.id }, select: { key: true, quantity: true } });
     return {
       guardado: true,

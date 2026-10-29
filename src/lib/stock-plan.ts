@@ -19,8 +19,9 @@ const STOCK_PRODUCT_SELECT = {
   id: true,
   name: true,
   stockSince: true,
+  showMore: true,
   variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } },
-  stock: { select: { key: true, quantity: true } },
+  stock: { select: { key: true, quantity: true, outSince: true, cutAt: true } },
 } satisfies Prisma.ProductSelect;
 
 /** Lo que hace falta del producto de una publicación para saber su stock, también si es combo. */
@@ -39,7 +40,15 @@ export function stockProduct(p: ProductRow): StockProduct {
     name: p.name,
     slots: stockSlots(p.variants),
     stock: p.stockSince ? Object.fromEntries(p.stock.map((s) => [s.key, s.quantity])) : null,
+    showMore: p.showMore,
+    alarms: Object.fromEntries(p.stock.map((s) => [s.key, { outSince: s.outSince, cutAt: s.cutAt }])),
   };
+}
+
+/** Lo mismo sin "Mostrar más de 5": lo que hay de verdad. */
+function realSource(source: StockSource): StockSource {
+  const plain = (product: StockProduct): StockProduct => ({ ...product, showMore: false });
+  return source.kind === 'COMBO' ? { kind: 'COMBO', parts: source.parts.map((p) => ({ ...p, product: plain(p.product) })) } : { kind: 'INDIVIDUAL', product: plain(source.product) };
 }
 
 export function sourceOf(p: SourceRow): StockSource {
@@ -68,8 +77,9 @@ export type ListingMeasure = { label: string; sku: string | null };
 
 export type StockPlan =
   // Sigue al stock: lo que le toca, lo que tiene en el canal, si hay que subirlo
-  // y, si vende una sola medida del producto, cuál.
-  | { managed: true; lines: QuantityLine[]; channel: QuantityLine[] | null; pending: boolean; measure: ListingMeasure | null }
+  // y, si vende una sola medida del producto, cuál. real: lo que hay de verdad,
+  // si con "Mostrar más de 5" se muestra más.
+  | { managed: true; lines: QuantityLine[]; channel: QuantityLine[] | null; pending: boolean; measure: ListingMeasure | null; real?: QuantityLine[] }
   // off: la cantidad automática está apagada en la publicación.
   | { managed: false; reason: string; off?: boolean };
 
@@ -78,9 +88,18 @@ type ManagedPlan = Extract<StockPlan, { managed: true }>;
 /** Si la publicación tiene prendida la cantidad automática. Sin plan, como viene de entrada. */
 export const followsStockOf = (plan: StockPlan | null | undefined): boolean => !(plan && !plan.managed && plan.off);
 
-/** Lo que le toca, en texto, con la medida si vende una sola: "0.50: 2". */
+/** Lo que le toca, en texto, con la medida si vende una sola: "0.50: 2". Si se muestra más de lo que hay: "6 · hay 2". */
 export function plannedText(plan: ManagedPlan): string {
-  return plan.measure ? `${plan.measure.label}: ${quantityText(plan.lines)}` : quantityText(plan.lines);
+  const real = plan.real;
+  let text = quantityText(plan.lines);
+  if (real) {
+    const one = (l: QuantityLine) => {
+      const has = real.find((r) => r.key === l.key)?.quantity;
+      return has === undefined || has === l.quantity ? String(l.quantity) : `${l.quantity} · hay ${has}`;
+    };
+    text = plan.lines.length === 1 && plan.lines[0].key === '' ? one(plan.lines[0]) : plan.lines.map((l) => `${l.label || 'Sin medida'}: ${one(l)}`).join(', ');
+  }
+  return plan.measure ? `${plan.measure.label}: ${text}` : text;
 }
 
 /** Por qué la cantidad no se cambia en la publicación, con la medida que vende si es una sola. */
@@ -131,7 +150,10 @@ export function planFor(p: PlanRow): StockPlan {
   if ('reason' in planned) return { managed: false, reason: planned.reason };
   const channel = channelQuantities(copy.quantity, variations);
   const measure = single ? { label: single.measure ?? single.sku ?? '', sku: single.sku ?? null } : null;
-  return { managed: true, lines: planned.lines, channel, pending: !sameQuantities(planned.lines, channel), measure };
+  const plan: ManagedPlan = { managed: true, lines: planned.lines, channel, pending: !sameQuantities(planned.lines, channel), measure };
+  const real = plannedQuantities(variations, realSource(source), single);
+  if ('lines' in real && !sameQuantities(real.lines, planned.lines)) plan.real = real.lines;
+  return plan;
 }
 
 /** Si la cantidad de la publicación sale del stock del producto. */

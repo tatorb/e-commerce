@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { cookies } from 'next/headers';
-import { AlignLeft, Camera, ClipboardList, DollarSign, History, Image as ImageIcon, KanbanSquare, ListChecks, ListTodo, MessageCircleQuestion, MessageSquareText, Package, PlugZap, RefreshCw, SlidersHorizontal, Type, Upload, Users } from 'lucide-react';
+import { AlignLeft, BellRing, Camera, ClipboardList, DollarSign, History, Image as ImageIcon, KanbanSquare, ListChecks, ListTodo, MessageCircleQuestion, MessageSquareText, Package, PlugZap, RefreshCw, SlidersHorizontal, Type, Upload, Users } from 'lucide-react';
 import { NavLink } from '@/components/dashboard/NavLink';
 import { SidebarShell } from '@/components/dashboard/SidebarShell';
 import { SidebarToggle } from '@/components/dashboard/SidebarToggle';
@@ -23,6 +23,7 @@ export async function Sidebar({
   accounts,
   questions = 0,
   tasks = 0,
+  alarms = 0,
   className,
 }: {
   user: CurrentUser;
@@ -33,6 +34,8 @@ export async function Sidebar({
   questions?: number;
   // Tareas suyas que ya llegaron al aviso o vencieron.
   tasks?: number;
+  // Medidas sin stock que se siguen mostrando con "Mostrar más de 5".
+  alarms?: number;
   className?: string;
 }) {
   const accountHome = account ? `/a/${account.slug}` : null;
@@ -41,8 +44,8 @@ export async function Sidebar({
   // siempre: cada uno ve las suyas.
   const sees = (section: Section) => accountHome !== null && (isOwnSection(section) || can(user.access, section, 'read'));
   const settings = SETTINGS_SECTIONS.some(sees);
-  // Lo de todos los días: registrar productos, responder preguntas y las tareas.
-  const daily = (['captura', 'preguntas', 'tareas'] as const).some(sees);
+  // Lo de todos los días: registrar productos, responder preguntas, las tareas y las alarmas de stock.
+  const daily = (['captura', 'preguntas', 'tareas', 'alarmas'] as const).some(sees);
   const collapsed = (await cookies()).get('sidebar_collapsed')?.value === '1';
 
   return (
@@ -123,6 +126,11 @@ export async function Sidebar({
           {sees('tareas') ? (
             <NavLink href={`${accountHome}/tareas`} label="Tareas" badge={tasks}>
               <ListTodo className="h-4 w-4" />
+            </NavLink>
+          ) : null}
+          {sees('alarmas') ? (
+            <NavLink href={`${accountHome}/alarmas-stock`} label="Alarmas de stock" badge={alarms}>
+              <BellRing className="h-4 w-4" />
             </NavLink>
           ) : null}
           {settings ? (

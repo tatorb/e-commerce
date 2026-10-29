@@ -4,11 +4,11 @@ import { revalidatePath } from 'next/cache';
 import { act } from '@/lib/auth/guard';
 import { prisma } from '@/lib/db';
 import { StockError } from '@/domain/stock';
-import { dropOrphanStock, markStockReviewed, setProductStock } from '@/lib/stock';
+import { dropOrphanStock, markStockReviewed, setProductStock, setShowMore } from '@/lib/stock';
 
 // El stock del producto: cambiarlo a mano, que se sube solo a sus
-// publicaciones, marcar como revisado lo que había para revisar y borrar el
-// de medidas que ya no están en la ficha.
+// publicaciones, marcar como revisado lo que había para revisar, borrar el
+// de medidas que ya no están en la ficha y prender "Mostrar más de 5".
 
 type Result = { ok: true; message: string } | { ok: false; error: string };
 
@@ -41,6 +41,22 @@ export async function dropOrphanStockAction(accountSlug: string, productId: stri
       await dropOrphanStock(prisma, { accountId: account.id, productId: String(productId), key: String(key), userId: user.id });
       revalidatePath(`/a/${accountSlug}`, 'layout');
       return { ok: true, message: 'Borrado.' };
+    } catch (e) {
+      if (e instanceof StockError) return { ok: false, error: e.message };
+      throw e;
+    }
+  });
+}
+
+export async function setShowMoreAction(accountSlug: string, productId: string, on: boolean): Promise<Result> {
+  const does = on ? 'Prendió "Mostrar más de 5" en el producto' : 'Apagó "Mostrar más de 5" en el producto';
+  return act(accountSlug, { section: 'productos', does, productId }, async ({ user, account }) => {
+    try {
+      const sync = await setShowMore(prisma, { accountId: account.id, productId: String(productId), on: on === true, userId: user.id });
+      revalidatePath(`/a/${accountSlug}`, 'layout');
+      const sent = sync.sent > 0 ? ` Se subió a ${sync.sent === 1 ? '1 publicación' : `${sync.sent} publicaciones`}.` : '';
+      const failed = sync.failed.length > 0 ? ` No se pudo subir a ${sync.failed.map((f) => `«${f.title}» (${f.error})`).join(', ')}: se vuelve a probar sola cada hora.` : '';
+      return { ok: true, message: `${on ? 'Prendido.' : 'Apagado.'}${sent}${failed}` };
     } catch (e) {
       if (e instanceof StockError) return { ok: false, error: e.message };
       throw e;

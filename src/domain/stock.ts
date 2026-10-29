@@ -1,6 +1,7 @@
 import type { StockMoveKind } from '@/generated/prisma/enums';
 import { measureText, variantKey, type VariantLike } from './media';
 import { MAX_QUANTITY, quantityKey, type QuantityLine } from './quantities';
+import { cushionShown, SHOWN_WHEN_SHORT, type CushionState } from './stock-cushion';
 
 // El stock es del producto: uno por medida, o uno solo si no tiene medidas.
 // Sus publicaciones lo heredan; un combo, de sus piezas. Este módulo no sabe
@@ -83,7 +84,15 @@ export function listingMeasure(slots: StockSlot[], skus: string[]): VariantLike 
 // ───────────────────────────── De dónde sale el stock ─────────────────────────────
 
 /** Un producto con su stock. stock null: la app todavía no lo maneja. */
-export type StockProduct = { id: string; name: string; slots: StockSlot[]; stock: Record<string, number> | null };
+export type StockProduct = {
+  id: string;
+  name: string;
+  slots: StockSlot[];
+  stock: Record<string, number> | null;
+  // "Mostrar más de 5" y cómo está la alarma de cada medida (src/domain/stock-cushion.ts).
+  showMore?: boolean;
+  alarms?: Record<string, CushionState>;
+};
 
 /** Lo que vende una publicación: un producto, o las piezas de un combo con cuántas lleva de cada una. */
 export type StockSource = { kind: 'INDIVIDUAL'; product: StockProduct } | { kind: 'COMBO'; parts: { product: StockProduct; quantity: number }[] };
@@ -134,13 +143,32 @@ export function available(source: StockSource, v: VariantLike | null): number | 
 }
 
 /**
+ * Cuántas tiene que mostrar el canal de esa medida: las que hay o, con
+ * "Mostrar más de 5", 6 aunque haya menos. Un combo muestra 6 solo si todas
+ * sus piezas tienen la opción y alcanza para armar al menos uno: un combo
+ * nunca se vende sin tener. Null si no se sabe.
+ */
+export function shownAvailable(source: StockSource, v: VariantLike | null): number | null {
+  const n = available(source, v);
+  if (n === null) return null;
+  if (source.kind === 'COMBO') {
+    const all = source.parts.length > 0 && source.parts.every((p) => p.product.showMore);
+    return all && n >= 1 ? Math.min(Math.max(n, SHOWN_WHEN_SHORT), MAX_QUANTITY) : n;
+  }
+  const product = source.product;
+  if (!product.showMore || !product.stock) return n;
+  const key = unitParts(source, v)![0].key;
+  return Math.min(cushionShown(product.stock[key] ?? 0, true, product.alarms?.[key] ?? null), MAX_QUANTITY);
+}
+
+/**
  * Las cantidades que tiene que tener la publicación: una por cada medida que
  * tiene en el canal, o una sola. single: la medida de una publicación sin
  * medidas, si se sabe por su SKU. Si alguna no se puede saber, el motivo.
  */
 export function plannedQuantities(variations: VariantLike[], source: StockSource, single: VariantLike | null = null): { lines: QuantityLine[] } | { reason: string } {
   if (variations.length === 0) {
-    const n = available(source, single);
+    const n = shownAvailable(source, single);
     if (n === null) {
       return { reason: 'La publicación no tiene medidas y el producto sí, y su SKU no dice de cuál es: no se sabe de qué medida sale su cantidad.' };
     }
@@ -150,7 +178,7 @@ export function plannedQuantities(variations: VariantLike[], source: StockSource
   const unknown: string[] = [];
   variations.forEach((v, i) => {
     const label = v.measure ?? v.sku ?? `Variante ${i + 1}`;
-    const n = available(source, v);
+    const n = shownAvailable(source, v);
     if (n === null) unknown.push(label);
     else lines.push({ key: quantityKey(v, i), label, quantity: n });
   });

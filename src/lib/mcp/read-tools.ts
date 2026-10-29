@@ -38,6 +38,7 @@ import { comboForAi, comboParts, PRODUCT_KIND_LABEL } from '@/domain/combos';
 import { loadCatalogData } from '@/lib/catalog-data';
 import { plannedText, plansFor } from '@/lib/stock-plan';
 import { stockSlots, stockText } from '@/domain/stock';
+import { owedText } from '@/domain/stock-cushion';
 import { fieldLabel, kindLabel } from '@/domain/sync-log';
 import { catalogForClaude } from './catalog';
 import { loadTitleContext, RECEIVED_QUESTIONS } from '@/lib/queries/title-step';
@@ -417,7 +418,10 @@ const getPublication = defineTool({
       loadCombo(ctx.db, product.id),
       loadKnowledge(ctx.db, product.id),
       plansFor(ctx.db, [id]),
-      ctx.db.product.findUniqueOrThrow({ where: { id: product.id }, select: { stockSince: true, stock: { select: { key: true, quantity: true } } } }),
+      ctx.db.product.findUniqueOrThrow({
+        where: { id: product.id },
+        select: { stockSince: true, showMore: true, stock: { select: { key: true, quantity: true, outSince: true, cutAt: true } } },
+      }),
     ]);
     const plan = plans.get(id) ?? null;
     const r = research.research;
@@ -491,6 +495,22 @@ const getPublication = defineTool({
         stock: stock.stockSince
           ? stockText(stockSlots(product.variants).map((s) => ({ label: s.label, quantity: stock.stock.find((x) => x.key === s.key)?.quantity ?? 0 })))
           : 'La app todavía no lleva el stock de este producto.',
+        // Con la opción, los canales muestran 6 aunque haya de 1 a 5, y cada medida tiene su alarma.
+        mostrar_mas_de_5: stock.showMore,
+        ...(stock.showMore
+          ? {
+              alarmas_de_stock: stockSlots(product.variants).flatMap((s) => {
+                const row = stock.stock.find((x) => x.key === s.key);
+                if (!row || (!row.outSince && row.quantity > 1)) return [];
+                const state = row.cutAt
+                  ? 'pausada por no reponer en dos días'
+                  : row.outSince
+                    ? `sin stock desde ${row.outSince.toISOString()}${row.quantity < 0 ? `, ${owedText(-row.quantity).toLowerCase()}` : ''}`
+                    : 'queda 1';
+                return [{ ...(s.label ? { medida: s.label } : {}), estado: state }];
+              }),
+            }
+          : {}),
         compatibilidades: product.compatibilities.map((c) => ({
           marca: c.vehicleBrand,
           modelo: c.model,

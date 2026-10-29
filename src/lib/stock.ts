@@ -6,6 +6,7 @@ import { getChannelSales, SalesAccessError, type ChannelOrder, type ChannelOrder
 import { fingerprint, parseFingerprints, parseRejections } from '@/domain/channel-sync';
 import { parseVariantListings, parseVariations, type VariantLike } from '@/domain/media';
 import { channelQuantities } from '@/domain/quantities';
+import { cushionShown } from '@/domain/stock-cushion';
 import { copySkus, initialStock, isManaged, listingMeasure, observedStock, parseStockChange, StockError, stockSlots, unitParts } from '@/domain/stock';
 import { titleOrUntitled } from '@/domain/publication-title';
 import { needsReactivation } from '@/domain/channel-status';
@@ -13,7 +14,8 @@ import { quantityCopy, sendQuantities } from '@/lib/channel-push';
 import { withAccessToken } from '@/lib/connections';
 import { variantListingOwners } from '@/lib/variant-listings';
 import { afterRestock } from '@/lib/restock';
-import { PLAN_SELECT, planFor, singleMeasure, SOURCE_SELECT, sourceOf, type PlanRow, type StockPlan } from '@/lib/stock-plan';
+import { PLAN_SELECT, planFor, plansFor, singleMeasure, SOURCE_SELECT, sourceOf, type PlanRow, type StockPlan } from '@/lib/stock-plan';
+import { announceStockAlarms, markStockAlarms, settleStockAlarms, type AlarmEvent, type StockChange } from '@/lib/stock-alarms';
 
 // El stock de cada producto: cargarlo a mano, tomarlo del canal al empezar,
 // descontar las ventas, devolver las canceladas y subir la cantidad que le
@@ -199,11 +201,16 @@ export async function setProductStock(
   const wanted = parseStockChange(args.stock, slots);
   const starting = product.stockSince === null;
   let changed = 0;
+  const now = args.now ?? new Date();
+  let events: AlarmEvent[] = [];
   await db.$transaction(async (tx) => {
+    const changes: StockChange[] = [];
     for (const slot of slots) {
       const before = starting ? null : (product.stock.find((s) => s.key === slot.key)?.quantity ?? 0);
       const next = wanted[slot.key] ?? (starting ? 0 : null);
       if (next === null || next === before) continue;
+      // Solo las medidas que cambiaron: guardar otra no toca la alarma de esta.
+      changes.push({ productId: product.id, key: slot.key, before: before ?? 0, after: next, cause: 'manual' });
       await tx.productStock.upsert({
         where: { productId_key: { productId: product.id, key: slot.key } },
         create: { productId: product.id, key: slot.key, label: slot.label, quantity: next },
@@ -214,8 +221,10 @@ export async function setProductStock(
       });
       changed++;
     }
-    if (starting) await tx.product.update({ where: { id: product.id }, data: { stockSince: args.now ?? new Date() } });
+    if (starting) await tx.product.update({ where: { id: product.id }, data: { stockSince: now } });
+    events = await markStockAlarms(tx, changes, now);
   });
+  await announceStockAlarms(db, events, now);
   const sync = await syncStock(db, {
     publicationIds: await affectedPublications(db, [product.id]),
     userId: args.userId,
@@ -251,6 +260,28 @@ export async function dropOrphanStock(db: Db, args: { accountId: string; product
         note: `Se borró el stock de «${row.label || 'sin nombre'}», una medida que ya no está en la ficha.`,
       },
     });
+  });
+}
+
+/**
+ * Prende o apaga "Mostrar más de 5" en un producto y sube la cantidad nueva a
+ * sus publicaciones. Al apagarla, las alarmas de sus medidas se borran y sus
+ * tareas se cierran, salvo las de unidades vendidas sin tener, que siguen
+ * hasta entregarlas.
+ */
+export async function setShowMore(db: Db, args: { accountId: string; productId: string; on: boolean; userId: string | null }): Promise<SyncResult> {
+  const product = await db.product.findFirst({ where: { id: args.productId, accountId: args.accountId }, select: { id: true, kind: true, stockSince: true } });
+  if (!product) throw new StockError('El producto no está en la cuenta.');
+  if (product.kind === 'COMBO') throw new StockError('Un combo muestra más de 5 cuando todas sus piezas lo tienen prendido: prendelo en cada una.');
+  await db.$transaction(async (tx) => {
+    await tx.product.update({ where: { id: product.id }, data: { showMore: args.on } });
+    if (!args.on) await tx.productStock.updateMany({ where: { productId: product.id }, data: { lowAt: null, outSince: null, remindedAt: null, cutAt: null } });
+  });
+  if (!args.on) await settleStockAlarms(db, product.id);
+  return syncStock(db, {
+    publicationIds: await affectedPublications(db, [product.id]),
+    userId: args.userId,
+    note: args.on ? 'Se prendió "Mostrar más de 5" en el producto.' : 'Se apagó "Mostrar más de 5" en el producto.',
   });
 }
 
@@ -331,18 +362,24 @@ async function resolveLine(db: Db | Tx, storeId: string, line: ChannelOrderLine,
   return { ...base, publicationId: pub.id, counted: true, parts };
 }
 
-/** El nombre de cada medida, para las filas nuevas del stock. */
-async function slotLabel(tx: Tx, productId: string, key: string): Promise<string> {
-  const p = await tx.product.findUnique({ where: { id: productId }, select: { variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } } } });
-  return stockSlots(p?.variants ?? []).find((s) => s.key === key)?.label ?? '';
+/** El nombre de cada medida, para las filas nuevas del stock, y si el producto muestra más de 5. */
+async function slotOf(tx: Tx, productId: string, key: string): Promise<{ label: string; showMore: boolean }> {
+  const p = await tx.product.findUnique({
+    where: { id: productId },
+    select: { showMore: true, variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } } },
+  });
+  return { label: stockSlots(p?.variants ?? []).find((s) => s.key === key)?.label ?? '', showMore: p?.showMore ?? false };
 }
 
-/** Descuenta (o devuelve) las unidades de las líneas y lo anota. */
-async function moveStock(tx: Tx, lines: SaleLine[], sign: -1 | 1, args: { saleId: string; orderId: string }): Promise<void> {
+/** Descuenta (o devuelve) las unidades de las líneas y lo anota. Devuelve lo que cambió en cada medida. */
+async function moveStock(tx: Tx, lines: SaleLine[], sign: -1 | 1, args: { saleId: string; orderId: string }): Promise<StockChange[]> {
+  const changes: StockChange[] = [];
   for (const line of lines) {
     if (!line.counted) continue;
     for (const part of line.parts) {
-      const after = await addStock(tx, part.productId, part.key, await slotLabel(tx, part.productId, part.key), sign * part.quantity);
+      const slot = await slotOf(tx, part.productId, part.key);
+      const after = await addStock(tx, part.productId, part.key, slot.label, sign * part.quantity);
+      changes.push({ productId: part.productId, key: part.key, before: after - sign * part.quantity, after, cause: sign < 0 ? 'sale' : 'cancel' });
       await tx.stockMovement.create({
         data: {
           productId: part.productId,
@@ -355,12 +392,44 @@ async function moveStock(tx: Tx, lines: SaleLine[], sign: -1 | 1, args: { saleId
           note: `Venta ${args.orderId}`,
         },
       });
-      if (after < 0) await tx.product.update({ where: { id: part.productId }, data: { stockReview: SOLD_TOO_MUCH } });
+      // Con "Mostrar más de 5", vender sin tener es parte del plan: lo avisan las alarmas de stock.
+      if (after < 0 && !slot.showMore) await tx.product.update({ where: { id: part.productId }, data: { stockReview: SOLD_TOO_MUCH } });
     }
   }
+  return changes;
 }
 
 const productsOf = (lines: SaleLine[]) => [...new Set(lines.filter((l) => l.counted).flatMap((l) => l.parts.map((p) => p.productId)))];
+
+/**
+ * Lo que descontó el canal al vender, en la cara del canal: el canal baja
+ * solo su cantidad. Solo en las que muestran más de lo que hay ("Mostrar más
+ * de 5"): así la cantidad que les toca vuelve a quedar distinta de la del
+ * canal y se sube otra vez enseguida, en lugar de quedar en 5 hasta la
+ * próxima lectura.
+ */
+async function soldInChannel(tx: Tx, lines: SaleLine[], boosted: Set<string>): Promise<void> {
+  for (const line of lines) {
+    if (!line.counted || !line.publicationId || !boosted.has(line.publicationId)) continue;
+    const copy = await tx.channelCopy.findUnique({ where: { publicationId: line.publicationId }, select: { quantity: true, variations: true } });
+    if (!copy) continue;
+    const minus = (q: unknown) => (typeof q === 'number' ? Math.max(0, q - line.quantity) : q);
+    const variations = Array.isArray(copy.variations)
+      ? (copy.variations as Record<string, unknown>[]).map((v) => (v && line.variationId && String(v.variationId) === line.variationId ? { ...v, quantity: minus(v.quantity) } : v))
+      : copy.variations;
+    await tx.channelCopy.update({
+      where: { publicationId: line.publicationId },
+      data: { quantity: minus(copy.quantity) as number | null, variations: variations as Prisma.InputJsonValue },
+    });
+  }
+}
+
+/** Las publicaciones que hoy muestran más de lo que hay. */
+async function boostedOf(db: Db, lines: SaleLine[]): Promise<Set<string>> {
+  const ids = [...new Set(lines.flatMap((l) => (l.counted && l.publicationId ? [l.publicationId] : [])))];
+  const plans = await plansFor(db, ids);
+  return new Set([...plans].flatMap(([id, plan]) => (plan.managed && plan.real ? [id] : [])));
+}
 
 /**
  * Anota una venta del canal: si se confirmó, descuenta las unidades del stock
@@ -380,6 +449,8 @@ export async function recordOrder(db: Db, args: { storeId: string; order: Channe
     const lines: SaleLine[] = [];
     for (const line of order.lines) lines.push(await resolveLine(db, args.storeId, line, ownersOf));
     const counted = lines.some((l) => l.counted);
+    const boosted = await boostedOf(db, lines);
+    let events: AlarmEvent[] = [];
     try {
       await db.$transaction(async (tx) => {
         const sale = await tx.channelSale.create({
@@ -393,19 +464,23 @@ export async function recordOrder(db: Db, args: { storeId: string; order: Channe
             checkedAt: now,
           },
         });
-        await moveStock(tx, lines, -1, { saleId: sale.id, orderId: order.orderId });
+        const changes = await moveStock(tx, lines, -1, { saleId: sale.id, orderId: order.orderId });
+        events = await markStockAlarms(tx, changes, now);
+        await soldInChannel(tx, lines, boosted);
       });
     } catch (e) {
       // Llegó dos veces a la vez: la otra ya la anotó.
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') return [];
       throw e;
     }
+    await announceStockAlarms(db, events, now);
     return productsOf(lines);
   }
 
   const lines = parseSaleLines(existing.lines);
   if (order.cancelled && existing.status === 'COUNTED') {
     const delivered = order.delivered || existing.delivered;
+    let events: AlarmEvent[] = [];
     const changed = await db.$transaction(async (tx) => {
       // Solo una vez, aunque lleguen dos avisos juntos.
       const claimed = await tx.channelSale.updateMany({
@@ -417,9 +492,11 @@ export async function recordOrder(db: Db, args: { storeId: string; order: Channe
         for (const productId of productsOf(lines)) await tx.product.update({ where: { id: productId }, data: { stockReview: KEPT_NOTE } });
         return false;
       }
-      await moveStock(tx, lines, 1, { saleId: existing.id, orderId: order.orderId });
+      const changes = await moveStock(tx, lines, 1, { saleId: existing.id, orderId: order.orderId });
+      events = await markStockAlarms(tx, changes, now);
       return true;
     });
+    await announceStockAlarms(db, events, now);
     return changed ? productsOf(lines) : [];
   }
   await db.channelSale.update({ where: { id: existing.id }, data: { checkedAt: now, delivered: order.delivered || existing.delivered } });
@@ -663,7 +740,7 @@ export async function loadProductStock(db: Db, args: { accountId: string; produc
     select: {
       ...SOURCE_SELECT,
       stockReview: true,
-      stock: { select: { key: true, label: true, quantity: true } },
+      stock: { select: { key: true, label: true, quantity: true, lowAt: true, outSince: true, remindedAt: true, cutAt: true } },
       inCombos: { select: { quantity: true, combo: { select: { id: true, name: true } } } },
       stockMoves: {
         orderBy: { id: 'desc' },
@@ -707,7 +784,19 @@ export async function loadProductStock(db: Db, args: { accountId: string; produc
     managed: product.stockSince !== null,
     since: product.stockSince,
     review: product.stockReview,
-    lines: slots.map((s) => ({ key: s.key, label: s.label, quantity: stock.get(s.key)?.quantity ?? null })),
+    showMore: product.showMore,
+    lines: slots.map((s) => {
+      const row = stock.get(s.key);
+      const quantity = row?.quantity ?? null;
+      return {
+        key: s.key,
+        label: s.label,
+        quantity,
+        // Lo que se ve en los canales con "Mostrar más de 5", y cómo está su alarma.
+        shown: quantity === null ? null : cushionShown(quantity, product.showMore, row ?? null),
+        alarm: row ? { lowAt: row.lowAt, outSince: row.outSince, remindedAt: row.remindedAt, cutAt: row.cutAt } : null,
+      };
+    }),
     // Stock de medidas que ya no están en la ficha.
     orphans: product.stock.filter((s) => !slots.some((x) => x.key === s.key)),
     parts: product.kind === 'COMBO' ? sourceOf(product) : null,

@@ -6,8 +6,9 @@ import { CheckCircle2, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { cn } from '@/lib/utils/cn';
 import { StatusText } from '@/components/pipeline/StatusText';
-import { dropOrphanStockAction, markStockReviewedAction, setProductStockAction } from '@/app/a/[cuenta]/productos/stock-actions';
+import { dropOrphanStockAction, markStockReviewedAction, setProductStockAction, setShowMoreAction } from '@/app/a/[cuenta]/productos/stock-actions';
 
 // Cambiar a mano el stock del producto, uno por medida. Al guardar se sube
 // solo a todas sus publicaciones.
@@ -137,5 +138,41 @@ export function DropOrphanStockButton({ accountSlug, productId, stockKey, label 
       </Button>
       {error ? <span className="text-destructive">{error}</span> : null}
     </span>
+  );
+}
+
+/** El interruptor de "Mostrar más de 5": prendido, los canales muestran 6 aunque haya de 1 a 5. */
+export function ShowMoreSwitch({ accountSlug, productId, on, readOnly }: { accountSlug: string; productId: string; on: boolean; readOnly: boolean }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [status, setStatus] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <button
+        id="mostrar-mas-de-5"
+        type="button"
+        role="switch"
+        aria-checked={on}
+        disabled={readOnly || pending}
+        onClick={() =>
+          startTransition(async () => {
+            setStatus(null);
+            const r = await setShowMoreAction(accountSlug, productId, !on);
+            setStatus(r.ok ? { kind: 'ok', text: r.message } : { kind: 'error', text: r.error });
+            if (r.ok) router.refresh();
+          })
+        }
+        className={cn(
+          'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50',
+          on ? 'bg-primary' : 'bg-input',
+        )}
+      >
+        <span className={cn('inline-block h-5 w-5 rounded-full bg-background shadow transition-transform', on ? 'translate-x-5' : 'translate-x-0.5')} />
+      </button>
+      <Label htmlFor="mostrar-mas-de-5" className="text-sm font-medium">
+        Mostrar más de 5
+      </Label>
+      <StatusText status={status} />
+    </div>
   );
 }

@@ -6,7 +6,8 @@ import { PrismaClient } from '@/generated/prisma/client';
 import { mercadolibreSales, parseOrder } from '@/channels/mercadolibre/sales';
 import { available, copySkus, initialStock, listingMeasure, matchSlot, observedStock, parseStockChange, plannedQuantities, stockSlots, unitParts, type StockSource } from '@/domain/stock';
 import { encrypt } from '@/lib/crypto';
-import { handleSalesNotice, readSales, recordOrder, setFollowsStock, setProductStock, startStock, syncStock, affectedPublications, reconcileStock } from '@/lib/stock';
+import { handleSalesNotice, readSales, recordOrder, setFollowsStock, setProductStock, setShowMore, startStock, syncStock, affectedPublications, reconcileStock } from '@/lib/stock';
+import { stockAlarmPass } from '@/lib/stock-alarms';
 import { afterRestock } from '@/lib/restock';
 import { STATUS_TOOLS } from '@/lib/mcp/status-tools';
 import type { McpContext } from '@/lib/mcp/tool';
@@ -442,6 +443,115 @@ describe.skipIf(!url)('el stock en la base', () => {
     expect(await db.task.findFirstOrThrow()).toMatchObject({ status: 'DONE', doneAt: expect.any(Date) });
     await expect(tool.run(ctx, { publicacion: 'MLA1000001', accion: 'reactivar' })).rejects.toThrow('No se pudo reactivar');
     expect(await tool.run(ctx, { publicacion: 'MLA1000001', accion: 'pausar' })).toMatchObject({ estado: 'Pausada' });
+  });
+
+  it('mostrar más de 5: 6 con poco stock, el aviso al quedar 1, la alarma al vender la última y el cortafuegos', async () => {
+    await startStock(db);
+    // Bulón: 5. Sus publicaciones y la del kit, que lleva 2 bulones.
+    writes.length = 0;
+    await setShowMore(db, { accountId, productId: ids.bulon, on: true, userId: 'ana' });
+    expect(pushedTo().sort()).toEqual(['MLA1000001=6', 'MLA1000002=6', 'MLA1000004=6']);
+    const plan = (await plansFor(db, [ids.p1])).get(ids.p1)!;
+    expect(plan).toMatchObject({ managed: true, lines: [{ quantity: 6 }], real: [{ quantity: 5 }] });
+    expect(plannedText(plan as Extract<typeof plan, { managed: true }>)).toBe('6 · hay 5');
+
+    const sell = async (orderId: string, quantity: number) => {
+      const products = await recordOrder(db, { storeId, order: sale(orderId, [{ listingId: 'MLA1000001', variationId: null, sku: null, quantity }]) });
+      return syncStock(db, { publicationIds: await affectedPublications(db, products) });
+    };
+    const alarm = () => db.productStock.findUniqueOrThrow({ where: { productId_key: { productId: ids.bulon, key: '' } } });
+    const task = () => db.task.findFirst({ where: { autoKey: `stock:${ids.bulon}:` }, include: { assignees: true } });
+
+    // De 5 a 2: nada. Mercado Libre bajó la vendida a 3: se le vuelve a subir 6 enseguida.
+    writes.length = 0;
+    await sell('4001', 3);
+    expect(await task()).toBeNull();
+    expect(pushedTo()).toEqual(['MLA1000001=6']);
+    // De 2 a 1: el aviso temprano, y se sigue viendo 6. El kit lleva 2 bulones: no alcanza para uno, y un combo nunca se vende sin tener.
+    writes.length = 0;
+    await sell('4002', 1);
+    expect((await alarm()).lowAt).toEqual(expect.any(Date));
+    expect(await task()).toMatchObject({ title: 'Queda 1: Bulón de tapa', status: 'PENDING', remindAt: expect.any(Date) });
+    expect((await task())!.assignees.map((a) => a.userId)).toEqual(['ana']);
+    expect(pushedTo().sort()).toEqual(['MLA1000001=6', 'MLA1000004=0']);
+
+    // Se vende la última: la alarma, y se sigue viendo 6.
+    writes.length = 0;
+    await sell('4003', 1);
+    expect((await alarm()).outSince).toEqual(expect.any(Date));
+    expect((await task())!.title).toBe('Reponer: Bulón de tapa, se vendió la última');
+    expect((await task())!.description).toContain('se pausa la publicación');
+    expect(pushedTo()).toEqual(['MLA1000001=6']);
+    expect(await db.task.count({ where: { autoKey: { startsWith: 'stock:' } } })).toBe(1);
+
+    // Una sin tenerla: todavía 6, sin pedir revisar el stock. Falta 1 para entregar.
+    await sell('4004', 1);
+    expect((await alarm()).quantity).toBe(-1);
+    expect((await task())!.title).toBe('Reponer: Bulón de tapa, falta 1 para entregar');
+    expect((await db.product.findUniqueOrThrow({ where: { id: ids.bulon } })).stockReview ?? '').not.toContain('Se vendió más de lo que había');
+    expect((await plansFor(db, [ids.p1])).get(ids.p1)).toMatchObject({ lines: [{ quantity: 6 }] });
+
+    // El cortafuegos: al día, otro aviso; a los dos días, se pausa y se sube 0.
+    const later = (hours: number) => new Date(Date.now() + hours * 3600_000);
+    expect(await stockAlarmPass(db, { budgetMs: 10_000, now: later(1) })).toEqual({ reminded: 0, cut: [], pending: false });
+    expect(await stockAlarmPass(db, { budgetMs: 10_000, now: later(25) })).toEqual({ reminded: 1, cut: [], pending: false });
+    expect((await task())!.description).toContain('Pasó un día sin reponer.');
+    expect(await stockAlarmPass(db, { budgetMs: 10_000, now: later(26) })).toEqual({ reminded: 0, cut: [], pending: false });
+    const cut = await stockAlarmPass(db, { budgetMs: 10_000, now: later(49) });
+    expect(cut.cut).toEqual([ids.bulon]);
+    writes.length = 0;
+    await syncStock(db, { publicationIds: await affectedPublications(db, cut.cut) });
+    expect(pushedTo().sort()).toEqual(['MLA1000001=0', 'MLA1000002=0']);
+    expect((await task())!.title).toBe('Reponer y reactivar: Bulón de tapa, falta 1 para entregar');
+
+    // Al cargar el stock, la alarma se borra, la tarea se cierra y vuelve a verse 6.
+    writes.length = 0;
+    await setProductStock(db, { accountId, productId: ids.bulon, userId: 'ana', stock: { '': 3 } });
+    expect(await alarm()).toMatchObject({ quantity: 3, outSince: null, remindedAt: null, cutAt: null, lowAt: null });
+    expect(await task()).toMatchObject({ status: 'DONE' });
+    expect(pushedTo().sort()).toEqual(['MLA1000001=6', 'MLA1000002=6', 'MLA1000004=6']);
+  });
+
+  it('mostrar más de 5: la segunda sin tener pausa, cargar 0 dice que no hay y al apagarla se cierra', async () => {
+    await startStock(db);
+    await setProductStock(db, { accountId, productId: ids.bulon, userId: 'ana', stock: { '': 1 } });
+    // Prenderla con 0 no muestra 6: solo cuenta lo que se vende después.
+    await setProductStock(db, { accountId, productId: ids.bulon, userId: 'ana', stock: { '': 0 } });
+    await setShowMore(db, { accountId, productId: ids.bulon, on: true, userId: 'ana' });
+    expect((await plansFor(db, [ids.p1])).get(ids.p1)).toMatchObject({ lines: [{ quantity: 0 }] });
+
+    await setProductStock(db, { accountId, productId: ids.bulon, userId: 'ana', stock: { '': 1 } });
+    const sell = (orderId: string, quantity: number) => recordOrder(db, { storeId, order: sale(orderId, [{ listingId: 'MLA1000002', variationId: null, sku: null, quantity }]) });
+    await sell('5001', 1);
+    await sell('5002', 1);
+    expect((await plansFor(db, [ids.p1])).get(ids.p1)).toMatchObject({ lines: [{ quantity: 6 }] });
+    // La segunda sin tenerla: ya no se muestra 6.
+    await sell('5003', 1);
+    expect((await plansFor(db, [ids.p1])).get(ids.p1)).toMatchObject({ lines: [{ quantity: 0 }] });
+    const task = () => db.task.findFirstOrThrow({ where: { autoKey: `stock:${ids.bulon}:` } });
+    expect((await task()).title).toBe('Reponer y reactivar: Bulón de tapa, faltan 2 para entregar');
+    expect((await task()).description).toContain('Ya se vendieron 2 sin tener');
+
+    // Una venta cancelada vuelve: falta 1 y se vuelve a ver 6.
+    const products = await recordOrder(db, {
+      storeId,
+      order: sale('5003', [{ listingId: 'MLA1000002', variationId: null, sku: null, quantity: 1 }], { cancelled: true }),
+    });
+    expect(products).toEqual([ids.bulon]);
+    expect((await plansFor(db, [ids.p1])).get(ids.p1)).toMatchObject({ lines: [{ quantity: 6 }] });
+    expect((await task()).title).toBe('Reponer: Bulón de tapa, falta 1 para entregar');
+
+    // Cargar 0 a mano dice que no hay: se sube 0 y la tarea se cierra.
+    await setProductStock(db, { accountId, productId: ids.bulon, userId: 'ana', stock: { '': 0 } });
+    expect((await plansFor(db, [ids.p1])).get(ids.p1)).toMatchObject({ lines: [{ quantity: 0 }] });
+    expect((await task()).status).toBe('DONE');
+
+    // Apagarla: se ve lo que hay, y un combo no se puede prender solo.
+    await setProductStock(db, { accountId, productId: ids.bulon, userId: 'ana', stock: { '': 2 } });
+    expect((await plansFor(db, [ids.p1])).get(ids.p1)).toMatchObject({ lines: [{ quantity: 6 }] });
+    await setShowMore(db, { accountId, productId: ids.bulon, on: false, userId: 'ana' });
+    expect((await plansFor(db, [ids.p1])).get(ids.p1)).toMatchObject({ lines: [{ quantity: 2 }] });
+    await expect(setShowMore(db, { accountId, productId: ids.kit, on: true, userId: 'ana' })).rejects.toThrow('todas sus piezas');
   });
 
   it('una venta cancelada antes de entregarse vuelve; entregada, no', async () => {

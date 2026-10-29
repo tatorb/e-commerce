@@ -7,7 +7,8 @@ import { formatDateTime } from '@/lib/format';
 import type { ProductStockView } from '@/lib/stock';
 import { plannedText } from '@/lib/stock-plan';
 import { cn } from '@/lib/utils/cn';
-import { DropOrphanStockButton, StockForm, StockReviewedButton } from './StockForm';
+import { DropOrphanStockButton, ShowMoreSwitch, StockForm, StockReviewedButton } from './StockForm';
+import { cushionDeadlines, cushionText, owed, owedText, SELL_WITHOUT_STOCK, SHOWN_WHEN_SHORT } from '@/domain/stock-cushion';
 
 // El stock del producto: cuánto hay, qué muestra cada publicación y lo que fue
 // pasando. Un combo no tiene stock propio: sale de sus piezas.
@@ -80,6 +81,28 @@ export function ProductStockPanel({
               {view.managed ? stockText(view.lines.map((l) => ({ label: l.label, quantity: l.quantity ?? 0 }))) : 'Sin stock cargado.'}
             </p>
           )}
+
+          {!isCombo ? (
+            <div className="space-y-2 rounded-lg border px-3 py-2.5">
+              <ShowMoreSwitch accountSlug={accountSlug} productId={view.id} on={view.showMore} readOnly={!canEdit || !view.managed} />
+              <p className="text-xs text-muted-foreground">
+                {view.managed
+                  ? `Prendido, los canales muestran ${SHOWN_WHEN_SHORT} aunque haya de 1 a 5, para que la publicación no se pause al vender la última. Avisa cuando queda 1 y cuando se vende la última; se pueden vender ${SELL_WITHOUT_STOCK} sin tenerlas. Al día sin reponer avisa otra vez y a los dos días se pausa. Lo resuelve cargar el stock.`
+                  : 'Se prende cuando la app lleva el stock del producto.'}
+              </p>
+              {view.showMore ? (
+                <ul className="space-y-1 text-sm">
+                  {view.lines.map((l) => (
+                    <li key={l.key} className="flex flex-wrap items-baseline gap-x-2">
+                      <span className="font-medium">{view.lines.length > 1 ? `${l.label || 'Sin medida'}:` : ''}</span>
+                      <span className="tabular-nums">{l.quantity === null || l.shown === null ? 'Sin stock cargado' : cushionText(l.quantity, l.shown)}</span>
+                      <MeasureAlarm quantity={l.quantity} alarm={l.alarm} timeZone={timeZone} />
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
 
           {view.orphans.length > 0 ? (
             <div className="space-y-1.5 text-xs text-muted-foreground">
@@ -169,4 +192,31 @@ export function ProductStockPanel({
       ) : null}
     </>
   );
+}
+
+/** Cómo está la alarma de una medida, en pocas palabras. */
+function MeasureAlarm({
+  quantity,
+  alarm,
+  timeZone,
+}: {
+  quantity: number | null;
+  alarm: { lowAt: Date | null; outSince: Date | null; remindedAt: Date | null; cutAt: Date | null } | null;
+  timeZone: string;
+}) {
+  if (quantity === null) return null;
+  const when = (d: Date) => formatDateTime(d, timeZone);
+  const missing = owed(quantity);
+  const extra = missing > 0 ? ` ${owedText(missing)}.` : '';
+  if (alarm?.cutAt) return <span className="text-xs text-destructive">Pausada el {when(alarm.cutAt)} por no reponer en dos días.{extra}</span>;
+  if (alarm?.outSince && quantity <= -SELL_WITHOUT_STOCK) return <span className="text-xs text-destructive">Ya se vendieron {SELL_WITHOUT_STOCK} sin tener: pausada hasta cargar el stock.</span>;
+  if (alarm?.outSince) {
+    return (
+      <span className="text-xs text-destructive">
+        Sin stock desde el {when(alarm.outSince)}: se pausa el {when(cushionDeadlines(alarm.outSince).cutAt)}.{extra}
+      </span>
+    );
+  }
+  if (quantity === 1) return <span className="text-xs text-amber-700 dark:text-amber-400">Queda la última: si se vende, salta la alarma.</span>;
+  return null;
 }

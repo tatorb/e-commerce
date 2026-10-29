@@ -66,6 +66,17 @@ async function sendToAll(kind: TaskMailKind, t: MailTask, stamp: string, baseUrl
   return { all, sent };
 }
 
+/**
+ * Vuelve a avisar ya a las personas de una tarea abierta, por ejemplo cuando
+ * cambió una alarma de stock. stamp: qué cambió, para no mandar dos veces lo mismo.
+ */
+export async function notifyTaskAgain(db: Db, taskId: string, stamp: string, baseUrl: string = publicAppUrl()): Promise<number> {
+  if (!isEmailConfigured()) return 0;
+  const t = await db.task.findUnique({ where: { id: taskId }, select: MAIL_SELECT });
+  if (!t || !OPEN_STATUSES.includes(t.status)) return 0;
+  return (await sendToAll('REMINDER', t, stamp, baseUrl)).sent;
+}
+
 export type TaskMailResult = { configured: boolean; sent: number; pending: boolean };
 
 /** El mail de que se la asignaron, a las personas de una tarea que todavía no lo recibieron. */
