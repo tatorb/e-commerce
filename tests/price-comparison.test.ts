@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compare, copyablePlan } from '@/domain/price-comparison';
+import { brandKey, brandOptions, compare, competitorAverage, copyablePlan } from '@/domain/price-comparison';
 import { marginOf, PRICING_DEFAULTS } from '@/domain/pricing';
 
 // Precios inventados para las pruebas.
@@ -56,5 +56,31 @@ describe('comparación con la competencia', () => {
     expect(copyablePlan(c.cheapest, P)).toEqual({ plan: 12, available: true });
     expect(copyablePlan(c.cheapest, { ...P, installments12Pct: null })).toEqual({ plan: 12, available: false });
     expect(copyablePlan(null, P)).toBeNull();
+  });
+
+  it('filtrar por marca: las marcas con cuántos tiene cada una, sin importar mayúsculas, y sin marca al final', () => {
+    const many = [...competitors, { ...competitor('Cuatro', 240_000, 0, 0, true), brand: 'PERSAN ' }, { ...competitor('Cinco', 245_000, 0, 0, true), brand: 'Mahle' }];
+    const c = compare({ mine: { listPrice: 240_000, discountPct: 0, plan: 0, brand: 'Rik' }, competitors: many, cost: COST, params: P });
+    expect(brandOptions(c.rows)).toEqual([
+      { key: 'mahle', label: 'Mahle', count: 1 },
+      { key: 'persan', label: 'Persan', count: 2 },
+      { key: '', label: 'Sin marca', count: 2 },
+    ]);
+    // Mi marca no cuenta: la lista es de la competencia.
+    expect(brandKey(c.rows[0])).toBe('rik');
+  });
+
+  it('el promedio de la competencia: de lista y efectivo, y cuánto más caro o barato estoy', () => {
+    const c = compare({ mine: { listPrice: 240_000, discountPct: 0, plan: 0 }, competitors, cost: COST, params: P });
+    const all = competitorAverage(c.rows)!;
+    expect(all.count).toBe(3);
+    expect(all.listPrice).toBeCloseTo((250_000 + 230_000 + 260_000) / 3, 9);
+    const effective = (225_000 + 230_000 + P.shipping + 221_000) / 3;
+    expect(all.effectivePrice).toBeCloseTo(effective, 9);
+    expect(all.diffPct).toBeCloseTo((240_000 / effective - 1) * 100, 9);
+    // Con filtro, solo esa marca; mi fila sigue para comparar.
+    const persan = competitorAverage(c.rows.filter((r) => r.mine || brandKey(r) === 'persan'))!;
+    expect([persan.count, persan.effectivePrice]).toEqual([1, 230_000 + P.shipping]);
+    expect(competitorAverage(c.rows.filter((r) => r.mine))).toBeNull();
   });
 });

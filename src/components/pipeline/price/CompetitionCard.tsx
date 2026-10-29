@@ -1,22 +1,33 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { OpenLinkButton } from '@/components/ui/open-link-button';
 import { SectionBody, SectionCard } from '@/components/ui/section-card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { daysSince } from '@/domain/competitors';
 import { formatPercent, formatPrice } from '@/domain/money';
-import { copyablePlan, type ComparedRow, type Comparison } from '@/domain/price-comparison';
+import { brandKey, brandOptions, competitorAverage, copyablePlan, type ComparedRow, type Comparison } from '@/domain/price-comparison';
 import { planLabel, type InstallmentPlan, type PricingParams } from '@/domain/pricing';
 import { cn } from '@/lib/utils/cn';
 
 // Mi precio frente al de la competencia que se cargó en el paso Información:
 // una fila mía arriba y una por competidor, lo que más importa en números y
-// un resumen en palabras. Los botones mueven el simulador.
+// un resumen en palabras. Los botones mueven el simulador. La lista se filtra
+// por marca y termina con el promedio de lo que se ve; los números de arriba
+// y los botones siguen mirando a toda la competencia.
 
 const MAX_DISCOUNT = 50;
 
 const cuotas = (r: ComparedRow) => planLabel(r.installments);
+
+// Toda la competencia, o una marca: "m:" y su clave, que puede ser vacía (sin marca).
+const ALL = 'todas';
+const brandValue = (key: string) => `m:${key}`;
+
+// Mi fila, para que se distinga de la competencia.
+const MINE_ROW = 'bg-emerald-100 dark:bg-emerald-950/50';
 
 function Diff({ value }: { value: number | null }) {
   if (value === null) return <span className="text-muted-foreground">—</span>;
@@ -59,6 +70,7 @@ export function CompetitionCard({
   disabled?: boolean;
 }) {
   const others = comparison?.rows.filter((r) => !r.mine) ?? [];
+  const [brand, setBrand] = useState(ALL);
   const missing = withoutPrice > 0 ? `${withoutPrice === 1 ? 'Un competidor no tiene' : `${withoutPrice} competidores no tienen`} precio cargado.` : null;
 
   if (!comparison || others.length === 0) {
@@ -80,6 +92,16 @@ export function CompetitionCard({
   const { cheapest, match } = comparison;
   const copy = copyablePlan(cheapest, params);
   const tooMuch = match !== null && match.discountPct > MAX_DISCOUNT;
+  const brands = brandOptions(comparison.rows);
+  // Si la marca elegida ya no está, por ejemplo porque se borró ese competidor, se ven todos.
+  const chosen = brand === ALL ? null : (brands.find((b) => brandValue(b.key) === brand) ?? null);
+  const rows = chosen ? comparison.rows.filter((r) => r.mine || brandKey(r) === chosen.key) : comparison.rows;
+  const average = competitorAverage(rows);
+  const averageLabel = average
+    ? chosen
+      ? `Promedio de ${average.count} ${chosen.key === '' ? 'sin marca' : `de marca ${chosen.label}`}`
+      : `Promedio de ${average.count === 1 ? '1 competidor' : `los ${average.count} competidores`}`
+    : null;
 
   return (
     <SectionCard
@@ -141,6 +163,25 @@ export function CompetitionCard({
           {!copy && cheapest ? <span className="text-xs text-muted-foreground">El más barato no ofrece cuotas.</span> : null}
         </div>
 
+        {brands.length > 1 ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm text-muted-foreground">Marca</span>
+            <Select value={chosen ? brand : ALL} onValueChange={setBrand}>
+              <SelectTrigger className="w-auto min-w-48" aria-label="Filtrar la competencia por marca">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>Todas ({others.length})</SelectItem>
+                {brands.map((b) => (
+                  <SelectItem key={b.key} value={brandValue(b.key)}>
+                    {b.label} ({b.count})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ) : null}
+
         {/* En la computadora, una tabla; en el celular, una tarjeta por fila. */}
         <div className="hidden overflow-x-auto sm:block">
           <table className="w-full text-sm">
@@ -158,8 +199,8 @@ export function CompetitionCard({
               </tr>
             </thead>
             <tbody>
-              {comparison.rows.map((r, i) => (
-                <tr key={i} className={cn('border-b last:border-0', r.mine && 'bg-primary/5 font-medium')}>
+              {rows.map((r, i) => (
+                <tr key={i} className={cn('border-b last:border-0', r.mine && cn(MINE_ROW, 'font-medium'))}>
                   <td className="max-w-48 py-2 pr-2">
                     <div className="flex items-center gap-1.5">
                       <span className="truncate" title={r.title ?? r.name}>
@@ -182,11 +223,27 @@ export function CompetitionCard({
                 </tr>
               ))}
             </tbody>
+            {average ? (
+              <tfoot>
+                <tr className="border-t-2 font-medium">
+                  <td colSpan={2} className="py-2 pr-2">
+                    {averageLabel}
+                  </td>
+                  <td className="py-2 pr-2 text-right tabular-nums">{formatPrice(Math.round(average.listPrice))}</td>
+                  <td colSpan={3} />
+                  <td className="py-2 pr-2 text-right tabular-nums">{formatPrice(Math.round(average.effectivePrice))}</td>
+                  <td />
+                  <td className="py-2 text-right">
+                    <Diff value={average.diffPct} />
+                  </td>
+                </tr>
+              </tfoot>
+            ) : null}
           </table>
         </div>
         <ul className="space-y-2 sm:hidden">
-          {comparison.rows.map((r, i) => (
-            <li key={i} className={cn('rounded-md border px-3 py-2 text-sm', r.mine && 'border-primary/40 bg-primary/5')}>
+          {rows.map((r, i) => (
+            <li key={i} className={cn('rounded-md border px-3 py-2 text-sm', r.mine && cn(MINE_ROW, 'border-emerald-300 dark:border-emerald-800'))}>
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <p className="truncate font-medium">{r.name}</p>
@@ -213,6 +270,20 @@ export function CompetitionCard({
               </p>
             </li>
           ))}
+          {average ? (
+            <li className="flex items-start justify-between gap-2 rounded-md border-2 px-3 py-2 text-sm">
+              <div className="min-w-0">
+                <p className="font-medium">{averageLabel}</p>
+                <p className="text-xs text-muted-foreground">Lista {formatPrice(Math.round(average.listPrice))}</p>
+              </div>
+              <div className="text-right">
+                <p className="font-semibold tabular-nums">{formatPrice(Math.round(average.effectivePrice))}</p>
+                <p className="text-xs">
+                  Vos <Diff value={average.diffPct} />
+                </p>
+              </div>
+            </li>
+          ) : null}
         </ul>
       </SectionBody>
     </SectionCard>

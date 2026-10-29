@@ -132,6 +132,45 @@ export function compare(args: {
   return { rows: [me, ...others], rank, total: others.length + 1, cheapest, match, withInstallments, withDiscount, summary };
 }
 
+// ── Filtrar por marca ──
+
+/** La marca de una fila para filtrar, sin importar mayúsculas: vacía si no se cargó. */
+export const brandKey = (r: { brand: string | null }) => r.brand?.trim().toLocaleLowerCase('es') ?? '';
+
+export type BrandOption = { key: string; label: string; count: number };
+
+/** Las marcas de la competencia, por nombre, con cuántos competidores tiene cada una. Sin marca va al final. */
+export function brandOptions(rows: ComparedRow[]): BrandOption[] {
+  const byKey = new Map<string, BrandOption>();
+  for (const r of rows) {
+    if (r.mine) continue;
+    const key = brandKey(r);
+    const found = byKey.get(key);
+    if (found) found.count++;
+    else byKey.set(key, { key, label: r.brand?.trim() || 'Sin marca', count: 1 });
+  }
+  return [...byKey.values()].sort((a, b) => (a.key === '' ? 1 : b.key === '' ? -1 : a.label.localeCompare(b.label, 'es')));
+}
+
+/**
+ * El promedio de los competidores de la lista: el precio de lista y el
+ * efectivo, y cuánto más caro (positivo) o más barato estoy yo frente al
+ * efectivo, como en cada fila. Null sin competidores.
+ */
+export function competitorAverage(rows: ComparedRow[]): { count: number; listPrice: number; effectivePrice: number; diffPct: number | null } | null {
+  const others = rows.filter((r) => !r.mine);
+  if (others.length === 0) return null;
+  const avg = (of: (r: ComparedRow) => number) => others.reduce((sum, r) => sum + of(r), 0) / others.length;
+  const effectivePrice = avg((r) => r.effectivePrice);
+  const mine = rows.find((r) => r.mine);
+  return {
+    count: others.length,
+    listPrice: avg((r) => r.listPrice),
+    effectivePrice,
+    diffPct: mine && effectivePrice > 0 ? (mine.effectivePrice / effectivePrice - 1) * 100 : null,
+  };
+}
+
 /** Las cuotas del más barato, si se pueden usar: null si no ofrece o si ese plan no tiene el costo cargado. */
 export function copyablePlan(row: ComparedRow | null, params: PricingParams): { plan: InstallmentPlan; available: boolean } | null {
   if (!row || row.installments === 0 || !isInstallmentPlan(row.installments)) return null;
