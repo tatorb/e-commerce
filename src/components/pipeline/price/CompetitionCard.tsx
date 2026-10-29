@@ -12,15 +12,15 @@ import { formatPercent, formatPrice } from '@/domain/money';
 import { brandKey, brandOptions, competitorAverage, copyablePlan, type ComparedRow, type Comparison, type Estimate } from '@/domain/price-comparison';
 import { planLabel, type InstallmentPlan, type PricingParams } from '@/domain/pricing';
 import { cn } from '@/lib/utils/cn';
-import { LEVEL } from './parts';
 
 // Mi precio frente al de la competencia que se cargó en el paso Información:
 // una fila mía arriba y una por competidor, lo que más importa en números y
 // un resumen en palabras. Los botones mueven el simulador. La lista se filtra
 // por marca y termina con el promedio de lo que se ve; los números de arriba
-// y los botones siguen mirando a toda la competencia. Cada fila dice qué margen
-// te quedaría vendiendo a su precio y en sus condiciones. En la computadora,
-// los títulos de la tabla quedan fijos debajo del encabezado de la página.
+// y los botones siguen mirando a toda la competencia. Cada fila dice cuánto
+// sumarían tus costos y qué margen te quedaría vendiendo a su precio y en sus
+// condiciones: verde si ganás, rojo si perdés. En la computadora, los títulos
+// de la tabla quedan fijos debajo del encabezado de la página.
 
 const MAX_DISCOUNT = 50;
 
@@ -47,8 +47,10 @@ function Diff({ value }: { value: number | null }) {
 }
 
 const ESTIMATE_HELP = 'El margen sobre el costo que te quedaría vendiendo a su precio y en sus condiciones, con tu costo y tus costos. Supone que les cuesta lo mismo que a vos.';
+const COSTS_HELP =
+  'Lo que te costaría vender a su precio y en sus condiciones: tu costo de reposición, IVA, cargo del canal, impuestos, el costo de sus cuotas, publicidad, devoluciones, embalaje y el envío si lo ofrece gratis.';
 
-/** La rentabilidad estimada de una fila, con el color del semáforo del margen. */
+/** La rentabilidad estimada de una fila: verde si se gana, rojo si se pierde. */
 function EstimateCell({ value }: { value: Estimate | null }) {
   if (!value) return <span className="text-muted-foreground">—</span>;
   if (value.marginPct === null) {
@@ -58,7 +60,27 @@ function EstimateCell({ value }: { value: Estimate | null }) {
       </span>
     );
   }
-  return <span className={cn('whitespace-nowrap tabular-nums', LEVEL[value.level].text)}>{formatPercent(value.marginPct)}</span>;
+  return (
+    <span className={cn('whitespace-nowrap tabular-nums', value.marginPct > 0.005 ? 'text-emerald-700' : value.marginPct < -0.005 ? 'text-red-700' : 'text-muted-foreground')}>
+      {formatPercent(value.marginPct)}
+    </span>
+  );
+}
+
+/** Los costos totales de una fila, en pesos. Sin estimación, una raya. */
+function CostsCell({ value }: { value: Estimate | null }) {
+  if (!value || value.marginPct === null) return <span className="text-muted-foreground">—</span>;
+  return <span className="whitespace-nowrap tabular-nums">{formatPrice(Math.round(value.costs))}</span>;
+}
+
+/** Un título de la tabla con su ayuda al pasar el mouse. */
+function HelpLabel({ label, help }: { label: string; help: string }) {
+  return (
+    <span className="inline-flex items-center gap-1" title={help}>
+      {label}
+      <Info className="h-3 w-3 shrink-0" aria-label={help} />
+    </span>
+  );
 }
 
 /**
@@ -117,7 +139,7 @@ export function CompetitionCard({
 
   if (!comparison || others.length === 0) {
     return (
-      <SectionCard title="Comparación con la competencia" description="Con los precios que se cargan en el paso Información.">
+      <SectionCard banded title="Comparación con la competencia" description="Con los precios que se cargan en el paso Información.">
         <SectionBody>
           <p className="text-sm text-muted-foreground">
             {withoutPrice > 0 ? `${missing} ` : 'Todavía no hay competencia cargada. '}Cargá el precio de lista, el descuento, las cuotas y el envío de cada
@@ -138,7 +160,7 @@ export function CompetitionCard({
   // Si la marca elegida ya no está, por ejemplo porque se borró ese competidor, se ven todos.
   const chosen = brand === ALL ? null : (brands.find((b) => brandValue(b.key) === brand) ?? null);
   const rows = chosen ? comparison.rows.filter((r) => r.mine || brandKey(r) === chosen.key) : comparison.rows;
-  const average = competitorAverage(rows, params);
+  const average = competitorAverage(rows);
   const averageLabel = average
     ? chosen
       ? `Promedio de ${average.count} ${chosen.key === '' ? 'sin marca' : `de marca ${chosen.label}`}`
@@ -147,6 +169,7 @@ export function CompetitionCard({
 
   return (
     <SectionCard
+      banded
       title="Comparación con la competencia"
       count={others.length}
       description={`Por precio efectivo: lo que paga el comprador en total. El tuyo va con envío gratis; al de un competidor sin envío gratis se le suman ${formatPrice(params.shipping)}. La rentabilidad estimada supone que les cuesta lo mismo que a vos.`}
@@ -226,7 +249,7 @@ export function CompetitionCard({
           </div>
         ) : null}
 
-        {/* En la computadora, una tabla con los títulos fijos; en pantallas angostas, una tarjeta por fila. */}
+        {/* En la computadora, una tabla con los títulos fijos; en pantallas angostas, una tarjeta por fila. Hasta xl, la marca va debajo del vendedor. */}
         <div className="hidden lg:block">
           <table className="w-full text-sm">
             <thead>
@@ -234,25 +257,25 @@ export function CompetitionCard({
                 {(
                   [
                     ['Vendedor', ''],
-                    ['Marca', ''],
+                    ['Marca', 'hidden xl:table-cell'],
                     ['Lista', 'text-right'],
                     ['Cuotas', ''],
                     ['Envío', ''],
                     ['Precio efectivo', 'text-right'],
+                    ['Costos totales', 'text-right'],
                     ['Rentabilidad estimada', 'text-right'],
                     ['Vos vs. ellos', 'text-right'],
                   ] as const
-                ).map(([label, align]) => (
+                ).map(([label, cls]) => (
                   <th
                     key={label}
                     style={{ top: headerTop }}
-                    className={cn('sticky z-10 bg-card py-2 pr-2 align-bottom font-normal shadow-[inset_0_-1px_0_hsl(var(--border))] last:pr-0', align)}
+                    className={cn('sticky z-10 bg-card py-2 pr-2 align-bottom font-normal shadow-[inset_0_-1px_0_hsl(var(--border))] last:pr-0', cls)}
                   >
                     {label === 'Rentabilidad estimada' ? (
-                      <span className="inline-flex items-center gap-1" title={ESTIMATE_HELP}>
-                        {label}
-                        <Info className="h-3 w-3 shrink-0" aria-label={ESTIMATE_HELP} />
-                      </span>
+                      <HelpLabel label={label} help={ESTIMATE_HELP} />
+                    ) : label === 'Costos totales' ? (
+                      <HelpLabel label={label} help={COSTS_HELP} />
                     ) : (
                       label
                     )}
@@ -270,9 +293,10 @@ export function CompetitionCard({
                       </span>
                       {r.url ? <OpenLinkButton url={r.url} label={`Abrir la publicación de ${r.name}`} className="h-6 w-6" /> : null}
                     </div>
+                    <span className="block truncate text-[11px] font-normal text-muted-foreground xl:hidden">{r.brand ? `Marca ${r.brand}` : 'Sin marca'}</span>
                     {!r.mine ? <span className="block text-[11px] font-normal text-muted-foreground">{surveyed(r.surveyedAt, today)}</span> : null}
                   </td>
-                  <td className={cn('max-w-28 truncate py-2 pr-2', !r.brand && 'text-xs font-normal text-muted-foreground')} title={r.brand ?? undefined}>
+                  <td className={cn('hidden max-w-28 truncate py-2 pr-2 xl:table-cell', !r.brand && 'text-xs font-normal text-muted-foreground')} title={r.brand ?? undefined}>
                     {r.brand ?? 'Sin marca'}
                   </td>
                   <td className="whitespace-nowrap py-2 pr-2 text-right tabular-nums">
@@ -288,6 +312,9 @@ export function CompetitionCard({
                   <td className="py-2 pr-2">{r.freeShipping ? 'Gratis' : 'Con costo'}</td>
                   <td className="whitespace-nowrap py-2 pr-2 text-right tabular-nums">{formatPrice(Math.round(r.effectivePrice))}</td>
                   <td className="py-2 pr-2 text-right">
+                    <CostsCell value={r.estimate} />
+                  </td>
+                  <td className="py-2 pr-2 text-right">
                     <EstimateCell value={r.estimate} />
                   </td>
                   <td className="py-2 text-right">{r.mine ? <span className="text-muted-foreground">—</span> : <Diff value={r.diffPct} />}</td>
@@ -297,12 +324,14 @@ export function CompetitionCard({
             {average ? (
               <tfoot>
                 <tr className="border-t-2 font-medium">
-                  <td colSpan={2} className="py-2 pr-2">
-                    {averageLabel}
-                  </td>
+                  <td className="py-2 pr-2">{averageLabel}</td>
+                  <td className="hidden xl:table-cell" />
                   <td className="whitespace-nowrap py-2 pr-2 text-right tabular-nums">{formatPrice(Math.round(average.listPrice))}</td>
                   <td colSpan={2} />
                   <td className="whitespace-nowrap py-2 pr-2 text-right tabular-nums">{formatPrice(Math.round(average.effectivePrice))}</td>
+                  <td className="py-2 pr-2 text-right">
+                    <CostsCell value={average.estimate} />
+                  </td>
                   <td className="py-2 pr-2 text-right">
                     <EstimateCell value={average.estimate} />
                   </td>
@@ -341,9 +370,15 @@ export function CompetitionCard({
                 </span>
                 <span>Envío {r.freeShipping ? 'gratis' : 'con costo'}</span>
               </p>
-              <p className="mt-0.5 text-xs">
-                <span className="text-muted-foreground">{r.mine ? 'Tu margen ' : 'Rentabilidad estimada '}</span>
-                <EstimateCell value={r.estimate} />
+              <p className="mt-0.5 flex flex-wrap gap-x-3 text-xs">
+                <span>
+                  <span className="text-muted-foreground">{r.mine ? 'Tu margen ' : 'Rentabilidad estimada '}</span>
+                  <EstimateCell value={r.estimate} />
+                </span>
+                <span>
+                  <span className="text-muted-foreground">Costos totales </span>
+                  <CostsCell value={r.estimate} />
+                </span>
               </p>
             </li>
           ))}
@@ -355,6 +390,10 @@ export function CompetitionCard({
                 <p className="text-xs">
                   <span className="text-muted-foreground">Rentabilidad estimada </span>
                   <EstimateCell value={average.estimate} />
+                </p>
+                <p className="text-xs">
+                  <span className="text-muted-foreground">Costos totales </span>
+                  <CostsCell value={average.estimate} />
                 </p>
               </div>
               <div className="text-right">

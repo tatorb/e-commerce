@@ -3,7 +3,9 @@ import { cn } from '@/lib/utils/cn';
 
 // Tarjeta de sección: blanca, redondeada y con una sombra suave. Arriba, el
 // título con su ícono, la cantidad, una descripción corta y la acción
-// principal a la derecha, separados del contenido por una línea fina.
+// principal a la derecha, separados del contenido por una línea fina. Con
+// banded, el título va en una franja gris, para pantallas con muchas tarjetas
+// donde cuesta ver dónde empieza cada una.
 
 export function SectionCard({
   title,
@@ -12,6 +14,7 @@ export function SectionCard({
   description,
   action,
   id,
+  banded,
   className,
   children,
 }: {
@@ -23,12 +26,13 @@ export function SectionCard({
   count?: number | null;
   description?: React.ReactNode;
   action?: React.ReactNode;
+  banded?: boolean;
   className?: string;
   children?: React.ReactNode;
 }) {
   return (
     <section id={id} className={cn('scroll-mt-20 overflow-hidden rounded-2xl border bg-card text-card-foreground shadow-card', className)}>
-      <header className="flex flex-wrap items-start justify-between gap-3 border-b px-4 py-3.5 md:px-5">
+      <header className={cn('flex flex-wrap items-start justify-between gap-3 border-b px-4 py-3.5 md:px-5', banded && BAND)}>
         <div className="flex min-w-0 items-start gap-2.5">
           {icon ? <span className="mt-0.5 shrink-0 text-foreground/80 [&_svg]:h-5 [&_svg]:w-5" aria-hidden>{icon}</span> : null}
           <div className="min-w-0">
@@ -45,6 +49,9 @@ export function SectionCard({
     </section>
   );
 }
+
+/** La franja gris del título: un tono más que el fondo de la página, para que se distinga de él y del contenido blanco. */
+export const BAND = 'bg-border/60';
 
 /** El cuerpo de una sección con formulario o texto. */
 export function SectionBody({ className, children }: { className?: string; children: React.ReactNode }) {

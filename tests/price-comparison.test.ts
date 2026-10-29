@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { brandKey, brandOptions, compare, competitorAverage, copyablePlan, estimateAt } from '@/domain/price-comparison';
-import { marginLevel, marginOf, PRICING_DEFAULTS } from '@/domain/pricing';
+import { breakdown, marginOf, PRICING_DEFAULTS } from '@/domain/pricing';
 
 // Precios inventados para las pruebas.
 const P = PRICING_DEFAULTS;
@@ -72,35 +72,48 @@ describe('comparación con la competencia', () => {
 
   it('el promedio de la competencia: de lista y efectivo, y cuánto más caro o barato estoy', () => {
     const c = compare({ mine: { listPrice: 240_000, discountPct: 0, plan: 0 }, competitors, cost: COST, params: P });
-    const all = competitorAverage(c.rows, P)!;
+    const all = competitorAverage(c.rows)!;
     expect(all.count).toBe(3);
     expect(all.listPrice).toBeCloseTo((250_000 + 230_000 + 260_000) / 3, 9);
     const effective = (225_000 + 230_000 + P.shipping + 221_000) / 3;
     expect(all.effectivePrice).toBeCloseTo(effective, 9);
     expect(all.diffPct).toBeCloseTo((240_000 / effective - 1) * 100, 9);
     // Con filtro, solo esa marca; mi fila sigue para comparar.
-    const persan = competitorAverage(c.rows.filter((r) => r.mine || brandKey(r) === 'persan'), P)!;
+    const persan = competitorAverage(c.rows.filter((r) => r.mine || brandKey(r) === 'persan'))!;
     expect([persan.count, persan.effectivePrice]).toEqual([1, 230_000 + P.shipping]);
-    expect(competitorAverage(c.rows.filter((r) => r.mine), P)).toBeNull();
+    expect(competitorAverage(c.rows.filter((r) => r.mine))).toBeNull();
   });
 
   it('la rentabilidad estimada: mi margen a su precio y en sus condiciones, con mi costo y mis costos', () => {
     const c = compare({ mine: { listPrice: 240_000, discountPct: 0, plan: 0 }, competitors, cost: COST, params: P });
+    const costsOf = (i: number) => {
+      const e = c.rows[i].estimate;
+      return e.marginPct === null ? null : e.costs;
+    };
     // La mía, con lo de hoy.
-    expect(c.rows[0].estimate).toEqual({ marginPct: marginOf(240_000, COST, P, 0), level: marginLevel(marginOf(240_000, COST, P, 0)!, P) });
+    expect(c.rows[0].estimate.marginPct).toBeCloseTo(marginOf(240_000, COST, P, 0)!, 9);
+    // Los costos totales son el precio final menos la ganancia: lo mismo que suma la composición del precio sin la ganancia.
+    const parts = breakdown(240_000, COST, P, 0);
+    expect(costsOf(0)).toBeCloseTo(240_000 - parts.profit, 6);
+    expect(costsOf(0)).toBeCloseTo(Object.entries(parts).reduce((sum, [k, v]) => (k === 'profit' ? sum : sum + v), 0), 6);
     // Uno: a 225.000 en 6 cuotas, con envío gratis, que paga el vendedor.
     expect(c.rows[1].estimate.marginPct).toBeCloseTo(marginOf(225_000, COST, P, 6)!, 9);
     // Dos: sin envío gratis, el envío lo paga el comprador: no cuenta.
     expect(c.rows[2].estimate.marginPct).toBeCloseTo(marginOf(230_000, COST, { ...P, shipping: 0 }, 0)!, 9);
     expect(c.rows[2].estimate.marginPct!).toBeGreaterThan(marginOf(230_000, COST, P, 0)!);
+    // Sin envío gratis, el envío no suma a sus costos totales.
+    expect(costsOf(2)).toBeCloseTo(230_000 - breakdown(230_000, COST, { ...P, shipping: 0 }, 0).profit, 6);
+    expect(costsOf(2)).toBeLessThan(230_000 - breakdown(230_000, COST, P, 0).profit);
     // Un plan sin su costo cargado, o sin costo: no se puede estimar.
     expect(estimateAt({ finalPrice: 200_000, plan: 3, freeShipping: true, cost: COST, params: { ...P, installments3Pct: null } })).toEqual({ marginPct: null, why: 'plan' });
     expect(estimateAt({ finalPrice: 200_000, plan: 0, freeShipping: true, cost: 0, params: P })).toEqual({ marginPct: null, why: 'cost' });
     // El promedio, de los que se pueden estimar.
-    const avg = competitorAverage(c.rows, P)!;
+    const avg = competitorAverage(c.rows)!;
     const margins = c.rows.slice(1).map((r) => r.estimate.marginPct!);
     expect(avg.estimate!.marginPct).toBeCloseTo(margins.reduce((a, b) => a + b, 0) / 3, 9);
+    const avgCosts = avg.estimate!.marginPct === null ? null : avg.estimate!.costs;
+    expect(avgCosts).toBeCloseTo((costsOf(1)! + costsOf(2)! + costsOf(3)!) / 3, 6);
     const noCost = compare({ mine: { listPrice: 240_000, discountPct: 0, plan: 0 }, competitors, cost: 0, params: P });
-    expect(competitorAverage(noCost.rows, P)!.estimate).toEqual({ marginPct: null, why: 'cost' });
+    expect(competitorAverage(noCost.rows)!.estimate).toEqual({ marginPct: null, why: 'cost' });
   });
 });

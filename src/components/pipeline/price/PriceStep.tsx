@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { CollapsibleCard } from '@/components/ui/collapsible-card';
 import { SectionBody, SectionCard } from '@/components/ui/section-card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { measuresText } from '@/domain/costs';
@@ -38,7 +39,7 @@ import { savePriceDecisionAction } from '@/app/a/[cuenta]/pipeline/price-actions
 import { formatDateTime } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
 import { CompetitionCard } from './CompetitionCard';
-import { CostTable } from './CostTable';
+import { costRows, CostTable } from './CostTable';
 import { CompositionBar, LEVEL, MarginBadge, ProfitKnob } from './parts';
 
 // El paso Precio. Con el costo de reposición, que sale de la pestaña Costo y
@@ -48,7 +49,8 @@ import { CompositionBar, LEVEL, MarginBadge, ProfitKnob } from './parts';
 // quiere, y la competencia que se cargó en Información sirve para comparar.
 // Al guardar, el precio, las cuotas y el descuento quedan para subir desde Por
 // subir. Arranca con lo que tiene hoy la publicación. Si las medidas cuestan
-// distinto, hay una pestaña por costo, cada una con su precio.
+// distinto, hay una pestaña por costo, cada una con su precio. Cada tarjeta
+// lleva el título en la franja gris, y la lista de costos arranca plegada.
 
 const MAX_DISCOUNT = 50;
 
@@ -201,11 +203,14 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
   }
 
   const levelBox = ready ? LEVEL[sim.level] : null;
+  const totals = costRows({ params, plan, finalPrice: sim.finalPrice, cost }).totals;
+  const ownCount = Object.keys(own).length;
 
   return (
     <div className="space-y-4 md:space-y-6">
       <div className="grid gap-4 md:gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
         <SectionCard
+          banded
           title="Simulador"
           description={`${several && group.measures.length > 0 ? `Este precio vale para ${group.measures.length === 1 ? 'la medida' : 'las medidas'} ${measuresText(group.measures)}. ` : ''}El precio publicado incluye IVA.`}
         >
@@ -343,7 +348,7 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
           </SectionBody>
         </SectionCard>
 
-        <SectionCard title="Resultado">
+        <SectionCard banded title="Resultado">
           <SectionBody>
             {!cost ? (
               <p className="text-sm text-muted-foreground">
@@ -385,7 +390,7 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
         </SectionCard>
       </div>
 
-      <SectionCard title="Perilla de ganancia" description="Arrastrala para llevar la ganancia sobre el costo adonde quieras: el precio publicado se acomoda solo.">
+      <SectionCard banded title="Perilla de ganancia" description="Arrastrala para llevar la ganancia sobre el costo adonde quieras: el precio publicado se acomoda solo.">
         <SectionBody>
           {ready ? (
             <>
@@ -407,15 +412,34 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
         </SectionBody>
       </SectionCard>
 
-      <SectionCard title="De qué se compone el precio final">
+      <SectionCard banded title="De qué se compone el precio final">
         <SectionBody>
           {listPrice > 0 ? <CompositionBar parts={parts} finalPrice={sim.finalPrice} /> : <p className="text-sm text-muted-foreground">Cargá el precio publicado.</p>}
         </SectionBody>
       </SectionCard>
 
-      <SectionCard
+      <CollapsibleCard
+        banded
         title="Costos"
         description="En cada fila escribí lo que sabés: el % en los cargos e impuestos, el monto en el costo, el envío y el embalaje. Lo que cambies acá es solo para este producto."
+        aside={
+          // Lo principal, para no tener que abrirla.
+          <span className="flex flex-wrap gap-x-3 gap-y-0.5 tabular-nums sm:justify-end">
+            {listPrice > 0 ? (
+              <>
+                <span>
+                  <span className="text-muted-foreground">Total </span>
+                  {formatPrice(Math.round(totals.costs))}
+                </span>
+                <span className={cn(totals.profit < 0 && 'text-red-700')}>
+                  <span className="text-muted-foreground">Ganancia </span>
+                  {formatPrice(Math.round(totals.profit))}
+                </span>
+              </>
+            ) : null}
+            {ownCount > 0 ? <span className="text-primary">{ownCount === 1 ? '1 propio de este producto' : `${ownCount} propios de este producto`}</span> : null}
+          </span>
+        }
       >
         <CostTable
           params={params}
@@ -435,10 +459,21 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
           finalPrice={sim.finalPrice}
           cost={cost}
         />
-      </SectionCard>
+      </CollapsibleCard>
+
+      <CompetitionCard
+        comparison={comparison}
+        params={params}
+        plan={plan}
+        withoutPrice={data.competitorsWithoutPrice}
+        infoHref={infoHref}
+        today={today}
+        onMatch={(d) => change(() => setDiscount(Math.ceil(d * 100) / 100))}
+        onCopyPlan={(p) => change(() => setPlan(p))}
+      />
 
       <div className="grid gap-4 md:grid-cols-2 md:gap-6">
-        <SectionCard title="Precios de referencia" description="Sin cuotas ni descuento.">
+        <SectionCard banded title="Precios de referencia" description="Sin cuotas ni descuento.">
           <SectionBody>
             {refs ? (
               <dl className="space-y-2 text-sm">
@@ -468,7 +503,7 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
             )}
           </SectionBody>
         </SectionCard>
-        <SectionCard title="Descuento máximo" description="El más grande que aguanta este precio publicado sin bajar del margen mínimo.">
+        <SectionCard banded title="Descuento máximo" description="El más grande que aguanta este precio publicado sin bajar del margen mínimo.">
           <SectionBody>
             {ready ? (
               <dl className="space-y-2 text-sm">
@@ -489,18 +524,8 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
         </SectionCard>
       </div>
 
-      <CompetitionCard
-        comparison={comparison}
-        params={params}
-        plan={plan}
-        withoutPrice={data.competitorsWithoutPrice}
-        infoHref={infoHref}
-        today={today}
-        onMatch={(d) => change(() => setDiscount(Math.ceil(d * 100) / 100))}
-        onCopyPlan={(p) => change(() => setPlan(p))}
-      />
-
       <SectionCard
+        banded
         title="Guardar el precio"
         description={`El precio, las cuotas y el descuento pasan a Por subir y se mandan a ${data.channelName} desde ahí. ${data.channelName} pone fin a los descuentos: antes de que venza, la app lo vuelve a subir sola.`}
       >

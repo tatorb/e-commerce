@@ -1,6 +1,6 @@
 import { offerPrices, type CompetitorOffer } from './competitors';
 import { formatPercent, formatPrice } from './money';
-import { finalPriceOf, fixedInstallments, isInstallmentPlan, installmentCostPct, marginLevel, marginOf, type InstallmentPlan, type MarginLevel, type PricingParams } from './pricing';
+import { finalPriceOf, fixedInstallments, isInstallmentPlan, installmentCostPct, marginOf, profitOf, type InstallmentPlan, type PricingParams } from './pricing';
 
 // Mi precio frente al de la competencia que se cargó en el paso Información.
 // Se compara el precio efectivo, lo que paga el comprador en total: el mío va
@@ -35,12 +35,17 @@ export type ComparedRow = {
   // Cuánto más caro (positivo) o más barato (negativo) estoy yo, en %. Null en mi fila.
   diffPct: number | null;
   // El margen sobre el costo que me quedaría vendiendo a su precio y en sus
-  // condiciones, con mi costo y mis costos. En mi fila, el mío. Null si no se puede estimar.
+  // condiciones, con mi costo y mis costos, y la suma de esos costos. En mi
+  // fila, los míos. Si no se puede estimar, por qué.
   estimate: Estimate;
 };
 
-/** La rentabilidad estimada: el margen sobre el costo y su semáforo, o por qué no se puede estimar. */
-export type Estimate = { marginPct: number; level: MarginLevel } | { marginPct: null; why: 'cost' | 'plan' };
+/**
+ * La rentabilidad estimada: el margen sobre el costo y los costos totales en
+ * pesos (el costo de reposición y todo lo demás que se descuenta del precio
+ * final), o por qué no se puede estimar.
+ */
+export type Estimate = { marginPct: number; costs: number } | { marginPct: null; why: 'cost' | 'plan' };
 
 /**
  * El margen que me quedaría vendiendo a ese precio final con esas cuotas, con
@@ -52,8 +57,8 @@ export function estimateAt(args: { finalPrice: number; plan: number; freeShippin
   if (!(args.cost > 0)) return { marginPct: null, why: 'cost' };
   if (!isInstallmentPlan(args.plan) || installmentCostPct(args.params, args.plan) === null) return { marginPct: null, why: 'plan' };
   const params = args.freeShipping ? args.params : { ...args.params, shipping: 0 };
-  const marginPct = marginOf(args.finalPrice, args.cost, params, args.plan)!;
-  return { marginPct, level: marginLevel(marginPct, args.params) };
+  const profit = profitOf(args.finalPrice, args.cost, params, args.plan);
+  return { marginPct: (profit / args.cost) * 100, costs: args.finalPrice - profit };
 }
 
 export type Comparison = {
@@ -177,27 +182,26 @@ export function brandOptions(rows: ComparedRow[]): BrandOption[] {
 /**
  * El promedio de los competidores de la lista: el precio de lista y el
  * efectivo, cuánto más caro (positivo) o más barato estoy yo frente al
- * efectivo, como en cada fila, y su rentabilidad estimada, de los que se puede
- * estimar. Null sin competidores.
+ * efectivo, como en cada fila, y su rentabilidad estimada y sus costos
+ * totales, de los que se puede estimar. Null sin competidores.
  */
 export function competitorAverage(
   rows: ComparedRow[],
-  params: PricingParams,
 ): { count: number; listPrice: number; effectivePrice: number; diffPct: number | null; estimate: Estimate | null } | null {
   const others = rows.filter((r) => !r.mine);
   if (others.length === 0) return null;
   const avg = (of: (r: ComparedRow) => number) => others.reduce((sum, r) => sum + of(r), 0) / others.length;
   const effectivePrice = avg((r) => r.effectivePrice);
   const mine = rows.find((r) => r.mine);
-  const margins = others.flatMap((r) => (r.estimate.marginPct === null ? [] : [r.estimate.marginPct]));
-  const marginPct = margins.length > 0 ? margins.reduce((sum, m) => sum + m, 0) / margins.length : null;
+  const estimated = others.flatMap((r) => (r.estimate.marginPct === null ? [] : [r.estimate]));
+  const mean = (of: (e: (typeof estimated)[number]) => number) => estimated.reduce((sum, e) => sum + of(e), 0) / estimated.length;
   return {
     count: others.length,
     listPrice: avg((r) => r.listPrice),
     effectivePrice,
     diffPct: mine && effectivePrice > 0 ? (mine.effectivePrice / effectivePrice - 1) * 100 : null,
     // Si ninguno se puede estimar, por lo mismo que el primero.
-    estimate: marginPct !== null ? { marginPct, level: marginLevel(marginPct, params) } : (others[0]?.estimate ?? null),
+    estimate: estimated.length > 0 ? { marginPct: mean((e) => e.marginPct), costs: mean((e) => e.costs) } : (others[0]?.estimate ?? null),
   };
 }
 
