@@ -193,12 +193,27 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
   }
 
   function movePhoto(w: string, i: number, by: number) {
+    placePhoto(w, i, i + by);
+  }
+
+  /** Lleva la foto de una posición a otra de la misma ventana. */
+  function placePhoto(w: string, from: number, to: number) {
     setState((st) => {
       const list = [...st.order[w]];
-      const [k] = list.splice(i, 1);
-      list.splice(Math.max(0, Math.min(list.length, i + by)), 0, k);
+      const [k] = list.splice(from, 1);
+      list.splice(Math.max(0, Math.min(list.length, to)), 0, k);
       return { ...st, order: { ...st.order, [w]: list } };
     });
+  }
+
+  // La foto que se está arrastrando para ordenarla, y sobre cuál está. Solo dentro de su ventana.
+  const [dragging, setDragging] = useState<{ w: string; key: string } | null>(null);
+  const [over, setOver] = useState<string | null>(null);
+
+  function dropOn(w: string, key: string) {
+    if (!dragging || dragging.w !== w || dragging.key === key) return;
+    const list = state.order[w];
+    placePhoto(w, list.indexOf(dragging.key), list.indexOf(key));
   }
 
   function moveClip(id: string, by: number) {
@@ -337,7 +352,7 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
         <div className="space-y-1">
           <h3 className="text-sm font-semibold">{withMeasures ? 'Lo que ve el comprador en cada medida' : 'Lo que ve el comprador'}</h3>
           <p className="text-xs text-muted-foreground">
-            Ordená con las flechas: la primera foto es la portada.
+            Ordená arrastrando cada foto a su lugar, o con las flechas: la primera foto es la portada.
             {clip && state.clips.length > 0 ? ` Los ${clip.name}s tienen un solo orden en ${channelName}: si movés uno, se mueve en todas las medidas. El primero es el que se muestra antes.` : ''}
           </p>
         </div>
@@ -362,8 +377,37 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
                   <ol className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-5">
                     {keys.map((k, i) => {
                       const m = photos.get(k)!;
+                      const isDragging = dragging?.w === w && dragging.key === k;
+                      const isOver = over === `${w}:${k}` && dragging?.w === w && dragging.key !== k;
                       return (
-                        <li key={k} className="space-y-1">
+                        <li
+                          key={k}
+                          draggable={busy === null}
+                          aria-label={`${m.label}, posición ${i + 1}`}
+                          onDragStart={(e) => {
+                            e.dataTransfer.effectAllowed = 'move';
+                            e.dataTransfer.setData('text/plain', k);
+                            setDragging({ w, key: k });
+                          }}
+                          onDragEnd={() => {
+                            setDragging(null);
+                            setOver(null);
+                          }}
+                          onDragOver={(e) => {
+                            if (!dragging || dragging.w !== w) return;
+                            e.preventDefault();
+                            e.dataTransfer.dropEffect = 'move';
+                            if (over !== `${w}:${k}`) setOver(`${w}:${k}`);
+                          }}
+                          onDragLeave={() => setOver((o) => (o === `${w}:${k}` ? null : o))}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            dropOn(w, k);
+                            setDragging(null);
+                            setOver(null);
+                          }}
+                          className={cn('space-y-1 rounded-md transition-opacity', busy === null && 'cursor-grab active:cursor-grabbing', isDragging && 'opacity-40', isOver && 'ring-2 ring-primary ring-offset-2')}
+                        >
                           <div className="relative">
                             <PhotoThumb item={m} />
                             <span className="absolute left-1 top-1 rounded bg-foreground/80 px-1.5 text-[11px] tabular-nums text-background">
