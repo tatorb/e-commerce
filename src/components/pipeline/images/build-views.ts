@@ -53,6 +53,8 @@ export function buildPhotoView(edit: Edit, timeZone: string): PhotoView {
     originalType: edit.originalType,
     originalSize: edit.originalSize,
     size: edit.width && edit.height ? `${edit.width} × ${edit.height} px` : null,
+    width: edit.width,
+    height: edit.height,
     camera: cameraText(edit.camera),
     thumbHref: edit.asIs ? (edit.previewUrl ? original : shown) : (last?.afterHref ?? (edit.previewUrl ? original : null)),
     originalHref: photoFileHref('original', { foto: edit.id }, true),

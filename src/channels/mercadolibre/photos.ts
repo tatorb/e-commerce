@@ -11,6 +11,9 @@ export const MERCADOLIBRE_PHOTOS: ChannelPhotoRules = {
   types: ['image/jpeg', 'image/png'],
   typesLabel: 'JPG o PNG',
   maxBytes: 10 * 1024 * 1024,
+  // Menos de 500 px de lado la rechaza y no la agranda; con 1200 el comprador puede hacer zoom.
+  minSide: 500,
+  recommendedSide: 1200,
 };
 
 const PICTURE = /^(.*\/)(?:D_NQ_NP_(?:2X_)?|D_)([^/]+)-[A-Z]\.(?:jpe?g|webp|png)$/i;

@@ -48,6 +48,19 @@ class Cancelado(Exception):
     """La app avisó que el paso ya no es de este intento: se rehízo o se sacó la foto."""
 
 
+class FotoChica(Exception):
+    """El original es más chico que lo que acepta el canal: no se edita, porque la edición no agranda."""
+
+
+def revisar_tamano(foto: Foto, lado_minimo: int | None) -> None:
+    """Frena antes de gastar en Claude si el original no llega al lado mínimo del canal."""
+    if lado_minimo and min(foto.ancho, foto.alto) < lado_minimo:
+        raise FotoChica(
+            f"La foto es chica para el canal: tiene {foto.ancho} × {foto.alto} px y el canal pide al menos "
+            f"{lado_minimo} × {lado_minimo}. La edición no la agranda: hace falta una foto más grande."
+        )
+
+
 def a_json(valor):
     """Lo medido, en tipos que entiende JSON: sin números de numpy ni NaN."""
     if isinstance(valor, dict):
@@ -214,6 +227,7 @@ def procesar(
     carpeta = CarpetaDeFoto(raiz, trabajo.foto)
     carpeta.limpiar({r.id for r in trabajo.receta} | {trabajo.id})
     entrada, avisos = foto_de_entrada(trabajo, pasos, carpeta, cliente, cancelado)
+    revisar_tamano(entrada, getattr(trabajo, "lado_minimo", None))
     foto = entrada
 
     ajustes = leer_ajustes(trabajo.ajustes)

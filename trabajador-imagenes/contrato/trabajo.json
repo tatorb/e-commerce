@@ -29,6 +29,7 @@
       "tipo": "image/heic",
       "bajar": { "url": "https://ejemplo.private.blob.vercel-storage.com/imagenes/p/originales/img_0001-ab12.heic?vercel-blob-signature=x", "metodo": "GET", "encabezados": {} }
     },
+    "lado_minimo": 500,
     "receta": [],
     "subidas": {
       "antes": { "url": "https://vercel.com/api/blob/?pathname=imagenes%2Fp%2Ffoto-1%2Fcorrida-corregir%2Fantes.jpg&vercel-blob-signature=x", "metodo": "PUT", "encabezados": { "x-api-version": "12", "x-content-type": "image/jpeg" } },

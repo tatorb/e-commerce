@@ -4,7 +4,7 @@ import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { ImagePlus } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
-import { asIsProblem, type ChannelPhotoRules } from '@/domain/media';
+import { asIsProblem, photoSizeProblem, photoSizeWarning, type ChannelPhotoRules, type PhotoSize } from '@/domain/media';
 import { ORIGINAL_MAX_BYTES, originalTypeFor } from '@/lib/photo-rules';
 import { addUploadedPhotosAction, startPhotoUploadAction } from '@/app/a/[cuenta]/pipeline/image-actions';
 import { BrandMark } from '@/components/ui/brand-loader';
@@ -16,6 +16,18 @@ import { uploadToDrive } from '@/components/drive/upload';
 // no pasan por la Mac, y tienen que poder ir al canal como están.
 
 const ACCEPT = '.jpg,.jpeg,.png,.heic,.heif,.tif,.tiff,image/jpeg,image/png,image/heic,image/heif,image/tiff';
+
+/** El tamaño de la foto, si el navegador la puede abrir. Las HEIC casi nunca: esas las mide la Mac. */
+async function measure(file: File): Promise<PhotoSize | null> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const size = { width: bitmap.width, height: bitmap.height };
+    bitmap.close();
+    return size;
+  } catch {
+    return null;
+  }
+}
 
 export function PhotoUploader({
   accountSlug,
@@ -35,27 +47,34 @@ export function PhotoUploader({
   const [dragging, setDragging] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
+  // Las que se subieron igual, pero el canal las va a mostrar sin zoom.
+  const [notes, setNotes] = useState<string[]>([]);
   const [busy, startTransition] = useTransition();
 
   function send(list: FileList | File[]) {
     const all = [...list];
     if (all.length === 0) return;
     setErrors([]);
+    setNotes([]);
     startTransition(async () => {
       const problems: string[] = [];
+      const warnings: string[] = [];
       const done: string[] = [];
-      const ok = all.filter((f) => {
+      const ok: File[] = [];
+      for (const f of all) {
         const type = originalTypeFor(f.name);
-        const problem = !type
-          ? 'solo fotos JPG, PNG, HEIC o TIFF.'
-          : f.size > ORIGINAL_MAX_BYTES
-            ? 'pesa más de 100 MB.'
-            : asIs
-              ? asIsProblem({ type, size: f.size }, photoRules, channelName)
-              : null;
+        let problem = !type ? 'solo fotos JPG, PNG, HEIC o TIFF.' : f.size > ORIGINAL_MAX_BYTES ? 'pesa más de 100 MB.' : null;
+        if (!problem && type) {
+          // Se mide antes de subir: una chica para el canal no entra, así no se gasta en editarla.
+          setProgress(`Midiendo ${f.name}…`);
+          const size = await measure(f);
+          problem = asIs ? asIsProblem({ type, size: f.size, ...size }, photoRules, channelName) : photoSizeProblem(size, photoRules, channelName);
+          const warning = problem ? null : photoSizeWarning(size, photoRules, channelName);
+          if (warning) warnings.push(`${f.name}: ${warning}`);
+        }
         if (problem) problems.push(`${f.name}: ${problem}`);
-        return !problem;
-      });
+        else ok.push(f);
+      }
       for (const [i, file] of ok.entries()) {
         const label = ok.length === 1 ? file.name : `${i + 1} de ${ok.length}`;
         setProgress(`Subiendo ${label}…`);
@@ -77,6 +96,7 @@ export function PhotoUploader({
       }
       setProgress(null);
       setErrors(problems);
+      setNotes(warnings);
       router.refresh();
     });
   }
@@ -132,6 +152,13 @@ export function PhotoUploader({
       {errors.length > 0 ? (
         <ul role="status" className="space-y-0.5 text-sm text-destructive">
           {errors.map((m) => (
+            <li key={m}>{m}</li>
+          ))}
+        </ul>
+      ) : null}
+      {notes.length > 0 ? (
+        <ul role="status" className="space-y-0.5 text-sm text-amber-700">
+          {notes.map((m) => (
             <li key={m}>{m}</li>
           ))}
         </ul>

@@ -53,7 +53,7 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
 
   beforeEach(async () => {
     await db.$executeRawUnsafe(
-      'TRUNCATE photo_step_runs, photo_edits, photo_settings, image_workers, assets, shoot_steps, shoot_protocols, products, accounts, users CASCADE',
+      'TRUNCATE photo_step_runs, photo_edits, photo_settings, image_workers, assets, shoot_steps, shoot_protocols, publications, stores, channels, products, accounts, users CASCADE',
     );
     accountId = (await db.account.create({ data: { slug: 'prueba', name: 'Cuenta de prueba' } })).id;
     productId = (await db.product.create({ data: { accountId, name: 'Kit de pistones', productType: 'Pistón' } })).id;
@@ -212,6 +212,25 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     expect(Object.keys(job.subidas).sort()).toEqual(['antes', 'jpg', 'mascara', 'png', 'vista', 'vivo']);
     expect(job.subidas.vista!.url).toBe(`https://subir.example/?corrida=${job.id}&tipo=vista`);
     expect(job.receta).toEqual([]);
+    // Sin publicaciones en un canal, no hay lado mínimo.
+    expect(job.lado_minimo).toBeNull();
+  });
+
+  it('el pedido lleva el lado mínimo del canal, y una foto chica falla sin reintentos ni Claude', async () => {
+    const channel = await db.channel.create({ data: { kind: 'MERCADOLIBRE', name: 'Mercado Libre' } });
+    const store = await db.store.create({ data: { accountId, channelId: channel.id, name: 'TIENDA' } });
+    await db.publication.create({ data: { productId, storeId: store.id, externalId: 'MLA1', title: 'Kit', attributes: [] } });
+    const w = await worker();
+    const edit = await photo();
+    const claimed = await claimNext(db, w);
+    const job = await buildJob(db, claimed!.runId, deps);
+    expect(job.lado_minimo).toBe(500);
+    // La Mac mide el original, ve que es chico y lo devuelve como fallo definitivo: queda fallido al primer intento.
+    const r = await submitFailure(db, w, { id: job.id, turno: job.turno, error: 'La foto es chica para el canal: tiene 420 × 380 px.', definitivo: true });
+    expect(r).toEqual({ aceptado: true });
+    const run = await openRun(edit.id);
+    expect([run.status, run.attempts, run.error]).toEqual(['FAILED', 1, 'La foto es chica para el canal: tiene 420 × 380 px.']);
+    expect(await claimNext(db, w)).toBeNull();
   });
 
   it('a un trabajador con el protocolo anterior no le pide el paquete para editar en vivo', async () => {
@@ -251,6 +270,7 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
       pedidos: { valores: {}, apagados: ['luces'] },
       foto_del_protocolo: { titulo: 'Frente', indicaciones: 'Sin brillos.' },
       indicacion: 'Más luz.',
+      lado_minimo: 500,
       subidas: { vista: job.subidas.vista },
     };
     const expected = { ...example.trabajo, subidas: { vista: example.trabajo.subidas.vista } };

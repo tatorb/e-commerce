@@ -60,6 +60,9 @@ export type Job = {
   ajustes: PhotoSettingsValues;
   pedidos: StepRequest | null;
   original: { nombre: string; tipo: string; bajar: Transfer };
+  // El lado más chico que acepta el canal, en px: con un original menor la Mac
+  // no sigue ni le pregunta a Claude, porque la edición no agranda. null: sin tope.
+  lado_minimo: number | null;
   // Los pasos anteriores, para rehacer la foto desde el original si la Mac ya no la tiene.
   receta: RecipeEntry[];
   subidas: Partial<Record<UploadKind, Transfer>>;
@@ -156,6 +159,8 @@ const failedSchema = z.object({
   turno: z.number().int(),
   ok: z.literal(false),
   error: shortText(4000),
+  // No vale la pena reintentar: por ejemplo, el original es chico para el canal.
+  definitivo: z.boolean().nullish(),
 });
 
 export const resultSchema = z.discriminatedUnion('ok', [doneSchema, failedSchema]);

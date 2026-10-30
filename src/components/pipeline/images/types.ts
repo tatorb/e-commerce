@@ -42,6 +42,8 @@ export type PhotoView = {
   originalType: string;
   originalSize: number;
   size: string | null;
+  width: number | null;
+  height: number | null;
   camera: string | null;
   thumbHref: string | null;
   originalHref: string;

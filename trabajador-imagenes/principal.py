@@ -32,7 +32,7 @@ from mrb_imagenes.config import (
 from mrb_imagenes.inspector import Inspector, obtener_clave_claude
 from mrb_imagenes.pasos import armar_pasos
 from mrb_imagenes.pasos.fondo import memoria_gb
-from mrb_imagenes.trabajo import Cancelado, limpiar_viejas, procesar
+from mrb_imagenes.trabajo import Cancelado, FotoChica, limpiar_viejas, procesar
 
 log = logging.getLogger("trabajador")
 LATIDO_CADA_S = 60
@@ -124,6 +124,10 @@ def un_trabajo(cliente: ClienteApp, trabajo: Trabajo, pasos, inspector) -> None:
         try:
             hecho = procesar(trabajo, pasos, inspector, cliente, carpeta_de_datos() / "trabajo", cancelado)
         except Cancelado:
+            return
+        except FotoChica as e:  # no se reintenta: la foto no sirve para el canal
+            log.info(str(e))
+            entregar(cliente, Fallo(id=trabajo.id, turno=trabajo.turno, error=str(e), definitivo=True))
             return
         except Exception as e:  # cualquier problema con la foto se informa a la app
             log.exception("El paso falló.")

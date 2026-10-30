@@ -86,6 +86,8 @@ class Trabajo(BaseModel):
     ajustes: dict
     pedidos: Pedidos | None = None
     original: Original
+    # El lado más chico que acepta el canal, en px: con un original menor no se sigue ni se le pregunta a Claude.
+    lado_minimo: int | None = None
     receta: list[PasoDeReceta] = Field(default_factory=list)
     subidas: dict[TipoSubida, Transferencia] = Field(default_factory=dict)
 
@@ -152,6 +154,8 @@ class Fallo(BaseModel):
     turno: int
     ok: Literal[False] = False
     error: str
+    # No vale la pena reintentar: por ejemplo, el original es chico para el canal.
+    definitivo: bool = False
 
 
 class ErrorDeApp(Exception):

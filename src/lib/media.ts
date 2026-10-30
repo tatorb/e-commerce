@@ -4,6 +4,8 @@ import { getChannelAdapter } from '@/channels';
 import type { ChannelPicture, ChannelPictureLayout } from '@/channels/publish';
 import {
   asIsProblem,
+  photoSizeProblem,
+  type PhotoSize,
   channelPhotos,
   cleanMedia,
   parseMedia,
@@ -150,6 +152,8 @@ type FinishedEdit = {
   id: string;
   asIs: boolean;
   file: { url: string; type: string; name: string; size: number | null };
+  // El tamaño del original, si la Mac lo midió. La edición no lo agranda.
+  size: PhotoSize | null;
   thumb: string | null;
   // La foto en su tamaño más grande que el navegador puede mostrar, para la lupa.
   zoom: string;
@@ -168,6 +172,8 @@ async function finishedEdits(db: Db, productId: string): Promise<FinishedEdit[]>
       originalUrl: true,
       originalType: true,
       originalSize: true,
+      width: true,
+      height: true,
       previewUrl: true,
       asIs: true,
       runs: {
@@ -186,6 +192,7 @@ async function finishedEdits(db: Db, productId: string): Promise<FinishedEdit[]>
           asIs: true,
           // Va el mismo archivo que se subió, con su nombre.
           file: { url: e.originalUrl, type: e.originalType, name: e.originalName, size: e.originalSize },
+          size: e.width && e.height ? { width: e.width, height: e.height } : null,
           thumb: photoFileHref(e.previewUrl ? 'antes' : 'original', { foto: e.id }),
           zoom: photoFileHref(SHOWABLE.includes(e.originalType) || !e.previewUrl ? 'original' : 'antes', { foto: e.id }),
         },
@@ -199,6 +206,7 @@ async function finishedEdits(db: Db, productId: string): Promise<FinishedEdit[]>
         asIs: false,
         // Del Drive: si se retocó a mano desde la Mac, va la versión retocada.
         file: { url: run.jpgUrl, type: 'image/jpeg', name: `${e.originalName.replace(/\.[^.]+$/, '')}.jpg`, size: null },
+        size: e.width && e.height ? { width: e.width, height: e.height } : null,
         thumb: run.previewUrl ? viewUrl(run.id) : null,
         zoom: photoFileHref('jpg', { paso: run.id }),
       },
@@ -305,7 +313,11 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
   const inChannel = new Set(channel.map((c) => (c.ref.kind === 'channel' ? origins[c.ref.id] : undefined)).filter(Boolean));
   const corrected: MediaItem[] = edits.map((e, i) => {
     // La que se usa tal cual tiene que poder ir al canal como está.
-    const blocked = e.asIs && e.file.size !== null ? asIsProblem({ type: e.file.type, size: e.file.size }, adapter.photos, channelName) : null;
+    // La que se usa tal cual tiene que poder ir al canal como está; una corregida de un original chico sale chica.
+    const blocked =
+      e.asIs && e.file.size !== null
+        ? asIsProblem({ type: e.file.type, size: e.file.size, ...e.size }, adapter.photos, channelName)
+        : photoSizeProblem(e.size, adapter.photos, channelName);
     return {
       ref: { kind: 'edit', editId: e.id },
       key: photoKey({ kind: 'edit', editId: e.id }),

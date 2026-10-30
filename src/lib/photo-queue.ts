@@ -17,6 +17,7 @@ import {
   type UploadKind,
   type WorkerDone,
 } from '@/domain/photo-contract';
+import { getChannelAdapter } from '@/channels';
 import { LAST_PHOTO_STEP, LIVE_PARTS, missedByClaude, OPEN_RUN_STATUSES, PHOTO_STEPS, photoProgress } from '@/domain/photo-steps';
 import { parsePhotoSettings, type PhotoSettingsValues } from '@/domain/photo-settings';
 import { loadPhotoSettings } from './photo-settings';
@@ -216,9 +217,17 @@ export async function buildJob(db: PrismaClient, runId: string, deps: JobDeps): 
     ajustes: parsePhotoSettings(run.settings),
     pedidos: request ? { valores: request.valores, apagados: request.apagados } : null,
     original: { nombre: edit.originalName, tipo: edit.originalType, bajar: await deps.download(edit) },
+    lado_minimo: await minPhotoSide(db, edit.productId),
     receta,
     subidas,
   };
+}
+
+/** El lado más chico que piden los canales donde está el producto, el más exigente; null si ninguno lo pide. */
+export async function minPhotoSide(db: PrismaClient, productId: string): Promise<number | null> {
+  const pubs = await db.publication.findMany({ where: { productId }, select: { store: { select: { channel: { select: { kind: true, name: true } } } } } });
+  const sides = pubs.map((p) => getChannelAdapter(p.store.channel.kind, p.store.channel.name).photos?.minSide ?? null).filter((s): s is number => s !== null);
+  return sides.length > 0 ? Math.max(...sides) : null;
 }
 
 /** No se pudo armar el trabajo, por ejemplo porque el Drive no respondió: vuelve a la cola sin contar el intento. */
@@ -318,13 +327,14 @@ export async function submitResult(
 export async function submitFailure(
   db: PrismaClient,
   workerId: string,
-  args: { id: string; turno: number; error: string },
+  args: { id: string; turno: number; error: string; definitivo?: boolean | null },
 ): Promise<SubmitOutcome> {
   const run = await db.photoStepRun.findUnique({ where: { id: args.id } });
   if (!run || run.status !== 'PROCESSING' || run.lease !== args.turno || run.workerId !== workerId) {
     return { aceptado: false, motivo: STALE };
   }
-  const last = run.attempts >= MAX_ATTEMPTS;
+  // Un fallo definitivo, como un original chico para el canal, no se reintenta.
+  const last = args.definitivo === true || run.attempts >= MAX_ATTEMPTS;
   const r = await db.photoStepRun.updateMany({
     where: { id: run.id, status: 'PROCESSING', lease: args.turno },
     data: { status: last ? 'FAILED' : 'QUEUED', workerId: null, leaseUntil: null, error: args.error.slice(0, 4000) },

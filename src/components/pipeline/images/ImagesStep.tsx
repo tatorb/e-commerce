@@ -14,7 +14,7 @@ import { photosHref, toggledPhotos } from './open-photos';
 import { PhotoLine } from './PhotoLine';
 import { PhotoUploader } from './PhotoUploader';
 import { ArchivePhotoButton, AsIsButton, ChannelPhotosButton, RedoUnansweredButton } from './PhotoListActions';
-import { asIsProblem, type ChannelPhotoRules } from '@/domain/media';
+import { asIsProblem, photoSizeProblem, type ChannelPhotoRules } from '@/domain/media';
 import { missedByClaude, photoTone, type PhotoTone } from '@/domain/photo-steps';
 import { PHOTO_TONE as TONE } from './tone';
 import { WorkerStatusLine } from './WorkerStatusLine';
@@ -226,7 +226,7 @@ export function ImagesStep({
                 publicationId={publicationId}
                 editId={photo.id}
                 asIs={photo.asIs}
-                problem={asIsProblem({ type: photo.originalType, size: photo.originalSize }, photoRules, channelName)}
+                problem={asIsProblem({ type: photo.originalType, size: photo.originalSize, width: photo.width, height: photo.height }, photoRules, channelName)}
               />
               <ArchivePhotoButton accountSlug={accountSlug} editId={photo.id} />
               {open.length > 1 ? (
@@ -240,6 +240,12 @@ export function ImagesStep({
           }
         >
           <div className="p-4">
+            {/* La Mac midió el original y es chico para el canal: la edición no lo agranda. */}
+            {photoSizeProblem(photo.width && photo.height ? { width: photo.width, height: photo.height } : null, photoRules, channelName) ? (
+              <p role="alert" className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
+                {photoSizeProblem({ width: photo.width!, height: photo.height! }, photoRules, channelName)}
+              </p>
+            ) : null}
             {photo.asIs ? (
               <div className="space-y-3">
                 {photo.originalViewHref ? (

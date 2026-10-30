@@ -97,17 +97,44 @@ export type ChannelPhotoRules = {
   // Cómo se dicen, por ejemplo "JPG o PNG".
   typesLabel: string;
   maxBytes: number;
+  // El lado más chico que acepta, en px: una foto menor la rechaza y no la agranda. null: no lo informa.
+  minSide: number | null;
+  // El lado que recomienda, por ejemplo para que el comprador pueda hacer zoom.
+  recommendedSide: number | null;
 };
+
+export type PhotoSize = { width: number; height: number };
+
+/**
+ * Por qué una foto de ese tamaño no sirve para el canal, o null si sirve. La
+ * edición no agranda la foto: si el original es chico, la final sale chica.
+ */
+export function photoSizeProblem(size: PhotoSize | null | undefined, rules: ChannelPhotoRules | null, channelName: string): string | null {
+  if (!size || !rules?.minSide) return null;
+  if (Math.min(size.width, size.height) >= rules.minSide) return null;
+  return `Es chica para ${channelName}: tiene ${size.width} × ${size.height} px y ${channelName} pide al menos ${rules.minSide} × ${rules.minSide}. La edición no la agranda: hace falta una foto más grande.`;
+}
+
+/** El aviso cuando la foto sirve pero queda por debajo de lo que recomienda el canal, o null. */
+export function photoSizeWarning(size: PhotoSize | null | undefined, rules: ChannelPhotoRules | null, channelName: string): string | null {
+  if (!size || !rules?.recommendedSide || photoSizeProblem(size, rules, channelName)) return null;
+  if (Math.min(size.width, size.height) >= rules.recommendedSide) return null;
+  return `Tiene ${size.width} × ${size.height} px: ${channelName} recomienda ${rules.recommendedSide} × ${rules.recommendedSide} para que el comprador pueda hacer zoom.`;
+}
 
 /**
  * Por qué una foto no puede ir al canal tal como está, o null si puede. Una
  * foto que se usa tal cual no se convierte ni se achica.
  */
-export function asIsProblem(file: { type: string; size: number }, rules: ChannelPhotoRules | null, channelName: string): string | null {
+export function asIsProblem(
+  file: { type: string; size: number; width?: number | null; height?: number | null },
+  rules: ChannelPhotoRules | null,
+  channelName: string,
+): string | null {
   if (!rules) return null;
   if (!rules.types.includes(file.type)) return `${channelName} solo acepta fotos ${rules.typesLabel}: exportala así desde la Mac para usarla tal cual.`;
   if (file.size > rules.maxBytes) return `${channelName} acepta fotos de hasta ${Math.round(rules.maxBytes / 1024 / 1024)} MB y esta pesa ${(file.size / 1024 / 1024).toFixed(1).replace('.', ',')} MB.`;
-  return null;
+  return file.width && file.height ? photoSizeProblem({ width: file.width, height: file.height }, rules, channelName) : null;
 }
 
 /** Lo que identifica a una foto, sin importar el link con que se la ve. */

@@ -71,6 +71,7 @@ El trabajador se conecta con la app y arranca solo cada vez que iniciás sesión
 1. Abrí una publicación en el paso **Imágenes** del pipeline.
 2. Sumá fotos de tres formas:
    - **Arrastrá los originales**, tal como salen de la cámara. Pueden ser JPG, PNG, HEIC del iPhone o TIFF, de hasta 100 MB.
+   - Antes de subir, la app mide cada foto. Una más chica que lo que pide el canal (en Mercado Libre, 500 px de lado) no entra, porque la edición no la agranda; entre 500 y 1200 px entra con un aviso, porque no va a tener zoom. Las HEIC las mide la Mac: si es chica, la Mac la devuelve como fallida sin pedirle nada a Claude, y la foto no se puede elegir en Organización de multimedia.
    - **Copialas desde la Mac** a la carpeta Fotos / Originales del producto en el Drive. Al abrir el paso, o con **Revisar la carpeta**, entran a la línea.
    - **Usar las fotos publicadas** baja las que ya están en Mercado Libre, en su tamaño más grande.
 3. Tocá las fotos que quieras revisar. Cada una que tocás se abre abajo, una debajo de otra, y se marca con un tilde en la lista. Tocala de nuevo para cerrarla.
