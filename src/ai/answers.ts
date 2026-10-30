@@ -85,7 +85,7 @@ Forma de la respuesta:
 - Empezá con el saludo y terminá con la firma de la tienda, si los hay. Seguí el tono que pide la tienda.
 - Si el comprador hizo varias preguntas, respondé todas.
 - Las medidas y los códigos, como figuran en los datos.
-- Sin links, mails, teléfonos, redes sociales ni datos de contacto: el canal no los acepta. No mandes al comprador a escribir por otro lado.
+- Sin mails, teléfonos, redes sociales ni datos de contacto, y sin links a otros sitios: el canal no los acepta. No mandes al comprador a escribir por otro lado. Un link a otra publicación de la tienda en el mismo canal sí va, si está en los datos: sirve para mandarlo a la que le sirve.
 - Castellano de Argentina, tratando de vos salvo que la tienda pida otra cosa. No uses el guion largo.`;
 
 function storeBlock(input: AnswerInput): string {

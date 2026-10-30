@@ -1,5 +1,5 @@
 import type { DraftOutcome } from '@/generated/prisma/enums';
-import { contactFound, contactList } from './contact';
+import { contactFound, contactList, withoutOwnLinks } from './contact';
 
 // Las respuestas a las preguntas de los compradores: qué se revisa antes de
 // mandar una y cómo se cuenta lo que se hizo con cada propuesta de Claude.
@@ -41,7 +41,8 @@ export function checkAnswer(text: string): string[] {
   const problems: string[] = [];
   if (FILL_IN.test(value)) problems.push('Completá lo que está marcado con [COMPLETAR].');
   if (value.length > ANSWER_MAX) problems.push(`La respuesta puede tener hasta ${ANSWER_MAX} caracteres; tiene ${value.length}.`);
-  const found = contactFound(value);
+  // Los links a otras publicaciones del canal sí van: sirven para mandar al comprador a la que le sirve.
+  const found = contactFound(withoutOwnLinks(value));
   if (found.length > 0) problems.push(`Sacá ${contactList(found)}: el canal no los acepta en las respuestas.`);
   return problems;
 }

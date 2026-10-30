@@ -8,6 +8,15 @@ const CONTACT: [RegExp, string][] = [
   [/\+\s?54\b/, 'teléfonos'],
 ];
 
+// Los sitios de los propios canales: un link a otra publicación de la tienda
+// no es contacto, el canal lo acepta y lo promueve en las respuestas.
+const OWN_SITES = /\b(?:https?:\/\/)?(?:[\w-]+\.)*(?:mercadolibre|mercadoshops|mercadolivre)\.com(?:\.[a-z]{2})?(?:\/[^\s<>"']*)?/gi;
+
+/** El texto sin los links a los sitios de los canales, para que no cuenten como contacto. */
+export function withoutOwnLinks(text: string): string {
+  return text.replace(OWN_SITES, ' ');
+}
+
 /** Qué datos de contacto tiene el texto, por ejemplo ["links", "mails"]. Vacía si no tiene. */
 export function contactFound(text: string): string[] {
   return [...new Set(CONTACT.filter(([pattern]) => pattern.test(text)).map(([, what]) => what))];

@@ -25,6 +25,10 @@ describe('antes de mandar una respuesta', () => {
     expect(checkAnswer('Escribinos a ventas@tienda.com.ar o entrá a www.tienda.com.ar')[0]).toBe('Sacá links y mails: el canal no los acepta en las respuestas.');
     expect(checkAnswer('Mandanos un WhatsApp al +54 11 5555 5555')[0]).toContain('datos de contacto y teléfonos');
     expect(checkAnswer('Llamá al 4444-5555')[0]).toContain('datos de contacto');
+    // Un link a otra publicación del canal no es contacto: el canal lo acepta.
+    expect(checkAnswer('Tenemos la medida STD acá: https://articulo.mercadolibre.com.ar/MLA-1234567890-subconjunto-_JM. Saludos.')).toEqual([]);
+    expect(checkAnswer('Mirá www.mercadolibre.com.ar/p/MLA12345 y nuestra tienda mercadoshops.com.ar/insur')).toEqual([]);
+    expect(checkAnswer('Mirá https://articulo.mercadolibre.com.ar/MLA-1-x-_JM o www.otra-tienda.com')[0]).toBe('Sacá links: el canal no los acepta en las respuestas.');
   });
 
   it('cuenta si se mandó tal cual, corregida, descartada o respondida en el canal', () => {
