@@ -14,7 +14,8 @@ import { StatusText } from '../StatusText';
 import { BrandLoader } from '@/components/ui/brand-loader';
 
 // Las 3 propuestas de la IA, el título que se está armando con el chequeo en
-// vivo y el botón para aprobarlo. El chequeo y la cobertura los hace la app.
+// vivo y el botón para aprobarlo. La primera propuesta queda elegida sola:
+// no hace falta elegir para aprobar. El chequeo y la cobertura los hace la app.
 
 type Proposal = { title: string; reason: string };
 
@@ -90,8 +91,10 @@ export function TitleComposer({
   decision: TitleLockDecision | null;
   aiDisabledReason: string | null;
 }) {
-  const [title, setTitle] = useState(currentTitle ?? '');
-  const [aiTitle, setAiTitle] = useState<string | null>(null);
+  // Con propuestas, arranca con la primera elegida; sin propuestas, con el título que tiene.
+  const first = proposals[0]?.title ?? null;
+  const [title, setTitle] = useState(first ?? currentTitle ?? '');
+  const [aiTitle, setAiTitle] = useState<string | null>(first);
   const ai = useStepAction();
   const approve = useStepAction();
   const check = useMemo(() => checkTitle(title, rules, { usableWords }), [title, rules, usableWords]);

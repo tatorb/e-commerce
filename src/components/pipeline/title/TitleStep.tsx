@@ -123,6 +123,8 @@ export function TitleStep({
           .join(' ')}
       >
         <TitleComposer
+          // Con propuestas nuevas, arranca de nuevo con la primera elegida.
+          key={ctx.proposals.map((p) => p.title).join('\n')}
           accountSlug={accountSlug}
           publicationId={id}
           currentTitle={ctx.publication.title}
