@@ -99,8 +99,8 @@ export function ChannelPromotionsCard({
   return (
     <SectionCard
       banded
-      title={`Lo que acepta ${channelName}`}
-      description="El descuento propio que deja poner hoy y las campañas de la publicación."
+      title="Promociones"
+      description={`El descuento propio que deja poner ${channelName} hoy y sus campañas para la publicación.`}
       action={
         <Button size="sm" variant="outline" onClick={reload} disabled={loading}>
           Volver a consultar

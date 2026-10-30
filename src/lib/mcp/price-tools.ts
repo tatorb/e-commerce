@@ -378,7 +378,7 @@ const chooseCampaign = defineTool({
   section: 'pipeline',
   title: 'Sumarse a una campaña o salir',
   description:
-    'Deja en Por subir sumarse a una campaña del canal o salir de una, como los botones de la tarjeta Lo que acepta el canal en el paso Precio. La campaña es su campana en lo_que_acepta_el_canal de get_price_step. Para sumarse: si como_sumarse es eligiendo_el_precio, mandá precio, el precio para el comprador dentro de precio_que_acepta; si es aceptando, el precio lo pone el canal; si es desde_el_canal, no se puede desde la app. Para salir, se_puede_salir tiene que ser true. Devuelve el margen estimado con lo que recibe la tienda, que suma lo que pone el canal. Se manda al canal con push_prices o desde Por subir. Antes, mostrale a la persona la campaña, el precio y el margen, y esperá que confirme.',
+    'Deja en Por subir sumarse a una campaña del canal o salir de una, como los botones de la tarjeta Promociones del paso Precio y de la página de la publicación. La campaña es su campana en lo_que_acepta_el_canal de get_price_step. Para sumarse: si como_sumarse es eligiendo_el_precio, mandá precio, el precio para el comprador dentro de precio_que_acepta; si es aceptando, el precio lo pone el canal; si es desde_el_canal, no se puede desde la app. Para salir, se_puede_salir tiene que ser true. Devuelve el margen estimado con lo que recibe la tienda, que suma lo que pone el canal. Se manda al canal con push_prices o desde Por subir. Antes, mostrale a la persona la campaña, el precio y el margen, y esperá que confirme.',
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg,
