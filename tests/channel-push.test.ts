@@ -1017,10 +1017,41 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     expect(await run({ cuenta: 'prueba' })).toEqual({ subidas: [], aviso: 'No hay precios, cuotas, descuentos ni campañas por subir en la cuenta.' });
   });
 
+  it('Claude sube solo el título de Por subir; uno bloqueado por ventas no va, y dice por qué', async () => {
+    process.env.DATABASE_URL ??= url;
+    const { PUSH_TOOLS } = await import('@/lib/mcp/push-tools');
+    const tool = PUSH_TOOLS.find((t) => t.name === 'push_titles')!;
+    expect(tool).toMatchObject({ section: 'subir', readOnly: false, destructive: true });
+    await db.user.create({ data: { id: 'u7', name: 'Persona', email: 'persona7@example.com' } });
+    const ctx: McpContext = { db, userId: 'u7', access: { isAdmin: true, permissions: {}, accountIds: [] }, baseUrl: 'https://app.ejemplo.com' };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const run = async (args: Record<string, unknown>): Promise<any> => tool.run(ctx, tool.input.parse(args));
+    const [p1, p2, p3] = [await pub('MLA1'), await pub('MLA2'), await pub('MLA3')];
+    await saveDraft(db, { accountId, publicationId: p1.id, field: 'title', value: 'Kit Embrague Ford Ka 1.6' });
+    // Una descripción nueva, que no es del título.
+    await saveDraft(db, { accountId, publicationId: p1.id, field: 'description', value: 'Kit completo con disco y placa.' });
+    // Con ventas, el título está bloqueado: cambiado a mano, no sube.
+    await db.publication.update({ where: { id: p3.id }, data: { title: 'Pistones Daewoo Tico' } });
+    writes.length = 0;
+
+    const r = await run({ cuenta: 'prueba', publicaciones: [p1.id, p2.id, p3.id] });
+    expect(r.subidas).toEqual([
+      { publicacion: 'MLA1', titulo: 'Kit Embrague Ford Ka 1.6', resultado: 'subido', confirmado_en_el_canal: true },
+      { publicacion: 'MLA3', titulo: 'Pistones Daewoo Tico', resultado: 'rechazado', motivo: expect.stringContaining('bloqueado'), confirmado_en_el_canal: false },
+    ]);
+    expect(r.salteadas).toEqual([{ publicacion: 'MLA2', motivo: 'No tiene el título por subir.' }]);
+    expect(writes.map((w) => `${w.method} ${w.path}`)).toEqual(['PUT /items/MLA1']);
+    expect(items.MLA1.title).toBe('Kit Embrague Ford Ka 1.6');
+    // La descripción no se subió: sigue en Por subir.
+    expect((await state('MLA1')).draft).toEqual(['description']);
+    expect(await run({ cuenta: 'prueba', publicaciones: [p1.id] })).toEqual({ subidas: [], salteadas: [{ publicacion: 'MLA1', motivo: 'No tiene el título por subir.' }] });
+  });
+
   it('Claude carga la descripción y sube solo esa; en una familia, la de todas sus medidas', async () => {
     process.env.DATABASE_URL ??= url;
     const { DESCRIPTION_TOOLS } = await import('@/lib/mcp/description-tools');
-    const tool = (name: string) => DESCRIPTION_TOOLS.find((t) => t.name === name)!;
+    const { PUSH_TOOLS } = await import('@/lib/mcp/push-tools');
+    const tool = (name: string) => [...DESCRIPTION_TOOLS, ...PUSH_TOOLS].find((t) => t.name === name)!;
     expect(tool('push_descriptions')).toMatchObject({ section: 'subir', readOnly: false, destructive: true });
     await db.user.create({ data: { id: 'u5', name: 'Persona', email: 'persona5@example.com' } });
     const ctx: McpContext = { db, userId: 'u5', access: { isAdmin: true, permissions: {}, accountIds: [] }, baseUrl: 'https://app.ejemplo.com' };
@@ -1063,7 +1094,7 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     await run('save_description', { cuenta: 'prueba', descripciones: [{ publicacion: p3.id, descripcion: 'Juego de 3 pistones con aros.' }] });
     const rejected = await run('push_descriptions', { cuenta: 'prueba' });
     expect(rejected.subidas).toEqual([
-      expect.objectContaining({ publicacion: 'MLA3', resultado: 'rechazada', motivo: 'Mercado Libre no acepta links, mails, teléfonos ni etiquetas HTML en la descripción.' }),
+      expect.objectContaining({ publicacion: 'MLA3', resultado: 'rechazado', motivo: 'Mercado Libre no acepta links, mails, teléfonos ni etiquetas HTML en la descripción.' }),
     ]);
     expect((await state('MLA3')).draft).toEqual(['description']);
     delete items.MLA3.descriptionRejected;
