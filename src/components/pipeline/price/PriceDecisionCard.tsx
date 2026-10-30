@@ -8,10 +8,24 @@ import type { LatestPriceDecision } from '@/lib/pricing';
 import { formatDateTime } from '@/lib/format';
 
 // En el paso Publicación: el precio, las cuotas y el descuento que se
-// decidieron en el paso Precio, y si ya están en el canal. Se suben desde Por
-// subir; el precio también va al crear la publicación.
+// decidieron en el paso Precio, y si ya están en el canal, y las campañas que
+// se pidieron en Promociones. Se suben desde Por subir; el precio también va
+// al crear la publicación.
 
 type PriceField = 'price' | 'installments' | 'discount';
+
+/** Sumarse a una campaña o salir, pedido en Promociones y todavía sin subir. code: de qué medida, si hay varias. */
+export type PendingCampaignRow = {
+  id: string;
+  action: 'join' | 'leave';
+  name: string;
+  kind: string;
+  price: number | null;
+  rejection: string | null;
+  code: string | null;
+  // El margen estimado si se suma con ese precio.
+  marginPct: number | null;
+};
 
 export type PriceSides = {
   app: FaceValues;
@@ -28,6 +42,7 @@ export function PriceDecisionCard({
   published,
   priceHref,
   timeZone,
+  campaigns = [],
 }: {
   decision: LatestPriceDecision;
   channelName: string;
@@ -38,6 +53,7 @@ export function PriceDecisionCard({
   published: boolean;
   priceHref: string;
   timeZone: string;
+  campaigns?: PendingCampaignRow[];
 }) {
   if (!decision) {
     return (
@@ -47,6 +63,11 @@ export function PriceDecisionCard({
           <Button asChild size="sm" variant="outline">
             <Link href={priceHref}>Ir a Precio</Link>
           </Button>
+          {campaigns.length > 0 ? (
+            <dl className="divide-y rounded-md border">
+              <CampaignRows campaigns={campaigns} channelName={channelName} />
+            </dl>
+          ) : null}
         </SectionBody>
       </SectionCard>
     );
@@ -119,6 +140,7 @@ export function PriceDecisionCard({
               <dd className="text-sm text-muted-foreground sm:max-w-[60%] sm:text-right">{status(r.field)}</dd>
             </div>
           ))}
+          <CampaignRows campaigns={campaigns} channelName={channelName} />
         </dl>
         {renews ? (
           <p className="text-sm text-muted-foreground">
@@ -128,4 +150,32 @@ export function PriceDecisionCard({
       </SectionBody>
     </SectionCard>
   );
+}
+
+/** Una fila por campaña pedida, como las del precio. */
+function CampaignRows({ campaigns, channelName }: { campaigns: PendingCampaignRow[]; channelName: string }) {
+  return campaigns.map((c) => {
+    // "Campaña tradicional, el comprador paga $ 85.000, margen de 18 % sobre el costo."
+    const detail = [
+      c.name !== c.kind ? c.kind : null,
+      c.action === 'join' ? (c.price !== null ? `el comprador paga ${formatPrice(c.price)}` : `el precio lo pone ${channelName}`) : null,
+      c.marginPct !== null ? `margen de ${formatPercent(c.marginPct)} sobre el costo` : null,
+    ]
+      .filter(Boolean)
+      .join(', ');
+    return (
+      <div key={c.id} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-3 py-2">
+        <div className="min-w-0">
+          <dt className="text-xs text-muted-foreground">Campaña{c.code ? ` · ${c.code}` : ''}</dt>
+          <dd className="font-semibold">
+            {c.action === 'join' ? 'Sumarse a' : 'Salir de'} {c.name}
+          </dd>
+          {detail ? <dd className="text-xs text-muted-foreground">{`${detail.charAt(0).toUpperCase()}${detail.slice(1)}.`}</dd> : null}
+        </div>
+        <dd className={c.rejection ? 'text-sm text-destructive sm:max-w-[60%] sm:text-right' : 'text-sm text-muted-foreground sm:max-w-[60%] sm:text-right'}>
+          {c.rejection ? `No se pudo subir: ${c.rejection}` : `Se sube a ${channelName} desde Por subir, abajo.`}
+        </dd>
+      </div>
+    );
+  });
 }

@@ -15,7 +15,7 @@ import {
   Boxes,
   Info,
 } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { Fragment, type ReactNode } from 'react';
 import { EntityHero } from '@/components/navigation/EntityHero';
 import { CollapsibleCard } from '@/components/ui/collapsible-card';
 import { InfoStrip } from '@/components/ui/info-strip';
@@ -69,8 +69,7 @@ import { loadPublicationFaces, type PublicationFaces } from '@/lib/queries/publi
 import { FamilyMembersRow } from '@/components/families/FamilyMembersRow';
 import { familyOf } from '@/lib/families';
 import { PublicationPromotions } from '@/components/publication/PublicationPromotions';
-import { loadPriceStep } from '@/lib/pricing';
-import { isInstallmentPlan, resolvePricing } from '@/domain/pricing';
+import { campaignMarginFor, loadPriceStep } from '@/lib/pricing';
 
 export const dynamic = 'force-dynamic';
 // Subir al canal hace varios pedidos y vuelve a leer la publicación, y generar
@@ -151,17 +150,22 @@ export default async function PublicationPage({
   const productHref = `/a/${account.slug}/productos/${p.product.id}`;
   // Las otras publicaciones del mismo producto, para pasar de una a otra.
   const canTask = can(user.access, 'tareas', 'write');
-  // Para el margen de las campañas: el costo, los parámetros y las cuotas del paso Precio. Solo en la cara del canal.
-  const priceStep = face === 'canal' && p.externalId && copy ? await loadPriceStep(prisma, account.id, p.id).catch(() => null) : null;
-  const priceGroup = priceStep?.groups.find((g) => g.publicationIds.includes(p.id)) ?? null;
-  const campaignMargin =
-    priceStep && priceGroup
-      ? {
-          cost: priceGroup.cost,
-          params: resolvePricing(priceStep.account, priceStep.overrides),
-          plan: priceGroup.installments !== null && isInstallmentPlan(priceGroup.installments) ? priceGroup.installments : 0,
-        }
-      : null;
+  // Para Promociones, abajo del precio en las dos caras: el margen de las campañas sale del paso Precio.
+  const priceStep = face !== 'historial' && p.externalId && copy ? await loadPriceStep(prisma, account.id, p.id).catch(() => null) : null;
+  const { margin: campaignMargin } = campaignMarginFor(priceStep, p.id);
+  const promotions =
+    p.externalId && copy ? (
+      <PublicationPromotions
+        accountSlug={account.slug}
+        publicationIds={[p.id]}
+        mode="now"
+        channelName={channelName}
+        channelListPrice={copy.price === null ? null : Number(copy.price)}
+        range={priceStep?.discountRange ?? null}
+        margin={campaignMargin}
+        timeZone={tz}
+      />
+    ) : null;
   const [others, history, knowledge, qa, tasks, people, stockPlans, factsOf, family, covers] = await Promise.all([
     prisma.publication.findMany({
       where: { productId: p.product.id, id: { not: p.id } },
@@ -348,7 +352,7 @@ export default async function PublicationPage({
                               ? managedNote(stockPlan, channelName)
                               : quantityReason(p.externalId, copy?.stockInChannel ?? false, quantities, channelName)
                             : (true as const);
-              return (
+              const card = (
                 <SectionCard
                   key={field}
                   id={`campo-${field}`}
@@ -400,6 +404,15 @@ export default async function PublicationPage({
                   </SectionBody>
                 </SectionCard>
               );
+              // Promociones, junto al precio.
+              return field === 'price' ? (
+                <Fragment key={field}>
+                  {card}
+                  {promotions}
+                </Fragment>
+              ) : (
+                card
+              );
             })}
           </>
         ) : !copy ? (
@@ -440,17 +453,7 @@ export default async function PublicationPage({
                 />
               ))}
             </div>
-            {p.externalId ? (
-              <PublicationPromotions
-                accountSlug={account.slug}
-                publicationId={p.id}
-                channelName={channelName}
-                channelListPrice={copy.price === null ? null : Number(copy.price)}
-                range={priceStep?.discountRange ?? null}
-                margin={campaignMargin}
-                timeZone={tz}
-              />
-            ) : null}
+            {promotions}
             {(['description', 'attributes'] as const).map((field) => (
               <CollapsibleCard key={field} title={FACE_FIELD_LABEL[field]} icon={FIELD_ICON[field]}>
                 <SectionBody>

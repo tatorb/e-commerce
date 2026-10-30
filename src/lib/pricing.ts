@@ -222,6 +222,19 @@ export async function loadPriceStep(db: Db, accountId: string, publicationId: st
 export type PriceStepData = NonNullable<Awaited<ReturnType<typeof loadPriceStep>>>;
 export type PriceGroupData = PriceStepData['groups'][number];
 
+/**
+ * La pestaña del paso Precio de la publicación, con las que comparten su
+ * precio, y con qué se calcula el margen de una campaña: el costo, los
+ * parámetros y las cuotas.
+ */
+export function campaignMarginFor(step: PriceStepData | null, publicationId: string) {
+  const group = step?.groups.find((g) => g.publicationIds.includes(publicationId)) ?? null;
+  if (!step || !group) return { group: null, margin: null };
+  const plan: InstallmentPlan = group.installments !== null && isInstallmentPlan(group.installments) ? group.installments : 0;
+  const margin: { cost: number | null; params: PricingParams; plan: InstallmentPlan } = { cost: group.cost, params: resolvePricing(step.account, step.overrides), plan };
+  return { group, margin };
+}
+
 /** El último precio decidido, para el paso Publicación. */
 export async function latestPriceDecision(db: Db, publicationId: string) {
   const d = await db.priceDecision.findFirst({

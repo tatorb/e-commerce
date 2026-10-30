@@ -8,10 +8,11 @@ import { formatPercent, formatPrice } from '@/domain/money';
 import { combinedBounds, dealPrice, discountFit, discountOptions, type DiscountBounds } from '@/domain/promotions';
 import type { PromotionsResult } from '@/lib/channel-promotions';
 import { readPromotionsAction } from '@/app/a/[cuenta]/pipeline/price-actions';
-import { CampaignList, type CampaignItem, type MarginContext } from './CampaignList';
+import { CampaignList, type CampaignDraft, type CampaignItem, type MarginContext } from './CampaignList';
 
-// Lo que el canal deja hacer hoy con el descuento de unas publicaciones: en el
-// paso Precio, las de la pestaña; en la página de la publicación, esa. Se
+// Promociones: lo que el canal deja hacer hoy con el descuento de unas
+// publicaciones, siempre abajo del precio. En los pasos Precio y Publicación,
+// las que comparten el precio; en la página de la publicación, esa. Se
 // pregunta al abrir la pantalla, sin frenar la carga, y se puede volver a
 // preguntar. De las campañas, sumarse o salir: en el Pipeline queda en Por
 // subir, en la página de la publicación se manda en el momento.
@@ -76,6 +77,8 @@ export function ChannelPromotionsCard({
   mode,
   margin,
   timeZone,
+  onCampaignDraft,
+  campaignsKey,
 }: {
   accountSlug: string;
   state: PromotionsState;
@@ -94,6 +97,10 @@ export function ChannelPromotionsCard({
   mode: 'queue' | 'now';
   margin: MarginContext | null;
   timeZone: string;
+  // La campaña abierta con su precio, para que Guardar en el paso Precio la deje en Por subir.
+  onCampaignDraft?: (draft: CampaignDraft | null) => void;
+  // Cambia para cerrar la campaña abierta, después de dejarla en Por subir desde afuera.
+  campaignsKey?: number;
 }) {
   const loading = state.kind === 'loading';
   return (
@@ -131,6 +138,8 @@ export function ChannelPromotionsCard({
             margin={margin}
             timeZone={timeZone}
             onChanged={refresh}
+            onCampaignDraft={onCampaignDraft}
+            campaignsKey={campaignsKey}
           />
         )}
       </SectionBody>
@@ -149,6 +158,8 @@ function Result({
   margin,
   timeZone,
   onChanged,
+  onCampaignDraft,
+  campaignsKey,
 }: {
   accountSlug: string;
   result: Extract<PromotionsResult, { ok: true }>;
@@ -160,6 +171,8 @@ function Result({
   margin: MarginContext | null;
   timeZone: string;
   onChanged: () => void;
+  onCampaignDraft?: (draft: CampaignDraft | null) => void;
+  campaignsKey?: number;
 }) {
   const { channelName, read, unpublished, pending } = result;
   const several = read.length > 1;
@@ -252,6 +265,7 @@ function Result({
       <div className="space-y-2">
         <p className="text-sm font-medium">Campañas</p>
         <CampaignList
+          key={campaignsKey}
           accountSlug={accountSlug}
           items={campaigns}
           pending={pending}
@@ -260,6 +274,7 @@ function Result({
           margin={margin}
           timeZone={timeZone}
           onChanged={onChanged}
+          onDraft={onCampaignDraft}
         />
       </div>
       {unpublished > 0 ? (

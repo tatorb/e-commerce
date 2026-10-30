@@ -24,6 +24,9 @@ export type CampaignItem = { publicationId: string; code: string | null; campaig
 /** Con qué se calcula el margen: el costo, los parámetros de precio y las cuotas de la publicación. */
 export type MarginContext = { cost: number | null; params: PricingParams; plan: InstallmentPlan };
 
+/** La campaña abierta para sumarse o salir, con el precio escrito: Guardar en el paso Precio la deja en Por subir. problem: por qué no se puede todavía. */
+export type CampaignDraft = { publicationId: string; choice: CampaignChoice; problem: string | null };
+
 const STATUS: Record<ChannelCampaign['status'], { text: string; className: string }> = {
   active: { text: 'Está adentro', className: 'bg-emerald-100 text-emerald-900' },
   scheduled: { text: 'Programada', className: 'bg-sky-100 text-sky-900' },
@@ -40,6 +43,22 @@ function datesText(start: Date | null, finish: Date | null, timeZone: string): s
 }
 
 const amountText = (n: number | null) => (n === null ? '' : new Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 }).format(n));
+
+/** El precio que se propone al abrir una campaña: el sugerido o, si no, el más alto que acepta. */
+const startText = (c: ChannelCampaign) => amountText(c.range?.suggestedPrice ?? c.range?.maxPrice ?? null);
+
+/** Lo que se pide con la campaña abierta y el precio escrito, y por qué no se puede, si no entra. */
+function draftOf(item: CampaignItem, action: 'join' | 'leave', priceText: string): CampaignDraft {
+  const c = item.campaign;
+  const withPrice = action === 'join' && c.join === 'price';
+  const typed = parsePrice(priceText);
+  const price = withPrice ? (typeof typed === 'number' ? typed : null) : c.price;
+  return {
+    publicationId: item.publicationId,
+    choice: { action, ref: c.ref!, name: c.name ?? c.kind, kind: c.kind, price: withPrice && price !== null ? Math.round(price) : null },
+    problem: withPrice ? campaignPriceProblem(price ?? 0, c.range, c.listPrice) : null,
+  };
+}
 
 /** "de $ 1.000 a $ 2.000", "hasta $ 2.000"… */
 function rangeText(r: NonNullable<ChannelCampaign['range']>): string | null {
@@ -58,6 +77,7 @@ export function CampaignList({
   margin,
   timeZone,
   onChanged,
+  onDraft,
 }: {
   accountSlug: string;
   items: CampaignItem[];
@@ -68,6 +88,8 @@ export function CampaignList({
   timeZone: string;
   // Después de pedir o mandar algo: volver a consultar al canal.
   onChanged: () => void;
+  // La campaña que está abierta, o null al cerrarla.
+  onDraft?: (draft: CampaignDraft | null) => void;
 }) {
   const [open, setOpen] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
@@ -93,10 +115,13 @@ export function CampaignList({
               onOpen={(on) => {
                 setOpen(on ? key : null);
                 setNotice(null);
+                if (!on) onDraft?.(null);
               }}
+              onDraft={onDraft}
               onDone={(text) => {
                 setOpen(null);
                 setNotice({ kind: 'ok', text });
+                onDraft?.(null);
                 onChanged();
               }}
               onError={(text) => setNotice({ kind: 'error', text })}
@@ -129,6 +154,7 @@ function CampaignRow({
   timeZone,
   open,
   onOpen,
+  onDraft,
   onDone,
   onError,
 }: {
@@ -141,6 +167,7 @@ function CampaignRow({
   timeZone: string;
   open: boolean;
   onOpen: (on: boolean) => void;
+  onDraft?: (draft: CampaignDraft | null) => void;
   onDone: (text: string) => void;
   onError: (text: string) => void;
 }) {
@@ -183,7 +210,15 @@ function CampaignRow({
           </p>
         </div>
         {queued ? null : canAct && !open ? (
-          <Button access={mode === 'now' ? 'subir' : undefined} size="sm" variant="outline" onClick={() => onOpen(true)}>
+          <Button
+            access={mode === 'now' ? 'subir' : undefined}
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              onOpen(true);
+              onDraft?.(draftOf(item, action, startText(c)));
+            }}
+          >
             {action === 'join' ? 'Sumarse' : 'Salir'}
           </Button>
         ) : !canAct ? (
@@ -210,6 +245,7 @@ function CampaignRow({
           channelName={channelName}
           margin={margin}
           onCancel={() => onOpen(false)}
+          onPrice={(text) => onDraft?.(draftOf(item, action, text))}
           onDone={onDone}
           onError={onError}
         />
@@ -226,6 +262,7 @@ function ChoicePanel({
   channelName,
   margin,
   onCancel,
+  onPrice,
   onDone,
   onError,
 }: {
@@ -236,6 +273,8 @@ function ChoicePanel({
   channelName: string;
   margin: MarginContext | null;
   onCancel: () => void;
+  // Cada vez que cambia el precio escrito.
+  onPrice: (text: string) => void;
   onDone: (text: string) => void;
   onError: (text: string) => void;
 }) {
@@ -243,19 +282,17 @@ function ChoicePanel({
   const c = item.campaign;
   const name = c.name ?? c.kind;
   const withPrice = action === 'join' && c.join === 'price';
-  const start = c.range?.suggestedPrice ?? c.range?.maxPrice ?? null;
-  const [priceText, setPriceText] = useState(amountText(start));
+  const [priceText, setPriceText] = useState(startText(c));
   const [pending, setPending] = useState(false);
+  const { choice, problem } = draftOf(item, action, priceText);
   const typed = parsePrice(priceText);
   const price = withPrice ? (typeof typed === 'number' ? typed : null) : c.price;
-  const problem = withPrice ? campaignPriceProblem(price ?? 0, c.range, c.listPrice) : null;
   // El margen: con lo que recibe la tienda, que suma la parte que pone el canal.
   const revenue = action === 'join' && price !== null ? campaignRevenue({ price, channelPct: c.channelPct, listPrice: c.listPrice }) : null;
   const marginPct = revenue !== null && margin?.cost ? marginOf(revenue, margin.cost, margin.params, margin.plan) : null;
   const level = marginPct !== null && margin ? marginLevel(marginPct, margin.params) : null;
 
   async function confirm() {
-    const choice: CampaignChoice = { action, ref: c.ref!, name, kind: c.kind, price: withPrice ? Math.round(price!) : null };
     setPending(true);
     const r = await (mode === 'queue' ? queueCampaignAction(accountSlug, item.publicationId, choice) : sendCampaignNowAction(accountSlug, item.publicationId, choice)).catch(
       () => null,
@@ -283,7 +320,10 @@ function ChoicePanel({
                   id={`precio-${item.publicationId}-${c.ref}`}
                   inputMode="decimal"
                   value={priceText}
-                  onChange={(e) => setPriceText(e.target.value)}
+                  onChange={(e) => {
+                    setPriceText(e.target.value);
+                    onPrice(e.target.value);
+                  }}
                   className="h-8 max-w-40 tabular-nums"
                 />
               </div>

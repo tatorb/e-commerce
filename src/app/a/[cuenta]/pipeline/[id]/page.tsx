@@ -62,8 +62,10 @@ import { loadDescriptionStep } from '@/lib/descriptions';
 import { QaPanel } from '@/components/pipeline/qa/QaPanel';
 import { loadQaStep } from '@/lib/publication-qa';
 import { PriceStep } from '@/components/pipeline/price/PriceStep';
-import { latestPriceDecision, loadPriceStep, productPricing } from '@/lib/pricing';
-import { PriceDecisionCard } from '@/components/pipeline/price/PriceDecisionCard';
+import { campaignMarginFor, latestPriceDecision, loadPriceStep, productPricing } from '@/lib/pricing';
+import { PriceDecisionCard, type PendingCampaignRow } from '@/components/pipeline/price/PriceDecisionCard';
+import { PublicationPromotions } from '@/components/publication/PublicationPromotions';
+import { marginOf } from '@/domain/pricing';
 import { QuantityCard } from '@/components/pipeline/QuantityCard';
 import { StockFollowCard } from '@/components/publication/StockFollowCard';
 import { todayIn } from '@/domain/applications';
@@ -172,8 +174,9 @@ export default async function PipelineStepPage({
     viewing === 'VIDEOS' ? loadVideosStep(prisma, { accountId: account.id, publicationId: pub.id }) : null,
     viewing === 'DESCRIPTION' ? loadDescriptionStep(prisma, { accountId: account.id, publicationId: pub.id }) : null,
     viewing === 'QA' ? loadQaStep(prisma, { accountId: account.id, publicationId: pub.id }) : null,
-    // Precio usa el costo, los parámetros y la competencia; Información, el envío; Publicación, el precio decidido.
-    viewing === 'PRICE' ? loadPriceStep(prisma, account.id, pub.id) : null,
+    // Precio usa el costo, los parámetros y la competencia; Información, el envío; Publicación, el precio decidido
+    // y, para Promociones, las que comparten el precio y el margen de las campañas.
+    viewing === 'PRICE' || (viewing === 'PUBLISH' && pub.externalId) ? loadPriceStep(prisma, account.id, pub.id).catch(() => null) : null,
     viewing === 'PUBLISH' ? latestPriceDecision(prisma, pub.id) : null,
     // Las tareas de la publicación, en todos los pasos.
     tasksOfPublication(prisma, { publicationId: pub.id, viewer: user, timeZone: account.timezone }),
@@ -189,9 +192,33 @@ export default async function PipelineStepPage({
       productCovers([pub.productId]),
     ]).then(([copy, covers]) => firstPhoto(copy?.photos) ?? covers.get(pub.productId) ?? null),
   ]);
-  // Sumarse a una campaña o salir, pedido en Precio: se sube con los demás cambios.
+  // Sumarse a una campaña o salir, pedido en Promociones: se sube con los demás cambios.
   const pendingCampaignTexts =
     viewing === 'PUBLISH' ? (await pendingCampaigns(prisma, [pub.id])).map((c) => ({ text: campaignText(c), rejection: c.rejection })) : [];
+  // En la tarjeta Precio: las campañas pedidas de las que comparten el precio, con el margen si se suma con ese precio.
+  const { group: priceGroup, margin: campaignMargin } = campaignMarginFor(viewing === 'PUBLISH' ? price : null, pub.id);
+  const priceCampaigns: PendingCampaignRow[] =
+    viewing === 'PUBLISH'
+      ? await (async () => {
+          const ids = priceGroup?.publicationIds ?? [pub.id];
+          const [list, codes] = await Promise.all([
+            pendingCampaigns(prisma, ids),
+            ids.length > 1 ? prisma.publication.findMany({ where: { id: { in: ids } }, select: { id: true, externalId: true } }) : [],
+          ]);
+          const codeOf = new Map(codes.map((c) => [c.id, c.externalId]));
+          return list.map((c) => ({
+            id: c.id,
+            action: c.action,
+            name: c.name,
+            kind: c.kind,
+            price: c.price,
+            rejection: c.rejection,
+            code: codeOf.get(c.publicationId) ?? null,
+            marginPct:
+              c.action === 'join' && c.price !== null && campaignMargin?.cost ? marginOf(c.price, campaignMargin.cost, campaignMargin.params, campaignMargin.plan) : null,
+          }));
+        })()
+      : [];
   const facts = factsOf.get(pub.id) ?? null;
   const auto = ctx && viewing === 'TITLE' ? await autoAvailable(prisma, ctx.channel, ctx.storeId) : null;
   // En Publicación, cada medida de la familia con su código, su estado y sus cambios sin subir.
@@ -422,6 +449,7 @@ export default async function PipelineStepPage({
           <>
             {familyRows ? <FamilyPublishCard accountSlug={account.slug} channelName={pub.channelName} rows={familyRows} /> : null}
             <PriceDecisionCard
+              campaigns={priceCampaigns}
               decision={decision}
               channelName={pub.channelName}
               sides={faces ? { app: faces.app, channel: faces.channel, states: faces.states, rejected: faces.summary.rejected } : null}
@@ -430,6 +458,20 @@ export default async function PipelineStepPage({
               priceHref={`${pageHref}?paso=${PIPELINE_STEP_SLUG.PRICE}`}
               timeZone={account.timezone}
             />
+            {/* Promociones, junto al precio: sumarse o salir queda en Por subir. */}
+            {pub.externalId && priceGroup ? (
+              <PublicationPromotions
+                accountSlug={account.slug}
+                publicationIds={priceGroup.publicationIds}
+                mode="queue"
+                channelName={pub.channelName}
+                listPrice={priceGroup.price}
+                channelListPrice={priceGroup.channelPrice}
+                range={price?.discountRange ?? null}
+                margin={campaignMargin}
+                timeZone={account.timezone}
+              />
+            ) : null}
             <QuantityCard
               accountSlug={account.slug}
               publicationId={pub.id}
