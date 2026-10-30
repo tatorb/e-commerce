@@ -69,7 +69,7 @@ export async function listScoredPublications(
           select: {
             leadId: true,
             ...FAMILY_LOCK_SELECT.select,
-            members: { select: { ...FAMILY_LOCK_SELECT.select.members.select, variantKey: true } },
+            members: { select: { ...FAMILY_LOCK_SELECT.select.members.select, variantKey: true, externalId: true } },
           },
         },
         channelCopy: {
@@ -142,6 +142,8 @@ export async function listScoredPublications(
       // La familia de medidas: la principal, que la representa en el tablero, y cuántas medidas tiene.
       familyLeadId: p.family?.leadId ?? null,
       familySize: p.family?.members.length ?? 0,
+      // Los códigos de las otras medidas de su familia: la tarjeta del tablero se encuentra por cualquiera.
+      familyCodes: p.family?.members.map((m) => m.externalId).filter((c): c is string => Boolean(c)) ?? [],
       measures,
       productType: p.product.productType?.trim() || null,
       kind: p.product.kind,

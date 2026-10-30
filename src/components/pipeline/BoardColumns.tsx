@@ -39,6 +39,10 @@ export type BoardCardData = {
   familySize?: number;
   // Las medidas que vende la tarjeta, por ejemplo STD y 0.50: las de su familia, la suya, o las del producto.
   measures?: string[];
+  // Para el buscador: el nombre del producto, sus SKU y los códigos de las otras medidas de la familia.
+  productName?: string | null;
+  skus?: string[];
+  familyCodes?: string[];
 };
 
 // Las medidas que entran en la tarjeta; las demás se cuentan.
