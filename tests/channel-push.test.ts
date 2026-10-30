@@ -85,6 +85,8 @@ type Item = {
   campaignDetails?: Record<string, Record<string, unknown>>;
   // El canal no acepta sumarla a una campaña: el motivo.
   campaignRejected?: string;
+  // El canal no acepta la descripción: el motivo.
+  descriptionRejected?: string;
 };
 
 const variationBody = (v: NonNullable<Item['variations']>[number]) => ({
@@ -249,6 +251,7 @@ describe.skipIf(!url)('subir al canal en la base', () => {
       const desc = u.pathname.match(/^\/items\/(\w+)\/description$/);
       if (desc && req.method === 'PUT') {
         const it = items[desc[1]];
+        if (it?.descriptionRejected) return json(400, { message: 'validation_error', cause: [{ message: it.descriptionRejected }] });
         if (!it || it.description === null) return json(404, { message: 'no description' });
         it.description = body.plain_text;
         return json(200, {});
@@ -953,6 +956,60 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     again = await run({ cuenta: 'prueba' });
     expect(again.subidas).toEqual([expect.objectContaining({ publicacion: 'MLA1', resultado: 'subido', subio: ['descuento'] })]);
     expect(await run({ cuenta: 'prueba' })).toEqual({ subidas: [], aviso: 'No hay precios, cuotas, descuentos ni campañas por subir en la cuenta.' });
+  });
+
+  it('Claude carga la descripción y sube solo esa; en una familia, la de todas sus medidas', async () => {
+    process.env.DATABASE_URL ??= url;
+    const { DESCRIPTION_TOOLS } = await import('@/lib/mcp/description-tools');
+    const tool = (name: string) => DESCRIPTION_TOOLS.find((t) => t.name === name)!;
+    expect(tool('push_descriptions')).toMatchObject({ section: 'subir', readOnly: false, destructive: true });
+    await db.user.create({ data: { id: 'u5', name: 'Persona', email: 'persona5@example.com' } });
+    const ctx: McpContext = { db, userId: 'u5', access: { isAdmin: true, permissions: {}, accountIds: [] }, baseUrl: 'https://app.ejemplo.com' };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const run = async (name: string, args: Record<string, unknown>): Promise<any> => tool(name).run(ctx, tool(name).input.parse(args));
+
+    // MLA1 y MLA2 son medidas de la misma familia: la descripción es una sola.
+    const [p1, p2, p3] = [await pub('MLA1'), await pub('MLA2'), await pub('MLA3')];
+    await db.listingFamily.create({ data: { storeId, productId, channelFamilyId: 'FAM-9', leadId: p1.id, members: { connect: [{ id: p1.id }, { id: p2.id }] } } });
+    const saved = await run('save_description', { cuenta: 'prueba', descripciones: [{ publicacion: p1.id, descripcion: 'Kit completo con disco, placa y rulemán.' }] });
+    expect(saved.resultados[0]).toMatchObject({ resultado: 'guardada', familia: 'Se guardó en sus 2 medidas.' });
+    // Un título nuevo en el borrador, que no es de la descripción.
+    await saveDraft(db, { accountId, publicationId: p1.id, field: 'title', value: 'Kit Embrague Ford Ka 1.6' });
+    const nueva = await db.publication.create({ data: { productId, storeId, title: 'Kit nuevo', description: 'Kit nuevo.', attributes: [] } });
+    writes.length = 0;
+
+    // Con una sola medida de la familia van las dos.
+    const r = await run('push_descriptions', { cuenta: 'prueba', publicaciones: [p1.id, p3.id, nueva.id, 'MLA999999999'] });
+    expect(r.subidas).toEqual([
+      { publicacion: 'MLA1', titulo: 'Kit Embrague Ford Ka 1.6', caracteres: 40, resultado: 'subida', confirmado_en_el_canal: true },
+      { publicacion: 'MLA2', titulo: 'Kit Embrague Ford Ka 1.6', caracteres: 40, resultado: 'subida', confirmado_en_el_canal: true },
+    ]);
+    expect(r.salteadas).toEqual([
+      { publicacion: 'MLA999999999', motivo: 'La publicación MLA999999999 no está en las Publicaciones de la cuenta.' },
+      { publicacion: 'MLA3', motivo: 'No tiene la descripción por subir.' },
+      { publicacion: nueva.id, motivo: 'Todavía no está publicada en Mercado Libre: primero hay que crearla allá.' },
+    ]);
+    expect(writes.map((w) => `${w.method} ${w.path}`)).toEqual(['PUT /items/MLA1/description', 'PUT /items/MLA2/description', 'POST /items/MLA2/description']);
+    expect([items.MLA1.description, items.MLA2.description]).toEqual(['Kit completo con disco, placa y rulemán.', 'Kit completo con disco, placa y rulemán.']);
+    // El título no se subió: sigue en Por subir.
+    expect((await state('MLA1')).draft).toEqual(['title']);
+    const activity = await db.activityLog.findMany({ where: { summary: 'Subió cambios al canal' }, orderBy: { createdAt: 'asc' } });
+    expect(activity.map((a) => [a.publicationId, a.section, a.via, a.userId, a.detail])).toEqual([
+      [p1.id, 'subir', 'CLAUDE', 'u5', 'Subió la descripción'],
+      [p2.id, 'subir', 'CLAUDE', 'u5', 'Subió la descripción'],
+    ]);
+
+    // Lo que el canal rechaza vuelve con su motivo y queda en Por subir.
+    items.MLA3.descriptionRejected = 'The description contains a phone number';
+    await run('save_description', { cuenta: 'prueba', descripciones: [{ publicacion: p3.id, descripcion: 'Juego de 3 pistones con aros.' }] });
+    const rejected = await run('push_descriptions', { cuenta: 'prueba' });
+    expect(rejected.subidas).toEqual([
+      expect.objectContaining({ publicacion: 'MLA3', resultado: 'rechazada', motivo: 'Mercado Libre no acepta links, mails, teléfonos ni etiquetas HTML en la descripción.' }),
+    ]);
+    expect((await state('MLA3')).draft).toEqual(['description']);
+    delete items.MLA3.descriptionRejected;
+    expect((await run('push_descriptions', { cuenta: 'prueba' })).subidas).toEqual([expect.objectContaining({ publicacion: 'MLA3', resultado: 'subida' })]);
+    expect(await run('push_descriptions', { cuenta: 'prueba' })).toEqual({ subidas: [], aviso: 'No hay descripciones por subir en la cuenta.' });
   });
 
   it('antes de que venza, el descuento se renueva solo y queda en el Registro', async () => {
