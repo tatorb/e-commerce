@@ -45,7 +45,7 @@ import { listingTargets } from '@/lib/variant-listings';
 import { loadTitleRules } from '@/lib/title-rules';
 import { STOCK_MANAGED, stockManaged } from '@/lib/stock-plan';
 import { afterRestock } from '@/lib/restock';
-import { CampaignError, sendPendingCampaigns, type CampaignOutcome } from '@/lib/channel-campaigns';
+import { CampaignError, pendingCampaigns, sendPendingCampaigns, type CampaignOutcome } from '@/lib/channel-campaigns';
 
 // Subir al canal el borrador de una publicación: lo que cambió en la app y
 // todavía no está allá. Antes de subir se revisa lo mismo que en la app (el
@@ -277,6 +277,9 @@ export async function pushDrafts(
   const adapter = getChannelAdapter(p.store.channel.kind, p.store.channel.name);
   const wanted = args.fields ?? [...summary.draft, ...summary.choose];
   const result: PushResult = { sent: [], rejected: [], confirmed: false, campaigns: [] };
+  // Si van las campañas pedidas y alguna frena el descuento propio, el descuento no se manda: chocarían.
+  const withCampaigns = args.campaigns ?? !args.fields;
+  const pauser = withCampaigns ? ((await pendingCampaigns(db, [p.id])).find((c) => c.action === 'join' && c.pausesOwnDiscount) ?? null) : null;
 
   // Anota lo que no se subió y por qué, mientras la app tenga ese mismo valor.
   const reject = async (field: FaceField, message: string) => {
@@ -398,6 +401,13 @@ export async function pushDrafts(
           result.rejected.push({ field, message: 'Falta el descuento: decidilo en el paso Precio.' });
           continue;
         }
+        if (pauser && pct > 0) {
+          result.rejected.push({
+            field,
+            message: `No se subió el descuento del ${pct} %: la campaña ${pauser.name} lo frena mientras esté en ella. Para que no quede pendiente, guardá 0 % en el paso Precio.`,
+          });
+          continue;
+        }
         // Sobre el precio que quedó en el canal.
         const listPrice = Number((result.sent.includes('price') ? app.price : channel.price) ?? 0);
         value = app.discount;
@@ -460,12 +470,12 @@ export async function pushDrafts(
   await logRejected();
 
   // Las campañas, después del precio: sumarse depende del precio que quedó.
-  if (args.campaigns ?? !args.fields) {
+  if (withCampaigns) {
     try {
       result.campaigns = await sendPendingCampaigns(db, { accountId: args.accountId, publicationId: p.id, userId: args.userId });
     } catch (e) {
       if (!(e instanceof CampaignError)) throw e;
-      result.campaigns = [{ name: 'Campañas', action: 'join', ok: false, message: e.message }];
+      result.campaigns = [{ ref: '', name: 'Campañas', kind: 'Campañas', action: 'join', price: null, ok: false, message: e.message }];
     }
   }
 

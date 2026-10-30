@@ -19,14 +19,14 @@ import {
   type PricingKey,
   type PricingParams,
 } from '@/domain/pricing';
-import { campaignPriceProblem, campaignRevenue, combinedBounds, discountOptions } from '@/domain/promotions';
+import { campaignOutcomeState, campaignPrice, campaignPriceProblem, campaignRevenue, combinedBounds, discountOptions, type CampaignOutcomeState } from '@/domain/promotions';
 import { logActivity } from '@/lib/activity';
 import { readPromotions, type PromotionsResult } from '@/lib/channel-promotions';
-import { CampaignError, campaignText, queueCampaign } from '@/lib/channel-campaigns';
+import { CampaignError, campaignText, queueCampaign, type CampaignOutcome } from '@/lib/channel-campaigns';
 import { pushDrafts, PushError } from '@/lib/channel-push';
 import { loadPricingSettings, loadPriceStep, PricingError, savePriceDecision, savePricingSettings, type PriceGroupData } from '@/lib/pricing';
 import { listToPush } from '@/lib/queries/sync';
-import { McpToolError, accountArg, defineTool, findPublication, publicationArg, resolveAccount, resolvePublication } from './tool';
+import { McpToolError, accountArg, defineTool, findPublication, publicationArg, resolveAccount, resolvePublication, type McpContext } from './tool';
 
 // El precio desde Claude: lo mismo que el paso Precio y Ajustes > Precios, con
 // los mismos permisos. Guardar un precio lo deja en Por subir, como la
@@ -371,7 +371,8 @@ const SENT_NAME = { price: 'precio', installments: 'cuotas', discount: 'descuent
 
 // Cuánto sube en una vuelta: el pedido de Claude a la app tiene 60 segundos, y
 // cada publicación tarda unos segundos porque después se vuelve a leer del canal.
-export const PUSH_BUDGET_MS = 45_000;
+// Antes de que se corte la conexión con Claude: lo que no entra vuelve en quedan.
+export const PUSH_BUDGET_MS = 25_000;
 
 const chooseCampaign = defineTool({
   name: 'choose_campaign',
@@ -384,7 +385,7 @@ const chooseCampaign = defineTool({
     publicacion: publicationArg,
     campana: z.string().min(1).max(500).describe('La campaña: su campana en lo_que_acepta_el_canal de get_price_step.'),
     accion: z.enum(['sumarse', 'salir']),
-    precio: z.number().positive().max(999_999_999).optional().describe('El precio para el comprador, en pesos, en las campañas que se suman eligiendo el precio.'),
+    precio: z.number().positive().max(999_999_999).optional().describe('El precio para el comprador, en pesos, en las campañas que se suman eligiendo el precio. Con centavos se redondea para abajo.'),
   }),
   readOnly: false,
   destructive: false,
@@ -403,12 +404,12 @@ const chooseCampaign = defineTool({
       const problem = campaignPriceProblem(args.precio ?? 0, c.range, c.listPrice);
       if (problem) throw new McpToolError(`${problem} ${c.range ? `${read.channelName} acepta de ${c.range.minPrice ?? '?'} a ${c.range.maxPrice ?? '?'}.` : ''}`.trim());
     }
-    const price = withPrice ? Math.round(args.precio!) : null;
+    const price = withPrice ? campaignPrice(args.precio!) : null;
     try {
       const queued = await queueCampaign(ctx.db, {
         accountId: account.id,
         publicationId: id,
-        choice: { action: args.accion === 'sumarse' ? 'join' : 'leave', ref: c.ref!, name, kind: c.kind, price },
+        choice: { action: args.accion === 'sumarse' ? 'join' : 'leave', ref: c.ref!, name, kind: c.kind, price, pausesOwnDiscount: c.pausesOwnDiscount },
         userId: ctx.userId,
       });
       // El margen, con lo que recibe la tienda: lo que paga el comprador más lo que pone el canal.
@@ -425,7 +426,9 @@ const chooseCampaign = defineTool({
       return {
         en_por_subir: campaignText(queued),
         ...(margin !== null ? { margen_estimado_pct: round(margin) } : {}),
-        ...(args.accion === 'sumarse' && c.pausesOwnDiscount ? { aviso: `Mientras esté en esta campaña, ${read.channelName} frena el descuento propio.` } : {}),
+        ...(args.accion === 'sumarse' && c.pausesOwnDiscount
+          ? { aviso: `Mientras esté en esta campaña, ${read.channelName} frena el descuento propio: al subir, el descuento propio no se manda y se avisa.` }
+          : {}),
       };
     } catch (e) {
       if (e instanceof CampaignError) throw new McpToolError(e.message);
@@ -439,7 +442,7 @@ const pushPrices = defineTool({
   section: 'subir',
   title: 'Subir precios al canal',
   description:
-    'Manda al canal el precio publicado, el descuento y las cuotas sin interés que quedaron en Por subir, y sumarse o salir de las campañas pedidas (choose_campaign), como el botón de subir de Por subir, pero solo eso: lo demás que esté por subir (título, descripción, fotos) queda donde está; la descripción se sube con push_descriptions. Se mandan los valores del último precio guardado (save_price). En publicaciones pasá ids de la app o códigos del canal (por ejemplo MLA123456789), hasta 100; sin la lista, van todas las de la cuenta que tienen precio, cuotas o descuento por subir. Saltea las que todavía no están publicadas en el canal y las que no tienen esos cambios pendientes, y dice por qué. Si cambia el precio, el descuento se vuelve a mandar, porque el canal lo calcula sobre el precio. Por cada una devuelve qué se mandó y si quedó bien, o el motivo exacto del rechazo del canal; si el canal rechaza el descuento, lo dice y sigue con lo demás. Si son muchas, sube las que entran en una vuelta y devuelve en quedan las que faltan: volvé a llamar con esa lista. Cambia la publicación en el canal de verdad: antes de subir, mostrale a la persona qué se va a mandar y esperá que confirme.',
+    'Manda al canal el precio publicado, el descuento y las cuotas sin interés que quedaron en Por subir, y sumarse o salir de las campañas pedidas (choose_campaign), como el botón de subir de Por subir, pero solo eso: lo demás que esté por subir (título, descripción, fotos) queda donde está; la descripción se sube con push_descriptions. Se mandan los valores del último precio guardado (save_price). En publicaciones pasá ids de la app o códigos del canal (por ejemplo MLA123456789), hasta 100; sin la lista, van todas las de la cuenta que tienen precio, cuotas o descuento por subir. Saltea las que todavía no están publicadas en el canal y las que no tienen esos cambios pendientes, y dice por qué. Si cambia el precio, el descuento se vuelve a mandar, porque el canal lo calcula sobre el precio. Por cada una devuelve qué se mandó y si quedó bien, o el motivo exacto del rechazo del canal; si el canal rechaza el descuento, lo dice y sigue con lo demás. Después de mandar una campaña vuelve a consultar al canal: confirmado_en_el_canal es true solo si ya figura programada o activa (o fuera, al salir); si el canal todavía no lo muestra, la campaña queda como pendiente, suele tardar unos minutos, y se vuelve a mirar con get_price_step. Si la publicación tiene descuento propio pendiente y la campaña lo frena, el descuento no se manda y se avisa. Si son muchas, sube las que entran en una vuelta (unos 25 segundos) y devuelve en quedan las que faltan: volvé a llamar con esa lista. Cambia la publicación en el canal de verdad: antes de subir, mostrale a la persona qué se va a mandar y esperá que confirme.',
   input: z.object({
     cuenta: accountArg,
     publicaciones: z
@@ -517,9 +520,15 @@ const pushPrices = defineTool({
         const sent = r.sent.filter(isPriceField);
         const failed = r.rejected.length + r.campaigns.filter((c) => !c.ok).length;
         const done = sent.length + r.campaigns.filter((c) => c.ok).length;
+        // Las campañas que se mandaron: se vuelve a consultar al canal para ver cómo quedaron.
+        const states = await campaignStates(ctx.db, account.id, id, r.campaigns);
+        const pendingCampaigns = r.campaigns.filter((c) => c.ok && states.get(c.ref) === 'pendiente').map((c) => c.name);
         subidas.push({
           ...base,
-          se_mando: Object.fromEntries(PRICE_ORDER.filter((f) => tried.includes(f)).map((f) => [SENT_NAME[f], value[f]])),
+          se_mando: {
+            ...Object.fromEntries(PRICE_ORDER.filter((f) => tried.includes(f)).map((f) => [SENT_NAME[f], value[f]])),
+            ...(r.campaigns.length > 0 ? { campanas: r.campaigns.map(campaignText) } : {}),
+          },
           resultado: failed === 0 ? 'subido' : done > 0 ? 'subido_en_parte' : 'rechazado',
           subio: sent.map((f) => PRICE_FIELDS[f]),
           ...(r.rejected.length > 0 ? { rechazos: r.rejected.map((x) => ({ dato: isPriceField(x.field) ? PRICE_FIELDS[x.field] : x.field, motivo: x.message })) } : {}),
@@ -529,11 +538,16 @@ const pushPrices = defineTool({
                   campana: c.name,
                   accion: c.action === 'join' ? 'sumarse' : 'salir',
                   resultado: c.ok ? 'hecho' : 'rechazado',
+                  ...(c.ok ? { estado_en_el_canal: states.get(c.ref) ?? 'pendiente' } : {}),
                   ...(c.message ? { motivo: c.message } : {}),
                 })),
               }
             : {}),
-          confirmado_en_el_canal: r.confirmed,
+          // Lo del precio, releído después de subir; lo de las campañas, consultado al canal.
+          confirmado_en_el_canal: (sent.length === 0 || r.confirmed) && done > 0 && pendingCampaigns.length === 0,
+          ...(pendingCampaigns.length > 0
+            ? { aviso: `${p.store.channel.name} aceptó ${pendingCampaigns.join(', ')} pero todavía no lo muestra: suele tardar unos minutos. Volvé a mirar con get_price_step.` }
+            : {}),
         });
         // Como el botón de Por subir: queda en la actividad de la persona, hecho por Claude.
         await logActivity(ctx.db, {
@@ -572,5 +586,20 @@ const pushPrices = defineTool({
     };
   },
 });
+
+/** Cómo quedó en el canal cada campaña que se mandó bien, por su ref. Si no se puede consultar, quedan como pendientes. */
+async function campaignStates(db: McpContext['db'], accountId: string, publicationId: string, outcomes: CampaignOutcome[]): Promise<Map<string, CampaignOutcomeState>> {
+  const states = new Map<string, CampaignOutcomeState>();
+  const sent = outcomes.filter((c) => c.ok);
+  if (sent.length === 0) return states;
+  const read = await readPromotions(db, { accountId, publicationIds: [publicationId], light: true });
+  const campaigns = read.ok ? (read.read[0]?.promotions.campaigns ?? []) : null;
+  for (const c of sent) {
+    // Al entrar, el canal puede cambiarle la ref (por ejemplo, sumarle el código de la oferta): también vale el nombre.
+    const found = campaigns?.find((x) => x.ref === c.ref) ?? campaigns?.find((x) => x.name !== null && x.name === c.name && x.kind === c.kind) ?? null;
+    states.set(c.ref, campaigns === null ? 'pendiente' : campaignOutcomeState(c.action, found?.status ?? null));
+  }
+  return states;
+}
 
 export const PRICE_TOOLS = [getPriceStep, savePrice, getPricingSettings, updatePricingSettings, chooseCampaign, pushPrices];

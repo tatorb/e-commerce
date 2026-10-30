@@ -96,9 +96,28 @@ export function campaignRevenue(c: { price: number | null; channelPct: number | 
 
 /** Si el precio elegido para una campaña entra en lo que acepta el canal: el motivo si no entra. */
 export function campaignPriceProblem(price: number, range: DiscountBounds | null, listPrice: number | null): string | null {
-  if (!(price > 0)) return 'Falta el precio para el comprador.';
-  if (listPrice !== null && price >= listPrice) return 'Tiene que ser menor que el precio publicado.';
-  if (range?.maxPrice != null && price > range.maxPrice) return 'Es más alto de lo que acepta el canal.';
-  if (range?.minPrice != null && price < range.minPrice) return 'Es más bajo de lo que acepta el canal.';
+  // Se manda en pesos enteros, redondeado para abajo: un tope con centavos se acepta igual.
+  const p = campaignPrice(price);
+  if (!(p > 0)) return 'Falta el precio para el comprador.';
+  if (listPrice !== null && p >= listPrice) return 'Tiene que ser menor que el precio publicado.';
+  if (range?.maxPrice != null && p > range.maxPrice) return 'Es más alto de lo que acepta el canal.';
+  if (range?.minPrice != null && p < range.minPrice) return 'Es más bajo de lo que acepta el canal.';
   return null;
+}
+
+/** El precio para el comprador como se manda al canal: en pesos enteros, redondeado para abajo. */
+export function campaignPrice(price: number): number {
+  return Math.floor(price);
+}
+
+/**
+ * Cómo quedó en el canal lo que se mandó de una campaña, según lo que el canal
+ * informa después: programada o activa al sumarse, fuera al salir, o pendiente
+ * si todavía no lo muestra.
+ */
+export type CampaignOutcomeState = 'programada' | 'activa' | 'fuera' | 'pendiente';
+
+export function campaignOutcomeState(action: 'join' | 'leave', status: 'invited' | 'scheduled' | 'active' | null): CampaignOutcomeState {
+  if (action === 'join') return status === 'active' ? 'activa' : status === 'scheduled' ? 'programada' : 'pendiente';
+  return status === null || status === 'invited' ? 'fuera' : 'pendiente';
 }

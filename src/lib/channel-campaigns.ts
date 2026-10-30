@@ -3,6 +3,7 @@ import { getChannelAdapter } from '@/channels';
 import { getChannelPublisher, PublishError, type ChannelPublisher } from '@/channels/publish';
 import { ConnectError } from '@/channels/connect';
 import { formatPrice } from '@/domain/money';
+import { campaignPrice } from '@/domain/promotions';
 import { withAccessToken } from '@/lib/connections';
 
 // Sumarse a una campaña del canal o salir. Desde el Pipeline queda pedido y
@@ -19,9 +20,11 @@ export type CampaignChoice = {
   name: string;
   kind: string;
   price: number | null;
+  // Si mientras está en la campaña el canal frena el descuento propio: al subir, el descuento no va.
+  pausesOwnDiscount?: boolean;
 };
 
-export type CampaignOutcome = { name: string; action: CampaignAction; ok: boolean; message?: string };
+export type CampaignOutcome = { ref: string; name: string; kind: string; action: CampaignAction; price: number | null; ok: boolean; message?: string };
 
 export type PendingCampaign = CampaignChoice & { id: string; publicationId: string; rejection: string | null; requestedBy: string | null; createdAt: Date };
 
@@ -41,10 +44,10 @@ function cleanChoice(c: CampaignChoice): CampaignChoice {
   const ref = typeof c.ref === 'string' ? c.ref.trim() : '';
   if (!ref || ref.length > 500) throw new CampaignError('No se reconoce la campaña: volvé a consultar las promociones.');
   if (c.action !== 'join' && c.action !== 'leave') throw new CampaignError('Elegí si sumarse o salir.');
-  const price = c.action === 'join' && c.price !== null && c.price !== undefined ? Math.round(Number(c.price)) : null;
+  const price = c.action === 'join' && c.price !== null && c.price !== undefined ? campaignPrice(Number(c.price)) : null;
   if (price !== null && !(price > 0)) throw new CampaignError('El precio para el comprador tiene que ser mayor que cero.');
   const text = (v: unknown, fallback: string) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 200) : fallback);
-  return { action: c.action, ref, name: text(c.name, 'Campaña'), kind: text(c.kind, 'Campaña'), price };
+  return { action: c.action, ref, name: text(c.name, 'Campaña'), kind: text(c.kind, 'Campaña'), price, pausesOwnDiscount: c.action === 'join' && c.pausesOwnDiscount === true };
 }
 
 async function loadPublication(db: PrismaClient, accountId: string, publicationId: string) {
@@ -74,6 +77,7 @@ export async function pendingCampaigns(db: PrismaClient, publicationIds: string[
     name: r.name,
     kind: r.kind,
     price: r.price === null ? null : Number(r.price),
+    pausesOwnDiscount: r.pausesOwnDiscount,
     rejection: r.rejection,
     requestedBy: r.requestedBy?.name ?? null,
     createdAt: r.createdAt,
@@ -89,6 +93,7 @@ export async function queueCampaign(db: PrismaClient, args: { accountId: string;
     name: choice.name,
     kind: choice.kind,
     price: choice.price,
+    pausesOwnDiscount: choice.pausesOwnDiscount === true,
     rejection: null,
     requestedById: args.userId,
     createdAt: new Date(),
@@ -164,11 +169,11 @@ export async function sendPendingCampaigns(db: PrismaClient, args: { accountId: 
     } catch (e) {
       if (!(e instanceof PublishError)) throw e;
       await db.campaignRequest.update({ where: { id: r.id }, data: { rejection: e.message } });
-      out.push({ name: r.name, action: r.action, ok: false, message: e.message });
+      out.push({ ref: r.ref, name: r.name, kind: r.kind, action: r.action, price: r.price, ok: false, message: e.message });
       continue;
     }
     await db.campaignRequest.delete({ where: { id: r.id } });
-    out.push({ name: r.name, action: r.action, ok: true });
+    out.push({ ref: r.ref, name: r.name, kind: r.kind, action: r.action, price: r.price, ok: true });
   }
   return out;
 }

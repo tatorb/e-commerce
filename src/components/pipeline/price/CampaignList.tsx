@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import type { ChannelCampaign } from '@/channels/publish-types';
 import { formatPercent, formatPrice, parsePrice } from '@/domain/money';
 import { marginLevel, marginOf, type InstallmentPlan, type PricingParams } from '@/domain/pricing';
-import { campaignPriceProblem, campaignRevenue } from '@/domain/promotions';
+import { campaignPrice, campaignPriceProblem, campaignRevenue } from '@/domain/promotions';
 import type { CampaignChoice, PendingCampaign } from '@/lib/channel-campaigns';
 import { cancelCampaignAction, queueCampaignAction } from '@/app/a/[cuenta]/pipeline/price-actions';
 import { sendCampaignNowAction } from '@/app/a/[cuenta]/publicaciones/sync-actions';
@@ -55,7 +55,7 @@ function draftOf(item: CampaignItem, action: 'join' | 'leave', priceText: string
   const price = withPrice ? (typeof typed === 'number' ? typed : null) : c.price;
   return {
     publicationId: item.publicationId,
-    choice: { action, ref: c.ref!, name: c.name ?? c.kind, kind: c.kind, price: withPrice && price !== null ? Math.round(price) : null },
+    choice: { action, ref: c.ref!, name: c.name ?? c.kind, kind: c.kind, price: withPrice && price !== null ? campaignPrice(price) : null, pausesOwnDiscount: c.pausesOwnDiscount },
     problem: withPrice ? campaignPriceProblem(price ?? 0, c.range, c.listPrice) : null,
   };
 }

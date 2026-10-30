@@ -3,7 +3,7 @@ import { CAMPAIGN_TAG, CLASSIC, inFull, INSTALLMENT_TAGS, LOW_INTEREST_TAG, PREM
 import { measureText, variantKey, type VariantLike } from '@/domain/media';
 import { formatPrice } from '@/domain/money';
 import { isInstallmentPlan, LOW_INTEREST_PLAN } from '@/domain/pricing';
-import { dealPrice } from '@/domain/promotions';
+import { campaignPrice, dealPrice } from '@/domain/promotions';
 import { JOIN_WITH_PRICE, needsDetail, NEEDS_OFFER, parsePromotions, readRef, withDetail } from './promotions';
 import { MAX_QUANTITY, quantityKey } from '@/domain/quantities';
 import {
@@ -72,12 +72,14 @@ function translated(e: unknown): unknown {
  * El rechazo de algo puntual, como las cuotas o el descuento: lo que no
  * aceptó y el detalle que manda Mercado Libre.
  */
-function rejectedAs(what: string, e: unknown): unknown {
+function rejectedAs(what: string, e: unknown, opts: { raw?: boolean } = {}): unknown {
   if (!(e instanceof MercadoLibreRequestError) || e.status === 401 || e.status === 429) return e;
   if (e.status === 404) return new PublishError('Mercado Libre no encontró la publicación.');
   const detail = detailOf(e.body);
-  if (detail) return new PublishError(`Mercado Libre no aceptó ${what}: ${detail}`);
-  return new PublishError(e.status === 403 ? `Mercado Libre no deja cambiar ${what} con esta cuenta.` : `Mercado Libre no aceptó ${what} (código ${e.status}).`);
+  // Con raw, la respuesta completa de Mercado Libre va en el mensaje, para entender rechazos que no se conocen.
+  const raw = opts.raw && e.body !== null && e.body !== undefined ? ` Respuesta completa: ${JSON.stringify(e.body).slice(0, 600)}` : '';
+  if (detail) return new PublishError(`Mercado Libre no aceptó ${what}: ${detail}${raw}`);
+  return new PublishError((e.status === 403 ? `Mercado Libre no deja cambiar ${what} con esta cuenta.` : `Mercado Libre no aceptó ${what} (código ${e.status}).`) + raw);
 }
 
 async function send(method: 'PUT' | 'POST', path: string, token: string, body: unknown): Promise<unknown> {
@@ -542,9 +544,9 @@ export const mercadolibrePublisher: ChannelPublisher = {
     }
   },
 
-  async readPromotions(accessToken, externalId) {
+  async readPromotions(accessToken, externalId, opts) {
     try {
-      return await promotionsOf(encodeURIComponent(externalId), accessToken, true);
+      return await promotionsOf(encodeURIComponent(externalId), accessToken, opts?.details ?? true);
     } catch (e) {
       // Una llave vencida o "demasiados pedidos" siguen como error de conexión.
       if (e instanceof MercadoLibreRequestError && e.status !== 401 && e.status !== 429) {
@@ -561,15 +563,18 @@ export const mercadolibrePublisher: ChannelPublisher = {
     if (withPrice && !(price !== null && price > 0)) throw new PublishError('Falta el precio para el comprador en la campaña.');
     const id = encodeURIComponent(externalId);
     try {
-      await mlSend('POST', `/seller-promotions/items/${id}?app_version=v2`, accessToken, {
+      const response = await mlSend('POST', `/seller-promotions/items/${id}?app_version=v2`, accessToken, {
         promotion_id: campaign.promotion,
         promotion_type: campaign.type,
-        ...(withPrice ? { deal_price: Math.round(price!) } : {}),
+        ...(withPrice ? { deal_price: campaignPrice(price!) } : {}),
         ...(campaign.offer && NEEDS_OFFER.has(campaign.type) ? { offer_id: campaign.offer } : {}),
       });
+      // Lo que respondió al aceptar, por si después no la muestra: solo el código, nunca datos de la cuenta.
+      console.info(`[ml] campaña ${campaign.type} ${campaign.promotion} en ${externalId}: ${JSON.stringify(response).slice(0, 300)}`);
     } catch (e) {
       if (notCredible(e)) throw new PublishError('Mercado Libre no acepta ese precio en la campaña porque le parece poco descuento. Elegí uno dentro del rango que informa.');
-      throw rejectedAs('la campaña', e);
+      console.error(`[ml] campaña ${campaign.type} ${campaign.promotion} en ${externalId} rechazada: ${e instanceof MercadoLibreRequestError ? `${e.status} ${JSON.stringify(e.body).slice(0, 600)}` : e instanceof Error ? e.message : e}`);
+      throw rejectedAs('la campaña', e, { raw: true });
     }
   },
 

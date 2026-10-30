@@ -82,6 +82,7 @@ const campaignChoice = z.object({
   name: z.string().max(200),
   kind: z.string().max(200),
   price: z.number().positive().max(999_999_999).nullable(),
+  pausesOwnDiscount: z.boolean().optional(),
 });
 
 /** Desde el paso Precio: sumarse a una campaña o salir queda en Por subir. */

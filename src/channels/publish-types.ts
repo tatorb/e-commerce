@@ -162,8 +162,13 @@ export interface ChannelPublisher {
    * Lanza PublishError si el canal no lo acepta.
    */
   setDiscount(accessToken: string, externalId: string, discount: { pct: number; listPrice: number }, now: Date): Promise<{ until: Date | null }>;
-  /** Lo que el canal deja hacer hoy con los descuentos de la publicación. Lanza PublishError si no lo puede leer. */
-  readPromotions?(accessToken: string, externalId: string): Promise<ChannelPromotions>;
+  /**
+   * Lo que el canal deja hacer hoy con los descuentos de la publicación. Sin
+   * details, solo el estado de cada campaña, sin lo que hace falta para
+   * sumarse: más rápido, para confirmar después de subir. Lanza PublishError
+   * si no lo puede leer.
+   */
+  readPromotions?(accessToken: string, externalId: string, opts?: { details?: boolean }): Promise<ChannelPromotions>;
   /**
    * Suma la publicación a una campaña, por su ref. Con price, el precio para el
    * comprador, en las que lo elige la tienda. Lanza PublishError si el canal no lo acepta.

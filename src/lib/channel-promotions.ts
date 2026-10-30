@@ -26,7 +26,11 @@ export type PromotionsResult =
     }
   | { ok: false; error: string };
 
-export async function readPromotions(db: PrismaClient, args: { accountId: string; publicationIds: string[] }): Promise<PromotionsResult> {
+export async function readPromotions(
+  db: PrismaClient,
+  // light: solo el estado de cada campaña, para confirmar después de subir.
+  args: { accountId: string; publicationIds: string[]; light?: boolean },
+): Promise<PromotionsResult> {
   const ids = [...new Set(args.publicationIds)];
   const pubs = await db.publication.findMany({
     where: { id: { in: ids }, store: { accountId: args.accountId } },
@@ -45,7 +49,9 @@ export async function readPromotions(db: PrismaClient, args: { accountId: string
   try {
     const read = await withAccessToken(db, store.id, async (token) => {
       const out: PromotionsRead[] = [];
-      for (const p of published) out.push({ publicationId: p.id, externalId: p.externalId!, promotions: await publisher.readPromotions!(token, p.externalId!) });
+      for (const p of published) {
+        out.push({ publicationId: p.id, externalId: p.externalId!, promotions: await publisher.readPromotions!(token, p.externalId!, { details: !args.light }) });
+      }
       return out;
     });
     return { ok: true, channelName, read, unpublished: pubs.length - published.length, pending };

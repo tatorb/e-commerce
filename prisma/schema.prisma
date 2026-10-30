@@ -354,7 +354,7 @@ model Product {
   // Mostrar más de 5 en los canales aunque haya menos: con stock de 1 a 5 se
   // sube 6, para que la publicación no se pause al vender la última. Con
   // alarmas para reponer (src/domain/stock-cushion.ts).
-  showMore    Boolean  @default(false)
+  showMore    Boolean         @default(false)
   stock       ProductStock[]
   stockMoves  StockMovement[]
   costs       ProductCost[]
@@ -1939,22 +1939,24 @@ enum CampaignAction {
 // Por subir y se manda con los demás cambios. Desde la página de la
 // publicación se manda en el momento y no pasa por acá.
 model CampaignRequest {
-  id            String         @id @default(cuid())
-  publicationId String
-  publication   Publication    @relation(fields: [publicationId], references: [id], onDelete: Cascade)
-  action        CampaignAction
+  id                String         @id @default(cuid())
+  publicationId     String
+  publication       Publication    @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  action            CampaignAction
   // Cómo identifica el canal a la campaña: la app no lo interpreta.
-  ref           String
+  ref               String
   // Para mostrarla: su nombre y qué tipo de campaña es.
-  name          String
-  kind          String
+  name              String
+  kind              String
   // El precio para el comprador, en las campañas donde lo elige la tienda.
-  price         Decimal?       @db.Decimal(14, 2)
+  price             Decimal?       @db.Decimal(14, 2)
   // Por qué el canal no lo aceptó la última vez que se quiso subir.
-  rejection     String?
-  requestedById String?
-  requestedBy   User?          @relation("CampaignRequestedBy", fields: [requestedById], references: [id], onDelete: SetNull)
-  createdAt     DateTime       @default(now())
+  rejection         String?
+  // Si mientras está en la campaña el canal frena el descuento propio: al subir, el descuento no va.
+  pausesOwnDiscount Boolean        @default(false)
+  requestedById     String?
+  requestedBy       User?          @relation("CampaignRequestedBy", fields: [requestedById], references: [id], onDelete: SetNull)
+  createdAt         DateTime       @default(now())
 
   @@unique([publicationId, ref])
   @@map("campaign_requests")
@@ -2079,16 +2081,16 @@ model ProductCost {
 }
 
 model ProductStock {
-  productId String
-  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
   // La medida: su clave (quantityKey en src/domain/quantities.ts), o vacía si
   // el producto no tiene medidas. Así no se pierde si se vuelve a guardar la ficha.
-  key       String
+  key        String
   // Cómo se llamaba la medida, para mostrarla aunque cambie la ficha.
-  label     String   @default("")
+  label      String    @default("")
   // Puede quedar negativo si se vendió más de lo que había.
-  quantity  Int
-  updatedAt DateTime @updatedAt
+  quantity   Int
+  updatedAt  DateTime  @updatedAt
   // Las alarmas de stock, con "Mostrar más de 5" en el producto: cuándo una
   // venta dejó 1 (aviso temprano), cuándo una venta dejó 0 o menos, cuándo
   // salió el recordatorio del primer día y cuándo se pausó por no reponer en

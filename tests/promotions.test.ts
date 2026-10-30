@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { needsDetail, parsePromotions, readRef, withDetail } from '@/channels/mercadolibre/promotions';
-import { campaignPriceProblem, campaignRevenue, combinedBounds, dealPrice, discountFit, discountOptions, pctForPrice, pctUpToPrice } from '@/domain/promotions';
+import { campaignOutcomeState, campaignPrice, campaignPriceProblem, campaignRevenue, combinedBounds, dealPrice, discountFit, discountOptions, pctForPrice, pctUpToPrice } from '@/domain/promotions';
 
 // Lo que Mercado Libre informa de las promociones de una publicación, y las
 // cuentas del descuento frente a lo que acepta. Datos inventados, con la forma
@@ -123,5 +123,19 @@ describe('campañas', () => {
     expect(campaignPriceProblem(40, range, 100)).toBe('Es más bajo de lo que acepta el canal.');
     expect(campaignPriceProblem(100, null, 100)).toBe('Tiene que ser menor que el precio publicado.');
     expect(campaignPriceProblem(0, range, 100)).toBe('Falta el precio para el comprador.');
+    // Con centavos se redondea para abajo: el tope con centavos entra igual.
+    expect(campaignPrice(90.56)).toBe(90);
+    expect(campaignPriceProblem(90.56, { ...range, maxPrice: 90.56 }, 100)).toBeNull();
+    expect(campaignPriceProblem(90.9, range, 100)).toBeNull();
+  });
+
+  it('cómo quedó en el canal lo que se mandó: programada o activa al sumarse, fuera al salir, o pendiente', () => {
+    expect(campaignOutcomeState('join', 'active')).toBe('activa');
+    expect(campaignOutcomeState('join', 'scheduled')).toBe('programada');
+    expect(campaignOutcomeState('join', 'invited')).toBe('pendiente');
+    expect(campaignOutcomeState('join', null)).toBe('pendiente');
+    expect(campaignOutcomeState('leave', null)).toBe('fuera');
+    expect(campaignOutcomeState('leave', 'invited')).toBe('fuera');
+    expect(campaignOutcomeState('leave', 'active')).toBe('pendiente');
   });
 });
