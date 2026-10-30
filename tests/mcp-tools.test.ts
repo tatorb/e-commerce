@@ -32,6 +32,7 @@ describe('lista de herramientas', () => {
       'check_title',
       'list_tasks',
       'get_publication_media',
+      'get_description_step',
       'get_price_step',
       'get_pricing_settings',
     ]);

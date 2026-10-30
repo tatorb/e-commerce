@@ -36,6 +36,16 @@ export function composeDescription(parts: { header: string | null; body: string;
   return [clean(parts.header), clean(parts.body), clean(parts.footer)].filter(Boolean).join('\n\n');
 }
 
+/** El cuerpo sin el encabezado al principio ni el pie al final, si los trae: para no repetirlos al armarla. */
+export function withoutFrame(text: string, frame: { header: string | null; footer: string | null }): string {
+  let body = clean(text);
+  const header = clean(frame.header);
+  const footer = clean(frame.footer);
+  if (header && body.startsWith(header)) body = body.slice(header.length).trim();
+  if (footer && body.endsWith(footer)) body = body.slice(0, body.length - footer.length).trim();
+  return body;
+}
+
 /**
  * Separa el cuerpo de una descripción guardada. Si no empieza con el
  * encabezado o no termina con el pie de la cuenta, el cuerpo es todo el texto
