@@ -35,6 +35,10 @@ describe('lista de herramientas', () => {
       'get_description_step',
       'get_price_step',
       'get_pricing_settings',
+      'list_sales',
+      'get_sale',
+      'get_cash_summary',
+      'get_shipments',
     ]);
     for (const t of tools) {
       expect(t.inputSchema.type).toBe('object');

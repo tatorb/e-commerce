@@ -279,6 +279,8 @@ model Store {
   salesError     String?
   sales          ChannelSale[]
   families       ListingFamily[]
+  ledger         Sale[]
+  saleReader     SaleReader?
 
   @@unique([accountId, channelId, name])
   @@map("stores")
@@ -2169,4 +2171,126 @@ model ChannelSale {
   @@unique([storeId, orderId])
   @@index([status, checkedAt])
   @@map("channel_sales")
+}
+
+// ───────────────────────────── Ventas ─────────────────────────────
+
+// La venta para la sección Ventas: lo que pagó el comprador, lo que cobró el
+// canal, el pago con su liberación y el envío. Es aparte de ChannelSale, que
+// solo descuenta el stock: así traer las ventas viejas no toca el stock. Los
+// importes van como los informa el canal, con IVA (src/lib/sales/).
+enum SaleState {
+  // Todavía no se pagó.
+  PENDING
+  PAID
+  CANCELLED
+}
+
+enum SaleShipState {
+  // Sin envío por el canal, por ejemplo a acordar con el comprador.
+  NONE
+  // El envío todavía no se puede preparar, por ejemplo porque falta el pago.
+  PENDING
+  // Hay que prepararlo y despacharlo.
+  TO_SHIP
+  SHIPPED
+  DELIVERED
+  // No llegó: el correo no lo pudo entregar.
+  NOT_DELIVERED
+  // Volvió al vendedor.
+  RETURNED
+  CANCELLED
+}
+
+model Sale {
+  id             String        @id @default(cuid())
+  storeId        String
+  store          Store         @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  // El código de la venta en el canal, y el del carrito si se compró junto con otras.
+  orderId        String
+  packId         String?
+  state          SaleState
+  orderedAt      DateTime
+  // Cuándo se confirmó: desde ahí el canal descontó las unidades.
+  closedAt       DateTime?
+  currency       String        @default("ARS")
+  // Lo que pagó el comprador por los productos, y lo que habrían costado sin descuentos.
+  itemsAmount    Decimal       @db.Decimal(14, 2)
+  listAmount     Decimal?      @db.Decimal(14, 2)
+  // La comisión del canal por la venta, con el costo de las cuotas que ofrece.
+  fee            Decimal?      @db.Decimal(14, 2)
+  // Lo que pagó el comprador en total, con su parte del envío.
+  paidAmount     Decimal?      @db.Decimal(14, 2)
+  buyerId        String?
+  buyerNickname  String?
+  buyerName      String?
+  // Cada línea: { listingId, variationId, sku, title, quantity, unitPrice, listPrice, fee, publicationId, productId, key, measure }.
+  lines          Json          @default("[]")
+  // Cada pago: { id, state, amount, installments, method, approvedAt, refunded, net, releaseAt, released }.
+  payments       Json          @default("[]")
+  paymentIds     String[]      @default([])
+  // Lo que informa el medio de pago: lo que deposita y cuándo lo libera. Null sin el dato.
+  netReceived    Decimal?      @db.Decimal(14, 2)
+  releaseAt      DateTime?
+  released       Boolean?
+  refunded       Decimal?      @db.Decimal(14, 2)
+  // El envío: su estado en palabras de la app y del canal, su tipo y sus fechas.
+  shipmentId     String?
+  shipState      SaleShipState @default(NONE)
+  shipDetail     String?
+  // Quién lo lleva, sin el nombre del canal: channel (el depósito del canal, como Full), pickup, drop_off, flex, seller, none.
+  shipKind       String?
+  shipKindLabel  String?
+  tracking       String?
+  // Hasta cuándo hay que despacharlo.
+  dispatchBy     DateTime?
+  estimatedAt    DateTime?
+  shippedAt      DateTime?
+  deliveredAt    DateTime?
+  shipDelayed    Boolean       @default(false)
+  // Lo que paga el vendedor por el envío, y lo que pagó el comprador.
+  shippingCost   Decimal?      @db.Decimal(14, 2)
+  buyerShipping  Decimal?      @db.Decimal(14, 2)
+  // Un reclamo o mediación abierta.
+  claim          Boolean       @default(false)
+  cancelBy       String?
+  cancelReason   String?
+  delivered      Boolean       @default(false)
+  // Lo que se busca: códigos, comprador, títulos, SKU y productos, en minúsculas.
+  searchText     String        @default("")
+  // Cuándo se leyó el envío y el pago. Null: falta leerlos.
+  detailsAt      DateTime?
+  checkedAt      DateTime
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@unique([storeId, orderId])
+  @@index([storeId, orderedAt])
+  @@index([storeId, shipState])
+  @@index([shipmentId])
+  @@index([detailsAt])
+  @@map("sales")
+}
+
+// Por dónde va la lectura de las ventas de una tienda.
+model SaleReader {
+  storeId       String    @id
+  store         Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  // Mientras un pedido está leyendo, nadie más lee.
+  leaseUntil    DateTime?
+  // Desde cuándo se traen las ventas viejas, y por dónde va: cada tanda es un tramo de días.
+  historyFrom   DateTime?
+  historyCursor DateTime?
+  historyOffset Int       @default(0)
+  // Hasta dónde llegan las viejas: de ahí en adelante las trae la lectura de las nuevas.
+  historyUntil  DateTime?
+  historyDoneAt DateTime?
+  // Hasta dónde se revisaron las ventas que cambiaron.
+  updatedUntil  DateTime?
+  readAt        DateTime?
+  lastError     String?
+  // El último aviso del canal sobre una venta, un envío o un pago.
+  noticeAt      DateTime?
+
+  @@map("sale_readers")
 }

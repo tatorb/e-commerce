@@ -1,5 +1,5 @@
 import { ConnectError } from '../connect-types';
-import { apiUrl } from './urls';
+import { apiUrl, paymentsApiUrl } from './urls';
 
 // Pedidos a la API de Mercado Libre con la llave de la cuenta conectada.
 // Mercado Libre limita los pedidos sin publicar un número: ante "demasiados
@@ -33,10 +33,19 @@ function waitFor(res: Response, attempt: number): number {
 
 /** GET con la llave. Devuelve el cuerpo ya leído. */
 export async function mlGet(path: string, accessToken: string): Promise<unknown> {
+  return getFrom(apiUrl(), path, accessToken);
+}
+
+/** GET a Mercado Pago con la misma llave de la cuenta: los pagos de las ventas. */
+export async function mpGet(path: string, accessToken: string): Promise<unknown> {
+  return getFrom(paymentsApiUrl(), path, accessToken);
+}
+
+async function getFrom(base: string, path: string, accessToken: string): Promise<unknown> {
   for (let attempt = 0; ; attempt++) {
     let res: Response;
     try {
-      res = await fetch(`${apiUrl()}${path}`, {
+      res = await fetch(`${base}${path}`, {
         headers: { Accept: 'application/json', Authorization: `Bearer ${accessToken}` },
         signal: AbortSignal.timeout(15_000),
         cache: 'no-store',

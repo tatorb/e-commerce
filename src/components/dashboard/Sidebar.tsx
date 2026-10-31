@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { cookies } from 'next/headers';
-import { AlignLeft, BellRing, Camera, ClipboardList, DollarSign, History, Image as ImageIcon, KanbanSquare, ListChecks, ListTodo, MessageCircleQuestion, MessageSquareText, Package, PlugZap, RefreshCw, SlidersHorizontal, Type, Upload, Users } from 'lucide-react';
+import { AlignLeft, BellRing, Receipt, Camera, ClipboardList, DollarSign, History, Image as ImageIcon, KanbanSquare, ListChecks, ListTodo, MessageCircleQuestion, MessageSquareText, Package, PlugZap, RefreshCw, SlidersHorizontal, Type, Upload, Users } from 'lucide-react';
 import { NavLink } from '@/components/dashboard/NavLink';
 import { SidebarShell } from '@/components/dashboard/SidebarShell';
 import { SidebarToggle } from '@/components/dashboard/SidebarToggle';
@@ -24,6 +24,7 @@ export async function Sidebar({
   questions = 0,
   tasks = 0,
   alarms = 0,
+  shipments = 0,
   className,
 }: {
   user: CurrentUser;
@@ -36,6 +37,8 @@ export async function Sidebar({
   tasks?: number;
   // Medidas sin stock que se siguen mostrando con "Mostrar más de 5".
   alarms?: number;
+  // Envíos que hay que despachar hoy o ya vencidos.
+  shipments?: number;
   className?: string;
 }) {
   const accountHome = account ? `/a/${account.slug}` : null;
@@ -91,6 +94,11 @@ export async function Sidebar({
           {sees('publicaciones') ? (
             <NavLink href={`${accountHome}/publicaciones`} label="Publicaciones">
               <ListChecks className="h-4 w-4" />
+            </NavLink>
+          ) : null}
+          {sees('ventas') ? (
+            <NavLink href={`${accountHome}/ventas`} label="Ventas" badge={shipments}>
+              <Receipt className="h-4 w-4" />
             </NavLink>
           ) : null}
           {sees('importar') ? (

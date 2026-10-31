@@ -327,34 +327,49 @@ function parseSaleLines(raw: unknown): SaleLine[] {
   return Array.isArray(raw) ? (raw as SaleLine[]).filter((l) => l && typeof l === 'object' && typeof l.listingId === 'string') : [];
 }
 
+/** La publicación de la app de una línea vendida, por su código en el canal. Null si no está en la app. */
+export async function soldPublication(db: Db | Tx, storeId: string, listingId: string, owners: () => Promise<Map<string, string>>): Promise<PlanRow | null> {
+  const pub = await db.publication.findFirst({ where: { storeId, externalId: listingId }, select: PLAN_SELECT });
+  if (pub) return pub;
+  const owner = (await owners()).get(listingId);
+  return owner ? db.publication.findUnique({ where: { id: owner }, select: PLAN_SELECT }) : null;
+}
+
+/** Las publicaciones con varios códigos del canal adentro, por código: para encontrar la de cada línea. */
+export const listingOwners = (db: Db | Tx, storeId: string) => {
+  let owners: Map<string, string> | null = null;
+  return async () => (owners ??= await variantListingOwners(db as Db, storeId));
+};
+
+/** La medida del producto que vendió la línea: la publicación aparte de la familia, la variante, o el SKU. Null si no se sabe. */
+export function soldMeasure(pub: PlanRow, line: Pick<ChannelOrderLine, 'listingId' | 'variationId' | 'sku'>): VariantLike | null {
+  const family = parseVariantListings(pub.variantListings);
+  const variations = parseVariations(pub.channelCopy?.variations);
+  const member = family.find((f) => f.externalId === line.listingId);
+  if (family.length >= 2 && member) return member;
+  if (line.variationId) return variations.find((v) => v.variationId === line.variationId) ?? (line.sku ? { sku: line.sku, measure: null } : null);
+  if (line.sku && variations.length > 0) return { sku: line.sku, measure: null };
+  if (variations.length === 0) {
+    // Una medida publicada sola: la elegida en la publicación, o por el SKU de lo vendido o el de la publicación.
+    const slots = stockSlots(pub.product.variants);
+    return (
+      singleMeasure(pub.product, null, pub.variantKey) ??
+      (line.sku ? listingMeasure(slots, [line.sku]) : null) ??
+      listingMeasure(slots, copySkus(pub.channelCopy?.details))
+    );
+  }
+  return null;
+}
+
 /** De qué publicación de la app es la línea, y qué sale del stock. */
 async function resolveLine(db: Db | Tx, storeId: string, line: ChannelOrderLine, owners: () => Promise<Map<string, string>>): Promise<SaleLine> {
   const base = { listingId: line.listingId, variationId: line.variationId, sku: line.sku, quantity: line.quantity, parts: [] as SalePart[] };
-  let pub = await db.publication.findFirst({ where: { storeId, externalId: line.listingId }, select: PLAN_SELECT });
-  if (!pub) {
-    const owner = (await owners()).get(line.listingId);
-    if (owner) pub = await db.publication.findUnique({ where: { id: owner }, select: PLAN_SELECT });
-  }
+  const pub = await soldPublication(db, storeId, line.listingId, owners);
   if (!pub) return { ...base, publicationId: null, counted: false, reason: 'La publicación no está en la app.' };
   const skip = (reason: string, extra: Partial<SaleLine> = {}): SaleLine => ({ ...base, publicationId: pub!.id, counted: false, reason, ...extra });
   if (pub.channelCopy?.stockInChannel) return skip('El stock lo maneja el canal, por ejemplo en Full.');
   const source = sourceOf(pub.product);
-  // La medida vendida: la publicación aparte de la familia, la variante, o el SKU.
-  const family = parseVariantListings(pub.variantListings);
-  const variations = parseVariations(pub.channelCopy?.variations);
-  let measure: VariantLike | null = null;
-  const member = family.find((f) => f.externalId === line.listingId);
-  if (family.length >= 2 && member) measure = member;
-  else if (line.variationId) measure = variations.find((v) => v.variationId === line.variationId) ?? (line.sku ? { sku: line.sku, measure: null } : null);
-  else if (line.sku && variations.length > 0) measure = { sku: line.sku, measure: null };
-  else if (variations.length === 0) {
-    // Una medida publicada sola: la elegida en la publicación, o por el SKU de lo vendido o el de la publicación.
-    const slots = stockSlots(pub.product.variants);
-    measure =
-      singleMeasure(pub.product, null, pub.variantKey) ??
-      (line.sku ? listingMeasure(slots, [line.sku]) : null) ??
-      listingMeasure(slots, copySkus(pub.channelCopy?.details));
-  }
+  const measure = soldMeasure(pub, line);
   const unit = unitParts(source, measure);
   if (!unit) return skip('No se sabe de qué medida del producto es.');
   const parts = unit.map((u) => ({ ...u, quantity: u.quantity * line.quantity }));

@@ -5,9 +5,11 @@ import { isAiConfigured } from '@/ai/claude';
 import { prisma } from '@/lib/db';
 import { handleNotice } from '@/lib/answers';
 import { handleSalesNotice } from '@/lib/stock';
+import { handleSaleNotice } from '@/lib/sales/read';
 
 // Avisos del canal. Mercado Libre pide esta dirección al crear la aplicación.
-// La app usa los de las preguntas de los compradores y los de las ventas; los
+// La app usa los de las preguntas de los compradores, los de las ventas y los
+// de sus envíos y pagos; los
 // demás llegan y no se guardan. Se confirma enseguida y se procesa después: si tarda, el
 // canal vuelve a mandar el aviso. Lo que trae el aviso no se registra ni se
 // cree: la pregunta o la venta se le pide al canal con la conexión de la
@@ -41,6 +43,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ can
     try {
       await handleNotice(prisma, kind, body, { aiReady: isAiConfigured() });
       await handleSalesNotice(prisma, kind, body);
+      await handleSaleNotice(prisma, kind, body);
     } catch (e) {
       console.error('No se pudo procesar el aviso', e instanceof Error ? e.message : e);
     }
