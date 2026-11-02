@@ -450,6 +450,43 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     expect((await pub('MLA2')).title).toBe('Bomba de Agua Fiat 1.4 Fire');
   });
 
+  it('una marca de elegir que quedó de la comparación vieja se resuelve una sola vez con el título aprobado', async () => {
+    const p = await pub('MLA2');
+    const stale = async (agreedTitle: string) => {
+      const copy = (await pub('MLA2')).channelCopy!;
+      await db.channelCopy.update({
+        where: { publicationId: p.id },
+        data: { agreed: { ...(copy.agreed as Record<string, string>), title: fingerprint('title', agreedTitle) }, details: { ...(copy.details as Record<string, unknown>), titleBasis: null } },
+      });
+    };
+    items.MLA2.familyName = 'Bomba de Agua Fiat';
+    items.MLA2.familyMeasure = '0.50';
+    items.MLA2.title = 'Bomba de Agua Fiat 0.50';
+
+    // La app tiene el aprobado y el canal otro: el aprobado queda para subir, sin elegir.
+    await db.publication.update({ where: { id: p.id }, data: { title: 'Bomba de Agua Fiat 1.4 Fire' } });
+    await db.titleApproval.create({ data: { publicationId: p.id, outcome: 'WRITTEN', before: 'Bomba de Agua Fiat', title: 'Bomba de Agua Fiat 1.4 Fire' } });
+    await stale('Bomba vieja');
+    await readOne(db, { accountId, publicationId: p.id });
+    expect(await state('MLA2')).toEqual({ draft: ['title'], choose: [], rejected: [] });
+    expect((await pub('MLA2')).title).toBe('Bomba de Agua Fiat 1.4 Fire');
+
+    // El canal tiene el aprobado: la app lo toma, sin elegir.
+    await db.titleApproval.create({ data: { publicationId: p.id, outcome: 'WRITTEN', before: 'x', title: 'Bomba de Agua Fiat', createdAt: new Date(Date.now() + 1000) } });
+    await stale('Bomba vieja');
+    await readOne(db, { accountId, publicationId: p.id });
+    expect(await state('MLA2')).toEqual({ draft: [], choose: [], rejected: [] });
+    expect((await pub('MLA2')).title).toBe('Bomba de Agua Fiat');
+
+    // Ya se compara con el nombre de la familia: un cambio de verdad en el canal pide elegir.
+    await db.publication.update({ where: { id: p.id }, data: { title: 'Bomba de Agua Fiat 1.4 Fire' } });
+    items.MLA2.familyName = 'Bomba Fiat Nueva';
+    items.MLA2.title = 'Bomba Fiat Nueva 0.50';
+    await readOne(db, { accountId, publicationId: p.id });
+    expect(await state('MLA2')).toEqual({ draft: [], choose: ['title'], rejected: [] });
+    expect(writes).toEqual([]);
+  });
+
   it('si el canal rechaza el título, queda el motivo exacto con la respuesta completa', async () => {
     const p = await pub('MLA2');
     await saveDraft(db, { accountId, publicationId: p.id, field: 'title', value: 'Bomba de Agua Fiat 1.4 Fire' });

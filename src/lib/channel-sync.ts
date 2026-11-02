@@ -13,6 +13,7 @@ import {
   discountText,
   heldDiscount,
   installmentsText,
+  familyTitleAgreement,
   fingerprint,
   planFaces,
   priceText,
@@ -117,6 +118,11 @@ export async function startSync(
 }
 
 // ───────────────────────────── Una publicación ─────────────────────────────
+
+/** Si lo acordado del título ya se comparó con el nombre de la familia del canal. */
+function comparesFamilyName(details: unknown): boolean {
+  return !!details && typeof details === 'object' && !Array.isArray(details) && (details as Record<string, unknown>).titleBasis === 'family';
+}
 
 type CopyRow = {
   channelUpdatedAt: Date | null;
@@ -224,16 +230,25 @@ async function applyListing(
       if (lastAgreed[field] === undefined && appPrints[field]) lastAgreed[field] = channelPrints[field];
     }
   }
-  // Antes se comparaba con el título que muestra el canal, con la medida al final. Si la app tiene un título
-  // propio para subir sobre ese, lo acordado pasa a ser el nombre de la familia: sigue para subir y no se pisa.
-  if (
-    listing.channelFamilyName &&
-    listing.title &&
-    lastAgreed.title === fingerprint('title', listing.title) &&
-    appPrints.title !== lastAgreed.title &&
-    channelPrints.title !== lastAgreed.title
-  ) {
-    lastAgreed.title = channelPrints.title;
+  // La primera lectura que compara el título con el nombre de la familia del canal: lo que quedó
+  // de la comparación vieja, con el título que muestra el canal con la medida, se resuelve.
+  if (listing.channelFamilyName && p.channelCopy && !comparesFamilyName(p.channelCopy.details)) {
+    const approval = await tx.titleApproval.findFirst({
+      where: {
+        title: { not: null },
+        outcome: { in: ['KEPT', 'WRITTEN'] },
+        OR: [{ publicationId }, ...(p.familyId ? [{ publication: { familyId: p.familyId } }] : [])],
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { title: true },
+    });
+    lastAgreed.title = familyTitleAgreement({
+      app: appPrints.title,
+      channel: channelPrints.title,
+      agreed: lastAgreed.title,
+      approved: approval?.title ? fingerprint('title', approval.title) : null,
+      shown: listing.title ? fingerprint('title', listing.title) : null,
+    });
   }
   const plans = planFaces(appPrints, channelPrints, lastAgreed);
   const hold = heldDiscount(app.discount, channel.discount, p.channelCopy, ctx.now);
@@ -304,6 +319,8 @@ async function applyListing(
       categoryName: listing.categoryName,
       channelProductId: listing.channelProductId ?? null,
       channelFamilyName: listing.channelFamilyName ?? null,
+      // El título ya se compara con el nombre de la familia: lo acordado es sobre ese.
+      titleBasis: listing.channelFamilyName ? 'family' : null,
       ...familyDetails(family, p.channelCopy?.details, ctx.now),
     },
     categoryId: listing.categoryId,

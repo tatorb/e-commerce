@@ -382,3 +382,33 @@ export function mergeAttributes(channel: NameValue[], sent: NameValue[]): NameVa
   }
   return out;
 }
+
+/**
+ * Lo acordado del título la primera vez que se compara con el nombre de la
+ * familia del canal, en vez del título que muestra el canal con la medida al
+ * final. Una diferencia que quedó de la comparación vieja se resuelve sola:
+ * si el canal tiene el título aprobado, queda ese; si la app tiene el
+ * aprobado, queda para subir. Lo demás sigue como estaba. Todo en huellas.
+ */
+export function familyTitleAgreement(args: {
+  app: string;
+  channel: string;
+  agreed: string | undefined;
+  // El último título aprobado en la app, si hay.
+  approved: string | null;
+  // El título que muestra el canal, con la medida.
+  shown: string | null;
+}): string | undefined {
+  const { app, channel, agreed, approved, shown } = args;
+  const state = fieldState(app, channel, agreed);
+  if (state === 'choose') {
+    // El canal tiene el aprobado: la app lo toma.
+    if (approved !== null && approved === channel) return app;
+    // La app tiene el aprobado, o algo propio sobre el título con la medida: queda para subir.
+    if ((approved !== null && approved === app) || (shown !== null && agreed === shown)) return channel;
+    return agreed;
+  }
+  // La app tiene el aprobado y la comparación vieja lo haría pisar con el del canal: queda para subir.
+  if (state === 'incoming' && approved !== null && approved === app) return channel;
+  return agreed;
+}
