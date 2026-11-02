@@ -33,6 +33,7 @@ describe('lista de herramientas', () => {
       'list_tasks',
       'get_publication_media',
       'get_description_step',
+      'get_create_step',
       'get_price_step',
       'get_pricing_settings',
       'list_sales',

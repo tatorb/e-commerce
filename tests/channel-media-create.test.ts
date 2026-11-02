@@ -27,6 +27,7 @@ import { saveFamilyMedia } from '@/lib/family-media';
 import { saveQuestions } from '@/lib/buyer-questions';
 import { loadCatalogData, saveCatalogData } from '@/lib/catalog-data';
 import { resetVisitsTogether } from '@/channels/mercadolibre/listings';
+import type { McpContext } from '@/lib/mcp/tool';
 
 // Las fotos de cada publicación y crear publicaciones nuevas en el canal,
 // contra un Mercado Libre simulado. Las fotos corregidas se leen de un depósito
@@ -1162,6 +1163,87 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
       const other = await db.publication.findFirstOrThrow({ where: { productId, variantKey: half } });
       return { pub, other, result };
     }
+
+    it('Claude ve qué falta y crea la familia con 4 fotos, cada medida con su cantidad', async () => {
+      process.env.DATABASE_URL ??= url;
+      const { CREATE_TOOLS } = await import('@/lib/mcp/create-tools');
+      const tool = (name: string) => CREATE_TOOLS.find((t) => t.name === name)!;
+      expect(tool('get_create_step')).toMatchObject({ section: 'subir', readOnly: true });
+      expect(tool('create_in_channel')).toMatchObject({ section: 'subir', readOnly: false, destructive: true });
+      await db.user.create({ data: { id: 'u-crear', name: 'Persona', email: 'crear@example.com' } });
+      const ctx: McpContext = { db, userId: 'u-crear', access: { isAdmin: true, permissions: {}, accountIds: [] }, baseUrl: 'https://app.ejemplo.com' };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const run = async (name: string, args: Record<string, unknown>): Promise<any> => tool(name).run(ctx, tool(name).input.parse(args));
+      const cuenta = (await db.account.findUniqueOrThrow({ where: { id: accountId } })).slug;
+
+      const pub = await db.publication.create({
+        data: { productId, storeId, title: 'Subconjunto Peugeot 1.6 SP-413', description: 'Pistones y aros.', channelStatus: 'UNPUBLISHED' },
+      });
+      // Sin fotos, no se puede.
+      const empty = await run('get_create_step', { cuenta, publicacion: pub.id });
+      expect(empty.se_puede_crear).toBe(false);
+      expect(empty.falta.join(' ')).toContain('Fotos');
+      await expect(run('create_in_channel', { cuenta, publicacion: pub.id, tipo: 'clasica', precio: 80000 })).rejects.toThrow('Todavía no se puede crear');
+
+      // Con 4 fotos alcanza: 3 de todas y 1 de la STD.
+      await withPackage(pub.id);
+      const [front, side, general] = [await correctedPhoto('frente.jpg'), await correctedPhoto('costado.jpg'), await correctedPhoto('general.jpg')];
+      await saveMedia(db, {
+        accountId,
+        publicationId: pub.id,
+        refs: [
+          { kind: 'asset', url: 'https://otra/foto.jpg' },
+          { kind: 'edit', editId: front },
+          { kind: 'edit', editId: side },
+          { kind: 'edit', editId: general, variants: [std] },
+        ],
+      });
+      const step = await run('get_create_step', { cuenta, publicacion: pub.id });
+      expect(step).toMatchObject({
+        canal: 'Mercado Libre',
+        se_puede_crear: true,
+        medidas: [{ medida: 'STD' }, { medida: '0,50' }],
+        tipos_de_publicacion: [{ tipo: 'clasica' }, { tipo: 'premium' }],
+      });
+      expect(step.revision.find((r: { dato: string }) => r.dato === 'Fotos')).toMatchObject({ listo: true, detalle: 'STD con 4 fotos y 0,50 con 3 fotos.' });
+      expect(calls.filter((c) => c.path === '/items')).toEqual([]);
+
+      // Lo que no cierra no llega al canal.
+      await expect(run('create_in_channel', { cuenta, publicacion: pub.id, tipo: 'oro', precio: 80000 })).rejects.toThrow('Ese tipo de publicación no está');
+      await expect(run('create_in_channel', { cuenta, publicacion: pub.id, tipo: 'clasica', precio: 80000, cantidades: [{ medida: '0,75', cantidad: 1 }] })).rejects.toThrow('No hay una medida «0,75»');
+      await expect(run('create_in_channel', { cuenta, publicacion: pub.id, tipo: 'clasica', precio: 80000, cantidades: [{ medida: 'STD', cantidad: 2 }] })).rejects.toThrow('Falta la cantidad de 0,50');
+      expect(calls.filter((c) => c.path === '/items')).toEqual([]);
+
+      const r = await run('create_in_channel', {
+        cuenta,
+        publicacion: pub.id,
+        tipo: 'Clasica',
+        precio: 80000,
+        cantidades: [
+          { medida: 'std', cantidad: 2 },
+          { medida: '0,50', cantidad: 5 },
+        ],
+      });
+      expect(r).toMatchObject({
+        creada: true,
+        tipo: 'Clásica',
+        precio: 80000,
+        publicaciones: [
+          { medida: 'STD', publicacion: 'MLA900', link: expect.stringContaining('MLA') },
+          { medida: '0,50', publicacion: 'MLA901', link: expect.stringContaining('MLA') },
+        ],
+        confirmado_en_el_canal: true,
+      });
+      expect(r).not.toHaveProperty('no_se_crearon');
+      const posts = calls.filter((c) => c.path === '/items').map((c) => c.body as Record<string, unknown>);
+      expect(posts.map((p) => [p.available_quantity, (p.pictures as unknown[]).length])).toEqual([
+        [2, 4],
+        [5, 3],
+      ]);
+      expect(await db.publication.count({ where: { productId, externalId: { in: ['MLA900', 'MLA901'] } } })).toBe(2);
+      // Ya no queda nada para crear.
+      await expect(run('create_in_channel', { cuenta, publicacion: pub.id, tipo: 'clasica' })).rejects.toThrow('Todas las medidas ya están publicadas');
+    });
 
     it('crea una publicación por medida con el mismo nombre de familia, y cada una queda en la familia de la app', async () => {
       const { pub, other, result } = await createFamily();
