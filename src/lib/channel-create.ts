@@ -46,6 +46,9 @@ export function warrantyText(raw: string | null): string | null {
 
 const fotos = (n: number) => (n === 1 ? '1 foto' : `${n} fotos`);
 
+/** Las fotos que necesita cada publicación, o cada medida, para crearla en el canal. */
+export const MIN_CREATE_PHOTOS = 4;
+
 /**
  * Una publicación para crear: la única, o la de una medida de la familia. Sin
  * id todavía no está en la app: se arma al crear, con lo de la principal.
@@ -171,7 +174,8 @@ function measuresCheck(measures: Measure[], targets: Target[], published: { labe
 }
 
 /** Qué está listo y qué falta para crear la publicación en el canal. Con varias medidas, una por medida. */
-export async function createChecks(db: Db, args: { accountId: string; publicationId: string }) {
+export async function createChecks(db: Db, args: { accountId: string; publicationId: string; minPhotos?: number }) {
+  const minPhotos = args.minPhotos ?? MIN_CREATE_PHOTOS;
   const p = await load(db, args.accountId, args.publicationId);
   const channelName = getChannelAdapter(p.store.channel.kind, p.store.channel.name).name;
   const publisher = getChannelPublisher(p.store.channel.kind);
@@ -224,16 +228,18 @@ export async function createChecks(db: Db, args: { accountId: string; publicatio
     });
   }
 
-  const empty = targets.filter((t) => t.media.length === 0).map((t) => t.label);
+  // Para crear hacen falta al menos minPhotos fotos en cada medida, MIN_CREATE_PHOTOS salvo que se pida otro.
+  const short = targets.filter((t) => t.media.length < minPhotos);
+  const shortText = (t: Target) => (t.media.length ? `${t.label} tiene ${fotos(t.media.length)}` : `${t.label} no tiene ninguna`);
   checks.push({
     label: 'Fotos',
-    ok: targets.length > 0 && empty.length === 0,
+    ok: targets.length > 0 && short.length === 0,
     detail: !byMeasure
-      ? targets[0]?.media.length
+      ? (targets[0]?.media.length ?? 0) >= minPhotos
         ? `${fotos(targets[0].media.length)}.`
-        : 'Elegilas en Organización de multimedia.'
-      : empty.length > 0
-        ? `${empty.length === 1 ? 'La medida' : 'Las medidas'} ${names(empty)} no ${empty.length === 1 ? 'tiene' : 'tienen'} fotos, elegilas en Organización de multimedia.`
+        : `Hacen falta al menos ${fotos(minPhotos)} y ${targets[0]?.media.length ? `tiene ${fotos(targets[0].media.length)}` : 'no tiene ninguna'}: elegilas en Organización de multimedia.`
+      : short.length > 0
+        ? `Hacen falta al menos ${fotos(minPhotos)} en cada medida: ${names(short.map(shortText))}. Elegilas en Organización de multimedia.`
         : `${names(targets.map((t) => `${t.label} con ${fotos(t.media.length)}`))}.`,
     blocking: true,
   });
@@ -293,6 +299,8 @@ type CreateArgs = {
   listingType: string;
   userId: string | null;
   now?: Date;
+  // Solo para las pruebas: las fotos que necesita cada medida, si no MIN_CREATE_PHOTOS.
+  minPhotos?: number;
 };
 type Created = {
   // La primera que se creó.
