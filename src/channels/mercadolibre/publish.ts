@@ -613,7 +613,9 @@ export const mercadolibrePublisher: ChannelPublisher = {
     if (field === 'title') {
       // En una familia el título lo arma Mercado Libre con el nombre de la familia y la medida: se cambia el nombre.
       try {
-        await send('PUT', `/items/${id}`, accessToken, opts?.family ? { family_name: value } : { title: value });
+        // El nombre de la familia tiene su propia dirección: dentro de los datos de la publicación Mercado Libre no lo acepta.
+        if (opts?.family) await send('PUT', `/items/${id}/family_name`, accessToken, { family_name: value });
+        else await send('PUT', `/items/${id}`, accessToken, { title: value });
       } catch (e) {
         // Qué se mandó, para entender el rechazo.
         if (e instanceof PublishError) throw new PublishError(`${e.message} Se mandó como ${opts?.family ? 'nombre de familia (family_name)' : 'título (title)'}.`);

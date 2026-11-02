@@ -194,12 +194,8 @@ describe.skipIf(!url)('subir al canal en la base', () => {
           it.last_updated = new Date().toISOString();
           return json(200, { id: item[1] });
         }
-        if (body.family_name !== undefined) {
-          it.familyName = body.family_name;
-          it.title = `${body.family_name} ${it.familyMeasure ?? ''}`.trim();
-          it.last_updated = new Date().toISOString();
-          return json(200, { id: item[1] });
-        }
+        // Como Mercado Libre: el nombre de la familia no va con los datos de la publicación.
+        if (body.family_name !== undefined) return json(400, { cause: 374, message: 'BODY_INVALID_FIELDS', error: 'The field family name is invalid', status: 400 });
         // Inventado, con la forma de los rechazos de Mercado Libre.
         if (it.familyName) return json(400, { message: 'Validation error', error: 'validation_error', cause: [{ code: 'item.title.invalid', message: 'Title is generated from family_name' }] });
         if (it.sold > 0) return json(400, { message: 'Validation error', cause: [{ code: 'item.title.not_modifiable', message: 'Not modifiable' }] });
@@ -207,6 +203,16 @@ describe.skipIf(!url)('subir al canal en la base', () => {
         it.title = String(body.title).replace('Sachs', 'SACHS');
         it.last_updated = new Date().toISOString();
         return json(200, { id: item[1] });
+      }
+      // El nombre de la familia, en su propia dirección.
+      const familyName = u.pathname.match(/^\/items\/(\w+)\/family_name$/);
+      if (familyName && req.method === 'PUT') {
+        const it = items[familyName[1]];
+        if (!it) return json(404, {});
+        it.familyName = body.family_name;
+        it.title = `${body.family_name} ${it.familyMeasure ?? ''}`.trim();
+        it.last_updated = new Date().toISOString();
+        return json(200, { id: familyName[1] });
       }
       const type = u.pathname.match(/^\/items\/(\w+)\/listing_type$/);
       if (type && req.method === 'POST') {
@@ -425,7 +431,7 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     await saveDraft(db, { accountId, publicationId: p.id, field: 'title', value: 'Bomba de Agua Fiat 1.4 Fire' });
     writes.length = 0;
     expect((await pushDrafts(db, { accountId, publicationId: p.id, userId: null })).sent).toEqual(['title']);
-    expect(writes.map((w) => [w.method, w.path, w.body])).toEqual([['PUT', '/items/MLA2', { family_name: 'Bomba de Agua Fiat 1.4 Fire' }]]);
+    expect(writes.map((w) => [w.method, w.path, w.body])).toEqual([['PUT', '/items/MLA2/family_name', { family_name: 'Bomba de Agua Fiat 1.4 Fire' }]]);
     expect(items.MLA2.title).toBe('Bomba de Agua Fiat 1.4 Fire 0.50');
     expect(await state('MLA2')).toEqual({ draft: [], choose: [], rejected: [] });
   });
