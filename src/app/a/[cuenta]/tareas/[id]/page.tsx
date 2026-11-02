@@ -1,3 +1,4 @@
+import { LinkedText } from '@/components/ui/linked-text';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { PageHeader } from '@/components/dashboard/PageHeader';
@@ -79,7 +80,7 @@ export default async function TaskPage({ params }: { params: Promise<{ cuenta: s
         <SectionCard title="La tarea">
           <SectionBody>
             {task.description ? (
-              <p className="whitespace-pre-line break-words text-sm">{task.description}</p>
+              <LinkedText text={task.description} className="text-sm" />
             ) : (
               <p className="text-sm text-muted-foreground">Sin descripción.</p>
             )}

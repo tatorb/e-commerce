@@ -1,5 +1,6 @@
 import type { TaskStatus } from '@/generated/prisma/enums';
 import { dueDay, formatDay, remindText, TASK_STATUS_LABEL } from './tasks';
+import { linkParts, plainLinks } from './text-links';
 
 // Lo que dicen los mails de las tareas: al asignarla, al llegar el aviso y al
 // vencer sin terminar. Sin la base de datos, para poder probarlo solo.
@@ -26,6 +27,13 @@ export type TaskMailData = {
 const DESCRIPTION_MAX = 1500;
 
 const escape = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+/** La descripción con sus links como links. */
+function linkedHtml(text: string): string {
+  return linkParts(text)
+    .map((p) => (p.href ? `<a href="${escape(p.href)}" style="color:#1c1917;font-weight:600">${escape(p.text)}</a>` : escape(p.text)))
+    .join('');
+}
 
 function subjectOf(d: TaskMailData): string {
   if (d.kind === 'ASSIGNED') return `Nueva tarea: ${d.title}`;
@@ -59,7 +67,7 @@ export function taskMail(d: TaskMailData): { subject: string; text: string; html
     d.title,
     ...facts.map(([k, v]) => `${k}: ${v}`),
     ...(d.publications.length ? ['', 'Publicaciones:', ...d.publications.map((p) => `- ${p}`)] : []),
-    ...(description ? ['', description] : []),
+    ...(description ? ['', plainLinks(description)] : []),
     '',
     `Abrir la tarea: ${d.link}`,
     '',
@@ -82,7 +90,7 @@ export function taskMail(d: TaskMailData): { subject: string; text: string; html
     <ul style="margin:0 0 16px;padding-left:20px;font-size:14px">${d.publications.map((p) => `<li>${escape(p)}</li>`).join('')}</ul>`
         : ''
     }
-    ${description ? `<p style="margin:0 0 16px;font-size:14px;white-space:pre-wrap">${escape(description)}</p>` : ''}
+    ${description ? `<p style="margin:0 0 16px;font-size:14px;white-space:pre-wrap">${linkedHtml(description)}</p>` : ''}
     <p style="margin:0 0 20px"><a href="${escape(d.link)}" style="display:inline-block;background:#1c1917;color:#ffffff;text-decoration:none;padding:10px 16px;border-radius:6px;font-size:14px">Abrir la tarea</a></p>
     <p style="margin:0;font-size:12px;color:#a8a29e">${escape(footer)}</p>
   </div>

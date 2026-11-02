@@ -14,6 +14,7 @@ import type { McpContext } from '@/lib/mcp/tool';
 import { managedNote, plannedText, plansFor } from '@/lib/stock-plan';
 import { saveQuantities } from '@/lib/quantities';
 import type { ChannelOrder } from '@/channels/sales';
+import { plainLinks } from '@/domain/text-links';
 
 // El stock del producto: lo heredan sus publicaciones y lo descuentan las
 // ventas, contra un Mercado Libre simulado. Los datos son inventados.
@@ -482,7 +483,9 @@ describe.skipIf(!url)('el stock en la base', () => {
     expect((await task())!.title).toBe('Reponer: Bulón de tapa, se vendió la última');
     expect((await task())!.description).toContain('se pausa la publicación');
     // Arriba, lo que hay que pedir y dónde se vende; la tarea queda en sus publicaciones y en la del kit.
-    expect((await task())!.description).toMatch(/^Producto: Bulón de tapa\nSKU: sin cargar en la ficha\nEn Mercado Libre: Publicación p1 \(MLA1000001\)\nEn Mercado Libre: Publicación p2 \(MLA1000002\)/);
+    const head = plainLinks((await task())!.description).split('\n\n')[0].split('\n');
+    expect(head.slice(0, 2)).toEqual([expect.stringMatching(/^Producto: Bulón de tapa \(http.*\/a\/prueba\/productos\/\w+\?seccion=stock\)$/), 'SKU: sin cargar en la ficha']);
+    expect(head[2]).toMatch(/^Publicación: Publicación p1 \(http.*\/a\/prueba\/publicaciones\/\w+\) · MLA1000001 · Ver en Mercado Libre \(https:\/\/.*MLA/);
     expect(await db.taskPublication.count({ where: { task: { autoKey: `stock:${ids.bulon}:` } } })).toBe(4);
     expect(pushedTo()).toEqual(['MLA1000001=6']);
     expect(await db.task.count({ where: { autoKey: { startsWith: 'stock:' } } })).toBe(1);

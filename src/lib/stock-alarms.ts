@@ -21,6 +21,8 @@ import {
 import { dayIn, dueDate, OPEN_STATUSES, TASK_TITLE_MAX } from '@/domain/tasks';
 import { formatDateTime } from '@/lib/format';
 import { notifyAssigned, notifyTaskAgain } from '@/lib/task-mail';
+import { publicAppUrl } from '@/lib/public-url';
+import { textLink } from '@/domain/text-links';
 
 // Las alarmas de stock de los productos con "Mostrar más de 5"
 // (src/domain/stock-cushion.ts): una tarea por medida, para todos los
@@ -96,7 +98,7 @@ const STATE_SELECT = {
       name: true,
       showMore: true,
       accountId: true,
-      account: { select: { timezone: true } },
+      account: { select: { timezone: true, slug: true } },
       variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } },
     },
   },
@@ -124,20 +126,36 @@ export function alarmItemText(item: AlarmItem): string {
   return [item.name, item.sku ? `SKU ${item.sku}` : null, item.measure ? `medida ${item.measure}` : null].filter(Boolean).join(' · ');
 }
 
-/** Una publicación que vende la medida: su título y su código en el canal. */
-export type AlarmListing = { title: string; externalId: string | null; channelName: string };
+/** Una publicación que vende la medida: su título, su código y su link en el canal. */
+export type AlarmListing = { id: string; title: string; externalId: string | null; channelName: string; url: string | null };
 
 /** El título y la descripción de la tarea según cómo está la medida. */
-export function alarmTaskText(row: StateRow, kind: AlarmEvent['kind'], listings: AlarmListing[] = []): { title: string; description: string } {
+export function alarmTaskText(
+  row: StateRow,
+  kind: AlarmEvent['kind'],
+  listings: AlarmListing[] = [],
+  appUrl: string = publicAppUrl(),
+): { title: string; description: string } {
   const tz = row.product.account.timezone;
   const item = alarmItem(row);
   const what = alarmItemText(item);
-  // Arriba de todo, lo que hay que pedir a fábrica y dónde se vende.
+  // Arriba de todo, lo que hay que pedir a fábrica y dónde se vende, con los
+  // links al producto, a cada publicación en la app y en el canal.
+  const base = `${appUrl}/a/${row.product.account.slug}`;
+  const product = `${base}/productos/${row.product.id}?seccion=stock`;
   const head = [
-    `Producto: ${item.name}`,
-    `SKU: ${item.sku ?? 'sin cargar en la ficha'}`,
+    `Producto: ${textLink(item.name, product)}`,
+    `SKU: ${item.sku ? textLink(item.sku, product) : 'sin cargar en la ficha'}`,
     ...(item.measure ? [`Medida: ${item.measure}`] : []),
-    ...listings.map((l) => `En ${l.channelName}: ${l.title}${l.externalId ? ` (${l.externalId})` : ''}`),
+    ...listings.map((l) =>
+      [
+        `Publicación: ${textLink(l.title, `${base}/publicaciones/${l.id}`)}`,
+        l.externalId,
+        l.url ? textLink(`Ver en ${l.channelName}`, l.url) : null,
+      ]
+        .filter(Boolean)
+        .join(' · '),
+    ),
   ].join('\n');
   const real = row.quantity;
   const missing = owed(real);
@@ -184,17 +202,22 @@ function soldKeys(pub: Parameters<typeof planFor>[0]): string[] {
 async function taskPublications(db: Db, productId: string, key: string): Promise<{ ids: string[]; listings: AlarmListing[] }> {
   const live = { channelStatus: { notIn: ['CLOSED', 'DELETED'] as ('CLOSED' | 'DELETED')[] } };
   const [own, combos] = await Promise.all([
-    db.publication.findMany({ where: { productId, ...live }, orderBy: { createdAt: 'asc' }, take: 50, select: PLAN_SELECT }),
+    db.publication.findMany({ where: { productId, ...live }, orderBy: { createdAt: 'asc' }, take: 50, select: { ...PLAN_SELECT, url: true } }),
     db.publication.findMany({ where: { product: { comboItems: { some: { productId } } }, ...live }, orderBy: { createdAt: 'asc' }, take: 20, select: { id: true } }),
   ]);
   const selling = own.filter((p) => soldKeys(p).includes(key));
   return {
     ids: [...selling.map((p) => p.id), ...combos.map((p) => p.id)].slice(0, 20),
-    listings: selling.slice(0, 10).map((p) => ({
-      title: titleOrUntitled(p.title),
-      externalId: p.externalId,
-      channelName: getChannelAdapter(p.store.channel.kind, p.store.channel.name).name,
-    })),
+    listings: selling.slice(0, 10).map((p) => {
+      const adapter = getChannelAdapter(p.store.channel.kind, p.store.channel.name);
+      return {
+        id: p.id,
+        title: titleOrUntitled(p.title),
+        externalId: p.externalId,
+        channelName: adapter.name,
+        url: p.url ?? (p.externalId ? adapter.publicationUrl(p.externalId) : null),
+      };
+    }),
   };
 }
 
