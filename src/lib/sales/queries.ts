@@ -4,7 +4,7 @@ import { getChannelAdapter } from '@/channels';
 import { getChannelSalesLedger } from '@/channels/sales';
 import { costMap } from '@/lib/costs';
 import { costOf } from '@/domain/costs';
-import { stockSlots } from '@/domain/stock';
+import { matchSlot, NO_MEASURE, stockSlots } from '@/domain/stock';
 import { loadPricingSettings } from '@/lib/pricing';
 import {
   cashFlow,
@@ -30,8 +30,16 @@ type Db = PrismaClient;
 
 // ───────────────────────────── El costo de cada línea ─────────────────────────────
 
-/** El costo de reposición por unidad de cada producto y medida, para las líneas vendidas. */
-export async function lineCosts(db: Db, accountId: string, lines: SaleLineRow[]): Promise<(line: SaleLineRow) => number | null> {
+/** Lo que se sabe hoy de una línea vendida: la medida del producto y su costo de reposición por unidad. */
+export type LineFacts = { key: string | null; measure: string | null; unitCost: number | null };
+
+/**
+ * La medida y el costo de reposición por unidad de cada línea vendida, con los
+ * datos de hoy del producto. Si la medida guardada con la venta falta o ya no
+ * está en el producto (se leyó antes de cargar los SKU, o se renombró), se
+ * busca de nuevo por el SKU vendido.
+ */
+export async function lineFacts(db: Db, accountId: string, lines: SaleLineRow[]): Promise<(line: SaleLineRow) => LineFacts> {
   const ids = new Set<string>();
   for (const l of lines) {
     if (l.productId) ids.add(l.productId);
@@ -49,19 +57,30 @@ export async function lineCosts(db: Db, accountId: string, lines: SaleLineRow[])
     if (!p || key === null) return null;
     return costOf(p.costs, p.general, key);
   };
+  // La medida de la línea en el producto de hoy: la guardada si sigue, si no la del SKU vendido.
+  const keyOf = (line: SaleLineRow): string | null => {
+    const p = line.productId ? byId.get(line.productId) : undefined;
+    if (!p) return line.key;
+    if (p.slots.length === 1 && p.slots[0].key === NO_MEASURE) return NO_MEASURE;
+    if (line.key && p.slots.some((s) => s.key === line.key)) return line.key;
+    return line.sku ? matchSlot(p.slots, { sku: line.sku, measure: null }) : null;
+  };
   return (line) => {
-    if (!line.productId) return null;
-    const own = unit(line.productId, line.key);
-    if (own !== null) return own;
+    if (!line.productId) return { key: null, measure: line.measure, unitCost: null };
+    const key = keyOf(line);
+    const p = byId.get(line.productId);
+    const measure = key === null ? null : key === NO_MEASURE ? line.measure : (p?.slots.find((s) => s.key === key)?.label ?? line.measure);
+    const own = unit(line.productId, key);
+    if (own !== null) return { key, measure, unitCost: own };
     // Un combo sin costo propio: lo que cuestan sus piezas.
-    if (!line.parts?.length) return null;
+    if (!line.parts?.length) return { key, measure, unitCost: null };
     let sum = 0;
     for (const part of line.parts) {
       const c = unit(part.productId, part.key);
-      if (c === null) return null;
+      if (c === null) return { key, measure, unitCost: null };
       sum += c * part.quantity;
     }
-    return sum;
+    return { key, measure, unitCost: sum };
   };
 }
 
@@ -206,9 +225,9 @@ const num = (d: Prisma.Decimal | null) => (d === null ? null : Number(d));
 async function shape(db: Db, accountId: string, raw: RawRow[], params?: SaleParams): Promise<SaleRow[]> {
   const p = params ?? (await saleParams(db, accountId));
   const allLines = raw.flatMap((r) => parseLines(r.lines));
-  const costOfLine = await lineCosts(db, accountId, allLines);
+  const factsOf = await lineFacts(db, accountId, allLines);
   return raw.map((r) => {
-    const lines = parseLines(r.lines).map((l) => ({ ...l, unitCost: costOfLine(l) }));
+    const lines = parseLines(r.lines).map((l) => ({ ...l, ...factsOf(l) }));
     const cost = saleCost(lines.map((l) => ({ cost: l.unitCost, quantity: l.quantity })));
     const money = saleMoney({
       state: r.state,

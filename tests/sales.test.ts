@@ -268,6 +268,36 @@ describe.skipIf(!url)('las ventas en la base', () => {
     expect((await db.channelConnection.findUniqueOrThrow({ where: { storeId } })).status).toBe('ACTIVE');
   });
 
+  it('una publicación que vende una sola medida: la venta toma la medida por el SKU y su costo, aunque se haya guardado sin la medida', async () => {
+    const p = await db.product.create({
+      data: { accountId, name: 'Subconjunto SP-564', variants: { create: [{ sku: 'SP-564-50', measure: '0.50', position: 0 }, { sku: 'SP-564-00', measure: 'STD', position: 1 }] } },
+    });
+    await db.productCost.createMany({
+      data: [
+        { productId: p.id, key: 'sku:SP-564-50 medida:0.50', cost: 1478 },
+        { productId: p.id, key: 'sku:SP-564-00 medida:std', cost: 1478 },
+      ],
+    });
+    await db.publication.create({ data: { productId: p.id, storeId, externalId: 'MLA9300001', title: 'Subconjunto SP-564 0.50', channelCopy: { create: { readAt: new Date(), status: 'ACTIVE', variations: [] } } } });
+    orders = [order(2000000009, 0, [{ listing: 'MLA9300001', sku: 'SP-564-50', qty: 1, price: 3030, fee: 690, title: 'Subconjunto SP-564 0.50' }], { payments: [{ id: 555009, status: 'approved', transaction_amount: 3030 }] })];
+    await readStoreSales(db, storeId, { budgetMs: 60_000 });
+    const sale = await byOrder('2000000009');
+    expect(sale.lines).toEqual([expect.objectContaining({ key: 'sku:SP-564-50 medida:0.50', measure: '0.50' })]);
+
+    // Una venta que se guardó sin la medida, por ejemplo porque se leyó antes de cargar los SKU: se busca de nuevo por el SKU vendido.
+    const lines = sale.lines as Record<string, unknown>[];
+    await db.sale.update({ where: { id: sale.id }, data: { lines: [{ ...lines[0], key: null, measure: null }] } });
+    const tz = 'America/Argentina/Buenos_Aires';
+    const all = await listSales(db, accountId, { period: parsePeriod({ periodo: '30d' }, new Date(), tz), state: 'todas', ship: 'todos', q: '' });
+    const row = all.rows.find((r) => r.orderId === '2000000009')!;
+    expect(row.lines[0]).toMatchObject({ measure: '0.50', unitCost: 1478 });
+    expect(row.money.cost).toBe(1478);
+    // Lo mismo si la medida guardada ya no está en el producto.
+    await db.sale.update({ where: { id: sale.id }, data: { lines: [{ ...lines[0], key: 'sku:SP-564-50 medida:0,50 vieja', measure: 'vieja' }] } });
+    const again = await listSales(db, accountId, { period: parsePeriod({ periodo: '30d' }, new Date(), tz), state: 'todas', ship: 'todos', q: '' });
+    expect(again.rows.find((r) => r.orderId === '2000000009')!.lines[0]).toMatchObject({ measure: '0.50', unitCost: 1478 });
+  });
+
   it('las cuentas: la lista con filtros, la ganancia con el costo de la medida, la caja y los envíos', async () => {
     await readStoreSales(db, storeId, { budgetMs: 60_000 });
     const tz = 'America/Argentina/Buenos_Aires';
