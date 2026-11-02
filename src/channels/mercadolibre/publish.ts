@@ -31,7 +31,7 @@ const KNOWN: [RegExp, string][] = [
   [/available_quantity|quantity|stock/i, 'Mercado Libre no aceptó la cantidad.'],
   [/item\.price|price/i, 'Mercado Libre no aceptó el precio.'],
   [/attribute/i, 'Mercado Libre no aceptó un dato de catálogo.'],
-  [/title.*not_modifiable|title.*modif/i, 'Mercado Libre no deja cambiar el título de una publicación con ventas.'],
+  [/title.*not_modifiable|title.*modif/i, 'Mercado Libre no deja cambiar el título.'],
   [/title.*(length|max|long)/i, 'El título es más largo de lo que acepta la categoría en Mercado Libre.'],
   [/title/i, 'Mercado Libre no aceptó el título.'],
   [/description.*(length|max|long)/i, 'La descripción es más larga de lo que acepta Mercado Libre.'],
@@ -57,6 +57,11 @@ export function rejectionMessage(status: number, body: unknown): string {
   const detail = detailOf(body);
   for (const [pattern, message] of KNOWN) {
     if (!pattern.test(codes)) continue;
+    // En el título va el motivo tal cual y la respuesta completa: hay rechazos que no se entienden sin ella.
+    if (/title/i.test(pattern.source)) {
+      const raw = body !== null && body !== undefined ? ` Respuesta completa: ${JSON.stringify(body).slice(0, 600)}` : '';
+      return `${detail ? `${message.slice(0, -1)}: ${detail}` : message}${raw}`;
+    }
     // En las medidas, los datos de catálogo y las fotos, el detalle dice cuál fue.
     return /variation|attribute|picture|price|quantity/i.test(pattern.source) && detail ? `${message.slice(0, -1)}: ${detail}` : message;
   }

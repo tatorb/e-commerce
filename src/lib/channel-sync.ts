@@ -13,6 +13,7 @@ import {
   discountText,
   heldDiscount,
   installmentsText,
+  fingerprint,
   planFaces,
   priceText,
   storedPrints,
@@ -197,8 +198,9 @@ async function applyListing(
   });
   const app = faceValues(p);
   const channel: FaceValues = {
-    // En una familia, el título que se edita es el nombre de la familia: cada medida lo muestra con su medida.
-    title: p.familyId ? listing.channelFamilyName || (listing.title && titleWithoutMeasure(listing.title, p.variantKey)) : listing.title,
+    // Si el canal la agrupa en una familia, el título que se edita es el nombre de la familia: cada medida lo muestra
+    // con su medida al final. Pasa aunque en la app la publicación esté sola.
+    title: listing.channelFamilyName || (p.familyId && listing.title ? titleWithoutMeasure(listing.title, p.variantKey) : listing.title),
     description: descriptionRead ? listing.description : (p.channelCopy?.description ?? null),
     attributes: listingAttributes(listing, ctx.adapter),
     photos: channelPhotos(listing.photos, listing.photoIds, listing.variations),
@@ -221,6 +223,17 @@ async function applyListing(
     for (const field of FACE_FIELDS) {
       if (lastAgreed[field] === undefined && appPrints[field]) lastAgreed[field] = channelPrints[field];
     }
+  }
+  // Antes se comparaba con el título que muestra el canal, con la medida al final. Si la app tiene un título
+  // propio para subir sobre ese, lo acordado pasa a ser el nombre de la familia: sigue para subir y no se pisa.
+  if (
+    listing.channelFamilyName &&
+    listing.title &&
+    lastAgreed.title === fingerprint('title', listing.title) &&
+    appPrints.title !== lastAgreed.title &&
+    channelPrints.title !== lastAgreed.title
+  ) {
+    lastAgreed.title = channelPrints.title;
   }
   const plans = planFaces(appPrints, channelPrints, lastAgreed);
   const hold = heldDiscount(app.discount, channel.discount, p.channelCopy, ctx.now);

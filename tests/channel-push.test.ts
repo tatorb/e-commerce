@@ -4,7 +4,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@/generated/prisma/client';
 import { rejectionMessage } from '@/channels/mercadolibre/publish';
-import { faceSummary, faceValues, fingerprintsOf } from '@/domain/channel-sync';
+import { faceSummary, faceValues, fingerprint, fingerprintsOf } from '@/domain/channel-sync';
 import { DraftError, pushDrafts, PushError, renewDiscounts, saveDraft } from '@/lib/channel-push';
 import { discardDrafts, readOne, runSyncStep, startSync } from '@/lib/channel-sync';
 import { encrypt } from '@/lib/crypto';
@@ -24,8 +24,12 @@ import type { McpContext } from '@/lib/mcp/tool';
 
 describe('por qué Mercado Libre no aceptó un cambio', () => {
   it('explica los motivos conocidos en castellano', () => {
-    expect(rejectionMessage(400, { cause: [{ code: 'item.title.not_modifiable', message: 'Title is not modifiable' }] })).toContain(
-      'no deja cambiar el título',
+    expect(rejectionMessage(400, { cause: [{ code: 'item.title.not_modifiable', message: 'Title is not modifiable' }] })).toBe(
+      'Mercado Libre no deja cambiar el título: Title is not modifiable Respuesta completa: {"cause":[{"code":"item.title.not_modifiable","message":"Title is not modifiable"}]}',
+    );
+    // El título rechazado lleva el motivo exacto y la respuesta completa.
+    expect(rejectionMessage(400, { message: 'Validation error', error: 'validation_error', cause: [{ code: 'item.title.invalid', message: 'Title is generated from family_name' }] })).toBe(
+      'Mercado Libre no aceptó el título: Title is generated from family_name Respuesta completa: {"message":"Validation error","error":"validation_error","cause":[{"code":"item.title.invalid","message":"Title is generated from family_name"}]}',
     );
     expect(rejectionMessage(400, { cause: [{ code: 'item.title.length.invalid' }] })).toContain('más largo');
     expect(rejectionMessage(403, {})).toContain('permiso para modificar');
@@ -69,6 +73,9 @@ type Item = {
   quantity?: number;
   // En Full: el stock lo maneja Mercado Libre.
   full?: boolean;
+  // De una familia: Mercado Libre muestra el título con la medida al final, y el título se cambia con el nombre de la familia.
+  familyName?: string;
+  familyMeasure?: string;
   listing_type_id?: string;
   tags?: string[];
   // El descuento puesto: el precio con descuento.
@@ -187,6 +194,14 @@ describe.skipIf(!url)('subir al canal en la base', () => {
           it.last_updated = new Date().toISOString();
           return json(200, { id: item[1] });
         }
+        if (body.family_name !== undefined) {
+          it.familyName = body.family_name;
+          it.title = `${body.family_name} ${it.familyMeasure ?? ''}`.trim();
+          it.last_updated = new Date().toISOString();
+          return json(200, { id: item[1] });
+        }
+        // Inventado, con la forma de los rechazos de Mercado Libre.
+        if (it.familyName) return json(400, { message: 'Validation error', error: 'validation_error', cause: [{ code: 'item.title.invalid', message: 'Title is generated from family_name' }] });
         if (it.sold > 0) return json(400, { message: 'Validation error', cause: [{ code: 'item.title.not_modifiable', message: 'Not modifiable' }] });
         // A veces el canal guarda el título con algún cambio.
         it.title = String(body.title).replace('Sachs', 'SACHS');
@@ -282,6 +297,7 @@ describe.skipIf(!url)('subir al canal en la base', () => {
                 id,
                 seller_id: 7,
                 title: it.title,
+                family_name: it.familyName ?? null,
                 status: 'active',
                 price: it.deal?.price ?? it.price ?? 100,
                 original_price: it.deal ? (it.price ?? 100) : null,
@@ -395,6 +411,55 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     expect(await db.channelApplication.findFirst({ where: { publicationId: p.id } })).toMatchObject({ method: 'API', fields: ['title', 'description'] });
   });
 
+  it('en una publicación con nombre de familia, el título se compara y se sube como nombre de familia', async () => {
+    const p = await pub('MLA2');
+    items.MLA2.familyName = 'Bomba de Agua Fiat';
+    items.MLA2.familyMeasure = '0.50';
+    items.MLA2.title = 'Bomba de Agua Fiat 0.50';
+    // La medida que Mercado Libre agrega al final no es un cambio.
+    await readOne(db, { accountId, publicationId: p.id });
+    expect(await state('MLA2')).toEqual({ draft: [], choose: [], rejected: [] });
+    expect((await pub('MLA2')).title).toBe('Bomba de Agua Fiat');
+
+    // El título nuevo va como nombre de la familia, aunque en la app esté sola.
+    await saveDraft(db, { accountId, publicationId: p.id, field: 'title', value: 'Bomba de Agua Fiat 1.4 Fire' });
+    writes.length = 0;
+    expect((await pushDrafts(db, { accountId, publicationId: p.id, userId: null })).sent).toEqual(['title']);
+    expect(writes.map((w) => [w.method, w.path, w.body])).toEqual([['PUT', '/items/MLA2', { family_name: 'Bomba de Agua Fiat 1.4 Fire' }]]);
+    expect(items.MLA2.title).toBe('Bomba de Agua Fiat 1.4 Fire 0.50');
+    expect(await state('MLA2')).toEqual({ draft: [], choose: [], rejected: [] });
+  });
+
+  it('un título para subir que se comparaba con el del canal con la medida sigue para subir, sin pedir elegir', async () => {
+    const p = await pub('MLA2');
+    items.MLA2.familyName = 'Bomba de Agua Fiat';
+    items.MLA2.familyMeasure = '0.50';
+    items.MLA2.title = 'Bomba de Agua Fiat 0.50';
+    // Como quedó antes: lo acordado era el título del canal con la medida, y la app tiene uno nuevo.
+    const copy = (await pub('MLA2')).channelCopy!;
+    await db.channelCopy.update({ where: { publicationId: p.id }, data: { agreed: { ...(copy.agreed as Record<string, string>), title: fingerprint('title', 'Bomba de Agua Fiat 0.50') } } });
+    await db.publication.update({ where: { id: p.id }, data: { title: 'Bomba de Agua Fiat 1.4 Fire' } });
+    await readOne(db, { accountId, publicationId: p.id });
+    expect(await state('MLA2')).toEqual({ draft: ['title'], choose: [], rejected: [] });
+    expect((await pub('MLA2')).title).toBe('Bomba de Agua Fiat 1.4 Fire');
+  });
+
+  it('si el canal rechaza el título, queda el motivo exacto con la respuesta completa', async () => {
+    const p = await pub('MLA2');
+    await saveDraft(db, { accountId, publicationId: p.id, field: 'title', value: 'Bomba de Agua Fiat 1.4 Fire' });
+    // El canal lo agrupó en una familia después de la última lectura: la app todavía no lo sabe.
+    items.MLA2.familyName = 'Bomba de Agua Fiat';
+    const result = await pushDrafts(db, { accountId, publicationId: p.id, userId: null });
+    expect(result.rejected).toEqual([
+      {
+        field: 'title',
+        message:
+          'Mercado Libre no aceptó el título: Title is generated from family_name Respuesta completa: {"message":"Validation error","error":"validation_error","cause":[{"code":"item.title.invalid","message":"Title is generated from family_name"}]}',
+      },
+    ]);
+    expect((await state('MLA2')).rejected).toMatchObject([{ field: 'title', message: expect.stringContaining('Title is generated from family_name') }]);
+  });
+
   it('si la publicación no tenía descripción, la crea', async () => {
     const p = await pub('MLA2');
     await saveDraft(db, { accountId, publicationId: p.id, field: 'description', value: 'Bomba con junta.' });
@@ -410,11 +475,16 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     await db.measurement.deleteMany({ where: { publicationId: p.id } });
     const result = await pushDrafts(db, { accountId, publicationId: p.id, userId: null });
     expect(result.sent).toEqual([]);
-    expect(result.rejected).toEqual([{ field: 'title', message: 'Mercado Libre no deja cambiar el título de una publicación con ventas.' }]);
-    expect((await state('MLA3')).rejected).toMatchObject([{ field: 'title', message: expect.stringContaining('con ventas') }]);
+    expect(result.rejected).toEqual([
+      {
+        field: 'title',
+        message: 'Mercado Libre no deja cambiar el título: Not modifiable Respuesta completa: {"message":"Validation error","cause":[{"code":"item.title.not_modifiable","message":"Not modifiable"}]}',
+      },
+    ]);
+    expect((await state('MLA3')).rejected).toMatchObject([{ field: 'title', message: expect.stringContaining('no deja cambiar el título: Not modifiable') }]);
     // El intento queda en el historial, con lo que había y lo que se quiso subir.
     expect(await db.channelSyncChange.findMany({ where: { publicationId: p.id, kind: 'REJECTED' } })).toMatchObject([
-      { field: 'title', before: 'Pistones Tico', after: 'Pistones Daewoo Tico', message: expect.stringContaining('con ventas') },
+      { field: 'title', before: 'Pistones Tico', after: 'Pistones Daewoo Tico', message: expect.stringContaining('no deja cambiar el título') },
     ]);
     // Con otro valor en el borrador, el motivo ya no vale.
     await db.publication.update({ where: { id: p.id }, data: { title: 'Pistones Daewoo Tico 800' } });

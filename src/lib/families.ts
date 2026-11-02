@@ -2,7 +2,7 @@ import { Prisma, type PrismaClient, type Publication } from '@/generated/prisma/
 import type { ChannelStatus, PipelineExit } from '@/generated/prisma/enums';
 import { getChannelAdapter } from '@/channels';
 import { fingerprint } from '@/domain/channel-sync';
-import { comparableText, distinctTexts, familyRead, pipelineRank } from '@/domain/families';
+import { channelFamilyNameOf, comparableText, distinctTexts, familyRead, pipelineRank } from '@/domain/families';
 import { lockFamily } from '@/domain/family-members';
 import { parseMedia, parseVariantListings, variantKey, type PhotoRef } from '@/domain/media';
 import { PIPELINE_STEP_LABEL, PIPELINE_STEPS, pipelineLabel } from '@/domain/pipeline';
@@ -420,10 +420,7 @@ type Tx = Prisma.TransactionClient;
 const json = (v: unknown) => (v === null || v === undefined ? Prisma.DbNull : (v as Prisma.InputJsonValue));
 
 /** El nombre de la familia en el canal, si lo dio. */
-function channelFamilyName(details: unknown): string | null {
-  const name = details && typeof details === 'object' && !Array.isArray(details) ? (details as Record<string, unknown>).channelFamilyName : null;
-  return typeof name === 'string' && name.trim() ? name.trim() : null;
-}
+const channelFamilyName = channelFamilyNameOf;
 
 /** Los textos distintos de las medidas, uno debajo del otro, el de la principal primero. Null si no hay ninguno. */
 function joinedTexts(values: (string | null)[]): string | null {

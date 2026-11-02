@@ -35,6 +35,7 @@ import type { NameValue } from '@/domain/name-value';
 import { writeContentField } from '@/domain/content';
 import { LATEST_MEASUREMENTS } from '@/domain/measurements';
 import { resolveTitleLock } from '@/domain/title-lock';
+import { channelFamilyNameOf } from '@/domain/families';
 import { FAMILY_LOCK_SELECT, titleLockFromData } from '@/lib/family-lock';
 import { isInstallmentPlan } from '@/domain/pricing';
 import { checkTitle } from '@/domain/titles';
@@ -447,7 +448,7 @@ export async function pushDrafts(
         }
         const text = (app[field] ?? '').trim();
         value = text;
-        send = () => withAccessToken(db, p.store.id, (token) => eachTarget(p, (id) => publisher.update(token, id, field, text, { family: Boolean(p.family) })));
+        send = () => withAccessToken(db, p.store.id, (token) => eachTarget(p, (id) => publisher.update(token, id, field, text, { family: Boolean(p.family) || channelFamilyNameOf(p.channelCopy?.details) !== null })));
       }
       try {
         await send();

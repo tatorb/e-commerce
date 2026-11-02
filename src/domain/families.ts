@@ -104,6 +104,17 @@ export function distinctTexts(values: (string | null | undefined)[]): string[] {
 }
 
 /**
+ * El nombre de la familia que informó el canal, guardado con lo que se leyó de
+ * la publicación. Null si el canal no la agrupa en una familia. Con nombre de
+ * familia, el título lo arma el canal con el nombre y la medida: lo que se
+ * cambia es el nombre.
+ */
+export function channelFamilyNameOf(details: unknown): string | null {
+  const name = details && typeof details === 'object' && !Array.isArray(details) ? (details as Record<string, unknown>).channelFamilyName : null;
+  return typeof name === 'string' && name.trim() ? name.trim() : null;
+}
+
+/**
  * El nombre de la familia a partir del título de una medida, para cuando el
  * canal no lo da: el título sin la medida que el canal le agrega al final.
  */
