@@ -65,7 +65,9 @@ export function rejectionMessage(status: number, body: unknown): string {
     // En las medidas, los datos de catálogo y las fotos, el detalle dice cuál fue.
     return /variation|attribute|picture|price|quantity/i.test(pattern.source) && detail ? `${message.slice(0, -1)}: ${detail}` : message;
   }
-  return detail ? `Mercado Libre no lo aceptó: ${detail}` : `Mercado Libre no lo aceptó (código ${status}).`;
+  // Un motivo que no se conoce: va con la respuesta completa, para poder entenderlo.
+  const raw = body !== null && body !== undefined && JSON.stringify(body) !== '{}' ? ` Respuesta completa: ${JSON.stringify(body).slice(0, 600)}` : '';
+  return detail ? `Mercado Libre no lo aceptó: ${detail}${raw}` : `Mercado Libre no lo aceptó (código ${status}).${raw}`;
 }
 
 // Una llave vencida o "demasiados pedidos" siguen como error de conexión.
@@ -610,7 +612,13 @@ export const mercadolibrePublisher: ChannelPublisher = {
     const id = encodeURIComponent(externalId);
     if (field === 'title') {
       // En una familia el título lo arma Mercado Libre con el nombre de la familia y la medida: se cambia el nombre.
-      await send('PUT', `/items/${id}`, accessToken, opts?.family ? { family_name: value } : { title: value });
+      try {
+        await send('PUT', `/items/${id}`, accessToken, opts?.family ? { family_name: value } : { title: value });
+      } catch (e) {
+        // Qué se mandó, para entender el rechazo.
+        if (e instanceof PublishError) throw new PublishError(`${e.message} Se mandó como ${opts?.family ? 'nombre de familia (family_name)' : 'título (title)'}.`);
+        throw e;
+      }
       return;
     }
     // La descripción: se reemplaza; si la publicación no tenía, se crea.

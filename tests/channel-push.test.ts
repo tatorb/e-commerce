@@ -52,7 +52,7 @@ describe('por qué Mercado Libre no aceptó un cambio', () => {
         cause: [{ code: 'item.attributes.invalid', message: 'The attributes [seller_package_height, seller_package_weight] are all required' }],
       }),
     ).toBe('Mercado Libre pide datos de catálogo que faltan: The attributes [seller_package_height, seller_package_weight] are all required');
-    expect(rejectionMessage(400, { message: 'Algo raro' })).toBe('Mercado Libre no lo aceptó: Algo raro');
+    expect(rejectionMessage(400, { message: 'Algo raro' })).toBe('Mercado Libre no lo aceptó: Algo raro Respuesta completa: {"message":"Algo raro"}');
     expect(rejectionMessage(500, null)).toBe('Mercado Libre no lo aceptó (código 500).');
   });
 });
@@ -454,7 +454,7 @@ describe.skipIf(!url)('subir al canal en la base', () => {
       {
         field: 'title',
         message:
-          'Mercado Libre no aceptó el título: Title is generated from family_name Respuesta completa: {"message":"Validation error","error":"validation_error","cause":[{"code":"item.title.invalid","message":"Title is generated from family_name"}]}',
+          'Mercado Libre no aceptó el título: Title is generated from family_name Respuesta completa: {"message":"Validation error","error":"validation_error","cause":[{"code":"item.title.invalid","message":"Title is generated from family_name"}]} Se mandó como título (title).',
       },
     ]);
     expect((await state('MLA2')).rejected).toMatchObject([{ field: 'title', message: expect.stringContaining('Title is generated from family_name') }]);
@@ -478,7 +478,7 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     expect(result.rejected).toEqual([
       {
         field: 'title',
-        message: 'Mercado Libre no deja cambiar el título: Not modifiable Respuesta completa: {"message":"Validation error","cause":[{"code":"item.title.not_modifiable","message":"Not modifiable"}]}',
+        message: 'Mercado Libre no deja cambiar el título: Not modifiable Respuesta completa: {"message":"Validation error","cause":[{"code":"item.title.not_modifiable","message":"Not modifiable"}]} Se mandó como título (title).',
       },
     ]);
     expect((await state('MLA3')).rejected).toMatchObject([{ field: 'title', message: expect.stringContaining('no deja cambiar el título: Not modifiable') }]);
