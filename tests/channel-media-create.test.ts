@@ -824,7 +824,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
 
   it('dice qué falta para crear una publicación nueva', async () => {
     const pub = await db.publication.create({ data: { productId, storeId, title: 'Kit Embrague Ford Ka 1.6', channelStatus: 'UNPUBLISHED' } });
-    let info = await createChecks(db, { minPhotos: 1, accountId, publicationId: pub.id });
+    let info = await createChecks(db, { accountId, publicationId: pub.id });
     expect(info.blocked).toBeNull();
     expect(info.ready).toBe(false);
     expect(info.checks.find((c) => c.label === 'Fotos')).toMatchObject({ ok: false, blocking: true });
@@ -836,7 +836,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     });
     await withPackage(pub.id);
     await saveMedia(db, { accountId, publicationId: pub.id, refs: [{ kind: 'asset', url: 'https://otra/foto.jpg' }] });
-    info = await createChecks(db, { minPhotos: 1, accountId, publicationId: pub.id });
+    info = await createChecks(db, { accountId, publicationId: pub.id });
     // Los impuestos: sin cargar y sin otras publicaciones en la tienda, faltan.
     expect(info.ready).toBe(false);
     expect(info.checks.find((c) => c.label === 'Datos obligatorios')).toMatchObject({ ok: false, detail: 'Faltan IVA y Impuesto interno.' });
@@ -844,7 +844,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     await taxesInStore();
     await taxesInStore();
     await taxesInStore('10.5 %');
-    info = await createChecks(db, { minPhotos: 1, accountId, publicationId: pub.id });
+    info = await createChecks(db, { accountId, publicationId: pub.id });
     expect(info.ready).toBe(true);
     expect(info.checks.find((c) => c.label === 'Datos obligatorios')).toMatchObject({
       ok: true,
@@ -862,7 +862,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     expect(info.measures).toEqual([]);
 
     // Con varias medidas, cada una necesita su medida cargada, sin repetir, y sus fotos.
-    const measuresCheck = async () => (await createChecks(db, { minPhotos: 1, accountId, publicationId: pub.id })).checks.find((c) => c.label === 'Medidas');
+    const measuresCheck = async () => (await createChecks(db, { accountId, publicationId: pub.id })).checks.find((c) => c.label === 'Medidas');
     await db.productVariant.createMany({ data: [{ productId, sku: 'A', measure: 'STD', position: 0 }, { productId, sku: 'B', measure: null, position: 1 }] });
     expect(await measuresCheck()).toMatchObject({ ok: false, detail: 'Cargá en la ficha la medida de B, es lo que elige el comprador.' });
     await db.productVariant.updateMany({ where: { productId, sku: 'B' }, data: { measure: 'std' } });
@@ -870,14 +870,14 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     await db.productVariant.updateMany({ where: { productId, sku: 'B' }, data: { measure: '0,50' } });
     await saveMedia(db, { accountId, publicationId: pub.id, refs: [{ kind: 'asset', url: 'https://otra/foto.jpg', variants: ['sku:A medida:std'] }] });
     expect(await measuresCheck()).toMatchObject({ ok: true });
-    info = await createChecks(db, { minPhotos: 1, accountId, publicationId: pub.id });
-    expect(info.checks.find((c) => c.label === 'Fotos')).toMatchObject({ ok: false, detail: 'Hacen falta al menos 1 foto en cada medida: 0,50 no tiene ninguna. Elegilas en Organización de multimedia.' });
-    await expect(createInChannel(db, { minPhotos: 1, accountId, publicationId: pub.id, price: 100, quantity: 1, listingType: 'clasica', userId: null })).rejects.toThrow(
+    info = await createChecks(db, { accountId, publicationId: pub.id });
+    expect(info.checks.find((c) => c.label === 'Fotos')).toMatchObject({ ok: false, detail: 'Hace falta al menos una foto en cada medida: 0,50 no tiene ninguna. Elegilas en Organización de multimedia.' });
+    await expect(createInChannel(db, { accountId, publicationId: pub.id, price: 100, quantity: 1, listingType: 'clasica', userId: null })).rejects.toThrow(
       'Fotos',
     );
 
     await saveMedia(db, { accountId, publicationId: pub.id, refs: [{ kind: 'asset', url: 'https://otra/foto.jpg' }] });
-    info = await createChecks(db, { minPhotos: 1, accountId, publicationId: pub.id });
+    info = await createChecks(db, { accountId, publicationId: pub.id });
     expect(info.ready).toBe(true);
     expect(info.checks.find((c) => c.label === 'Medidas')).toMatchObject({
       ok: true,
@@ -890,7 +890,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     ]);
     // La cantidad se carga en cada medida.
     await expect(
-      createInChannel(db, { minPhotos: 1, accountId, publicationId: pub.id, price: 100, quantities: { 'sku:A medida:std': 2 }, listingType: 'clasica', userId: null }),
+      createInChannel(db, { accountId, publicationId: pub.id, price: 100, quantities: { 'sku:A medida:std': 2 }, listingType: 'clasica', userId: null }),
     ).rejects.toThrow('La cantidad de 0,50 tiene que ser 1 o más.');
     expect(calls.some((c) => c.path === '/items')).toBe(false);
     // Ver lo que falta no arma la familia: se arma al crear.
@@ -924,7 +924,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
       ],
     });
 
-    const created = await createInChannel(db, { minPhotos: 1,
+    const created = await createInChannel(db, {
       accountId,
       publicationId: pub.id,
       price: 80000,
@@ -967,7 +967,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     expect(await state(pub.id)).toEqual({ draft: [], choose: [], rejected: [] });
     expect(await state(other.id)).toEqual({ draft: [], choose: [], rejected: [] });
     // Ya no queda nada para crear.
-    expect((await createChecks(db, { minPhotos: 1, accountId, publicationId: other.id })).blocked).toBe('Todas las medidas ya están publicadas en Mercado Libre.');
+    expect((await createChecks(db, { accountId, publicationId: other.id })).blocked).toBe('Todas las medidas ya están publicadas en Mercado Libre.');
   });
 
   it('crea la publicación con sus datos, fotos y descripción, y queda con su código y al día', async () => {
@@ -986,7 +986,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     await taxesInStore();
     await withPackage(pub.id);
 
-    const created = await createInChannel(db, { minPhotos: 1, accountId, publicationId: pub.id, price: 45000, quantity: 3, listingType: 'premium', userId: null });
+    const created = await createInChannel(db, { accountId, publicationId: pub.id, price: 45000, quantity: 3, listingType: 'premium', userId: null });
     expect(created).toEqual({ externalId: 'MLA900', url: 'https://articulo.mercadolibre.com.ar/MLA-900', warnings: [], confirmed: true, created: [] });
     const post = calls.find((c) => c.path === '/items')!.body as Record<string, unknown>;
     expect(post).toMatchObject({
@@ -1032,7 +1032,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     expect(await state(pub.id)).toEqual({ draft: [], choose: [], rejected: [] });
     expect(await db.channelSyncChange.findFirst({ where: { publicationId: pub.id, kind: 'CREATED' } })).not.toBeNull();
     // Ya no se puede volver a crear.
-    expect((await createChecks(db, { minPhotos: 1, accountId, publicationId: pub.id })).blocked).toBe('Ya está publicada en Mercado Libre.');
+    expect((await createChecks(db, { accountId, publicationId: pub.id })).blocked).toBe('Ya está publicada en Mercado Libre.');
   });
 
   it('si el canal no la acepta, no queda nada a medias y se ve el motivo', async () => {
@@ -1040,9 +1040,9 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     await saveMedia(db, { accountId, publicationId: pub.id, refs: [{ kind: 'asset', url: 'https://otra/foto.jpg' }] });
     await taxesInStore();
     await withPackage(pub.id);
-    const attempt = createInChannel(db, { minPhotos: 1, accountId, publicationId: pub.id, price: 1, quantity: 1, listingType: 'clasica', userId: null });
+    const attempt = createInChannel(db, { accountId, publicationId: pub.id, price: 1, quantity: 1, listingType: 'clasica', userId: null });
     await expect(attempt).rejects.toThrow(CreateError);
-    await expect(createInChannel(db, { minPhotos: 1, accountId, publicationId: pub.id, price: 1, quantity: 1, listingType: 'clasica', userId: null })).rejects.toThrow(
+    await expect(createInChannel(db, { accountId, publicationId: pub.id, price: 1, quantity: 1, listingType: 'clasica', userId: null })).rejects.toThrow(
       'El precio es muy bajo',
     );
     expect((await db.publication.findUniqueOrThrow({ where: { id: pub.id } })).externalId).toBeNull();
@@ -1159,12 +1159,12 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
           { kind: 'edit', editId: general, variants: [std] },
         ],
       });
-      const result = await createInChannel(db, { minPhotos: 1, accountId, publicationId: pub.id, price: 80000, quantities: { [std]: 2, [half]: 5 }, listingType: 'clasica', userId: null });
+      const result = await createInChannel(db, { accountId, publicationId: pub.id, price: 80000, quantities: { [std]: 2, [half]: 5 }, listingType: 'clasica', userId: null });
       const other = await db.publication.findFirstOrThrow({ where: { productId, variantKey: half } });
       return { pub, other, result };
     }
 
-    it('Claude ve qué falta y crea la familia; hacen falta 4 fotos en cada medida, cada una con su cantidad', async () => {
+    it('Claude ve qué falta y crea la familia, con una foto por medida alcanza, cada una con su cantidad', async () => {
       process.env.DATABASE_URL ??= url;
       const { CREATE_TOOLS } = await import('@/lib/mcp/create-tools');
       const tool = (name: string) => CREATE_TOOLS.find((t) => t.name === name)!;
@@ -1185,26 +1185,19 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
       expect(empty.falta.join(' ')).toContain('Fotos');
       await expect(run('create_in_channel', { cuenta, publicacion: pub.id, tipo: 'clasica', precio: 80000 })).rejects.toThrow('Todavía no se puede crear');
 
-      // Con 3 de todas y 1 de la STD, la 0,50 tiene 3: no alcanza, hacen falta 4 en cada medida.
+      // Con 3 fotos de todas y 1 de la STD: alcanza con una por medida, la regla de 6 del puntaje no frena nada.
       await withPackage(pub.id);
-      const [front, side, general, box] = [await correctedPhoto('frente.jpg'), await correctedPhoto('costado.jpg'), await correctedPhoto('general.jpg'), await correctedPhoto('caja-050.jpg')];
-      const shared = [
-        { kind: 'asset' as const, url: 'https://otra/foto.jpg' },
-        { kind: 'edit' as const, editId: front },
-        { kind: 'edit' as const, editId: side },
-        { kind: 'edit' as const, editId: general, variants: [std] },
-      ];
-      await saveMedia(db, { accountId, publicationId: pub.id, refs: shared });
-      const three = await run('get_create_step', { cuenta, publicacion: pub.id });
-      expect(three.se_puede_crear).toBe(false);
-      expect(three.falta).toEqual(['Fotos: Hacen falta al menos 4 fotos en cada medida: 0,50 tiene 3 fotos. Elegilas en Organización de multimedia.']);
-      await expect(run('create_in_channel', { cuenta, publicacion: pub.id, tipo: 'clasica', precio: 80000, cantidades: [{ medida: 'STD', cantidad: 2 }, { medida: '0,50', cantidad: 5 }] })).rejects.toThrow(
-        'Hacen falta al menos 4 fotos en cada medida',
-      );
-      expect(calls.filter((c) => c.path === '/items')).toEqual([]);
-
-      // Con una más para la 0,50, las dos tienen 4: ya se puede.
-      await saveMedia(db, { accountId, publicationId: pub.id, refs: [...shared, { kind: 'edit', editId: box, variants: [half] }] });
+      const [front, side, general] = [await correctedPhoto('frente.jpg'), await correctedPhoto('costado.jpg'), await correctedPhoto('general.jpg')];
+      await saveMedia(db, {
+        accountId,
+        publicationId: pub.id,
+        refs: [
+          { kind: 'asset', url: 'https://otra/foto.jpg' },
+          { kind: 'edit', editId: front },
+          { kind: 'edit', editId: side },
+          { kind: 'edit', editId: general, variants: [std] },
+        ],
+      });
       const step = await run('get_create_step', { cuenta, publicacion: pub.id });
       expect(step).toMatchObject({
         canal: 'Mercado Libre',
@@ -1212,7 +1205,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
         medidas: [{ medida: 'STD' }, { medida: '0,50' }],
         tipos_de_publicacion: [{ tipo: 'clasica' }, { tipo: 'premium' }],
       });
-      expect(step.revision.find((r: { dato: string }) => r.dato === 'Fotos')).toMatchObject({ listo: true, detalle: 'STD con 4 fotos y 0,50 con 4 fotos.' });
+      expect(step.revision.find((r: { dato: string }) => r.dato === 'Fotos')).toMatchObject({ listo: true, detalle: 'STD con 4 fotos y 0,50 con 3 fotos.' });
       expect(calls.filter((c) => c.path === '/items')).toEqual([]);
 
       // Lo que no cierra no llega al canal.
@@ -1245,7 +1238,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
       const posts = calls.filter((c) => c.path === '/items').map((c) => c.body as Record<string, unknown>);
       expect(posts.map((p) => [p.available_quantity, (p.pictures as unknown[]).length])).toEqual([
         [2, 4],
-        [5, 4],
+        [5, 3],
       ]);
       expect(await db.publication.count({ where: { productId, externalId: { in: ['MLA900', 'MLA901'] } } })).toBe(2);
       // Ya no queda nada para crear.
@@ -1349,7 +1342,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
       await withPackage(pub.id);
       await saveMedia(db, { accountId, publicationId: pub.id, refs: [{ kind: 'asset', url: 'https://otra/foto.jpg' }] });
       const rejected = 'sku:RECHAZAR medida:0.50';
-      const result = await createInChannel(db, { minPhotos: 1, accountId, publicationId: pub.id, price: 80000, quantities: { [std]: 2, [rejected]: 5 }, listingType: 'clasica', userId: null });
+      const result = await createInChannel(db, { accountId, publicationId: pub.id, price: 80000, quantities: { [std]: 2, [rejected]: 5 }, listingType: 'clasica', userId: null });
       expect(result.created).toEqual([{ label: 'STD', externalId: 'MLA900' }]);
       expect(result.warnings).toEqual([expect.stringContaining('La medida 0,50 no se creó')]);
       const other = await db.publication.findFirstOrThrow({ where: { productId, variantKey: rejected } });
@@ -1357,14 +1350,14 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
       expect(await db.channelSyncChange.findFirst({ where: { publicationId: other.id, kind: 'CREATE_FAILED' } })).not.toBeNull();
 
       // Desde cualquiera de las dos se ve lo que falta: solo la 0,50.
-      const info = await createChecks(db, { minPhotos: 1, accountId, publicationId: pub.id });
+      const info = await createChecks(db, { accountId, publicationId: pub.id });
       expect(info.measures).toEqual([{ key: rejected, label: '0,50', price: null }]);
       expect(info.published).toEqual([{ label: 'STD', externalId: 'MLA900' }]);
       expect(info.checks.find((c) => c.label === 'Medidas')).toMatchObject({ ok: true, detail: 'Falta crear 0,50, en la familia de STD, que ya está publicada.' });
       await db.productVariant.updateMany({ where: { productId, measure: '0,50' }, data: { sku: 'SP-414' } });
       await db.publication.update({ where: { id: other.id }, data: { variantKey: 'sku:SP-414 medida:0.50' } });
       calls.length = 0;
-      const again = await createInChannel(db, { minPhotos: 1, accountId, publicationId: other.id, price: 80000, quantities: { 'sku:SP-414 medida:0.50': 5 }, listingType: 'clasica', userId: null });
+      const again = await createInChannel(db, { accountId, publicationId: other.id, price: 80000, quantities: { 'sku:SP-414 medida:0.50': 5 }, listingType: 'clasica', userId: null });
       expect(again.created).toEqual([{ label: '0,50', externalId: 'MLA901' }]);
       expect(calls.filter((c) => c.path === '/items')).toHaveLength(1);
     });
@@ -1374,7 +1367,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
       const pub = await db.publication.create({ data: { productId, storeId, title: 'Subconjunto Peugeot 1.6 SP-413', channelStatus: 'UNPUBLISHED' } });
       await withPackage(pub.id);
       await saveMedia(db, { accountId, publicationId: pub.id, refs: [{ kind: 'asset', url: 'https://otra/foto.jpg' }] });
-      const result = await createInChannel(db, { minPhotos: 1, accountId, publicationId: pub.id, price: 80000, quantity: 3, listingType: 'clasica', userId: null });
+      const result = await createInChannel(db, { accountId, publicationId: pub.id, price: 80000, quantity: 3, listingType: 'clasica', userId: null });
       expect(result).toMatchObject({ externalId: 'MLA900', confirmed: true });
       const post = calls.find((c) => c.path === '/items')!.body as Record<string, unknown>;
       expect(post).toMatchObject({ family_name: 'Subconjunto Peugeot 1.6 SP-413', available_quantity: 3 });
