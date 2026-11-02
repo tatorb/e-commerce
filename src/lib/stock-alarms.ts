@@ -104,17 +104,41 @@ const STATE_SELECT = {
 
 type StateRow = Prisma.ProductStockGetPayload<{ select: typeof STATE_SELECT }>;
 
-/** El producto y la medida, como se nombran en la tarea: "Aros de pistón 0.50". */
-function whatOf(row: StateRow): string {
+/** El producto, el SKU y la medida de la alarma, para saber qué pedir a fábrica. */
+export type AlarmItem = { name: string; sku: string | null; measure: string | null };
+
+export function alarmItem(row: Pick<StateRow, 'key' | 'label'> & { product: { name: string; variants: VariantLike[] } }): AlarmItem {
   const slots = stockSlots(row.product.variants);
-  const label = slots.length > 1 ? (slots.find((s) => s.key === row.key)?.label ?? row.label) : '';
-  return label ? `${row.product.name}, medida ${label}` : row.product.name;
+  const slot = slots.find((s) => s.key === row.key);
+  // Con una sola medida en la ficha, la clave es la vacía: el SKU y la medida son los de esa.
+  const only = row.product.variants.length === 1 ? row.product.variants[0] : null;
+  return {
+    name: row.product.name,
+    sku: slot?.sku ?? only?.sku ?? null,
+    measure: slots.length > 1 ? (slot?.label ?? (row.label || null)) : (only?.measure ?? null),
+  };
 }
 
+/** El producto, el SKU y la medida en una línea: "Subconjunto SP-900 · SKU SP-900-50 · medida 0.50". */
+export function alarmItemText(item: AlarmItem): string {
+  return [item.name, item.sku ? `SKU ${item.sku}` : null, item.measure ? `medida ${item.measure}` : null].filter(Boolean).join(' · ');
+}
+
+/** Una publicación que vende la medida: su título y su código en el canal. */
+export type AlarmListing = { title: string; externalId: string | null; channelName: string };
+
 /** El título y la descripción de la tarea según cómo está la medida. */
-export function alarmTaskText(row: StateRow, kind: AlarmEvent['kind']): { title: string; description: string } {
+export function alarmTaskText(row: StateRow, kind: AlarmEvent['kind'], listings: AlarmListing[] = []): { title: string; description: string } {
   const tz = row.product.account.timezone;
-  const what = whatOf(row);
+  const item = alarmItem(row);
+  const what = alarmItemText(item);
+  // Arriba de todo, lo que hay que pedir a fábrica y dónde se vende.
+  const head = [
+    `Producto: ${item.name}`,
+    `SKU: ${item.sku ?? 'sin cargar en la ficha'}`,
+    ...(item.measure ? [`Medida: ${item.measure}`] : []),
+    ...listings.map((l) => `En ${l.channelName}: ${l.title}${l.externalId ? ` (${l.externalId})` : ''}`),
+  ].join('\n');
   const real = row.quantity;
   const missing = owed(real);
   const closing = 'Esta tarea se cierra sola al cargar el stock en el producto.';
@@ -125,10 +149,10 @@ export function alarmTaskText(row: StateRow, kind: AlarmEvent['kind']): { title:
   if (!row.outSince && real === 1) {
     return {
       title: `Queda 1: ${what}`,
-      description: `Queda 1 unidad de ${what}. En los canales se sigue viendo ${SHOWN_WHEN_SHORT}, así que no se nota. Si se vende esta, la app avisa para reponer. ${closing}`,
+      description: `${head}\n\nQueda 1 unidad. En los canales se sigue viendo ${SHOWN_WHEN_SHORT}, así que no se nota. Si se vende esta, la app avisa para reponer. ${closing}`,
     };
   }
-  const head = missing > 0 ? owedText(missing).toLowerCase() : 'se vendió la última';
+  const state = missing > 0 ? owedText(missing).toLowerCase() : 'se vendió la última';
   const parts: string[] = [];
   if (row.outSince) parts.push(`Se quedó sin stock el ${when(row.outSince)}.`);
   if (missing > 0) parts.push(`Se ${missing === 1 ? 'vendió 1' : `vendieron ${missing}`} sin tenerla${missing === 1 ? '' : 's'}: hay que comprar${missing === 1 ? 'la' : 'las'} en fábrica para entregar${missing === 1 ? 'la' : 'las'}.`);
@@ -141,19 +165,37 @@ export function alarmTaskText(row: StateRow, kind: AlarmEvent['kind']): { title:
     parts.push(`El ${when(deadlines.cutAt)} se pausa la publicación.`);
   }
   parts.push(closing);
-  const title = cut ? `Reponer y reactivar: ${what}, ${head}` : `Reponer: ${what}, ${head}`;
-  return { title: title.slice(0, TASK_TITLE_MAX), description: parts.join(' ') };
+  const title = cut ? `Reponer y reactivar: ${what}, ${state}` : `Reponer: ${what}, ${state}`;
+  return { title: title.slice(0, TASK_TITLE_MAX), description: `${head}\n\n${parts.join(' ')}` };
 }
 
-/** Las publicaciones de la tarea: las del producto y las de sus combos, las primeras. */
-async function taskPublications(db: Db, productId: string): Promise<string[]> {
-  const rows = await db.publication.findMany({
-    where: { OR: [{ productId }, { product: { comboItems: { some: { productId } } } }], channelStatus: { notIn: ['CLOSED', 'DELETED'] } },
-    orderBy: { createdAt: 'asc' },
-    take: 20,
-    select: { id: true },
-  });
-  return rows.map((r) => r.id);
+/** Las claves de stock de las medidas que vende la publicación. */
+function soldKeys(pub: Parameters<typeof planFor>[0]): string[] {
+  const source = sourceOf(pub.product);
+  const variations = parseVariations(pub.channelCopy?.variations);
+  const measures = variations.length === 0 ? [singleMeasure(pub.product, pub.channelCopy, pub.variantKey)] : variations;
+  return measures.flatMap((v) => unitParts(source, v)?.[0]?.key ?? []);
+}
+
+/**
+ * Las publicaciones de la tarea: las del producto que venden esa medida, con
+ * su título y su código para la descripción, y después las de sus combos.
+ */
+async function taskPublications(db: Db, productId: string, key: string): Promise<{ ids: string[]; listings: AlarmListing[] }> {
+  const live = { channelStatus: { notIn: ['CLOSED', 'DELETED'] as ('CLOSED' | 'DELETED')[] } };
+  const [own, combos] = await Promise.all([
+    db.publication.findMany({ where: { productId, ...live }, orderBy: { createdAt: 'asc' }, take: 50, select: PLAN_SELECT }),
+    db.publication.findMany({ where: { product: { comboItems: { some: { productId } } }, ...live }, orderBy: { createdAt: 'asc' }, take: 20, select: { id: true } }),
+  ]);
+  const selling = own.filter((p) => soldKeys(p).includes(key));
+  return {
+    ids: [...selling.map((p) => p.id), ...combos.map((p) => p.id)].slice(0, 20),
+    listings: selling.slice(0, 10).map((p) => ({
+      title: titleOrUntitled(p.title),
+      externalId: p.externalId,
+      channelName: getChannelAdapter(p.store.channel.kind, p.store.channel.name).name,
+    })),
+  };
 }
 
 /**
@@ -177,6 +219,7 @@ async function announceOne(db: Db, e: AlarmEvent, now: Date): Promise<void> {
   const accountId = row.product.accountId;
   const autoKey = stockAlarmKey(e.productId, e.key);
   // Se cierra al cargar stock (2 o más), al cargar 0 a mano (dice que no hay) o al apagar la opción sin nada que entregar.
+  const pubs = await taskPublications(db, e.productId, e.key);
   const settled = e.kind === 'off' ? row.quantity >= 0 : e.kind === 'restock' && !row.outSince && (row.quantity >= 2 || row.quantity <= 0);
   const notify = e.kind !== 'restock' && e.kind !== 'off';
 
@@ -187,7 +230,7 @@ async function announceOne(db: Db, e: AlarmEvent, now: Date): Promise<void> {
       if (open) await tx.task.update({ where: { id: open.id }, data: { status: 'DONE', doneAt: now } });
       return null;
     }
-    const text = alarmTaskText(row, e.kind);
+    const text = alarmTaskText(row, e.kind, pubs.listings);
     const cutDay = row.outSince && !row.cutAt ? dueDate(dayIn(cushionDeadlines(row.outSince).cutAt, row.product.account.timezone)) : null;
     const data = {
       title: text.title,
@@ -209,7 +252,7 @@ async function announceOne(db: Db, e: AlarmEvent, now: Date): Promise<void> {
         ...data,
         autoKey,
         assignees: { create: admins.map((a) => ({ userId: a.id })) },
-        publications: { create: (await taskPublications(db, e.productId)).map((publicationId) => ({ publicationId })) },
+        publications: { create: pubs.ids.map((publicationId) => ({ publicationId })) },
       },
       select: { id: true },
     });

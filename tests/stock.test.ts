@@ -481,6 +481,9 @@ describe.skipIf(!url)('el stock en la base', () => {
     expect((await alarm()).outSince).toEqual(expect.any(Date));
     expect((await task())!.title).toBe('Reponer: Bulón de tapa, se vendió la última');
     expect((await task())!.description).toContain('se pausa la publicación');
+    // Arriba, lo que hay que pedir y dónde se vende; la tarea queda en sus publicaciones y en la del kit.
+    expect((await task())!.description).toMatch(/^Producto: Bulón de tapa\nSKU: sin cargar en la ficha\nEn Mercado Libre: Publicación p1 \(MLA1000001\)\nEn Mercado Libre: Publicación p2 \(MLA1000002\)/);
+    expect(await db.taskPublication.count({ where: { task: { autoKey: `stock:${ids.bulon}:` } } })).toBe(4);
     expect(pushedTo()).toEqual(['MLA1000001=6']);
     expect(await db.task.count({ where: { autoKey: { startsWith: 'stock:' } } })).toBe(1);
 
