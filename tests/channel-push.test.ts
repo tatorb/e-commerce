@@ -10,7 +10,9 @@ import { discardDrafts, readOne, runSyncStep, startSync } from '@/lib/channel-sy
 import { encrypt } from '@/lib/crypto';
 import { savePriceDecision } from '@/lib/pricing';
 import { readPromotions } from '@/lib/channel-promotions';
-import { cancelCampaign, queueCampaign, sendCampaignNow } from '@/lib/channel-campaigns';
+import { cancelCampaign, familyCampaignAction, queueCampaign, sendCampaignNow } from '@/lib/channel-campaigns';
+import { familyCampaigns, splitText } from '@/domain/family-campaigns';
+import { variantKey } from '@/domain/media';
 import { formatPrice } from '@/domain/money';
 import { saveQuantities } from '@/lib/quantities';
 import { advanceStep } from '@/domain/pipeline';
@@ -710,8 +712,8 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     expect(step.pestanas[0].lo_que_acepta_el_canal).toMatchObject({
       descuento_propio: { se_puede: true, precio_con_descuento_desde: 20, precio_con_descuento_hasta: 240_000 },
       campanas: [
-        expect.objectContaining({ publicacion: 'MLA1', tipo: 'Co-fondeada automática', estado: 'esta_adentro', pone_el_canal_pct: 4 }),
-        expect.objectContaining({ nombre: 'Hot Sale', estado: 'la_invitan', hasta: '2026-11-11T02:59:59.000Z' }),
+        expect.objectContaining({ tipo: 'Co-fondeada automática', pone_el_canal_pct: 4, medidas: [expect.objectContaining({ publicacion: 'MLA1', estado: 'esta_adentro' })] }),
+        expect.objectContaining({ nombre: 'Hot Sale', hasta: '2026-11-11T02:59:59.000Z', medidas: [expect.objectContaining({ estado: 'la_invitan' })] }),
       ],
     });
     // Solo lee: no cambia nada en el canal.
@@ -868,19 +870,26 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     const step = await run('get_price_step', { cuenta: 'prueba', publicacion: p.id });
     const campaigns = step.pestanas[0].lo_que_acepta_el_canal.campanas;
     const deal = campaigns.find((c: { nombre: string }) => c.nombre === 'Semana del repuesto');
-    expect(deal).toMatchObject({ estado: 'la_invitan', como_sumarse: 'eligiendo_el_precio', precio_que_acepta: { desde: 50, hasta: 90, sugerido: 85 }, frena_el_descuento_propio: true });
-    expect(campaigns.find((c: { nombre: string }) => c.nombre === '3x2')).toMatchObject({ como_sumarse: 'desde_el_canal' });
-    expect(campaigns.find((c: { nombre: string }) => c.nombre === 'Compartida vieja')).toMatchObject({ estado: 'esta_adentro', se_puede_salir: true });
+    expect(deal).toMatchObject({ frena_el_descuento_propio: true, medidas: [{ estado: 'la_invitan', como_sumarse: 'eligiendo_el_precio', precio_que_acepta: { desde: 50, hasta: 90, sugerido: 85 } }] });
+    // Sin familia, no hay estado por medida ni familia partida.
+    expect(deal).not.toHaveProperty('estado_por_medida');
+    expect(step).not.toHaveProperty('familia_partida');
+    expect(campaigns.find((c: { nombre: string }) => c.nombre === '3x2').medidas[0]).toMatchObject({ como_sumarse: 'desde_el_canal' });
+    expect(campaigns.find((c: { nombre: string }) => c.nombre === 'Compartida vieja').medidas[0]).toMatchObject({ estado: 'esta_adentro', se_puede_salir: true });
 
     // Un precio fuera de lo que acepta no queda pedido.
     await expect(run('choose_campaign', { cuenta: 'prueba', publicacion: p.id, campana: deal.campana, accion: 'sumarse', precio: 95 })).rejects.toThrow('Es más alto de lo que acepta el canal.');
     await expect(run('choose_campaign', { cuenta: 'prueba', publicacion: p.id, campana: 'otra', accion: 'sumarse' })).rejects.toThrow('ya no aparece');
     const chosen = await run('choose_campaign', { cuenta: 'prueba', publicacion: p.id, campana: deal.campana, accion: 'sumarse', precio: 85 });
-    expect(chosen).toMatchObject({ en_por_subir: `Sumarse a Semana del repuesto (Campaña tradicional), el comprador paga ${formatPrice(85)}`, aviso: expect.stringContaining('frena el descuento propio') });
+    expect(chosen).toMatchObject({
+      en_por_subir: `Sumarse a Semana del repuesto (Campaña tradicional), el comprador paga ${formatPrice(85)}`,
+      publicacion: 'MLA1',
+      aviso_descuento: expect.stringContaining('frena el descuento propio'),
+    });
     expect(writes).toEqual([]);
     // get_price_step lo muestra pedido.
     const after = await run('get_price_step', { cuenta: 'prueba', publicacion: p.id });
-    expect(after.pestanas[0].lo_que_acepta_el_canal.campanas.find((c: { nombre: string }) => c.nombre === 'Semana del repuesto').en_por_subir).toContain('Sumarse');
+    expect(after.pestanas[0].lo_que_acepta_el_canal.campanas.find((c: { nombre: string }) => c.nombre === 'Semana del repuesto').medidas[0].en_por_subir).toContain('Sumarse');
 
     // push_prices lo manda, aunque no haya precio por subir, y vuelve a consultar al canal: ya está adentro.
     const pushed = await run('push_prices', { cuenta: 'prueba' });
@@ -896,6 +905,117 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     ]);
     expect(pushed.subidas[0].aviso).toBeUndefined();
     expect(writes.map((w) => w.body)).toEqual([{ promotion_id: 'P-DEAL', promotion_type: 'DEAL', deal_price: 85 }]);
+  });
+
+  /** MLA1 y MLA2 como dos medidas de una familia, STD y 0,50, las dos invitadas a la misma campaña, cada una con su rango. */
+  async function familyWithCampaigns() {
+    withCampaigns();
+    await db.productVariant.createMany({ data: [{ productId, measure: 'STD', position: 0 }, { productId, measure: '0,50', position: 1 }] });
+    const [p1, p2] = [await pub('MLA1'), await pub('MLA2')];
+    await db.publication.update({ where: { id: p1.id }, data: { variantKey: variantKey({ sku: null, measure: 'STD' }) } });
+    await db.publication.update({ where: { id: p2.id }, data: { variantKey: variantKey({ sku: null, measure: '0,50' }) } });
+    await db.listingFamily.create({ data: { storeId, productId, channelFamilyId: 'FAM-C', leadId: p1.id, members: { connect: [{ id: p1.id }, { id: p2.id }] } } });
+    items.MLA2.campaigns = [{ id: 'P-DEAL', type: 'DEAL', status: 'candidate', price: 0, original_price: 100, name: 'Semana del repuesto' }];
+    items.MLA2.campaignDetails = { 'P-DEAL': { id: 'MLA2', status: 'candidate', price: 0, original_price: 100, min_discounted_price: 50, max_discounted_price: 80, suggested_discounted_price: 75 } };
+    return [p1, p2];
+  }
+
+  it('en una familia, la campaña se pide para cada medida con su propio rango; la que no entra lo dice; push_prices sube las dos', async () => {
+    process.env.DATABASE_URL ??= url;
+    const { PRICE_TOOLS } = await import('@/lib/mcp/price-tools');
+    const tool = (name: string) => PRICE_TOOLS.find((t) => t.name === name)!;
+    await db.user.create({ data: { id: 'u7', name: 'Persona', email: 'persona7@example.com' } });
+    const ctx: McpContext = { db, userId: 'u7', access: { isAdmin: true, permissions: {}, accountIds: [] }, baseUrl: 'https://app.ejemplo.com' };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const run = async (name: string, args: Record<string, unknown>): Promise<any> => tool(name).run(ctx, tool(name).input.parse(args));
+    const [p1, p2] = await familyWithCampaigns();
+
+    const step = await run('get_price_step', { cuenta: 'prueba', publicacion: p1.id });
+    const deal = step.pestanas[0].lo_que_acepta_el_canal.campanas.find((c: { nombre: string }) => c.nombre === 'Semana del repuesto');
+    expect(deal).toMatchObject({
+      estado_por_medida: 'STD: la invitan · 0,50: la invitan',
+      medidas: [
+        { publicacion: 'MLA1', medida: 'STD', estado: 'la_invitan', precio_que_acepta: { desde: 50, hasta: 90 } },
+        { publicacion: 'MLA2', medida: '0,50', estado: 'la_invitan', precio_que_acepta: { desde: 50, hasta: 80 } },
+      ],
+    });
+    // La Compartida solo invita a la STD.
+    expect(step.pestanas[0].lo_que_acepta_el_canal.campanas.find((c: { nombre: string }) => c.nombre === 'Compartida').medidas[1]).toMatchObject({ medida: '0,50', estado: 'no_la_invitan' });
+    // La Compartida vieja tiene solo a la STD adentro: la familia está partida.
+    expect(step.familia_partida).toEqual(['Compartida vieja: STD adentro, 0,50 no la invitan']);
+
+    // A $ 85 la 0,50 no entra: queda pedida solo la STD, y lo avisa.
+    const chosen = await run('choose_campaign', { cuenta: 'prueba', publicacion: p1.id, campana: deal.campana, accion: 'sumarse', precio: 85 });
+    expect(chosen.medidas).toEqual([
+      { publicacion: 'MLA1', medida: 'STD', resultado: 'pedido' },
+      { publicacion: 'MLA2', medida: '0,50', resultado: 'no_entra', motivo: `Medida 0,50: Es más alto de lo que acepta el canal. Acepta de ${formatPrice(50)} a ${formatPrice(80)}.` },
+    ]);
+    expect(chosen.aviso).toContain('la familia va a quedar partida en Semana del repuesto');
+    // A $ 75 entran las dos, cada una con su pedido.
+    const both = await run('choose_campaign', { cuenta: 'prueba', publicacion: p2.id, campana: deal.campana, accion: 'sumarse', precio: 75 });
+    expect(both.medidas.map((m: { resultado: string }) => m.resultado)).toEqual(['pedido', 'pedido']);
+    expect(both).not.toHaveProperty('aviso');
+    const requests = await db.campaignRequest.findMany();
+    expect(new Map(requests.map((r) => [r.publicationId, Number(r.price)]))).toEqual(new Map([[p1.id, 75], [p2.id, 75]]));
+    expect(writes).toEqual([]);
+
+    // push_prices con una sola medida sube las dos, cada una con su medida. El canal rechaza la 0,50: la familia queda partida.
+    items.MLA2.campaignRejected = 'Item is not eligible';
+    const pushed = await run('push_prices', { cuenta: 'prueba', publicaciones: [p1.id] });
+    expect(pushed.subidas).toEqual([
+      expect.objectContaining({ publicacion: 'MLA1', medida: 'STD', resultado: 'subido', campanas: [{ campana: 'Semana del repuesto', accion: 'sumarse', resultado: 'hecho', estado_en_el_canal: 'activa' }] }),
+      expect.objectContaining({ publicacion: 'MLA2', medida: '0,50', resultado: 'rechazado', campanas: [expect.objectContaining({ campana: 'Semana del repuesto', resultado: 'rechazado', motivo: expect.stringContaining('Item is not eligible') })] }),
+    ]);
+    expect(writes.map((w) => `${w.method} ${w.path} ${(w.body as { deal_price?: number }).deal_price}`)).toEqual(['POST /seller-promotions/items/MLA1 75', 'POST /seller-promotions/items/MLA2 75']);
+    // Solo avisa de las campañas que se mandaron.
+    expect(pushed.familia_partida).toEqual(['Semana del repuesto: STD adentro, 0,50 la invitan']);
+    expect(pushed.aviso_familia).toBeTruthy();
+    const after = await run('get_price_step', { cuenta: 'prueba', publicacion: p1.id });
+    expect(after.pestanas[0].lo_que_acepta_el_canal.campanas.find((c: { nombre: string }) => c.nombre === 'Semana del repuesto')).toMatchObject({
+      estado_por_medida: 'STD: adentro · 0,50: la invitan',
+      familia_partida: true,
+    });
+    expect(after.familia_partida).toEqual(['Semana del repuesto: STD adentro, 0,50 la invitan', 'Compartida vieja: STD adentro, 0,50 no la invitan']);
+
+    // Con la 0,50 aceptada, las dos quedan adentro y ya no está partida.
+    items.MLA2.campaignRejected = undefined;
+    await run('choose_campaign', { cuenta: 'prueba', publicacion: p1.id, campana: deal.campana, accion: 'sumarse', precio: 75 });
+    const again = await run('push_prices', { cuenta: 'prueba', publicaciones: [p2.id] });
+    expect(again.subidas.map((x: { medida: string; resultado: string }) => [x.medida, x.resultado])).toEqual([['0,50', 'subido']]);
+    expect(again.salteadas).toEqual([{ publicacion: 'MLA1', motivo: 'No tiene precio, cuotas, descuento ni campañas por subir.' }]);
+    expect(again).not.toHaveProperty('familia_partida');
+    const last = await run('get_price_step', { cuenta: 'prueba', publicacion: p1.id });
+    expect(last.pestanas[0].lo_que_acepta_el_canal.campanas.find((c: { nombre: string }) => c.nombre === 'Semana del repuesto')).toMatchObject({ estado_por_medida: 'STD: adentro · 0,50: adentro' });
+    expect(last.familia_partida).toEqual(['Compartida vieja: STD adentro, 0,50 no la invitan']);
+  });
+
+  it('en una familia, mandar ya: si el canal rechaza una medida, la otra queda adentro y la familia queda partida', async () => {
+    const [p1, p2] = await familyWithCampaigns();
+    items.MLA2.campaignRejected = 'Item is not eligible';
+    const read = await readPromotions(db, { accountId, publicationIds: [p1.id], family: true });
+    if (!read.ok) throw new Error(read.error);
+    // Lee también a la otra medida, con su nombre.
+    expect(read.read.map((r) => r.label)).toEqual(['STD']);
+    expect(read.family.map((r) => [r.publicationId, r.label])).toEqual([[p2.id, '0,50']]);
+    const key = read.read[0].promotions.campaigns.find((c) => c.name === 'Semana del repuesto')!.group!;
+    const r = await familyCampaignAction(db, { accountId, publicationIds: [p1.id, p2.id], campaign: key, action: 'join', price: 70, mode: 'now', userId: null });
+    expect(r.results.map((x) => [x.label, x.result])).toEqual([
+      ['STD', 'hecho'],
+      ['0,50', 'rechazado'],
+    ]);
+    expect(r.results[1].message).toContain('Item is not eligible');
+    expect(writes.map((w) => w.path)).toEqual(['/seller-promotions/items/MLA1', '/seller-promotions/items/MLA2']);
+    const again = await readPromotions(db, { accountId, publicationIds: [p1.id], family: true });
+    if (!again.ok) throw new Error(again.error);
+    const groups = familyCampaigns([...again.read, ...again.family].map((m) => ({ publicationId: m.publicationId, label: m.label, campaigns: m.promotions.campaigns })));
+    expect(groups.filter((g) => g.split).map(splitText)).toContain('Semana del repuesto: STD adentro, 0,50 la invitan');
+
+    // Salir va para todas las medidas que están adentro.
+    const left = await familyCampaignAction(db, { accountId, publicationIds: [p1.id], campaign: key, action: 'leave', price: null, mode: 'queue', userId: null });
+    expect(left.results.map((x) => [x.label, x.result])).toEqual([
+      ['STD', 'pedido'],
+      ['0,50', 'ya_estaba'],
+    ]);
   });
 
   it('Claude: si el canal acepta la campaña pero todavía no la muestra, queda pendiente; el tope con centavos entra redondeado para abajo', async () => {

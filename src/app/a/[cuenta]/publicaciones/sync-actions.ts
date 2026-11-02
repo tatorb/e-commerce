@@ -23,7 +23,8 @@ import { plannedText } from '@/lib/stock-plan';
 import { settleReactivations } from '@/lib/restock';
 import { saveFamilyMedia } from '@/lib/family-media';
 import { familyMemberIds } from '@/domain/family-members';
-import { CampaignError, sendCampaignNow, type CampaignChoice } from '@/lib/channel-campaigns';
+import { CampaignError, familyCampaignAction, sendCampaignNow, type CampaignChoice } from '@/lib/channel-campaigns';
+import { familyCampaignInput, type FamilyCampaignActionResult, type FamilyCampaignInput } from '@/lib/family-campaign-input';
 
 // Lo que se hace desde la página de una publicación y desde Por subir: cambiar
 // el borrador, subirlo al canal, descartarlo y volver a leer del canal.
@@ -337,4 +338,24 @@ export async function sendCampaignNowAction(accountSlug: string, publicationId: 
       throw e;
     }
   });
+}
+
+/** Desde la página de la publicación: sumarse a una campaña o salir se manda en el momento, para todas las medidas que pueden. */
+export async function sendFamilyCampaignNowAction(accountSlug: string, input: FamilyCampaignInput): Promise<FamilyCampaignActionResult> {
+  const parsed = familyCampaignInput.safeParse(input);
+  const does = parsed.success && parsed.data.action === 'leave' ? 'Salió de una campaña del canal' : 'Se sumó a una campaña del canal';
+  return act<FamilyCampaignActionResult>(accountSlug,
+    { section: 'subir', does, publicationId: parsed.success ? parsed.data.publicationIds[0] : null, targetOf: (r) => (r.ok ? r.name : null) },
+    async ({ user, account }): Promise<FamilyCampaignActionResult> => {
+      if (!parsed.success) return { ok: false as const, error: 'Revisá la campaña y el precio.' };
+      try {
+        const r = await familyCampaignAction(prisma, { accountId: account.id, ...parsed.data, mode: 'now', userId: user.id });
+        for (const x of r.results) if (x.result === 'hecho') refresh(accountSlug, x.publicationId);
+        return { ok: true as const, name: r.name, results: r.results };
+      } catch (e) {
+        if (e instanceof CampaignError || e instanceof ConnectError) return { ok: false as const, error: e.message };
+        throw e;
+      }
+    },
+  );
 }

@@ -19,10 +19,12 @@ import {
   type PricingKey,
   type PricingParams,
 } from '@/domain/pricing';
-import { campaignOutcomeState, campaignPrice, campaignPriceProblem, campaignRevenue, combinedBounds, discountOptions, type CampaignOutcomeState } from '@/domain/promotions';
+import { campaignOutcomeState, campaignPrice, campaignRevenue, combinedBounds, discountOptions, type CampaignOutcomeState } from '@/domain/promotions';
 import { logActivity } from '@/lib/activity';
 import { readPromotions, type PromotionsResult } from '@/lib/channel-promotions';
-import { CampaignError, campaignText, queueCampaign, type CampaignOutcome } from '@/lib/channel-campaigns';
+import { CampaignError, campaignText, familyCampaignAction, type CampaignOutcome } from '@/lib/channel-campaigns';
+import { familyCampaigns, membersText, splitText } from '@/domain/family-campaigns';
+import { measuresOf } from '@/lib/media';
 import { pushDrafts, PushError } from '@/lib/channel-push';
 import { loadPricingSettings, loadPriceStep, PricingError, savePriceDecision, savePricingSettings, type PriceGroupData } from '@/lib/pricing';
 import { listToPush } from '@/lib/queries/sync';
@@ -173,13 +175,17 @@ function groupForClaude(g: PriceGroupData, params: PricingParams, ref: (id: stri
 
 const CAMPAIGN_STATUS = { invited: 'la_invitan', scheduled: 'programada', active: 'esta_adentro' } as const;
 
-/** Lo que el canal deja hacer hoy con el descuento de una pestaña, como lo ve Claude. */
-function promotionsForClaude(r: PromotionsResult, listPrice: number | null, range: { min: number; max: number } | null) {
+/** Lo que el canal deja hacer hoy con el descuento de una pestaña, y las campañas de toda la familia, como lo ve Claude. */
+function promotionsForClaude(r: PromotionsResult, tabIds: string[], listPrice: number | null, range: { min: number; max: number } | null) {
   if (!r.ok) return { no_se_pudo_consultar: r.error };
-  if (r.read.length === 0) return { aviso: `Todavía no está publicada en ${r.channelName}: se consulta cuando esté.` };
-  const bounds = combinedBounds(r.read.map((x) => x.promotions.discount));
+  const tab = r.read.filter((x) => tabIds.includes(x.publicationId));
+  if (tab.length === 0) return { aviso: `Todavía no está publicada en ${r.channelName}: se consulta cuando esté.` };
+  const bounds = combinedBounds(tab.map((x) => x.promotions.discount));
   const options = discountOptions(listPrice ?? 0, bounds, range);
-  const current = r.read.map((x) => x.promotions.current).find(Boolean) ?? null;
+  const current = tab.map((x) => x.promotions.current).find(Boolean) ?? null;
+  const measures = [...tab, ...r.read.filter((x) => !tabIds.includes(x.publicationId)), ...r.family];
+  const code = new Map(measures.map((m) => [m.publicationId, m.externalId]));
+  const several = measures.length > 1;
   return {
     descuento_propio: bounds
       ? {
@@ -198,30 +204,39 @@ function promotionsForClaude(r: PromotionsResult, listPrice: number | null, rang
         }
       : { se_puede: false },
     ...(current ? { descuento_puesto: { precio_para_el_comprador: current.price, programado: current.scheduled } } : {}),
-    campanas: r.read.flatMap((x) =>
-      x.promotions.campaigns.map((c) => {
-        const queued = r.pending.find((q) => q.publicationId === x.publicationId && q.ref === c.ref);
-        return {
-          publicacion: x.externalId,
-          ...(c.ref ? { campana: c.ref } : {}),
-          nombre: c.name,
-          tipo: c.kind,
-          estado: CAMPAIGN_STATUS[c.status],
-          precio_para_el_comprador: c.price,
-          pone_el_canal_pct: c.channelPct,
-          pone_la_tienda_pct: c.sellerPct,
-          desde: c.start?.toISOString() ?? null,
-          hasta: c.finish?.toISOString() ?? null,
-          como_sumarse: c.join === 'price' ? 'eligiendo_el_precio' : c.join === 'accept' ? 'aceptando' : c.status === 'invited' ? 'desde_el_canal' : null,
-          ...(c.join === 'price' && c.range
-            ? { precio_que_acepta: { desde: c.range.minPrice, hasta: c.range.maxPrice, sugerido: c.range.suggestedPrice } }
-            : {}),
-          se_puede_salir: c.canLeave,
-          ...(c.pausesOwnDiscount ? { frena_el_descuento_propio: true } : {}),
-          ...(queued ? { en_por_subir: campaignText(queued), ...(queued.rejection ? { rechazo_anterior: queued.rejection } : {}) } : {}),
-        };
-      }),
-    ),
+    campanas: familyCampaigns(measures.map((m) => ({ publicationId: m.publicationId, label: m.label, campaigns: m.promotions.campaigns }))).map((g) => {
+      const lead = (g.members.find((m) => tabIds.includes(m.publicationId) && m.campaign) ?? g.members.find((m) => m.campaign))!.campaign!;
+      return {
+        campana: g.key,
+        nombre: g.name,
+        tipo: g.kind,
+        pone_el_canal_pct: lead.channelPct,
+        pone_la_tienda_pct: lead.sellerPct,
+        desde: lead.start?.toISOString() ?? null,
+        hasta: lead.finish?.toISOString() ?? null,
+        ...(lead.pausesOwnDiscount ? { frena_el_descuento_propio: true } : {}),
+        ...(several ? { estado_por_medida: membersText(g) } : {}),
+        ...(g.split ? { familia_partida: true } : {}),
+        medidas: g.members.map((m) => {
+          const c = m.campaign;
+          const queued = r.pending.find((q) => q.publicationId === m.publicationId && (q.ref === c?.ref || (q.name === g.name && q.kind === g.kind)));
+          return {
+            publicacion: code.get(m.publicationId),
+            ...(several ? { medida: m.label, comparte_el_precio_de_esta_pestana: tabIds.includes(m.publicationId) } : {}),
+            estado: c ? CAMPAIGN_STATUS[c.status] : 'no_la_invitan',
+            ...(c
+              ? {
+                  precio_para_el_comprador: c.price,
+                  como_sumarse: c.join === 'price' ? 'eligiendo_el_precio' : c.join === 'accept' ? 'aceptando' : c.status === 'invited' ? 'desde_el_canal' : null,
+                  ...(c.join === 'price' && c.range ? { precio_que_acepta: { desde: c.range.minPrice, hasta: c.range.maxPrice, sugerido: c.range.suggestedPrice } } : {}),
+                  se_puede_salir: c.canLeave,
+                }
+              : {}),
+            ...(queued ? { en_por_subir: campaignText(queued), ...(queued.rejection ? { rechazo_anterior: queued.rejection } : {}) } : {}),
+          };
+        }),
+      };
+    }),
     ...(r.unpublished > 0 ? { sin_consultar: `${r.unpublished} todavía no están en ${r.channelName}.` } : {}),
   };
 }
@@ -245,19 +260,24 @@ const getPriceStep = defineTool({
         p.externalId ?? p.id,
       ]),
     );
+    // Una sola consulta al canal para todas las pestañas y las demás medidas de la familia.
+    const promotions = await readPromotions(ctx.db, { accountId: account.id, publicationIds: data.groups.flatMap((g) => g.publicationIds), family: true });
+    const split = promotions.ok
+      ? familyCampaigns([...promotions.read, ...promotions.family].map((m) => ({ publicationId: m.publicationId, label: m.label, campaigns: m.promotions.campaigns }))).filter((g) => g.split)
+      : [];
     return {
       canal: data.channelName,
+      ...(split.length > 0
+        ? {
+            familia_partida: split.map(splitText),
+            aviso_familia: 'Las medidas de la familia no están todas en la misma campaña. Para emparejarlas, choose_campaign con esa campaña: se pide para todas las medidas a la vez.',
+          }
+        : {}),
       ...(data.discountRange ? { descuento_que_acepta_el_canal: { minimo_pct: data.discountRange.min, maximo_pct: data.discountRange.max } } : {}),
-      pestanas: await Promise.all(
-        data.groups.map(async (g) => ({
-          ...groupForClaude(g, params, (x) => codes.get(x) ?? x),
-          lo_que_acepta_el_canal: promotionsForClaude(
-            await readPromotions(ctx.db, { accountId: account.id, publicationIds: g.publicationIds }),
-            g.price,
-            data.discountRange,
-          ),
-        })),
-      ),
+      pestanas: data.groups.map((g) => ({
+        ...groupForClaude(g, params, (x) => codes.get(x) ?? x),
+        lo_que_acepta_el_canal: promotionsForClaude(promotions, g.publicationIds, g.price, data.discountRange),
+      })),
       costos: {
         de_la_cuenta: pricingForClaude(data.account),
         propios_del_producto: pricingForClaude(data.overrides),
@@ -379,11 +399,11 @@ const chooseCampaign = defineTool({
   section: 'pipeline',
   title: 'Sumarse a una campaña o salir',
   description:
-    'Deja en Por subir sumarse a una campaña del canal o salir de una, como los botones de la tarjeta Promociones del paso Precio y de la página de la publicación. La campaña es su campana en lo_que_acepta_el_canal de get_price_step. Para sumarse: si como_sumarse es eligiendo_el_precio, mandá precio, el precio para el comprador dentro de precio_que_acepta; si es aceptando, el precio lo pone el canal; si es desde_el_canal, no se puede desde la app. Para salir, se_puede_salir tiene que ser true. Devuelve el margen estimado con lo que recibe la tienda, que suma lo que pone el canal. Se manda al canal con push_prices o desde Por subir. Antes, mostrale a la persona la campaña, el precio y el margen, y esperá que confirme.',
+    'Deja en Por subir sumarse a una campaña del canal o salir de una, como los botones de la tarjeta Promociones del paso Precio y de la página de la publicación. La campaña es su campana en lo_que_acepta_el_canal.campanas de get_price_step. En una familia se pide para todas las medidas a la vez, cada una con su propia campaña del canal: en las que se suman eligiendo el precio, para las medidas que comparten el precio de la pestaña de la publicación (las de otro precio se suman pasando una publicación de su pestaña, con su precio), y el precio se revisa contra el rango de cada medida. Las de salir y las que se suman aceptando el precio del canal van para todas. Para sumarse: si como_sumarse es eligiendo_el_precio, mandá precio, el precio para el comprador dentro de precio_que_acepta; si es aceptando, el precio lo pone el canal; si es desde_el_canal, no se puede desde la app. Para salir, se_puede_salir tiene que ser true. Devuelve qué pasó con cada medida (pedido, ya_estaba, no_entra con el motivo, otro_precio) y el margen estimado con lo que recibe la tienda, que suma lo que pone el canal. Se manda al canal con push_prices o desde Por subir. Antes, mostrale a la persona la campaña, el precio, las medidas y el margen, y esperá que confirme.',
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg,
-    campana: z.string().min(1).max(500).describe('La campaña: su campana en lo_que_acepta_el_canal de get_price_step.'),
+    campana: z.string().min(1).max(500).describe('La campaña: su campana en lo_que_acepta_el_canal.campanas de get_price_step.'),
     accion: z.enum(['sumarse', 'salir']),
     precio: z.number().positive().max(999_999_999).optional().describe('El precio para el comprador, en pesos, en las campañas que se suman eligiendo el precio. Con centavos se redondea para abajo.'),
   }),
@@ -392,42 +412,50 @@ const chooseCampaign = defineTool({
   run: async (ctx, args) => {
     const account = await resolveAccount(ctx, args.cuenta);
     const id = await resolvePublication(ctx, account.id, args.publicacion);
-    const read = await readPromotions(ctx.db, { accountId: account.id, publicationIds: [id] });
-    if (!read.ok) throw new McpToolError(read.error);
-    const c = read.read[0]?.promotions.campaigns.find((x) => x.ref === args.campana);
-    if (!c) throw new McpToolError(`Esa campaña ya no aparece en ${read.channelName}: volvé a mirar get_price_step.`);
-    const name = c.name ?? c.kind;
-    if (args.accion === 'salir' && !c.canLeave) throw new McpToolError(`De ${name} no se puede salir desde la app: se hace en ${read.channelName}.`);
-    if (args.accion === 'sumarse' && !c.join) throw new McpToolError(`A ${name} no se puede sumar desde la app: se hace en ${read.channelName}.`);
-    const withPrice = args.accion === 'sumarse' && c.join === 'price';
-    if (withPrice) {
-      const problem = campaignPriceProblem(args.precio ?? 0, c.range, c.listPrice);
-      if (problem) throw new McpToolError(`${problem} ${c.range ? `${read.channelName} acepta de ${c.range.minPrice ?? '?'} a ${c.range.maxPrice ?? '?'}.` : ''}`.trim());
-    }
-    const price = withPrice ? campaignPrice(args.precio!) : null;
+    const step = await loadPriceStep(ctx.db, account.id, id);
+    // Las medidas que comparten el precio de la publicación: su pestaña del paso Precio.
+    const group = step?.groups.find((g) => g.publicationIds.includes(id));
+    const action = args.accion === 'sumarse' ? 'join' : 'leave';
     try {
-      const queued = await queueCampaign(ctx.db, {
+      const r = await familyCampaignAction(ctx.db, {
         accountId: account.id,
-        publicationId: id,
-        choice: { action: args.accion === 'sumarse' ? 'join' : 'leave', ref: c.ref!, name, kind: c.kind, price, pausesOwnDiscount: c.pausesOwnDiscount },
+        publicationIds: group?.publicationIds ?? [id],
+        campaign: args.campana,
+        action,
+        price: args.precio ?? null,
+        mode: 'queue',
         userId: ctx.userId,
       });
+      const queued = r.results.filter((x) => x.result === 'pedido');
+      const several = r.results.length > 1;
+      const medidas = r.results.map((x) => ({
+        publicacion: x.externalId,
+        ...(several ? { medida: x.label } : {}),
+        resultado: x.result,
+        ...(x.message ? { motivo: x.message } : {}),
+      }));
+      if (queued.length === 0) {
+        const why = r.results.map((x) => x.message).filter(Boolean).join(' ');
+        throw new McpToolError(`No quedó nada en Por subir. ${why}`.trim());
+      }
       // El margen, con lo que recibe la tienda: lo que paga el comprador más lo que pone el canal.
       let margin: number | null = null;
-      if (args.accion === 'sumarse') {
-        const step = await loadPriceStep(ctx.db, account.id, id);
-        const group = step?.groups.find((g) => g.publicationIds.includes(id));
-        const revenue = campaignRevenue({ price: price ?? c.price, channelPct: c.channelPct, listPrice: c.listPrice });
+      const price = queued.length > 0 && action === 'join' && r.lead.join === 'price' ? campaignPrice(args.precio!) : null;
+      if (action === 'join') {
+        const revenue = campaignRevenue({ price: price ?? r.lead.price, channelPct: r.lead.channelPct, listPrice: r.lead.listPrice });
         if (step && group?.cost && revenue !== null) {
           const plan = group.installments !== null && isInstallmentPlan(group.installments) ? group.installments : 0;
           margin = marginOf(revenue, group.cost, resolvePricing(step.account, step.overrides), plan);
         }
       }
+      const missing = r.results.filter((x) => x.result === 'no_entra' || x.result === 'otro_precio');
       return {
-        en_por_subir: campaignText(queued),
+        en_por_subir: campaignText({ action, name: r.name, kind: r.kind, price }),
+        ...(several ? { medidas } : { publicacion: medidas[0].publicacion }),
         ...(margin !== null ? { margen_estimado_pct: round(margin) } : {}),
-        ...(args.accion === 'sumarse' && c.pausesOwnDiscount
-          ? { aviso: `Mientras esté en esta campaña, ${read.channelName} frena el descuento propio: al subir, el descuento propio no se manda y se avisa.` }
+        ...(missing.length > 0 ? { aviso: `No todas las medidas quedaron pedidas: la familia va a quedar partida en ${r.name}. ${missing.map((x) => x.message).join(' ')}` } : {}),
+        ...(action === 'join' && r.lead.pausesOwnDiscount
+          ? { aviso_descuento: `Mientras esté en esta campaña, ${r.channelName} frena el descuento propio: al subir, el descuento propio no se manda y se avisa.` }
           : {}),
       };
     } catch (e) {
@@ -442,7 +470,7 @@ const pushPrices = defineTool({
   section: 'subir',
   title: 'Subir precios al canal',
   description:
-    'Manda al canal el precio publicado, el descuento y las cuotas sin interés que quedaron en Por subir, y sumarse o salir de las campañas pedidas (choose_campaign), como el botón de subir de Por subir, pero solo eso: lo demás que esté por subir (título, descripción, fotos) queda donde está; la descripción se sube con push_descriptions y el título con push_titles. Se mandan los valores del último precio guardado (save_price). En publicaciones pasá ids de la app o códigos del canal (por ejemplo MLA123456789), hasta 100; sin la lista, van todas las de la cuenta que tienen precio, cuotas o descuento por subir. Saltea las que todavía no están publicadas en el canal y las que no tienen esos cambios pendientes, y dice por qué. Si cambia el precio, el descuento se vuelve a mandar, porque el canal lo calcula sobre el precio. Por cada una devuelve qué se mandó y si quedó bien, o el motivo exacto del rechazo del canal; si el canal rechaza el descuento, lo dice y sigue con lo demás. Después de mandar una campaña vuelve a consultar al canal: confirmado_en_el_canal es true solo si ya figura programada o activa (o fuera, al salir); si el canal todavía no lo muestra, la campaña queda como pendiente, suele tardar unos minutos, y se vuelve a mirar con get_price_step. Si la publicación tiene descuento propio pendiente y la campaña lo frena, el descuento no se manda y se avisa. Si son muchas, sube las que entran en una vuelta (unos 25 segundos) y devuelve en quedan las que faltan: volvé a llamar con esa lista. Cambia la publicación en el canal de verdad: antes de subir, mostrale a la persona qué se va a mandar y esperá que confirme.',
+    'Manda al canal el precio publicado, el descuento y las cuotas sin interés que quedaron en Por subir, y sumarse o salir de las campañas pedidas (choose_campaign), como el botón de subir de Por subir, pero solo eso: lo demás que esté por subir (título, descripción, fotos) queda donde está; la descripción se sube con push_descriptions y el título con push_titles. Se mandan los valores del último precio guardado (save_price). En publicaciones pasá ids de la app o códigos del canal (por ejemplo MLA123456789), hasta 100; sin la lista, van todas las de la cuenta que tienen precio, cuotas o descuento por subir. Saltea las que todavía no están publicadas en el canal y las que no tienen esos cambios pendientes, y dice por qué. Si cambia el precio, el descuento se vuelve a mandar, porque el canal lo calcula sobre el precio. Por cada una devuelve qué se mandó y si quedó bien, o el motivo exacto del rechazo del canal; si el canal rechaza el descuento, lo dice y sigue con lo demás. Después de mandar una campaña vuelve a consultar al canal: confirmado_en_el_canal es true solo si ya figura programada o activa (o fuera, al salir); si el canal todavía no lo muestra, la campaña queda como pendiente, suele tardar unos minutos, y se vuelve a mirar con get_price_step. Si la publicación tiene descuento propio pendiente y la campaña lo frena, el descuento no se manda y se avisa. Si una publicación es de una familia, sube todas sus medidas, cada una con su medida en el resultado, y si después de mandar una campaña las medidas quedaron en estados distintos lo dice en familia_partida. Si son muchas, sube las que entran en una vuelta (unos 25 segundos) y devuelve en quedan las que faltan: volvé a llamar con esa lista. Cambia la publicación en el canal de verdad: antes de subir, mostrale a la persona qué se va a mandar y esperá que confirme.',
   input: z.object({
     cuenta: accountArg,
     publicaciones: z
@@ -481,14 +509,46 @@ const pushPrices = defineTool({
       }
     } else ids = [...pending.keys()].filter((id) => priceFields(id).length > 0 || campaignsOf(id) > 0);
 
+    // En una familia van todas sus medidas, cada una después de la anterior: el precio y las campañas son de la familia.
+    const families = await ctx.db.publication.findMany({ where: { id: { in: ids }, familyId: { not: null } }, select: { id: true, familyId: true } });
+    if (families.length > 0) {
+      const members = await ctx.db.publication.findMany({
+        where: { familyId: { in: families.map((f) => f.familyId!) } },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true, familyId: true },
+      });
+      const expanded: string[] = [];
+      for (const id of ids) {
+        const fam = families.find((f) => f.id === id)?.familyId;
+        for (const m of fam ? [id, ...members.filter((x) => x.familyId === fam).map((x) => x.id)] : [id]) if (!expanded.includes(m)) expanded.push(m);
+      }
+      ids = expanded;
+    }
+
     const pubs = new Map(
       (
         await ctx.db.publication.findMany({
           where: { id: { in: ids } },
-          select: { id: true, externalId: true, title: true, price: true, installments: true, discount: true, store: { select: { channel: { select: { name: true } } } } },
+          select: {
+            id: true,
+            externalId: true,
+            title: true,
+            price: true,
+            installments: true,
+            discount: true,
+            familyId: true,
+            variantKey: true,
+            product: { select: { variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } } } },
+            store: { select: { channel: { select: { name: true } } } },
+          },
         })
       ).map((p) => [p.id, p]),
     );
+    // La medida, en una familia.
+    const measureOf = (p: { familyId: string | null; variantKey: string | null; product: { variants: { sku: string | null; measure: string | null }[] } }) =>
+      p.familyId && p.variantKey ? (measuresOf(p.product.variants).find((m) => m.key === p.variantKey)?.label ?? null) : null;
+    // Las familias a las que se les mandó alguna campaña, para ver al final si quedaron partidas.
+    const sentToFamily = new Map<string, Set<string>>();
 
     const subidas: unknown[] = [];
     const quedan: string[] = [];
@@ -513,7 +573,8 @@ const pushPrices = defineTool({
         installments: p.installments === null ? null : planName(p.installments),
         discount: p.discount === null ? null : Number(p.discount),
       };
-      const base = { publicacion: code, titulo: p.title };
+      const measure = measureOf(p);
+      const base = { publicacion: code, ...(measure ? { medida: measure } : {}), titulo: p.title };
       try {
         const r = await pushDrafts(ctx.db, { accountId: account.id, publicationId: id, fields, campaigns: true, userId: ctx.userId });
         const tried = [...r.sent, ...r.rejected.map((x) => x.field)].filter(isPriceField);
@@ -522,6 +583,11 @@ const pushPrices = defineTool({
         const done = sent.length + r.campaigns.filter((c) => c.ok).length;
         // Las campañas que se mandaron: se vuelve a consultar al canal para ver cómo quedaron.
         const states = await campaignStates(ctx.db, account.id, id, r.campaigns);
+        if (p.familyId && r.campaigns.some((c) => c.ok)) {
+          const names = sentToFamily.get(id) ?? new Set<string>();
+          for (const c of r.campaigns) if (c.ok) names.add(c.name);
+          sentToFamily.set(id, names);
+        }
         const pendingCampaigns = r.campaigns.filter((c) => c.ok && states.get(c.ref) === 'pendiente').map((c) => c.name);
         subidas.push({
           ...base,
@@ -578,8 +644,26 @@ const pushPrices = defineTool({
         });
       }
     }
+    // Después de mandar campañas a una familia: si sus medidas quedaron en estados distintos, se avisa.
+    const familia_partida: string[] = [];
+    const checked = new Set<string>();
+    for (const [id, names] of sentToFamily) {
+      const fam = pubs.get(id)!.familyId!;
+      if (checked.has(fam)) continue;
+      checked.add(fam);
+      const read = await readPromotions(ctx.db, { accountId: account.id, publicationIds: [id], family: true, light: true });
+      if (!read.ok) continue;
+      const groups = familyCampaigns([...read.read, ...read.family].map((m) => ({ publicationId: m.publicationId, label: m.label, campaigns: m.promotions.campaigns })));
+      for (const g of groups) if (g.split && names.has(g.name)) familia_partida.push(splitText(g));
+    }
     return {
       subidas,
+      ...(familia_partida.length > 0
+        ? {
+            familia_partida,
+            aviso_familia: 'Después de mandar, las medidas de la familia no quedaron todas en la misma campaña. Si recién se mandó, el canal puede tardar unos minutos en mostrarlo: volvé a mirar con get_price_step.',
+          }
+        : {}),
       ...(salteadas.length > 0 ? { salteadas } : {}),
       ...(quedan.length > 0 ? { quedan, aviso: 'No entraron todas en esta vuelta: volvé a llamar con la lista de quedan.' } : {}),
       ...(ids.length === 0 && salteadas.length === 0 ? { aviso: 'No hay precios, cuotas, descuentos ni campañas por subir en la cuenta.' } : {}),

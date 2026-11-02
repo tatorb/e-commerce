@@ -8,7 +8,7 @@ import { formatPercent, formatPrice } from '@/domain/money';
 import { combinedBounds, dealPrice, discountFit, discountOptions, type DiscountBounds } from '@/domain/promotions';
 import type { PromotionsResult } from '@/lib/channel-promotions';
 import { readPromotionsAction } from '@/app/a/[cuenta]/pipeline/price-actions';
-import { CampaignList, type CampaignDraft, type CampaignItem, type MarginContext } from './CampaignList';
+import { CampaignList, type CampaignDraft, type MarginContext } from './CampaignList';
 
 // Promociones: lo que el canal deja hacer hoy con el descuento de unas
 // publicaciones, siempre abajo del precio. En los pasos Precio y Publicación,
@@ -19,7 +19,7 @@ import { CampaignList, type CampaignDraft, type CampaignItem, type MarginContext
 
 export type PromotionsState = { kind: 'loading' } | { kind: 'done'; result: PromotionsResult };
 
-/** Pregunta al canal al abrir y cada vez que se pide. */
+/** Pregunta al canal al abrir y cada vez que se pide, por esas publicaciones y las demás medidas de sus familias. */
 export function usePromotions(accountSlug: string, publicationIds: string[]) {
   const [state, setState] = useState<PromotionsState>({ kind: 'loading' });
   const key = publicationIds.join(',');
@@ -27,7 +27,7 @@ export function usePromotions(accountSlug: string, publicationIds: string[]) {
   const asked = useRef(0);
   const ask = useCallback(() => {
     const n = ++asked.current;
-    readPromotionsAction(accountSlug, key.split(','))
+    readPromotionsAction(accountSlug, key.split(','), { family: true })
       .catch((): PromotionsResult => ({ ok: false, error: 'Se cortó la conexión con la app. Probá de nuevo.' }))
       .then((result) => n === asked.current && setState({ kind: 'done', result }));
   }, [accountSlug, key]);
@@ -174,14 +174,11 @@ function Result({
   onCampaignDraft?: (draft: CampaignDraft | null) => void;
   campaignsKey?: number;
 }) {
-  const { channelName, read, unpublished, pending } = result;
+  const { channelName, read, unpublished, pending, family } = result;
   const several = read.length > 1;
   const bounds = combinedBounds(read.map((r) => r.promotions.discount));
   const current = read.map((r) => r.promotions.current).find(Boolean) ?? null;
   const { smallest, largest, suggested } = discountOptions(listPrice, bounds, range);
-  const campaigns: CampaignItem[] = read.flatMap((r) =>
-    r.promotions.campaigns.map((campaign) => ({ publicationId: r.publicationId, code: several ? r.externalId : null, campaign })),
-  );
   const differs = channelListPrice !== null && listPrice > 0 && Math.round(listPrice) !== Math.round(channelListPrice);
 
   return (
@@ -267,7 +264,8 @@ function Result({
         <CampaignList
           key={campaignsKey}
           accountSlug={accountSlug}
-          items={campaigns}
+          reads={read}
+          family={family}
           pending={pending}
           mode={mode}
           channelName={channelName}

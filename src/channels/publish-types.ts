@@ -82,6 +82,8 @@ export type ChannelPriceRange = { minPrice: number | null; maxPrice: number | nu
 export type ChannelCampaign = {
   // Cómo la identifica el canal para sumarse o salir: la app lo guarda y lo devuelve sin interpretarlo.
   ref: string | null;
+  // La misma campaña en otras publicaciones lleva el mismo group, aunque cada una tenga su ref: así se juntan las medidas de una familia.
+  group: string | null;
   name: string | null;
   // Qué tipo de campaña es, en castellano: "Campaña tradicional", "Co-fondeada".
   kind: string;

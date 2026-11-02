@@ -2,35 +2,53 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { ChannelCampaign } from '@/channels/publish-types';
 import { formatPercent, formatPrice, parsePrice } from '@/domain/money';
 import { marginLevel, marginOf, type InstallmentPlan, type PricingParams } from '@/domain/pricing';
-import { campaignPrice, campaignPriceProblem, campaignRevenue } from '@/domain/promotions';
-import type { CampaignChoice, PendingCampaign } from '@/lib/channel-campaigns';
-import { cancelCampaignAction, queueCampaignAction } from '@/app/a/[cuenta]/pipeline/price-actions';
-import { sendCampaignNowAction } from '@/app/a/[cuenta]/publicaciones/sync-actions';
+import { campaignRevenue } from '@/domain/promotions';
+import { familyCampaigns, isIn, memberStateText, planFamilyAction, rangeText, splitText, type FamilyCampaign, type MemberPlan } from '@/domain/family-campaigns';
+import type { PendingCampaign } from '@/lib/channel-campaigns';
+import type { PromotionsRead } from '@/lib/channel-promotions';
+import type { FamilyCampaignActionResult } from '@/lib/family-campaign-input';
+import { cancelCampaignAction, queueFamilyCampaignAction } from '@/app/a/[cuenta]/pipeline/price-actions';
+import { sendFamilyCampaignNowAction } from '@/app/a/[cuenta]/publicaciones/sync-actions';
 import { cn } from '@/lib/utils/cn';
 
-// Las campañas del canal de una publicación, con lo que se puede hacer desde
-// la app: sumarse a las que la invitan y salir de las que está. En el Pipeline
-// queda en Por subir (mode queue); en la página de la publicación se manda en
-// el momento (mode now). Antes de confirmar, muestra el precio para el
-// comprador, lo que pone cada uno y el margen que queda.
-
-export type CampaignItem = { publicationId: string; code: string | null; campaign: ChannelCampaign };
+// Las campañas del canal de una publicación y, en una familia, de todas sus
+// medidas: cada campaña es una fila con cómo está cada medida, y sumarse o
+// salir se pide para todas a la vez. En las que se elige el precio, solo para
+// las medidas que comparten precio (las de la pestaña); las de otro precio se
+// suman desde su pestaña. Si las medidas quedan en estados distintos, avisa
+// que la familia está partida. En el Pipeline queda en Por subir (mode queue);
+// en la página de la publicación se manda en el momento (mode now). Antes de
+// confirmar, muestra el precio para el comprador, el margen y qué pasa con
+// cada medida.
 
 /** Con qué se calcula el margen: el costo, los parámetros de precio y las cuotas de la publicación. */
 export type MarginContext = { cost: number | null; params: PricingParams; plan: InstallmentPlan };
 
-/** La campaña abierta para sumarse o salir, con el precio escrito: Guardar en el paso Precio la deja en Por subir. problem: por qué no se puede todavía. */
-export type CampaignDraft = { publicationId: string; choice: CampaignChoice; problem: string | null };
+/**
+ * La campaña abierta para sumarse o salir, con el precio escrito: Guardar en el
+ * paso Precio la deja en Por subir para las medidas que pueden. problem: por
+ * qué no puede ninguna.
+ */
+export type CampaignDraft = {
+  publicationIds: string[];
+  campaign: string;
+  name: string;
+  action: 'join' | 'leave';
+  price: number | null;
+  problem: string | null;
+};
 
-const STATUS: Record<ChannelCampaign['status'], { text: string; className: string }> = {
-  active: { text: 'Está adentro', className: 'bg-emerald-100 text-emerald-900' },
-  scheduled: { text: 'Programada', className: 'bg-sky-100 text-sky-900' },
-  invited: { text: 'La invitan', className: 'bg-amber-100 text-amber-900' },
+const STATUS: Record<'active' | 'scheduled' | 'invited' | 'none', string> = {
+  active: 'bg-emerald-100 text-emerald-900',
+  scheduled: 'bg-sky-100 text-sky-900',
+  invited: 'bg-amber-100 text-amber-900',
+  none: 'bg-muted text-muted-foreground',
 };
 
 /** "Del 3/11 al 16/11", en la hora de la cuenta. */
@@ -44,33 +62,43 @@ function datesText(start: Date | null, finish: Date | null, timeZone: string): s
 
 const amountText = (n: number | null) => (n === null ? '' : new Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 }).format(n));
 
-/** El precio que se propone al abrir una campaña: el sugerido o, si no, el más alto que acepta. */
-const startText = (c: ChannelCampaign) => amountText(c.range?.suggestedPrice ?? c.range?.maxPrice ?? null);
+/** La campaña de la medida que se mira: la primera de la pestaña que la tiene, si no, cualquiera. */
+function leadOf(g: FamilyCampaign, tabIds: string[]): ChannelCampaign {
+  return (g.members.find((m) => tabIds.includes(m.publicationId) && m.campaign) ?? g.members.find((m) => m.campaign))!.campaign!;
+}
 
-/** Lo que se pide con la campaña abierta y el precio escrito, y por qué no se puede, si no entra. */
-function draftOf(item: CampaignItem, action: 'join' | 'leave', priceText: string): CampaignDraft {
-  const c = item.campaign;
-  const withPrice = action === 'join' && c.join === 'price';
-  const typed = parsePrice(priceText);
-  const price = withPrice ? (typeof typed === 'number' ? typed : null) : c.price;
+/** Lo que se puede hacer con la campaña: sumar las medidas que faltan, sacar las que están. */
+function actionsOf(g: FamilyCampaign): { join: boolean; leave: boolean } {
   return {
-    publicationId: item.publicationId,
-    choice: { action, ref: c.ref!, name: c.name ?? c.kind, kind: c.kind, price: withPrice && price !== null ? campaignPrice(price) : null, pausesOwnDiscount: c.pausesOwnDiscount },
-    problem: withPrice ? campaignPriceProblem(price ?? 0, c.range, c.listPrice) : null,
+    join: g.members.some((m) => m.campaign && !isIn(m.campaign) && m.campaign.join !== null),
+    leave: g.members.some((m) => isIn(m.campaign) && m.campaign!.canLeave),
   };
 }
 
-/** "de $ 1.000 a $ 2.000", "hasta $ 2.000"… */
-function rangeText(r: NonNullable<ChannelCampaign['range']>): string | null {
-  if (r.minPrice !== null && r.maxPrice !== null) return `de ${formatPrice(r.minPrice)} a ${formatPrice(r.maxPrice)}`;
-  if (r.maxPrice !== null) return `hasta ${formatPrice(r.maxPrice)}`;
-  if (r.minPrice !== null) return `desde ${formatPrice(r.minPrice)}`;
-  return null;
+/** Lo que se pide con la campaña abierta y el precio escrito, y por qué no puede ninguna medida. */
+function draftOf(g: FamilyCampaign, tabIds: string[], action: 'join' | 'leave', priceText: string, channelName: string): { draft: CampaignDraft; plans: MemberPlan[] } {
+  const withPrice = action === 'join' && g.members.some((m) => m.campaign?.join === 'price');
+  const typed = parsePrice(priceText);
+  const price = withPrice ? (typeof typed === 'number' ? typed : null) : null;
+  const plans = planFamilyAction(g, { action, price, samePrice: tabIds, channelName });
+  const any = plans.some((p) => p.outcome === 'do');
+  return {
+    plans,
+    draft: {
+      publicationIds: tabIds,
+      campaign: g.key,
+      name: g.name,
+      action,
+      price: withPrice ? (plans.find((p) => p.outcome === 'do')?.price ?? price) : null,
+      problem: any ? null : (plans.find((p) => p.outcome === 'skip' || p.outcome === 'elsewhere')?.message ?? 'Ninguna medida tiene algo para cambiar.'),
+    },
+  };
 }
 
 export function CampaignList({
   accountSlug,
-  items,
+  reads,
+  family = [],
   pending,
   mode,
   channelName,
@@ -80,7 +108,10 @@ export function CampaignList({
   onDraft,
 }: {
   accountSlug: string;
-  items: CampaignItem[];
+  // Las medidas que comparten el precio que se mira (la pestaña, o la publicación).
+  reads: PromotionsRead[];
+  // Las demás medidas de la familia.
+  family?: PromotionsRead[];
   pending: PendingCampaign[];
   mode: 'queue' | 'now';
   channelName: string;
@@ -92,52 +123,70 @@ export function CampaignList({
   onDraft?: (draft: CampaignDraft | null) => void;
 }) {
   const [open, setOpen] = useState<string | null>(null);
-  const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
-  if (items.length === 0) return <p className="text-sm text-muted-foreground">No está en ninguna campaña y no la invitan a ninguna.</p>;
-  const keyOf = (i: CampaignItem, n: number) => `${i.publicationId}:${i.campaign.ref ?? n}`;
+  const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; lines: string[] } | null>(null);
+  const measures = [...reads, ...family];
+  const groups = familyCampaigns(measures.map((m) => ({ publicationId: m.publicationId, label: m.label, campaigns: m.promotions.campaigns })));
+  const tabIds = reads.map((r) => r.publicationId);
+  const several = measures.length > 1;
+  if (groups.length === 0) return <p className="text-sm text-muted-foreground">No está en ninguna campaña y no la invitan a ninguna.</p>;
+  const split = groups.filter((g) => g.split);
   return (
     <div className="space-y-2">
+      {split.length > 0 ? (
+        <div className="space-y-1 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900" role="alert">
+          <p className="flex items-center gap-1.5 font-medium">
+            <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
+            Familia partida: no todas las medidas están en la misma campaña.
+          </p>
+          <ul className="list-disc pl-5 text-xs">
+            {split.map((g) => (
+              <li key={g.key}>{splitText(g)}.</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       <ul className="divide-y rounded-md border text-sm">
-        {items.map((item, n) => {
-          const key = keyOf(item, n);
-          const queued = pending.find((p) => p.publicationId === item.publicationId && p.ref === item.campaign.ref) ?? null;
-          return (
-            <CampaignRow
-              key={key}
-              accountSlug={accountSlug}
-              item={item}
-              queued={queued}
-              mode={mode}
-              channelName={channelName}
-              margin={margin}
-              timeZone={timeZone}
-              open={open === key}
-              onOpen={(on) => {
-                setOpen(on ? key : null);
-                setNotice(null);
-                if (!on) onDraft?.(null);
-              }}
-              onDraft={onDraft}
-              onDone={(text) => {
-                setOpen(null);
-                setNotice({ kind: 'ok', text });
-                onDraft?.(null);
-                onChanged();
-              }}
-              onError={(text) => setNotice({ kind: 'error', text })}
-            />
-          );
-        })}
+        {groups.map((g) => (
+          <CampaignRow
+            key={g.key}
+            accountSlug={accountSlug}
+            group={g}
+            tabIds={tabIds}
+            several={several}
+            queued={pending.filter((p) => g.members.some((m) => m.publicationId === p.publicationId && (m.campaign?.ref === p.ref || (p.name === g.name && p.kind === g.kind))))}
+            mode={mode}
+            channelName={channelName}
+            margin={margin}
+            timeZone={timeZone}
+            openAction={open?.startsWith(`${g.key}|`) ? (open.split('|').pop() as 'join' | 'leave') : null}
+            onOpen={(action) => {
+              setOpen(action ? `${g.key}|${action}` : null);
+              setNotice(null);
+              if (!action) onDraft?.(null);
+            }}
+            onDraft={onDraft}
+            onDone={(lines, ok) => {
+              setOpen(null);
+              setNotice({ kind: ok ? 'ok' : 'error', lines });
+              onDraft?.(null);
+              onChanged();
+            }}
+            onError={(text) => setNotice({ kind: 'error', lines: [text] })}
+          />
+        ))}
       </ul>
       {notice ? (
-        <p className={cn('text-sm', notice.kind === 'error' ? 'text-destructive' : 'text-foreground')} role="status">
-          {notice.text}
-        </p>
+        <div className={cn('space-y-0.5 text-sm', notice.kind === 'error' ? 'text-destructive' : 'text-foreground')} role="status">
+          {notice.lines.map((l, i) => (
+            <p key={i}>{l}</p>
+          ))}
+        </div>
       ) : null}
       <p className="text-xs text-muted-foreground">
         {mode === 'queue'
           ? `Sumarse o salir queda en Por subir y se manda a ${channelName} con los demás cambios.`
           : `Sumarse o salir se manda a ${channelName} en el momento.`}{' '}
+        {several ? 'En una familia se pide para todas las medidas a la vez. ' : ''}
         Oferta del día, relámpago y por volumen se manejan en {channelName}.
       </p>
     </div>
@@ -146,106 +195,132 @@ export function CampaignList({
 
 function CampaignRow({
   accountSlug,
-  item,
+  group: g,
+  tabIds,
+  several,
   queued,
   mode,
   channelName,
   margin,
   timeZone,
-  open,
+  openAction,
   onOpen,
   onDraft,
   onDone,
   onError,
 }: {
   accountSlug: string;
-  item: CampaignItem;
-  queued: PendingCampaign | null;
+  group: FamilyCampaign;
+  tabIds: string[];
+  several: boolean;
+  queued: PendingCampaign[];
   mode: 'queue' | 'now';
   channelName: string;
   margin: MarginContext | null;
   timeZone: string;
-  open: boolean;
-  onOpen: (on: boolean) => void;
+  openAction: 'join' | 'leave' | null;
+  onOpen: (action: 'join' | 'leave' | null) => void;
   onDraft?: (draft: CampaignDraft | null) => void;
-  onDone: (text: string) => void;
+  onDone: (lines: string[], ok: boolean) => void;
   onError: (text: string) => void;
 }) {
   const router = useRouter();
-  const c = item.campaign;
-  const status = STATUS[c.status];
+  const c = leadOf(g, tabIds);
   const [pending, setPending] = useState(false);
   const facts = [
     c.price !== null ? `El comprador paga ${formatPrice(c.price)}` : null,
     c.channelPct ? `${channelName} pone ${formatPercent(c.channelPct)}${c.sellerPct !== null ? ` y la tienda ${formatPercent(c.sellerPct)}` : ''}` : null,
     datesText(c.start, c.finish, timeZone),
   ].filter(Boolean);
-  const name = c.name ?? c.kind;
-  const action = c.status === 'invited' ? 'join' : 'leave';
-  const canAct = action === 'join' ? c.join !== null : c.canLeave;
+  const can = actionsOf(g);
+  const labelOf = (id: string) => g.members.find((m) => m.publicationId === id)?.label ?? '';
 
   async function cancel() {
-    if (!queued) return;
     setPending(true);
-    const r = await cancelCampaignAction(accountSlug, queued.id).catch(() => null);
+    for (const q of queued) {
+      const r = await cancelCampaignAction(accountSlug, q.id).catch(() => null);
+      if (!r || !r.ok) {
+        setPending(false);
+        return onError(r ? r.error : 'Se cortó la conexión con la app. Probá de nuevo.');
+      }
+    }
     setPending(false);
-    if (!r) return onError('Se cortó la conexión con la app. Probá de nuevo.');
-    if (!r.ok) return onError(r.error);
     router.refresh();
-    onDone(`Se sacó de Por subir: ${queued.action === 'join' ? 'sumarse a' : 'salir de'} ${name}.`);
+    onDone([`Se sacó de Por subir lo pedido para ${g.name}.`], true);
   }
+
+  const open = (action: 'join' | 'leave') => {
+    onOpen(action);
+    onDraft?.(draftOf(g, tabIds, action, amountText(c.range?.suggestedPrice ?? c.range?.maxPrice ?? null), channelName).draft);
+  };
 
   return (
     <li className="space-y-2 px-3 py-2">
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0 space-y-0.5">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="font-medium">{name}</span>
-            <span className={cn('rounded-full px-2 py-0.5 text-[11px] font-medium', status.className)}>{status.text}</span>
+        <div className="min-w-0 space-y-1">
+          <span className="font-medium">{g.name}</span>
+          <div className="flex flex-wrap gap-1">
+            {g.members.map((m) => (
+              <span key={m.publicationId} className={cn('rounded-full px-2 py-0.5 text-[11px] font-medium', STATUS[m.campaign?.status ?? 'none'])}>
+                {several ? `${m.label}: ` : ''}
+                {memberStateText(m.campaign)}
+              </span>
+            ))}
           </div>
           <p className="text-xs text-muted-foreground">
-            {[item.code, c.name ? c.kind : null].filter(Boolean).join(' · ')}
-            {item.code || c.name ? '. ' : ''}
+            {g.name !== g.kind ? `${g.kind}. ` : ''}
             {facts.length > 0 ? `${facts.join(', ')}.` : null}
           </p>
         </div>
-        {queued ? null : canAct && !open ? (
-          <Button
-            access={mode === 'now' ? 'subir' : undefined}
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              onOpen(true);
-              onDraft?.(draftOf(item, action, startText(c)));
-            }}
-          >
-            {action === 'join' ? 'Sumarse' : 'Salir'}
-          </Button>
-        ) : !canAct ? (
+        {queued.length > 0 || openAction ? null : can.join || can.leave ? (
+          <div className="flex flex-wrap gap-1.5">
+            {can.join ? (
+              <Button access={mode === 'now' ? 'subir' : undefined} size="sm" variant="outline" onClick={() => open('join')}>
+                {several ? 'Sumar todas las medidas' : 'Sumarse'}
+              </Button>
+            ) : null}
+            {can.leave ? (
+              <Button access={mode === 'now' ? 'subir' : undefined} size="sm" variant="outline" onClick={() => open('leave')}>
+                {several ? 'Sacar todas' : 'Salir'}
+              </Button>
+            ) : null}
+          </div>
+        ) : (
           <span className="text-xs text-muted-foreground">Se maneja en {channelName}</span>
-        ) : null}
+        )}
       </div>
-      {queued ? (
+      {queued.length > 0 ? (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-muted/60 px-2.5 py-1.5 text-xs">
           <span>
-            En Por subir: {queued.action === 'join' ? `sumarse${queued.price !== null ? ` con ${formatPrice(queued.price)}` : ''}` : 'salir'}
-            {queued.rejection ? <span className="block text-destructive">No se pudo la última vez: {queued.rejection}</span> : null}
+            En Por subir:{' '}
+            {queued
+              .map((q) => `${several ? `${labelOf(q.publicationId)}, ` : ''}${q.action === 'join' ? `sumarse${q.price !== null ? ` con ${formatPrice(q.price)}` : ''}` : 'salir'}`)
+              .join(' · ')}
+            {queued
+              .filter((q) => q.rejection)
+              .map((q) => (
+                <span key={q.id} className="block text-destructive">
+                  No se pudo la última vez{several ? ` (${labelOf(q.publicationId)})` : ''}: {q.rejection}
+                </span>
+              ))}
           </span>
           <Button size="sm" variant="ghost" onClick={cancel} disabled={pending} pending={pending}>
             Sacar de Por subir
           </Button>
         </div>
       ) : null}
-      {open && !queued ? (
+      {openAction && queued.length === 0 ? (
         <ChoicePanel
           accountSlug={accountSlug}
-          item={item}
-          action={action}
+          group={g}
+          tabIds={tabIds}
+          several={several}
+          action={openAction}
           mode={mode}
           channelName={channelName}
           margin={margin}
-          onCancel={() => onOpen(false)}
-          onPrice={(text) => onDraft?.(draftOf(item, action, text))}
+          onCancel={() => onOpen(null)}
+          onPrice={(text) => onDraft?.(draftOf(g, tabIds, openAction, text, channelName).draft)}
           onDone={onDone}
           onError={onError}
         />
@@ -254,9 +329,28 @@ function CampaignRow({
   );
 }
 
+const PLAN_CLASS: Record<MemberPlan['outcome'], string> = {
+  do: 'text-foreground',
+  already: 'text-muted-foreground',
+  skip: 'text-destructive',
+  elsewhere: 'text-amber-700',
+};
+
+/** Lo que pasó con cada medida, en una línea. */
+function resultLines(r: Extract<FamilyCampaignActionResult, { ok: true }>, action: 'join' | 'leave', mode: 'queue' | 'now', channelName: string, several: boolean): string[] {
+  return r.results.map((x) => {
+    const who = several ? `${x.label}: ` : '';
+    if (x.result === 'pedido') return `${who}quedó en Por subir ${action === 'join' ? `sumarse a ${r.name}` : `salir de ${r.name}`}.`;
+    if (x.result === 'hecho') return `${who}${action === 'join' ? `se sumó a ${r.name}` : `salió de ${r.name}`} en ${channelName}.`;
+    return x.message ?? `${who}no se pudo.`;
+  });
+}
+
 function ChoicePanel({
   accountSlug,
-  item,
+  group: g,
+  tabIds,
+  several,
   action,
   mode,
   channelName,
@@ -267,7 +361,9 @@ function ChoicePanel({
   onError,
 }: {
   accountSlug: string;
-  item: CampaignItem;
+  group: FamilyCampaign;
+  tabIds: string[];
+  several: boolean;
   action: 'join' | 'leave';
   mode: 'queue' | 'now';
   channelName: string;
@@ -275,34 +371,35 @@ function ChoicePanel({
   onCancel: () => void;
   // Cada vez que cambia el precio escrito.
   onPrice: (text: string) => void;
-  onDone: (text: string) => void;
+  onDone: (lines: string[], ok: boolean) => void;
   onError: (text: string) => void;
 }) {
   const router = useRouter();
-  const c = item.campaign;
-  const name = c.name ?? c.kind;
-  const withPrice = action === 'join' && c.join === 'price';
-  const [priceText, setPriceText] = useState(startText(c));
+  const c = leadOf(g, tabIds);
+  const withPrice = action === 'join' && g.members.some((m) => m.campaign?.join === 'price');
+  const [priceText, setPriceText] = useState(amountText(c.range?.suggestedPrice ?? c.range?.maxPrice ?? null));
   const [pending, setPending] = useState(false);
-  const { choice, problem } = draftOf(item, action, priceText);
+  const { draft, plans } = draftOf(g, tabIds, action, priceText, channelName);
   const typed = parsePrice(priceText);
   const price = withPrice ? (typeof typed === 'number' ? typed : null) : c.price;
   // El margen: con lo que recibe la tienda, que suma la parte que pone el canal.
   const revenue = action === 'join' && price !== null ? campaignRevenue({ price, channelPct: c.channelPct, listPrice: c.listPrice }) : null;
   const marginPct = revenue !== null && margin?.cost ? marginOf(revenue, margin.cost, margin.params, margin.plan) : null;
   const level = marginPct !== null && margin ? marginLevel(marginPct, margin.params) : null;
+  // Los rangos que acepta cada medida que comparte el precio, si no son todos iguales.
+  const ranges = g.members.filter((m) => tabIds.includes(m.publicationId) && m.campaign?.range).map((m) => ({ label: m.label, text: rangeText(m.campaign!) }));
+  const sameRange = new Set(ranges.map((r) => r.text)).size <= 1;
 
   async function confirm() {
     setPending(true);
-    const r = await (mode === 'queue' ? queueCampaignAction(accountSlug, item.publicationId, choice) : sendCampaignNowAction(accountSlug, item.publicationId, choice)).catch(
-      () => null,
-    );
+    const input = { publicationIds: tabIds, campaign: g.key, action, price: draft.price };
+    const r = await (mode === 'queue' ? queueFamilyCampaignAction(accountSlug, input) : sendFamilyCampaignNowAction(accountSlug, input)).catch(() => null);
     setPending(false);
     if (!r) return onError('Se cortó la conexión con la app. Probá de nuevo.');
     if (!r.ok) return onError(r.error);
     router.refresh();
-    const verb = action === 'join' ? `sumarse a ${name}` : `salir de ${name}`;
-    onDone(mode === 'queue' ? `Quedó en Por subir: ${verb}.` : action === 'join' ? `Se sumó a ${name} en ${channelName}.` : `Salió de ${name} en ${channelName}.`);
+    const ok = r.results.every((x) => x.result === 'pedido' || x.result === 'hecho' || x.result === 'ya_estaba');
+    onDone(resultLines(r, action, mode, channelName, several), ok);
   }
 
   return (
@@ -311,13 +408,13 @@ function ChoicePanel({
         <>
           {withPrice ? (
             <div className="space-y-1">
-              <label className="text-xs font-medium" htmlFor={`precio-${item.publicationId}-${c.ref}`}>
+              <label className="text-xs font-medium" htmlFor={`precio-${g.key}`}>
                 Precio para el comprador en la campaña
               </label>
               <div className="flex items-center gap-1.5">
                 <span className="text-sm text-muted-foreground">$</span>
                 <Input
-                  id={`precio-${item.publicationId}-${c.ref}`}
+                  id={`precio-${g.key}`}
                   inputMode="decimal"
                   value={priceText}
                   onChange={(e) => {
@@ -328,11 +425,14 @@ function ChoicePanel({
                 />
               </div>
               <p className="text-xs text-muted-foreground">
-                {c.range && rangeText(c.range) ? `${channelName} acepta ${rangeText(c.range)}.` : `${channelName} no informó el rango.`}
+                {ranges.length === 0
+                  ? `${channelName} no informó el rango.`
+                  : sameRange
+                    ? `${channelName} acepta ${ranges[0].text}.`
+                    : `${channelName} acepta ${ranges.map((r) => `${r.label} ${r.text}`).join(', ')}.`}
                 {c.range?.suggestedPrice ? ` Sugiere ${formatPrice(c.range.suggestedPrice)}.` : ''}
                 {c.listPrice && price ? ` Es ${formatPercent((1 - price / c.listPrice) * 100)} menos que ${formatPrice(c.listPrice)}.` : ''}
               </p>
-              {problem ? <p className="text-xs text-destructive">{problem}</p> : null}
             </div>
           ) : (
             <p className="text-sm">
@@ -351,15 +451,24 @@ function ChoicePanel({
           ) : margin && !margin.cost ? (
             <p className="text-xs text-muted-foreground">Sin el costo cargado no se puede calcular el margen.</p>
           ) : null}
-          {c.pausesOwnDiscount ? (
-            <p className="text-xs text-amber-700">Mientras esté en esta campaña, {channelName} frena el descuento propio.</p>
-          ) : null}
+          {c.pausesOwnDiscount ? <p className="text-xs text-amber-700">Mientras esté en esta campaña, {channelName} frena el descuento propio.</p> : null}
         </>
       ) : (
-        <p className="text-sm">Sale de {name} y el comprador vuelve a pagar el precio de siempre, con el descuento propio si tiene.</p>
+        <p className="text-sm">Sale de {g.name} y el comprador vuelve a pagar el precio de siempre, con el descuento propio si tiene.</p>
       )}
+      {several ? (
+        <ul className="space-y-0.5 text-xs">
+          {plans.map((p) => (
+            <li key={p.publicationId} className={PLAN_CLASS[p.outcome]}>
+              {p.outcome === 'do' ? `${p.label}: ${action === 'join' ? 'se suma' : 'sale'}${p.price !== null ? ` con ${formatPrice(p.price)}` : ''}.` : p.message}
+            </li>
+          ))}
+        </ul>
+      ) : draft.problem ? (
+        <p className="text-xs text-destructive">{draft.problem}</p>
+      ) : null}
       <div className="flex flex-wrap gap-2">
-        <Button access={mode === 'now' ? 'subir' : undefined} size="sm" onClick={confirm} disabled={pending || problem !== null} pending={pending}>
+        <Button access={mode === 'now' ? 'subir' : undefined} size="sm" onClick={confirm} disabled={pending || draft.problem !== null} pending={pending}>
           {mode === 'queue' ? 'Dejar en Por subir' : action === 'join' ? 'Sumarse ahora' : 'Salir ahora'}
         </Button>
         <Button size="sm" variant="ghost" onClick={onCancel} disabled={pending}>

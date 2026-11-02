@@ -35,7 +35,7 @@ import {
   type PricingParams,
 } from '@/domain/pricing';
 import type { PriceGroupData, PriceStepData } from '@/lib/pricing';
-import { queueCampaignAction, savePriceDecisionAction } from '@/app/a/[cuenta]/pipeline/price-actions';
+import { queueFamilyCampaignAction, savePriceDecisionAction } from '@/app/a/[cuenta]/pipeline/price-actions';
 import { formatDateTime } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
 import type { CampaignDraft } from './CampaignList';
@@ -104,7 +104,7 @@ const groupLabel = (g: PriceGroupData) => `${measuresText(g.measures) || 'Sin me
 
 /** "sumarse a Hot Sale con $ 85.000 para el comprador", "salir de Hot Sale". */
 function draftText(d: CampaignDraft): string {
-  const { action, name, price } = d.choice;
+  const { action, name, price } = d;
   return action === 'leave' ? `salir de ${name}` : `sumarse a ${name}${price !== null ? ` con ${formatPrice(price)} para el comprador` : ''}`;
 }
 
@@ -219,9 +219,20 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
     // La campaña abierta en Promociones, como su botón Dejar en Por subir.
     let failed = false;
     if (campaign) {
-      const r = campaign.problem ? null : await queueCampaignAction(accountSlug, campaign.publicationId, campaign.choice).catch(() => null);
+      const r = campaign.problem
+        ? null
+        : await queueFamilyCampaignAction(accountSlug, { publicationIds: campaign.publicationIds, campaign: campaign.campaign, action: campaign.action, price: campaign.price }).catch(
+            () => null,
+          );
       if (r?.ok) {
-        texts.push(`${dirty ? 'También quedó' : 'Quedó'} en Por subir ${draftText(campaign)}.`);
+        const queued = r.results.filter((x) => x.result === 'pedido');
+        // En una familia, qué medida quedó pedida y cuál no pudo, con su motivo.
+        const others = r.results.filter((x) => x.result !== 'pedido' && x.result !== 'ya_estaba');
+        texts.push(
+          `${dirty ? 'También quedó' : 'Quedó'} en Por subir ${draftText(campaign)}${r.results.length > 1 && queued.length > 0 ? ` para ${queued.map((x) => x.label).join(' y ')}` : ''}.`,
+          ...others.map((x) => x.message ?? `${x.label}: no se pudo.`),
+        );
+        if (others.length > 0) failed = true;
         setCampaign(null);
         setCampaignsKey((k) => k + 1);
         promotions.refresh();

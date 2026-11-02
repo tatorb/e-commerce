@@ -1,10 +1,13 @@
 import type { PrismaClient } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
 import { getChannelPublisher, PublishError, type ChannelPublisher } from '@/channels/publish';
+import type { ChannelCampaign } from '@/channels/publish-types';
 import { ConnectError } from '@/channels/connect';
 import { formatPrice } from '@/domain/money';
 import { campaignPrice } from '@/domain/promotions';
 import { withAccessToken } from '@/lib/connections';
+import { readPromotions } from '@/lib/channel-promotions';
+import { familyCampaigns, planFamilyAction } from '@/domain/family-campaigns';
 
 // Sumarse a una campaña del canal o salir. Desde el Pipeline queda pedido y
 // se manda con los demás cambios desde Por subir; desde la página de la
@@ -176,4 +179,74 @@ export async function sendPendingCampaigns(db: PrismaClient, args: { accountId: 
     out.push({ ref: r.ref, name: r.name, kind: r.kind, action: r.action, price: r.price, ok: true });
   }
   return out;
+}
+
+// ───────────────────────────── Toda la familia ─────────────────────────────
+
+/** Qué pasó con cada medida: pedido (en Por subir), hecho (mandado), ya_estaba, no_entra, otro_precio o rechazado. */
+export type FamilyCampaignResult = {
+  publicationId: string;
+  label: string;
+  externalId: string | null;
+  result: 'pedido' | 'hecho' | 'ya_estaba' | 'no_entra' | 'otro_precio' | 'rechazado';
+  message: string | null;
+};
+
+/**
+ * Sumarse a una campaña o salir, para todas las medidas de la familia de
+ * esas publicaciones a la vez, cada una con su propia campaña del canal y su
+ * rango de precio. samePrice: las que comparten el precio, que son las únicas
+ * que se suman eligiendo el precio. campaign: la de cualquiera de las medidas,
+ * por su ref o su clave. queue la deja en Por subir; now la manda en el momento.
+ * La medida que no puede lo dice, con su motivo.
+ */
+export async function familyCampaignAction(
+  db: PrismaClient,
+  args: {
+    accountId: string;
+    publicationIds: string[];
+    samePrice?: string[];
+    campaign: string;
+    action: CampaignAction;
+    price: number | null;
+    mode: 'queue' | 'now';
+    userId: string | null;
+  },
+): Promise<{ name: string; kind: string; channelName: string; results: FamilyCampaignResult[]; lead: ChannelCampaign }> {
+  const read = await readPromotions(db, { accountId: args.accountId, publicationIds: args.publicationIds, family: true });
+  if (!read.ok) throw new CampaignError(read.error);
+  const measures = [...read.read, ...read.family];
+  const groups = familyCampaigns(measures.map((m) => ({ publicationId: m.publicationId, label: m.label, campaigns: m.promotions.campaigns })));
+  const g = groups.find((x) => x.key === args.campaign || x.members.some((m) => m.campaign?.ref === args.campaign));
+  if (!g) throw new CampaignError(`Esa campaña ya no aparece en ${read.channelName}: volvé a consultar las promociones.`);
+  const samePrice = args.samePrice ?? read.read.map((r) => r.publicationId);
+  const plans = planFamilyAction(g, { action: args.action, price: args.price, samePrice, channelName: read.channelName });
+  const code = new Map(measures.map((m) => [m.publicationId, m.externalId]));
+  const results: FamilyCampaignResult[] = [];
+  for (const plan of plans) {
+    const base = { publicationId: plan.publicationId, label: plan.label, externalId: code.get(plan.publicationId) ?? null };
+    if (plan.outcome !== 'do') {
+      results.push({ ...base, result: plan.outcome === 'already' ? 'ya_estaba' : plan.outcome === 'elsewhere' ? 'otro_precio' : 'no_entra', message: plan.message });
+      continue;
+    }
+    const campaign = g.members.find((m) => m.publicationId === plan.publicationId)!.campaign!;
+    const choice: CampaignChoice = { action: args.action, ref: plan.ref!, name: g.name, kind: g.kind, price: plan.price, pausesOwnDiscount: campaign.pausesOwnDiscount };
+    if (args.mode === 'queue') {
+      await queueCampaign(db, { accountId: args.accountId, publicationId: plan.publicationId, choice, userId: args.userId });
+      results.push({ ...base, result: 'pedido', message: null });
+      continue;
+    }
+    const r = await sendCampaignNow(db, { accountId: args.accountId, publicationId: plan.publicationId, choice, userId: args.userId });
+    results.push(r.ok ? { ...base, result: 'hecho', message: null } : { ...base, result: 'rechazado', message: `Medida ${plan.label}: ${r.error}` });
+  }
+  // La campaña de la medida que se mira, para el margen: la primera que comparte el precio.
+  const lead = (g.members.find((m) => samePrice.includes(m.publicationId) && m.campaign) ?? g.members.find((m) => m.campaign))!.campaign!;
+  return { name: g.name, kind: g.kind, channelName: read.channelName, results, lead };
+}
+
+/** Lo que pasó, en una frase por medida, para la pantalla y para Claude. */
+export function familyResultText(r: FamilyCampaignResult, action: CampaignAction, mode: 'queue' | 'now'): string {
+  if (r.result === 'pedido') return `${r.label}: quedó en Por subir ${action === 'join' ? 'sumarse' : 'salir'}.`;
+  if (r.result === 'hecho') return `${r.label}: ${action === 'join' ? 'se sumó' : 'salió'}${mode === 'now' ? ' en el canal' : ''}.`;
+  return r.message ?? `${r.label}: no se pudo.`;
 }

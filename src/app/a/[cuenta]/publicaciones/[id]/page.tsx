@@ -157,7 +157,8 @@ export default async function PublicationPage({
     p.externalId && copy ? (
       <PublicationPromotions
         accountSlug={account.slug}
-        publicationIds={[p.id]}
+        // Las medidas que comparten su precio: sumarse a una campaña va para todas, y se ven las demás de la familia.
+        publicationIds={priceStep?.groups.find((g) => g.publicationIds.includes(p.id))?.publicationIds ?? [p.id]}
         mode="now"
         channelName={channelName}
         channelListPrice={copy.price === null ? null : Number(copy.price)}

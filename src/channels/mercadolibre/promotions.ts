@@ -106,6 +106,7 @@ export function parsePromotions(raw: unknown): ChannelPromotions {
     const ref = promotion ? { type, promotion, offer: str(e.ref_id) ?? str(e.offer_id) } : null;
     out.campaigns.push({
       ref: ref ? writeRef(ref) : null,
+      group: ref ? `${type}:${promotion}` : null,
       name: str(e.name),
       kind: KIND[type] ?? 'Otra promoción',
       status: campaign,

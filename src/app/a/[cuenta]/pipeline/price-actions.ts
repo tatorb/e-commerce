@@ -8,7 +8,8 @@ import { pricingInputSchema } from '@/domain/pricing';
 import { getAccountBySlug } from '@/lib/queries/accounts';
 import { PricingError, savePriceDecision, savePricingSettings } from '@/lib/pricing';
 import { readPromotions, type PromotionsResult } from '@/lib/channel-promotions';
-import { CampaignError, cancelCampaign, queueCampaign, type CampaignChoice } from '@/lib/channel-campaigns';
+import { CampaignError, cancelCampaign, familyCampaignAction, queueCampaign, type CampaignChoice } from '@/lib/channel-campaigns';
+import { familyCampaignInput, type FamilyCampaignActionResult, type FamilyCampaignInput } from '@/lib/family-campaign-input';
 import { z } from 'zod';
 
 // Lo que se hace desde el paso Precio y desde Ajustes > Precios.
@@ -69,9 +70,31 @@ export async function savePriceDecisionAction(accountSlug: string, publicationId
 }
 
 /** Lo que el canal deja hacer hoy con el descuento de las publicaciones de una pestaña. Solo lee. */
-export async function readPromotionsAction(accountSlug: string, publicationIds: string[]): Promise<PromotionsResult> {
+export async function readPromotionsAction(accountSlug: string, publicationIds: string[], opts?: { family?: boolean }): Promise<PromotionsResult> {
   const ids = Array.isArray(publicationIds) ? publicationIds.filter((id): id is string => typeof id === 'string').slice(0, 20) : [];
-  return act(accountSlug, { section: ['pipeline', 'publicaciones'], level: 'read' }, ({ account }) => readPromotions(prisma, { accountId: account.id, publicationIds: ids }));
+  return act(accountSlug, { section: ['pipeline', 'publicaciones'], level: 'read' }, ({ account }) =>
+    readPromotions(prisma, { accountId: account.id, publicationIds: ids, family: opts?.family === true }),
+  );
+}
+
+/** Desde el paso Precio y el paso Publicación: queda en Por subir para todas las medidas que pueden. */
+export async function queueFamilyCampaignAction(accountSlug: string, input: FamilyCampaignInput): Promise<FamilyCampaignActionResult> {
+  const parsed = familyCampaignInput.safeParse(input);
+  const does = parsed.success && parsed.data.action === 'leave' ? 'Dejó para subir: salir de una campaña' : 'Dejó para subir: sumarse a una campaña';
+  return act<FamilyCampaignActionResult>(accountSlug,
+    { section: ['pipeline'], does, publicationId: parsed.success ? parsed.data.publicationIds[0] : null, targetOf: (r) => (r.ok ? r.name : null) },
+    async ({ user, account }): Promise<FamilyCampaignActionResult> => {
+      if (!parsed.success) return { ok: false as const, error: 'Revisá la campaña y el precio.' };
+      try {
+        const r = await familyCampaignAction(prisma, { accountId: account.id, ...parsed.data, mode: 'queue', userId: user.id });
+        revalidatePath(`/a/${accountSlug}`, 'layout');
+        return { ok: true as const, name: r.name, results: r.results };
+      } catch (e) {
+        if (e instanceof CampaignError) return { ok: false as const, error: e.message };
+        throw e;
+      }
+    },
+  );
 }
 
 type CampaignResult = { ok: true } | { ok: false; error: string };
