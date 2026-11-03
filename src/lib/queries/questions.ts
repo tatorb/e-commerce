@@ -3,22 +3,24 @@ import { prisma } from '@/lib/db';
 import { getChannelQuestions } from '@/channels/questions';
 import { channelInfo } from '@/channels';
 import { practiceCounts } from '@/domain/answers';
+import { loadBuyerFacts } from '@/lib/buyers';
 
 // Lo que muestran la pantalla Preguntas, el menú y el aviso del Pipeline.
 
 export const QUESTIONS_PAGE_SIZE = 50;
 const MAX_PAGE = 100;
 
-export type QuestionView = 'sin-responder' | 'respondidas';
+export type QuestionView = 'sin-responder' | 'respondidas' | 'otras';
 
-export type QuestionSearch = { vista?: string; q?: string; publicacion?: string; page?: string };
+export type QuestionSearch = { vista?: string; q?: string; publicacion?: string; comprador?: string; page?: string };
 
 export function parseQuestionSearch(search: QuestionSearch) {
   const page = Number.parseInt(search.page ?? '', 10);
   return {
-    view: (search.vista === 'respondidas' ? 'respondidas' : 'sin-responder') as QuestionView,
+    view: (search.vista === 'respondidas' || search.vista === 'otras' ? search.vista : 'sin-responder') as QuestionView,
     q: (search.q ?? '').trim().slice(0, 100),
     publicationId: search.publicacion && /^[\w-]{1,40}$/.test(search.publicacion) ? search.publicacion : null,
+    buyerId: search.comprador && /^[\w-]{1,40}$/.test(search.comprador) ? search.comprador : null,
     page: Number.isFinite(page) && page > 1 ? Math.min(page, MAX_PAGE) : 1,
   };
 }
@@ -43,8 +45,11 @@ const QUESTION_SELECT = {
   askedAt: true,
   answer: true,
   answeredAt: true,
+  storeId: true,
   listingId: true,
   buyerId: true,
+  buyerAnswered: true,
+  statusNote: true,
   answeredFrom: true,
   answeredBy: { select: { name: true } },
   draft: {
@@ -58,10 +63,22 @@ const QUESTION_SELECT = {
 // La propuesta que Claude dejó para que la revise una persona y todavía nadie usó.
 const FOR_PERSON = { needsPerson: true, outcome: null } satisfies Prisma.QuestionDraftWhereInput;
 
+// Las cerradas, borradas o que el canal tiene en revisión: no se pueden responder.
+const OTHER_STATUS = { in: ['CLOSED' as const, 'REMOVED' as const] };
+
 export async function loadQuestions(accountId: string, f: QuestionFilters) {
+  // Se busca también por el nombre de usuario de quien preguntó.
+  const byNickname = f.q
+    ? await prisma.channelBuyer.findMany({
+        where: { store: { accountId }, nickname: { contains: f.q, mode: 'insensitive' } },
+        select: { buyerId: true },
+        take: 200,
+      })
+    : [];
   const base: Prisma.BuyerQuestionWhereInput = {
     store: { accountId },
     ...(f.publicationId ? { publicationId: f.publicationId } : {}),
+    ...(f.buyerId ? { buyerId: f.buyerId } : {}),
     ...(f.q
       ? {
           OR: [
@@ -69,6 +86,7 @@ export async function loadQuestions(accountId: string, f: QuestionFilters) {
             { answer: { contains: f.q, mode: 'insensitive' } },
             { listingId: { contains: f.q, mode: 'insensitive' } },
             { publication: { title: { contains: f.q, mode: 'insensitive' } } },
+            ...(byNickname.length > 0 ? [{ buyerId: { in: byNickname.map((b) => b.buyerId) } }] : []),
           ],
         }
       : {}),
@@ -76,12 +94,21 @@ export async function loadQuestions(accountId: string, f: QuestionFilters) {
   // Sin responder, las que Claude dejó para una persona van aparte, arriba.
   const forPersonWhere: Prisma.BuyerQuestionWhereInput = { ...base, status: 'UNANSWERED', draft: { is: FOR_PERSON } };
   const where: Prisma.BuyerQuestionWhereInput =
-    f.view === 'respondidas' ? { ...base, status: 'ANSWERED' } : { ...base, status: 'UNANSWERED', NOT: { draft: { is: FOR_PERSON } } };
-  const [questions, forPerson, total, forPersonCount, unanswered, answered, stores, publication] = await Promise.all([
+    f.view === 'respondidas'
+      ? { ...base, status: 'ANSWERED' }
+      : f.view === 'otras'
+        ? { ...base, status: OTHER_STATUS }
+        : { ...base, status: 'UNANSWERED', NOT: { draft: { is: FOR_PERSON } } };
+  const [questions, forPerson, total, forPersonCount, unanswered, answered, others, stores, publication] = await Promise.all([
     prisma.buyerQuestion.findMany({
       where,
-      // Sin responder, la que más espera arriba. Respondidas, la última arriba.
-      orderBy: f.view === 'respondidas' ? [{ answeredAt: { sort: 'desc', nulls: 'last' } }, { askedAt: 'desc' }] : [{ askedAt: 'asc' }],
+      // Sin responder, la que más espera arriba. Respondidas, la última arriba. Las otras, la última arriba.
+      orderBy:
+        f.view === 'respondidas'
+          ? [{ answeredAt: { sort: 'desc', nulls: 'last' } }, { askedAt: 'desc' }]
+          : f.view === 'otras'
+            ? [{ askedAt: 'desc' }]
+            : [{ askedAt: 'asc' }],
       skip: (f.page - 1) * QUESTIONS_PAGE_SIZE,
       take: QUESTIONS_PAGE_SIZE,
       select: QUESTION_SELECT,
@@ -93,6 +120,7 @@ export async function loadQuestions(accountId: string, f: QuestionFilters) {
     f.view === 'sin-responder' ? prisma.buyerQuestion.count({ where: forPersonWhere }) : 0,
     prisma.buyerQuestion.count({ where: { ...base, status: 'UNANSWERED' } }),
     prisma.buyerQuestion.count({ where: { ...base, status: 'ANSWERED' } }),
+    prisma.buyerQuestion.count({ where: { ...base, status: OTHER_STATUS } }),
     // Las conectadas, aunque haya que volver a conectarlas.
     prisma.store.findMany({
       where: { accountId, connection: { isNot: null } },
@@ -103,12 +131,20 @@ export async function loadQuestions(accountId: string, f: QuestionFilters) {
       ? prisma.publication.findFirst({ where: { id: f.publicationId, product: { accountId } }, select: { id: true, title: true, externalId: true } })
       : null,
   ]);
+  const buyers = await loadBuyerFacts(prisma, [...forPerson, ...questions]);
+  // Con el filtro de un comprador, lo que se sabe de él aunque no haya preguntas en esta vista.
+  const buyer = f.buyerId
+    ? ([...buyers.values()].find((b) => b.buyerId === f.buyerId) ??
+      (await prisma.channelBuyer.findFirst({ where: { store: { accountId }, buyerId: f.buyerId }, select: { nickname: true } })))
+    : null;
   return {
     questions,
     forPerson,
     total,
     pages: Math.min(Math.max(1, Math.ceil(total / QUESTIONS_PAGE_SIZE)), MAX_PAGE),
-    counts: { unanswered, answered, forPerson: forPersonCount },
+    counts: { unanswered, answered, others, forPerson: forPersonCount },
+    buyers,
+    buyerFilter: f.buyerId ? { buyerId: f.buyerId, nickname: buyer?.nickname ?? null } : null,
     stores: stores
       .filter((s) => getChannelQuestions(s.channel.kind) !== null)
       .map((s) => ({

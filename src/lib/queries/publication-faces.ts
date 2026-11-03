@@ -18,6 +18,7 @@ import {
 import { LATEST_MEASUREMENTS, latestMetrics } from '@/domain/measurements';
 import { resolveTitleLock } from '@/domain/title-lock';
 import { FAMILY_LOCK_SELECT, titleLockFromData } from '@/lib/family-lock';
+import { loadBuyerFacts } from '@/lib/buyers';
 
 // La página de una publicación: sus dos caras, lo que está en el canal y el
 // borrador de la app, dato por dato, con lo que se puede hacer con cada uno.
@@ -55,7 +56,7 @@ export async function loadPublicationFaces(accountId: string, publicationId: str
         where: { status: { in: ['UNANSWERED', 'ANSWERED'] } },
         orderBy: { askedAt: 'desc' },
         take: QUESTIONS,
-        select: { id: true, text: true, status: true, askedAt: true, answer: true, answeredAt: true },
+        select: { id: true, text: true, status: true, askedAt: true, answer: true, answeredAt: true, storeId: true, buyerId: true },
       },
       _count: { select: { buyerQuestions: { where: { status: { in: ['UNANSWERED', 'ANSWERED'] } } } } },
     },
@@ -83,8 +84,11 @@ export async function loadPublicationFaces(accountId: string, publicationId: str
   const channelCategory = channelCategoryId
     ? (adapter.catalog?.category(channelCategoryId)?.name ?? (typeof details.categoryName === 'string' ? details.categoryName : channelCategoryId))
     : null;
+  // Quién hizo cada pregunta.
+  const buyers = await loadBuyerFacts(prisma, p.buyerQuestions);
   return {
     publication: p,
+    buyers,
     channelName: adapter.name,
     app,
     channel,

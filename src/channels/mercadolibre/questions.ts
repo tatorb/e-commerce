@@ -1,8 +1,9 @@
 import { MercadoLibreRequestError, mlGet, mlSend } from './http';
-import { AnswerError, type ChannelQuestion, type ChannelQuestions, type ChannelQuestionStatus, type QuestionNotice, type QuestionPage } from '../questions-types';
+import { AnswerError, type ChannelBuyerProfile, type ChannelQuestion, type ChannelQuestions, type ChannelQuestionStatus, type QuestionNotice, type QuestionPage } from '../questions-types';
 
 // Las preguntas de los compradores en Mercado Libre, con la versión 4 de su
-// formato. Del comprador se guarda solo su código.
+// formato. Del comprador, su código y su perfil público: apodo, ciudad,
+// provincia y desde cuándo tiene cuenta.
 
 type Obj = Record<string, unknown>;
 
@@ -18,6 +19,18 @@ function statusOf(raw: unknown, deleted: boolean): ChannelQuestionStatus {
   // BANNED, DELETED, DISABLED y UNDER_REVIEW: no se ve o no se puede responder.
   return 'REMOVED';
 }
+
+/** Por qué no se puede responder o no se ve, en castellano. */
+function statusNoteOf(raw: unknown, deleted: boolean): string | null {
+  if (deleted || raw === 'DELETED') return 'Borrada de la publicación';
+  if (raw === 'UNDER_REVIEW') return 'En revisión de Mercado Libre';
+  if (raw === 'BANNED') return 'Bloqueada por Mercado Libre';
+  if (raw === 'DISABLED') return 'Deshabilitada: la publicación ya no recibe preguntas';
+  if (raw === 'CLOSED_UNANSWERED') return 'Cerrada sin respuesta';
+  return null;
+}
+
+const count = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null);
 
 /** Una pregunta de Mercado Libre en el formato neutro, o null si le falta lo básico. */
 export function parseQuestion(raw: unknown): ChannelQuestion | null {
@@ -37,6 +50,8 @@ export function parseQuestion(raw: unknown): ChannelQuestion | null {
     status: statusOf(raw.status, raw.deleted_from_listing === true),
     askedAt,
     buyerId: isObj(raw.from) ? id(raw.from.id) : null,
+    buyerAnswered: isObj(raw.from) ? count(raw.from.answered_questions) : null,
+    statusNote: statusNoteOf(raw.status, raw.deleted_from_listing === true),
     answer: answerText ? { text: answerText, answeredAt: str(answer!.date_created) } : null,
   };
 }
@@ -82,6 +97,34 @@ export function answerRejection(status: number, body: unknown): string {
     return 'Mercado Libre no acepta links, mails, teléfonos ni datos de contacto en las respuestas.';
   }
   return said ? `Mercado Libre no aceptó la respuesta. Mercado Libre dijo: «${said.slice(0, 300)}».` : `Mercado Libre no aceptó la respuesta (código ${status}).`;
+}
+
+// Las provincias de Argentina, por su código: Mercado Libre manda "AR-B".
+const PROVINCES: Record<string, string> = {
+  A: 'Salta', B: 'Buenos Aires', C: 'Capital Federal', D: 'San Luis', E: 'Entre Ríos', F: 'La Rioja', G: 'Santiago del Estero',
+  H: 'Chaco', J: 'San Juan', K: 'Catamarca', L: 'La Pampa', M: 'Mendoza', N: 'Misiones', P: 'Formosa', Q: 'Neuquén',
+  R: 'Río Negro', S: 'Santa Fe', T: 'Tucumán', U: 'Chubut', V: 'Tierra del Fuego', W: 'Corrientes', X: 'Córdoba', Y: 'Jujuy', Z: 'Santa Cruz',
+};
+
+function stateName(v: unknown): string | null {
+  const s = str(v);
+  if (!s) return null;
+  const code = s.match(/^AR-([A-Z])$/i);
+  return code ? (PROVINCES[code[1].toUpperCase()] ?? null) : s;
+}
+
+/** El perfil público de un usuario de Mercado Libre, o null si le falta todo. */
+export function parseBuyer(raw: unknown): ChannelBuyerProfile | null {
+  if (!isObj(raw)) return null;
+  const address = isObj(raw.address) ? raw.address : {};
+  const profile = {
+    nickname: str(raw.nickname),
+    city: str(address.city),
+    state: stateName(address.state),
+    registeredAt: str(raw.registration_date),
+    profileUrl: str(raw.permalink),
+  };
+  return Object.values(profile).some((v) => v !== null) ? profile : null;
 }
 
 const isBadRequest = (e: unknown) => e instanceof MercadoLibreRequestError && e.status === 400;
@@ -132,6 +175,16 @@ export const mercadolibreQuestions: ChannelQuestions = {
       return parseQuestion(await get(`/questions/${questionId}?api_version=4`, accessToken));
     } catch (e) {
       if (e instanceof MercadoLibreRequestError && e.status === 404) return null;
+      throw e;
+    }
+  },
+
+  async readBuyer(accessToken, buyerId) {
+    if (!/^\d{1,20}$/.test(buyerId)) return null;
+    try {
+      return parseBuyer(await mlGet(`/users/${buyerId}`, accessToken));
+    } catch (e) {
+      if (e instanceof MercadoLibreRequestError && (e.status === 404 || e.status === 403)) return null;
       throw e;
     }
   },

@@ -21,6 +21,7 @@ import { CollapsibleCard } from '@/components/ui/collapsible-card';
 import { InfoStrip } from '@/components/ui/info-strip';
 import { NavRow } from '@/components/ui/nav-row';
 import { measuresText } from '@/lib/publication-facts';
+import { buyerKey, type BuyerFacts } from '@/lib/buyers';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Breadcrumb } from '@/components/navigation/Breadcrumb';
@@ -122,6 +123,17 @@ function asText(values: FaceValues, field: FaceField): string {
   if (field === 'price' || field === 'installments' || field === 'discount') return priceFaceText(field, values[field]);
   if (field === 'quantity') return quantityText(values.quantity);
   return values[field] ?? '';
+}
+
+/** El usuario de quien preguntó, que lleva a todas sus preguntas. */
+function BuyerName({ b, accountSlug }: { b: BuyerFacts | undefined; accountSlug: string }) {
+  if (!b) return null;
+  return (
+    <Link href={`/a/${accountSlug}/preguntas?comprador=${encodeURIComponent(b.buyerId)}`} className="text-xs text-muted-foreground underline-offset-4 hover:underline">
+      {b.nickname ?? `Comprador ${b.buyerId}`}
+      {b.purchases > 0 ? ` · ${b.purchases === 1 ? 'compró una vez' : `compró ${b.purchases} veces`}` : ''}
+    </Link>
+  );
 }
 
 export default async function PublicationPage({
@@ -536,6 +548,7 @@ export default async function PublicationPage({
                   <div className="flex flex-wrap items-baseline gap-x-2">
                     <span className="tabular-nums text-xs text-muted-foreground">{formatDateTime(q.askedAt, tz)}</span>
                     {q.status === 'UNANSWERED' ? <Badge variant="alert">Sin responder</Badge> : null}
+                    {q.buyerId ? <BuyerName b={data.buyers.get(buyerKey(q.storeId, q.buyerId))} accountSlug={account.slug} /> : null}
                   </div>
                   <p className="whitespace-pre-line break-words font-medium">{q.text || 'El canal ocultó el texto de esta pregunta.'}</p>
                   {q.answer ? <p className="whitespace-pre-line break-words text-muted-foreground">{q.answer}</p> : null}

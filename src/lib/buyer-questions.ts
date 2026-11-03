@@ -2,6 +2,7 @@ import type { PrismaClient } from '@/generated/prisma/client';
 import type { ChannelKind } from '@/generated/prisma/enums';
 import { ConnectError } from '@/channels/connect';
 import { getChannelQuestions, type ChannelQuestion } from '@/channels/questions';
+import type { ChannelBuyerProfile } from '@/channels/questions-types';
 import { withAccessToken } from '@/lib/connections';
 import { variantListingOwners } from '@/lib/variant-listings';
 
@@ -20,6 +21,11 @@ const NEWEST_PAGES_MAX = 20;
 // Las que dejaron de esperar respuesta se vuelven a leer de a una, hasta estas por vez.
 const RECHECK_MAX = 30;
 const LEASE_MS = 90_000;
+// El perfil de cada comprador se vuelve a leer al mes; si falló, al día. Hasta estos por lectura.
+const BUYER_FRESH_MS = 30 * 24 * 60 * 60 * 1000;
+const BUYER_RETRY_MS = 24 * 60 * 60 * 1000;
+const BUYERS_MAX = 100;
+const BUYERS_ON_NOTICE = 3;
 
 export class QuestionError extends Error {}
 
@@ -46,7 +52,7 @@ export async function saveQuestions(db: Db, storeId: string, questions: ChannelQ
     }),
     db.buyerQuestion.findMany({
       where: { storeId, externalId: { in: valid.map((q) => q.externalId) } },
-      select: { id: true, externalId: true, status: true, text: true, answer: true, publicationId: true, answeredFrom: true },
+      select: { id: true, externalId: true, status: true, text: true, answer: true, publicationId: true, answeredFrom: true, statusNote: true, buyerAnswered: true },
     }),
   ]);
   // Las de una medida que el canal guarda aparte van a la publicación de su familia.
@@ -64,6 +70,8 @@ export async function saveQuestions(db: Db, storeId: string, questions: ChannelQ
       status: q.status,
       askedAt: toDate(q.askedAt)!,
       buyerId: q.buyerId,
+      buyerAnswered: q.buyerAnswered,
+      statusNote: q.statusNote,
       answer: q.answer?.text ?? null,
       answeredAt: toDate(q.answer?.answeredAt),
       // Las que llegan respondidas se respondieron en el canal.
@@ -83,8 +91,14 @@ export async function saveQuestions(db: Db, storeId: string, questions: ChannelQ
     // Las que el canal bloquea vienen sin texto: queda el que ya se tenía.
     const text = q.text || before.text;
     const answer = q.answer ? q.answer.text : q.status === 'UNANSWERED' ? null : before.answer;
+    const buyerAnswered = q.buyerAnswered ?? before.buyerAnswered;
     const changed =
-      before.status !== q.status || before.text !== text || before.answer !== answer || (publicationId !== undefined && before.publicationId !== publicationId);
+      before.status !== q.status ||
+      before.text !== text ||
+      before.answer !== answer ||
+      before.statusNote !== q.statusNote ||
+      before.buyerAnswered !== buyerAnswered ||
+      (publicationId !== undefined && before.publicationId !== publicationId);
     if (!changed) continue;
     const inChannel = q.status === 'ANSWERED' && before.status !== 'ANSWERED' && !before.answeredFrom;
     if (inChannel) answeredInChannel.push(before.id);
@@ -94,6 +108,8 @@ export async function saveQuestions(db: Db, storeId: string, questions: ChannelQ
         status: q.status,
         text,
         answer,
+        statusNote: q.statusNote,
+        buyerAnswered,
         ...(inChannel ? { answeredFrom: 'CHANNEL' as const } : {}),
         ...(q.answer ? { answeredAt: toDate(q.answer.answeredAt) } : answer === null ? { answeredAt: null } : {}),
         ...(publicationId ? { publicationId } : {}),
@@ -109,6 +125,57 @@ export async function saveQuestions(db: Db, storeId: string, questions: ChannelQ
     });
   }
   return count;
+}
+
+/**
+ * Lee del canal el perfil de los compradores que preguntaron y todavía no lo
+ * tienen, o lo tienen viejo: primero los de las preguntas más nuevas. Si el
+ * canal falla con uno, lo anota y para hasta la próxima lectura, sin cortar
+ * la lectura de las preguntas. Devuelve cuántos leyó.
+ */
+export async function fillBuyers(
+  db: Db,
+  storeId: string,
+  read: (buyerId: string) => Promise<ChannelBuyerProfile | null>,
+  opts: { now: () => Date; max?: number; left?: () => number },
+): Promise<number> {
+  const now = opts.now();
+  const fresh = new Date(now.getTime() - BUYER_FRESH_MS);
+  const retry = new Date(now.getTime() - BUYER_RETRY_MS);
+  const rows = await db.$queryRaw<{ buyerId: string }[]>`
+    SELECT q."buyerId" FROM buyer_questions q
+    LEFT JOIN channel_buyers b ON b."storeId" = q."storeId" AND b."buyerId" = q."buyerId"
+    WHERE q."storeId" = ${storeId} AND q."buyerId" IS NOT NULL
+      AND (b."buyerId" IS NULL OR b."readAt" < CASE WHEN b."failedAt" IS NULL THEN ${fresh}::timestamp ELSE ${retry}::timestamp END)
+    GROUP BY q."buyerId"
+    ORDER BY max(q."askedAt") DESC
+    LIMIT ${opts.max ?? BUYERS_MAX}`;
+  let done = 0;
+  for (const { buyerId } of rows) {
+    if (opts.left && opts.left() <= 0) break;
+    const key = { storeId_buyerId: { storeId, buyerId } };
+    let profile: ChannelBuyerProfile | null;
+    try {
+      profile = await read(buyerId);
+    } catch (e) {
+      // Sin el perfil, las preguntas igual se leen: se anota y se sigue en la próxima lectura.
+      console.error('No se pudo leer el comprador', buyerId, errorDetail(e));
+      await db.channelBuyer.upsert({ where: key, create: { storeId, buyerId, readAt: opts.now(), failedAt: opts.now() }, update: { readAt: opts.now(), failedAt: opts.now() } });
+      break;
+    }
+    const data = {
+      nickname: profile?.nickname ?? null,
+      city: profile?.city ?? null,
+      state: profile?.state ?? null,
+      registeredAt: toDate(profile?.registeredAt),
+      profileUrl: profile?.profileUrl ?? null,
+      readAt: opts.now(),
+      failedAt: null,
+    };
+    await db.channelBuyer.upsert({ where: key, create: { storeId, buyerId, ...data }, update: data });
+    done++;
+  }
+  return done;
 }
 
 /** Lo técnico de un error inesperado, corto: la última línea suele decir el motivo. */
@@ -237,6 +304,12 @@ export async function readQuestions(db: Db, storeId: string, opts: { budgetMs: n
         }
       }
       if (stale.length === RECHECK_MAX) pending = true;
+
+      // 4. Quiénes preguntaron: su apodo, de dónde son y desde cuándo tienen cuenta.
+      if (channel.readBuyer && left() > 0) {
+        const readBuyer = channel.readBuyer.bind(channel);
+        await fillBuyers(db, storeId, (id) => readBuyer(token, id), { now: clock, left });
+      }
     });
   } catch (e) {
     if (!(e instanceof ConnectError)) {
@@ -306,14 +379,24 @@ export async function receiveNotice(db: Db, kind: ChannelKind, body: unknown, no
   for (const { storeId } of connections) {
     await db.questionReader.upsert({ where: { storeId }, create: { storeId, noticeAt: now }, update: { noticeAt: now } });
     try {
-      const q = await withAccessToken(db, storeId, (token) => channel.readOne(token, notice.questionId));
-      if (!q) {
-        await db.buyerQuestion.updateMany({ where: { storeId, externalId: notice.questionId }, data: { status: 'REMOVED', readAt: now } });
-        continue;
-      }
-      if (q.sellerId && q.sellerId !== notice.userId) continue;
-      await saveQuestions(db, storeId, [q], now);
-      saved++;
+      const found = await withAccessToken(db, storeId, async (token) => {
+        const q = await channel.readOne(token, notice.questionId);
+        if (!q) {
+          await db.buyerQuestion.updateMany({ where: { storeId, externalId: notice.questionId }, data: { status: 'REMOVED', readAt: now } });
+          return false;
+        }
+        if (q.sellerId && q.sellerId !== notice.userId) return false;
+        await saveQuestions(db, storeId, [q], now);
+        // Quien preguntó, para verlo enseguida en Preguntas.
+        if (channel.readBuyer) {
+          const readBuyer = channel.readBuyer.bind(channel);
+          await fillBuyers(db, storeId, (id) => readBuyer(token, id), { now: () => now, max: BUYERS_ON_NOTICE }).catch((e) =>
+            console.error('No se pudo leer el comprador del aviso', errorDetail(e)),
+          );
+        }
+        return true;
+      });
+      if (found) saved++;
     } catch (e) {
       console.error('No se pudo leer la pregunta del aviso', e instanceof Error ? e.message : e);
     }

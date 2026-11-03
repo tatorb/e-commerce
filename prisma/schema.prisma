@@ -268,6 +268,7 @@ model Store {
   probes           ChannelProbe[]
   syncs            ChannelSync[]
   buyerQuestions   BuyerQuestion[]
+  buyers           ChannelBuyer[]
   questionReader   QuestionReader?
 
   // Desde cuándo la app lee las ventas de la tienda. Sin esto, o con un error,
@@ -1581,8 +1582,13 @@ model BuyerQuestion {
   text          String
   status        QuestionStatus
   askedAt       DateTime
-  // Solo el código del comprador en el canal, para juntar sus preguntas.
+  // El código del comprador en el canal, para juntar sus preguntas y sus compras.
+  // Sus datos públicos (nombre de usuario, ciudad) están en ChannelBuyer.
   buyerId       String?
+  // Cuántas preguntas de ese comprador ya respondió la tienda, según el canal.
+  buyerAnswered Int?
+  // Por qué no se puede responder, como lo dice el canal: en revisión, bloqueada, borrada.
+  statusNote    String?
   answer        String?
   answeredAt    DateTime?
   // Desde dónde se respondió, y quién si fue desde la app.
@@ -1600,6 +1606,26 @@ model BuyerQuestion {
   @@index([publicationId, askedAt])
   @@index([storeId, listingId])
   @@map("buyer_questions")
+}
+
+// Lo público de un comprador del canal que hizo preguntas: su nombre de
+// usuario, de dónde es y desde cuándo tiene cuenta. Se pide una vez y se
+// vuelve a pedir de vez en cuando.
+model ChannelBuyer {
+  storeId      String
+  store        Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  buyerId      String
+  nickname     String?
+  city         String?
+  state        String?
+  registeredAt DateTime?
+  profileUrl   String?
+  readAt       DateTime
+  // Si el canal no lo devolvió: no se vuelve a pedir enseguida.
+  failedAt     DateTime?
+
+  @@id([storeId, buyerId])
+  @@map("channel_buyers")
 }
 
 // Cómo va la lectura de las preguntas de cada tienda.
@@ -2203,66 +2229,66 @@ enum SaleShipState {
 }
 
 model Sale {
-  id             String        @id @default(cuid())
-  storeId        String
-  store          Store         @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  id            String        @id @default(cuid())
+  storeId       String
+  store         Store         @relation(fields: [storeId], references: [id], onDelete: Cascade)
   // El código de la venta en el canal, y el del carrito si se compró junto con otras.
-  orderId        String
-  packId         String?
-  state          SaleState
-  orderedAt      DateTime
+  orderId       String
+  packId        String?
+  state         SaleState
+  orderedAt     DateTime
   // Cuándo se confirmó: desde ahí el canal descontó las unidades.
-  closedAt       DateTime?
-  currency       String        @default("ARS")
+  closedAt      DateTime?
+  currency      String        @default("ARS")
   // Lo que pagó el comprador por los productos, y lo que habrían costado sin descuentos.
-  itemsAmount    Decimal       @db.Decimal(14, 2)
-  listAmount     Decimal?      @db.Decimal(14, 2)
+  itemsAmount   Decimal       @db.Decimal(14, 2)
+  listAmount    Decimal?      @db.Decimal(14, 2)
   // La comisión del canal por la venta, con el costo de las cuotas que ofrece.
-  fee            Decimal?      @db.Decimal(14, 2)
+  fee           Decimal?      @db.Decimal(14, 2)
   // Lo que pagó el comprador en total, con su parte del envío.
-  paidAmount     Decimal?      @db.Decimal(14, 2)
-  buyerId        String?
-  buyerNickname  String?
-  buyerName      String?
+  paidAmount    Decimal?      @db.Decimal(14, 2)
+  buyerId       String?
+  buyerNickname String?
+  buyerName     String?
   // Cada línea: { listingId, variationId, sku, title, quantity, unitPrice, listPrice, fee, publicationId, productId, key, measure }.
-  lines          Json          @default("[]")
+  lines         Json          @default("[]")
   // Cada pago: { id, state, amount, installments, method, approvedAt, refunded, net, releaseAt, released }.
-  payments       Json          @default("[]")
-  paymentIds     String[]      @default([])
+  payments      Json          @default("[]")
+  paymentIds    String[]      @default([])
   // Lo que informa el medio de pago: lo que deposita y cuándo lo libera. Null sin el dato.
-  netReceived    Decimal?      @db.Decimal(14, 2)
-  releaseAt      DateTime?
-  released       Boolean?
-  refunded       Decimal?      @db.Decimal(14, 2)
+  netReceived   Decimal?      @db.Decimal(14, 2)
+  releaseAt     DateTime?
+  released      Boolean?
+  refunded      Decimal?      @db.Decimal(14, 2)
   // El envío: su estado en palabras de la app y del canal, su tipo y sus fechas.
-  shipmentId     String?
-  shipState      SaleShipState @default(NONE)
-  shipDetail     String?
+  shipmentId    String?
+  shipState     SaleShipState @default(NONE)
+  shipDetail    String?
   // Quién lo lleva, sin el nombre del canal: channel (el depósito del canal, como Full), pickup, drop_off, flex, seller, none.
-  shipKind       String?
-  shipKindLabel  String?
-  tracking       String?
+  shipKind      String?
+  shipKindLabel String?
+  tracking      String?
   // Hasta cuándo hay que despacharlo.
-  dispatchBy     DateTime?
-  estimatedAt    DateTime?
-  shippedAt      DateTime?
-  deliveredAt    DateTime?
-  shipDelayed    Boolean       @default(false)
+  dispatchBy    DateTime?
+  estimatedAt   DateTime?
+  shippedAt     DateTime?
+  deliveredAt   DateTime?
+  shipDelayed   Boolean       @default(false)
   // Lo que paga el vendedor por el envío, y lo que pagó el comprador.
-  shippingCost   Decimal?      @db.Decimal(14, 2)
-  buyerShipping  Decimal?      @db.Decimal(14, 2)
+  shippingCost  Decimal?      @db.Decimal(14, 2)
+  buyerShipping Decimal?      @db.Decimal(14, 2)
   // Un reclamo o mediación abierta.
-  claim          Boolean       @default(false)
-  cancelBy       String?
-  cancelReason   String?
-  delivered      Boolean       @default(false)
+  claim         Boolean       @default(false)
+  cancelBy      String?
+  cancelReason  String?
+  delivered     Boolean       @default(false)
   // Lo que se busca: códigos, comprador, títulos, SKU y productos, en minúsculas.
-  searchText     String        @default("")
+  searchText    String        @default("")
   // Cuándo se leyó el envío y el pago. Null: falta leerlos.
-  detailsAt      DateTime?
-  checkedAt      DateTime
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  detailsAt     DateTime?
+  checkedAt     DateTime
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
   @@unique([storeId, orderId])
   @@index([storeId, orderedAt])

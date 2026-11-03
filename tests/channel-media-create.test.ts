@@ -1283,7 +1283,7 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
 
       // Las preguntas de cada código van a la publicación de su medida.
       await saveQuestions(db, storeId, [
-        { externalId: 'Q1', sellerId: '7', listingId: 'MLA901', text: '¿Sirve para 206?', status: 'UNANSWERED', askedAt: '2026-10-22T10:00:00Z', buyerId: '9', answer: null },
+        { externalId: 'Q1', sellerId: '7', listingId: 'MLA901', text: '¿Sirve para 206?', status: 'UNANSWERED', askedAt: '2026-10-22T10:00:00Z', buyerId: '9', buyerAnswered: null, statusNote: null, answer: null },
       ], new Date());
       expect(await db.buyerQuestion.findFirst({ where: { externalId: 'Q1' } })).toMatchObject({ publicationId: other.id });
     });

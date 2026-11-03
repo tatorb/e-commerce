@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ChevronLeft, ChevronRight, ExternalLink, MessageCircleQuestion, Search, Settings2, Sparkles, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ExternalLink, MessageCircleQuestion, Search, Settings2, Sparkles, UserRound, X } from 'lucide-react';
 import { SectionCard } from '@/components/ui/section-card';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
@@ -15,7 +15,8 @@ import { isAiConfigured } from '@/ai/claude';
 import type { PracticeCounts } from '@/domain/answers';
 import { titleOrUntitled } from '@/domain/publication-title';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
-import { formatDateTime, formatDuration, formatUsd, plural } from '@/lib/format';
+import { formatDateTime, formatDuration, formatRelativeDate, formatUsd, plural } from '@/lib/format';
+import { buyerKey, placeText, type BuyerFacts } from '@/lib/buyers';
 import {
   loadAnswerSettings,
   loadPractice,
@@ -232,6 +233,69 @@ function QuestionListing({
   );
 }
 
+/** Quién preguntó: su usuario, de dónde es, desde cuándo tiene cuenta, cuántas preguntas hizo y si compró. */
+function BuyerLine({
+  q,
+  b,
+  accountSlug,
+  timeZone,
+  hrefBuyer,
+}: {
+  q: QuestionRow;
+  b: BuyerFacts;
+  accountSlug: string;
+  timeZone: string;
+  hrefBuyer: (buyerId: string) => string;
+}) {
+  const channel = q.store.channel.name;
+  const place = placeText(b);
+  const since = b.registeredAt ? b.registeredAt.getUTCFullYear() : null;
+  // Lo que el canal dice que ya le respondió la tienda, si es más de lo que tiene la app.
+  const answeredInChannel = q.buyerAnswered !== null && q.buyerAnswered > b.answered ? q.buyerAnswered : null;
+  const bits: React.ReactNode[] = [];
+  if (place) bits.push(place);
+  if (since) bits.push(`en ${channel} desde ${since}`);
+  bits.push(
+    b.questions > 1 ? (
+      <Link href={hrefBuyer(b.buyerId)} className="underline-offset-4 hover:underline">
+        {plural(b.questions, 'pregunta', 'preguntas')}
+      </Link>
+    ) : (
+      'primera pregunta'
+    ),
+  );
+  if (answeredInChannel) bits.push(`${channel} dice que ya le respondieron ${answeredInChannel}`);
+  bits.push(
+    b.purchases > 0 && b.lastPurchase ? (
+      <>
+        {b.purchases === 1 ? 'compró una vez' : `compró ${b.purchases} veces`},{' '}
+        <Link href={`/a/${accountSlug}/ventas/${b.lastPurchase.id}`} className="underline-offset-4 hover:underline">
+          la última {formatRelativeDate(b.lastPurchase.orderedAt, timeZone)}
+        </Link>
+      </>
+    ) : (
+      'todavía no compró'
+    ),
+  );
+  return (
+    <p className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground">
+      <UserRound className="h-3.5 w-3.5 shrink-0" aria-hidden />
+      <Link href={hrefBuyer(b.buyerId)} className="font-medium text-foreground underline-offset-4 hover:underline" title="Ver sus preguntas">
+        {b.nickname ?? `Comprador ${b.buyerId}`}
+      </Link>
+      {b.profileUrl ? (
+        <a href={b.profileUrl} target="_blank" rel="noreferrer" className="inline-flex items-center" title={`Su perfil en ${channel}`}>
+          <ExternalLink className="h-3 w-3" aria-hidden />
+          <span className="sr-only">Su perfil en {channel}</span>
+        </a>
+      ) : null}
+      {bits.map((bit, i) => (
+        <span key={i}>· {bit}</span>
+      ))}
+    </p>
+  );
+}
+
 function QuestionItem({
   q,
   accountSlug,
@@ -240,6 +304,8 @@ function QuestionItem({
   showStore,
   canDraft,
   facts,
+  buyers,
+  hrefBuyer,
 }: {
   q: QuestionRow;
   accountSlug: string;
@@ -248,9 +314,12 @@ function QuestionItem({
   showStore: boolean;
   canDraft: boolean;
   facts: Map<string, PublicationFacts>;
+  buyers: Map<string, BuyerFacts>;
+  hrefBuyer: (buyerId: string) => string;
 }) {
   const draft = draftView(q);
   const waitingH = (now.getTime() - q.askedAt.getTime()) / 3_600_000;
+  const buyer = q.buyerId ? buyers.get(buyerKey(q.storeId, q.buyerId)) : undefined;
   return (
     <li className="space-y-2 px-4 py-3 text-sm">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
@@ -260,7 +329,13 @@ function QuestionItem({
             Espera hace {formatDuration(q.askedAt, now)}
           </span>
         ) : null}
+        {q.status === 'CLOSED' || q.status === 'REMOVED' ? (
+          <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+            {q.statusNote ?? (q.status === 'CLOSED' ? 'Cerrada' : `Ya no está en ${q.store.channel.name}`)}
+          </span>
+        ) : null}
       </div>
+      {buyer ? <BuyerLine q={q} b={buyer} accountSlug={accountSlug} timeZone={timeZone} hrefBuyer={hrefBuyer} /> : null}
       <p className="whitespace-pre-line break-words font-medium">{q.text || 'El canal ocultó el texto de esta pregunta.'}</p>
       <QuestionListing q={q} accountSlug={accountSlug} showStore={showStore} facts={q.publication ? (facts.get(q.publication.id) ?? null) : null} />
       {q.answer ? (
@@ -330,6 +405,7 @@ export default async function QuestionsPage({ params, searchParams }: { params: 
     return qs ? `?${qs}` : '?';
   };
   const neverRead = list.stores.every((s) => !s.reader?.readAt);
+  const hrefBuyer = (buyerId: string) => hrefWith({ comprador: buyerId, page: null });
 
   return (
     <>
@@ -359,6 +435,21 @@ export default async function QuestionsPage({ params, searchParams }: { params: 
           <Link href={hrefWith({ vista: 'respondidas', page: null })} className={chipClass(f.view === 'respondidas')}>
             Respondidas <ChipCount active={f.view === 'respondidas'}>{list.counts.answered}</ChipCount>
           </Link>
+          {list.counts.others > 0 || f.view === 'otras' ? (
+            <Link href={hrefWith({ vista: 'otras', page: null })} className={chipClass(f.view === 'otras')}>
+              Cerradas o borradas <ChipCount active={f.view === 'otras'}>{list.counts.others}</ChipCount>
+            </Link>
+          ) : null}
+          {list.buyerFilter ? (
+            <Link
+              href={hrefWith({ comprador: null, page: null })}
+              className="inline-flex max-w-full items-center gap-1 rounded-full border border-foreground bg-foreground px-3 py-1 text-xs font-medium text-background"
+              title="Quitar este filtro"
+            >
+              <span className="truncate">Solo {list.buyerFilter.nickname ?? `el comprador ${list.buyerFilter.buyerId}`}</span>
+              <X className="h-3 w-3 shrink-0" aria-hidden />
+            </Link>
+          ) : null}
           {f.publicationId ? (
             <Link
               href={hrefWith({ publicacion: null, page: null })}
@@ -398,7 +489,7 @@ export default async function QuestionsPage({ params, searchParams }: { params: 
           <form className="flex flex-wrap items-end gap-2 p-4" action="" method="get">
             <div className="relative min-w-0 flex-1 sm:w-80 sm:flex-none">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-              <Input name="q" defaultValue={f.q} placeholder="texto, título o código…" aria-label="Buscar" className="pl-9" />
+              <Input name="q" defaultValue={f.q} placeholder="texto, título, código o usuario…" aria-label="Buscar" className="pl-9" />
             </div>
             {kept
               .filter(([k]) => k !== 'q' && k !== 'page')
@@ -422,7 +513,7 @@ export default async function QuestionsPage({ params, searchParams }: { params: 
             </div>
             <ul className="divide-y">
               {list.forPerson.map((q) => (
-                <QuestionItem key={q.id} q={q} accountSlug={account.slug} timeZone={tz} now={now} showStore={list.stores.length > 1} canDraft={aiReady} facts={facts} />
+                <QuestionItem key={q.id} q={q} accountSlug={account.slug} timeZone={tz} now={now} showStore={list.stores.length > 1} canDraft={aiReady} facts={facts} buyers={list.buyers} hrefBuyer={hrefBuyer} />
               ))}
             </ul>
           </Card>
@@ -443,18 +534,20 @@ export default async function QuestionsPage({ params, searchParams }: { params: 
               <p className="font-semibold">
                 {neverRead
                   ? 'Todavía no se leyeron las preguntas.'
-                  : f.q || f.publicationId
+                  : f.q || f.publicationId || f.buyerId
                     ? 'No hay preguntas que coincidan.'
                     : f.view === 'sin-responder'
                       ? list.counts.forPerson > 0
                         ? 'No hay otras preguntas sin responder.'
                         : 'No hay preguntas sin responder.'
-                      : 'Todavía no hay preguntas respondidas.'}
+                      : f.view === 'otras'
+                        ? 'No hay preguntas cerradas ni borradas.'
+                        : 'Todavía no hay preguntas respondidas.'}
               </p>
               <p className="max-w-xs text-sm text-muted-foreground">
                 {neverRead
                   ? 'Tocá Leer ahora para traerlas.'
-                  : f.q || f.publicationId
+                  : f.q || f.publicationId || f.buyerId
                     ? 'Probá con otra búsqueda.'
                     : 'Cuando lleguen preguntas nuevas, aparecen acá.'}
               </p>
@@ -462,7 +555,7 @@ export default async function QuestionsPage({ params, searchParams }: { params: 
           ) : (
             <ul className="divide-y">
               {list.questions.map((q) => (
-                <QuestionItem key={q.id} q={q} accountSlug={account.slug} timeZone={tz} now={now} showStore={list.stores.length > 1} canDraft={aiReady} facts={facts} />
+                <QuestionItem key={q.id} q={q} accountSlug={account.slug} timeZone={tz} now={now} showStore={list.stores.length > 1} canDraft={aiReady} facts={facts} buyers={list.buyers} hrefBuyer={hrefBuyer} />
               ))}
             </ul>
           )}

@@ -46,6 +46,7 @@ import { fieldLabel, kindLabel } from '@/domain/sync-log';
 import { catalogForClaude } from './catalog';
 import { loadTitleContext, RECEIVED_QUESTIONS } from '@/lib/queries/title-step';
 import { familyOf } from '@/lib/families';
+import { buyerForClaude, buyerKey, loadBuyerFacts } from '@/lib/buyers';
 import {
   McpToolError,
   accountArg,
@@ -348,7 +349,7 @@ const getPublication = defineTool({
   section: ['publicaciones', 'pipeline', 'productos'],
   title: 'Ver una publicación',
   description:
-    'Muestra todo de una publicación: la ficha del producto (la fuente de verdad), el título y la descripción actuales, los atributos del canal, los datos de catálogo del canal (cada campo del formulario de su categoría, con sus opciones y lo cargado), el precio (el de la app, el que leyó del canal y el último guardado en el paso Precio, con su margen), el puntaje y lo que le falta, la última medición, el estado e historial del pipeline, el candado del título, la competencia cargada, las preguntas frecuentes y las reglas de la publicación (paso Preguntas y respuestas) y la investigación del producto: lo del fabricante, las aclaraciones para las imágenes, las preguntas de los compradores (las que llegaron solas del canal, con su respuesta, y las pegadas) y sus dolores y objeciones. La ficha y la investigación son del producto y las comparten todas sus publicaciones; las preguntas de la publicación propia son solo de esta.',
+    'Muestra todo de una publicación: la ficha del producto (la fuente de verdad), el título y la descripción actuales, los atributos del canal, los datos de catálogo del canal (cada campo del formulario de su categoría, con sus opciones y lo cargado), el precio (el de la app, el que leyó del canal y el último guardado en el paso Precio, con su margen), el puntaje y lo que le falta, la última medición, el estado e historial del pipeline, el candado del título, la competencia cargada, las preguntas frecuentes y las reglas de la publicación (paso Preguntas y respuestas) y la investigación del producto: lo del fabricante, las aclaraciones para las imágenes, las preguntas de los compradores (las que llegaron solas del canal, con su respuesta y quién la hizo: su usuario, de dónde es, cuántas preguntas hizo y si ya compró; y las pegadas) y sus dolores y objeciones. La ficha y la investigación son del producto y las comparten todas sus publicaciones; las preguntas de la publicación propia son solo de esta.',
   input: z.object({ cuenta: accountArg, publicacion: publicationArg }),
   readOnly: true,
   async run(ctx, args) {
@@ -381,7 +382,7 @@ const getPublication = defineTool({
             where: { status: { in: ['UNANSWERED', 'ANSWERED'] }, text: { not: '' } },
             orderBy: { askedAt: 'desc' },
             take: RECEIVED_QUESTIONS,
-            select: { text: true, answer: true, askedAt: true },
+            select: { text: true, answer: true, askedAt: true, storeId: true, buyerId: true },
           },
           measurements: { orderBy: { takenAt: 'desc' }, take: LATEST_MEASUREMENTS, select: { takenAt: true, metrics: true } },
           competitors: { orderBy: { position: 'asc' }, select: COMPETITOR_SELECT },
@@ -424,7 +425,7 @@ const getPublication = defineTool({
       loadCatalogData(ctx.db, id),
     ]);
     const product = pub.product;
-    const [combo, knowledge, plans, stock] = await Promise.all([
+    const [combo, knowledge, plans, stock, buyers] = await Promise.all([
       loadCombo(ctx.db, product.id),
       loadKnowledge(ctx.db, product.id),
       plansFor(ctx.db, [id]),
@@ -432,6 +433,7 @@ const getPublication = defineTool({
         where: { id: product.id },
         select: { stockSince: true, showMore: true, stock: { select: { key: true, quantity: true, outSince: true } }, ...COST_SELECT },
       }),
+      loadBuyerFacts(ctx.db, pub.buyerQuestions),
     ]);
     const plan = plans.get(id) ?? null;
     const r = research.research;
@@ -611,7 +613,13 @@ const getPublication = defineTool({
         aclaraciones_para_imagenes: richTextToMarkdown(r?.clarifications ?? null) || null,
         preguntas: {
           // Las que llegaron solas del canal, con su respuesta si la tiene.
-          recibidas: pub.buyerQuestions.map((q) => ({ pregunta: q.text, respuesta: q.answer, fecha: q.askedAt.toISOString().slice(0, 10) })),
+          // Con quién la hizo: su usuario, de dónde es, cuántas preguntas hizo y si ya compró.
+          recibidas: pub.buyerQuestions.map((q) => ({
+            pregunta: q.text,
+            respuesta: q.answer,
+            fecha: q.askedAt.toISOString().slice(0, 10),
+            ...buyerForClaude(q.buyerId ? buyers.get(buyerKey(q.storeId, q.buyerId)) : undefined),
+          })),
           propia: pub.ownQuestions,
           competencia: r?.competitorQuestions ?? null,
         },

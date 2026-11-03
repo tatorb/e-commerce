@@ -13,7 +13,20 @@ export type ChannelQuestion = {
   status: ChannelQuestionStatus;
   askedAt: string;
   buyerId: string | null;
+  // Cuántas preguntas de ese comprador ya respondió la tienda, si el canal lo dice.
+  buyerAnswered: number | null;
+  // Por qué no se puede responder, o no se ve, si el canal lo dice: "En revisión", "Bloqueada".
+  statusNote: string | null;
   answer: { text: string; answeredAt: string | null } | null;
+};
+
+/** Lo que el canal muestra en público de quien pregunta. */
+export type ChannelBuyerProfile = {
+  nickname: string | null;
+  city: string | null;
+  state: string | null;
+  registeredAt: string | null;
+  profileUrl: string | null;
 };
 
 export type QuestionPage = {
@@ -38,6 +51,8 @@ export interface ChannelQuestions {
   listUnanswered(accessToken: string, userId: string, offset: number, limit: number): Promise<QuestionPage>;
   /** Una pregunta, o null si el canal ya no la tiene. */
   readOne(accessToken: string, questionId: string): Promise<ChannelQuestion | null>;
+  /** El perfil público de un comprador, o null si el canal no lo tiene. */
+  readBuyer?(accessToken: string, buyerId: string): Promise<ChannelBuyerProfile | null>;
   /** Publica la respuesta. Si el canal no la acepta, AnswerError con el motivo. */
   answer(accessToken: string, questionId: string, text: string): Promise<void>;
   /** El aviso que manda el canal, o null si no es de una pregunta. */
