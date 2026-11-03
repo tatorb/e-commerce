@@ -21,11 +21,13 @@ export async function unitsLast90(db: PrismaClient, publicationIds: string[], no
   const stores = [...new Set(pubs.map((p) => p.storeId))];
   const ids = pubs.map((p) => p.id);
   const from = new Date(now.getTime() - SALES_DAYS * DAY);
+  // Por la publicación de la línea o por su código en el canal: una venta que llegó antes que la publicación también cuenta.
   const rows = await db.$queryRaw<{ id: string; units: bigint | number | null }[]>`
-    SELECT l->>'publicationId' AS id, SUM(COALESCE((l->>'quantity')::numeric, 0)) AS units
-    FROM sales s, jsonb_array_elements(s.lines) l
-    WHERE s."storeId" = ANY(${stores}) AND s.state <> 'CANCELLED' AND s."orderedAt" >= ${from}::timestamp
-      AND l->>'publicationId' = ANY(${ids})
+    SELECT p.id, SUM(COALESCE((l->>'quantity')::numeric, 0)) AS units
+    FROM sales s
+    CROSS JOIN LATERAL jsonb_array_elements(s.lines) l
+    JOIN publications p ON p."storeId" = s."storeId" AND (p.id = l->>'publicationId' OR p."externalId" = l->>'listingId')
+    WHERE s."storeId" = ANY(${stores}) AND s.state <> 'CANCELLED' AND s."orderedAt" >= ${from}::timestamp AND p.id = ANY(${ids})
     GROUP BY 1`;
   for (const r of rows) out.set(r.id, Number(r.units ?? 0));
   return out;

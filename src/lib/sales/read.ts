@@ -91,6 +91,48 @@ const dec = (n: number | null | undefined) => (n === null || n === undefined ? n
 
 // ───────────────────────────── Guardar ─────────────────────────────
 
+/** Completa en la línea de qué publicación, producto y medida es. Devuelve lo que se busca de ese producto. */
+async function linkLine(db: Db, storeId: string, row: SaleLineRow, owners: () => Promise<Map<string, string>>): Promise<(string | null)[]> {
+  const pub = await soldPublication(db, storeId, row.listingId, owners);
+  if (!pub) return [];
+  const measure = soldMeasure(pub, row);
+  const slots = stockSlots(pub.product.variants);
+  const key = slots.length === 1 ? NO_MEASURE : measure ? matchSlot(slots, measure) : null;
+  row.publicationId = pub.id;
+  row.productId = pub.product.id;
+  row.key = key;
+  row.measure = key ? (slots.find((s) => s.key === key)?.label ?? null) : null;
+  if (pub.product.kind === 'COMBO') row.parts = unitParts(sourceOf(pub.product), measure) ?? undefined;
+  return [pub.product.name, pub.title, pub.externalId, ...pub.product.variants.map((v) => v.sku)];
+}
+
+/**
+ * Las ventas con líneas de publicaciones que no estaban en la app: si ya
+ * están, las une a su publicación, producto y medida, para el costo y la
+ * búsqueda. Devuelve cuántas ventas cambiaron.
+ */
+export async function relinkSaleLines(db: Db, storeId: string, listingIds: string[]): Promise<number> {
+  if (listingIds.length === 0) return 0;
+  const sales = await db.$queryRaw<{ id: string }[]>`
+    SELECT DISTINCT s.id FROM sales s, jsonb_array_elements(s.lines) l
+    WHERE s."storeId" = ${storeId} AND l->>'listingId' = ANY(${listingIds}) AND (l->>'publicationId') IS NULL`;
+  const owners = listingOwners(db, storeId);
+  let changed = 0;
+  for (const { id } of sales) {
+    const sale = await db.sale.findUniqueOrThrow({ where: { id }, select: { lines: true, searchText: true } });
+    const lines = parseLines(sale.lines);
+    const words: (string | null)[] = [];
+    for (const row of lines) if (!row.publicationId) words.push(...(await linkLine(db, storeId, row, owners)));
+    if (words.length === 0) continue;
+    await db.sale.update({
+      where: { id },
+      data: { lines: lines as unknown as Prisma.InputJsonValue, searchText: searchTextOf([sale.searchText, ...words]) },
+    });
+    changed++;
+  }
+  return changed;
+}
+
 /** De qué publicación, producto y medida es cada línea vendida, y lo que se busca de esos productos. */
 async function resolveLines(db: Db, storeId: string, rec: ChannelSaleRecord, owners: () => Promise<Map<string, string>>) {
   const words: (string | null)[] = [];
@@ -110,18 +152,7 @@ async function resolveLines(db: Db, storeId: string, rec: ChannelSaleRecord, own
       key: null,
       measure: null,
     };
-    const pub = await soldPublication(db, storeId, line.listingId, owners);
-    if (pub) {
-      const measure = soldMeasure(pub, line);
-      const slots = stockSlots(pub.product.variants);
-      const key = slots.length === 1 ? NO_MEASURE : measure ? matchSlot(slots, measure) : null;
-      row.publicationId = pub.id;
-      row.productId = pub.product.id;
-      row.key = key;
-      row.measure = key ? (slots.find((s) => s.key === key)?.label ?? null) : null;
-      if (pub.product.kind === 'COMBO') row.parts = unitParts(sourceOf(pub.product), measure) ?? undefined;
-      words.push(pub.product.name, pub.title, pub.externalId, ...pub.product.variants.map((v) => v.sku));
-    }
+    words.push(...(await linkLine(db, storeId, row, owners)));
     words.push(line.title, line.sku, line.listingId);
     lines.push(row);
   }

@@ -251,16 +251,16 @@ enum ApplyMethod {
 // Tienda: la presencia de una cuenta en un canal. Por ejemplo, Insur en
 // Mercado Libre es la tienda INSURMOTOR.
 model Store {
-  id               String             @id @default(cuid())
+  id               String               @id @default(cuid())
   accountId        String
-  account          Account            @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  account          Account              @relation(fields: [accountId], references: [id], onDelete: Cascade)
   channelId        String
-  channel          Channel            @relation(fields: [channelId], references: [id])
+  channel          Channel              @relation(fields: [channelId], references: [id])
   name             String
   externalSellerId String?
-  applyMethod      ApplyMethod        @default(MANUAL)
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
+  applyMethod      ApplyMethod          @default(MANUAL)
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
   publications     Publication[]
   importRuns       ImportRun[]
   connection       ChannelConnection?
@@ -269,6 +269,7 @@ model Store {
   syncs            ChannelSync[]
   buyerQuestions   BuyerQuestion[]
   buyers           ChannelBuyer[]
+  listingMisses    ChannelListingMiss[]
   questionReader   QuestionReader?
 
   // Desde cuándo la app lee las ventas de la tienda. Sin esto, o con un error,
@@ -2334,4 +2335,16 @@ model PublicationVisitDay {
 
   @@id([publicationId, day])
   @@map("publication_visit_days")
+}
+
+// Una publicación que se vendió en el canal y no está en la app, que se pidió
+// para traerla y el canal no la devolvió: no se vuelve a pedir enseguida.
+model ChannelListingMiss {
+  storeId    String
+  store      Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  externalId String
+  checkedAt  DateTime
+
+  @@id([storeId, externalId])
+  @@map("channel_listing_misses")
 }
