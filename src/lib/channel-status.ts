@@ -78,6 +78,14 @@ export async function changeStatus(
       result.failed.push({ id: publicationId, title: null, message: e.message });
       continue;
     }
+    // El estado que decide es el de ahora en el canal, no el de la última lectura: por ejemplo, una que el canal pausó al quedar en 0.
+    try {
+      await readOne(db, { accountId: args.accountId, publicationId });
+      p = await load(db, args.accountId, publicationId);
+    } catch (e) {
+      // Sin poder leerla, se decide con lo que se sabe.
+      console.error('No se pudo leer el estado en el canal', e instanceof Error ? e.message : e);
+    }
     const blocked = blockedReason(p, args.action);
     if (blocked) {
       result.failed.push({ id: p.id, title: p.title, message: blocked });

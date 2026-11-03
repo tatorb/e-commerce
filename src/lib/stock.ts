@@ -15,6 +15,7 @@ import { withAccessToken } from '@/lib/connections';
 import { variantListingOwners } from '@/lib/variant-listings';
 import { afterRestock } from '@/lib/restock';
 import { PLAN_SELECT, planFor, plansFor, singleMeasure, SOURCE_SELECT, sourceOf, type PlanRow, type StockPlan } from '@/lib/stock-plan';
+import { readOne } from '@/lib/channel-sync';
 import { announceStockAlarms, markStockAlarms, settleStockAlarms, type AlarmEvent, type StockChange } from '@/lib/stock-alarms';
 
 // El stock de cada producto: cargarlo a mano, tomarlo del canal al empezar,
@@ -137,6 +138,11 @@ async function pushPlanned(
   });
   // Estaba frenada sin stock y ahora tiene: si el canal no la reactiva solo, una tarea.
   if (needsReactivation(row.channelStatus, plan.channel, plan.lines)) await afterRestock(db, { publicationId: row.id, lines: plan.lines });
+  // Al quedar en 0, o al salir de 0, el canal puede pausarla o reactivarla: el estado se vuelve a leer ya.
+  const total = (lines: { quantity: number }[] | null) => (lines ?? []).reduce((sum, l) => sum + l.quantity, 0);
+  if (total(plan.lines) === 0 || total(plan.channel) === 0) {
+    await readOne(db, { accountId: row.store.accountId, publicationId: row.id }).catch((e) => console.error('No se pudo leer el estado en el canal', e instanceof Error ? e.message : e));
+  }
   return { ok: true };
 }
 
@@ -727,6 +733,7 @@ async function startOne(db: Db, product: StartRow): Promise<boolean> {
   if (observed.length === 0) return false;
   const { lines, review } = initialStock(slots, observed);
   const since = new Date(Math.min(...used.map((p) => p.channelCopy!.readAt.getTime())));
+  let events: AlarmEvent[] = [];
   const done = await db.$transaction(async (tx) => {
     // Si mientras tanto alguien lo cargó a mano, queda lo suyo.
     const claimed = await tx.product.updateMany({ where: { id: product.id, stockSince: null }, data: { stockSince: since, stockReview: review } });
@@ -737,9 +744,16 @@ async function startOne(db: Db, product: StartRow): Promise<boolean> {
       data: lines.map((l) => ({ productId: product.id, key: l.key, kind: 'INITIAL' as const, delta: l.quantity, after: l.quantity, note: 'Tomado de sus publicaciones en el canal.' })),
     });
     await tx.publication.updateMany({ where: { productId: product.id }, data: { quantities: Prisma.DbNull } });
+    // Con "Mostrar más de 5", lo que entra en 1 o en 0 avisa como cualquier otro cambio.
+    events = await markStockAlarms(
+      tx,
+      lines.map((l) => ({ productId: product.id, key: l.key, before: l.quantity, after: l.quantity, cause: 'import' as const })),
+      new Date(),
+    );
     return true;
   });
   if (!done) return false;
+  await announceStockAlarms(db, events);
   await countLate(db, product.id, since);
   return true;
 }
@@ -808,7 +822,7 @@ export async function loadProductStock(db: Db, args: { accountId: string; produc
         label: s.label,
         quantity,
         // Lo que se ve en los canales con "Mostrar más de 5", y cómo está su alarma.
-        shown: quantity === null ? null : cushionShown(quantity, product.showMore, row ?? null),
+        shown: quantity === null ? null : cushionShown(quantity, product.showMore),
         alarm: row ? { lowAt: row.lowAt, outSince: row.outSince, remindedAt: row.remindedAt, cutAt: row.cutAt } : null,
       };
     }),

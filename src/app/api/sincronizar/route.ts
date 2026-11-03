@@ -7,7 +7,7 @@ import { readAllQuestions } from '@/lib/buyer-questions';
 import { answerAlone } from '@/lib/answers';
 import { isAiConfigured } from '@/ai/claude';
 import { sendTaskMail } from '@/lib/task-mail';
-import { affectedPublications, readSales, reconcileStock, startStock, syncStock } from '@/lib/stock';
+import { readSales, reconcileStock, startStock } from '@/lib/stock';
 import { stockAlarmPass } from '@/lib/stock-alarms';
 import { settleReactivations } from '@/lib/restock';
 import { placeAllShotPhotos } from '@/lib/shoot';
@@ -19,7 +19,7 @@ import { saleAlarmPass } from '@/lib/sales/alarms';
 // publicaciones en que Claude responde solo, manda los mails de las tareas,
 // descuenta las ventas del stock de los productos y sube la cantidad nueva, y
 // renueva los descuentos que subió la app antes de que venzan, avisa otra vez
-// de las alarmas de stock sin reponer y pausa las de dos días, y suma a sus
+// de las alarmas de stock sin reponer, y suma a sus
 // publicaciones las fotos de Registro de productos que quedaron listas, y al
 // final trae las ventas para la sección Ventas, con su envío y su pago, y abre
 // las tareas de despachar y de reclamos. La llaman Vercel una vez por día
@@ -42,7 +42,7 @@ const SALES_BUDGET_MS = 8_000;
 const STOCK_BUDGET_MS = 4_000;
 // Después, los descuentos por vencer: cada uno son unos pocos pedidos.
 const RENEW_BUDGET_MS = 6_000;
-// Las alarmas de stock: el aviso del primer día y la pausa a los dos días.
+// Las alarmas de stock: el aviso del primer día sin reponer. La app nunca pausa por eso.
 const ALARMS_BUDGET_MS = 3_000;
 // Las fotos de Registro de productos que quedaron listas sin sumarse a sus publicaciones.
 const SHOTS_BUDGET_MS = 3_000;
@@ -65,9 +65,8 @@ export async function GET(request: Request) {
   const alone = await answerAlone(prisma, { aiReady: isAiConfigured() });
   const mails = await sendTaskMail(prisma, { budgetMs: MAIL_BUDGET_MS });
   const sales = await readSales(prisma, { budgetMs: SALES_BUDGET_MS });
-  // Con las ventas al día: las alarmas de stock sin reponer. Las pausadas reciben ya su cantidad.
+  // Con las ventas al día: el aviso de las alarmas de stock sin reponer.
   const alarms = await stockAlarmPass(prisma, { budgetMs: ALARMS_BUDGET_MS });
-  const paused = await syncStock(prisma, { publicationIds: await affectedPublications(prisma, alarms.cut), note: 'Pasaron dos días sin reponer: se pausó.' });
   const renewals = await renewDiscounts(prisma, { budgetMs: RENEW_BUDGET_MS });
   const result = await syncAllStores(prisma, { budgetMs: BUDGET_MS - (Date.now() - begun) });
   // Con lo recién leído: el stock de partida de los productos nuevos y lo que quedó distinto del stock.
@@ -97,9 +96,8 @@ export async function GET(request: Request) {
     mails: mails.sent,
     sales: sales.orders,
     stockStarted: started.started,
-    stockSent: sales.sent + stock.sent + paused.sent,
+    stockSent: sales.sent + stock.sent,
     stockReminded: alarms.reminded,
-    stockPaused: alarms.cut.length,
     reactivated,
     shotPhotosPlaced: shots.placed,
     ledgerRead: ledger.read,

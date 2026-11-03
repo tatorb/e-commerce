@@ -430,7 +430,7 @@ const getPublication = defineTool({
       plansFor(ctx.db, [id]),
       ctx.db.product.findUniqueOrThrow({
         where: { id: product.id },
-        select: { stockSince: true, showMore: true, stock: { select: { key: true, quantity: true, outSince: true, cutAt: true } }, ...COST_SELECT },
+        select: { stockSince: true, showMore: true, stock: { select: { key: true, quantity: true, outSince: true } }, ...COST_SELECT },
       }),
     ]);
     const plan = plans.get(id) ?? null;
@@ -529,17 +529,16 @@ const getPublication = defineTool({
           : 'La app todavía no lleva el stock de este producto.',
         // El costo de reposición sin IVA, el de cada medida si tiene: la base del paso Precio.
         costo_de_reposicion_sin_iva: costsForClaude(costLines(stock).lines),
-        // Con la opción, los canales muestran 6 aunque haya de 1 a 5, y cada medida tiene su alarma.
+        // Con la opción, los canales muestran 6 con 5 o menos, también en 0, y cada medida tiene su alarma.
         mostrar_mas_de_5: stock.showMore,
         ...(stock.showMore
           ? {
               alarmas_de_stock: stockSlots(product.variants).flatMap((s) => {
                 const row = stock.stock.find((x) => x.key === s.key);
                 if (!row || (!row.outSince && row.quantity > 1)) return [];
-                const state = row.cutAt
-                  ? 'pausada por no reponer en dos días'
-                  : row.outSince
-                    ? `sin stock desde ${row.outSince.toISOString()}${row.quantity < 0 ? `, ${owedText(-row.quantity).toLowerCase()}` : ''}`
+                const state =
+                  row.outSince || row.quantity <= 0
+                    ? `sin stock${row.outSince ? ` desde ${row.outSince.toISOString()}` : ''}${row.quantity < 0 ? `, ${owedText(-row.quantity).toLowerCase()}` : ''}`
                     : 'queda 1';
                 return [{ ...(s.label ? { medida: s.label } : {}), estado: state }];
               }),

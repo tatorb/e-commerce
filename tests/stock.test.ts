@@ -10,6 +10,7 @@ import { handleSalesNotice, readSales, recordOrder, setFollowsStock, setProductS
 import { stockAlarmPass } from '@/lib/stock-alarms';
 import { afterRestock } from '@/lib/restock';
 import { STATUS_TOOLS } from '@/lib/mcp/status-tools';
+import { STOCK_TOOLS } from '@/lib/mcp/stock-tools';
 import type { McpContext } from '@/lib/mcp/tool';
 import { managedNote, plannedText, plansFor } from '@/lib/stock-plan';
 import { saveQuantities } from '@/lib/quantities';
@@ -137,6 +138,8 @@ type Item = {
   full?: boolean;
   status?: string;
   reactivates?: boolean;
+  // Como Mercado Libre: al quedar en 0, la pausa.
+  pausesAtZero?: boolean;
 };
 
 describe.skipIf(!url)('el stock en la base', () => {
@@ -191,6 +194,7 @@ describe.skipIf(!url)('el stock en la base', () => {
           if (mine && v.available_quantity !== undefined) mine.quantity = v.available_quantity;
         }
         if (it.reactivates && it.status !== 'active' && (it.quantity ?? 0) > 0) it.status = 'active';
+        if (it.pausesAtZero && body.available_quantity === 0) it.status = 'paused';
         return json(200, { id: item[1] });
       }
       const order = u.pathname.match(/^\/orders\/(\d+)$/);
@@ -446,118 +450,190 @@ describe.skipIf(!url)('el stock en la base', () => {
     expect(await tool.run(ctx, { publicacion: 'MLA1000001', accion: 'pausar' })).toMatchObject({ estado: 'Pausada' });
   });
 
-  it('mostrar más de 5: 6 con poco stock, el aviso al quedar 1, la alarma al vender la última y el cortafuegos', async () => {
+  // "Mostrar más de 5": con 5 o menos se ve 6, nunca algo que pause la publicación, y al quedar 1 o 0 salen la alarma y la tarea.
+  const task = () => db.task.findFirst({ where: { autoKey: `stock:${ids.bulon}:` }, orderBy: { createdAt: 'desc' }, include: { assignees: true, publications: true } });
+  const alarm = () => db.productStock.findUniqueOrThrow({ where: { productId_key: { productId: ids.bulon, key: '' } } });
+  // Lo que se le mandó al canal a las publicaciones del bulón.
+  const toBulon = () => pushedTo().filter((w) => w.startsWith('MLA1000001') || w.startsWith('MLA1000002'));
+  const withShowMore = async () => {
     await startStock(db);
-    // Bulón: 5. Sus publicaciones y la del kit, que lleva 2 bulones.
-    writes.length = 0;
     await setShowMore(db, { accountId, productId: ids.bulon, on: true, userId: 'ana' });
-    expect(pushedTo().sort()).toEqual(['MLA1000001=6', 'MLA1000002=6', 'MLA1000004=6']);
+    writes.length = 0;
+  };
+  const sell = async (orderId: string, quantity: number, listingId = 'MLA1000001', store = storeId) => {
+    const products = await recordOrder(db, { storeId: store, order: sale(orderId, [{ listingId, variationId: null, sku: null, quantity }]) });
+    return syncStock(db, { publicationIds: await affectedPublications(db, products) });
+  };
+  // La tarea dice el producto, el SKU, el stock real y las publicaciones con su código.
+  const expectRestockTask = async (real: number) => {
+    const t = (await task())!;
+    expect(t).toMatchObject({ status: 'PENDING', dueOn: null });
+    expect(t.assignees.map((a) => a.userId)).toEqual(['ana']);
+    const text = plainLinks(t.description);
+    expect(text).toContain('Producto: Bulón de tapa');
+    expect(text).toContain('SKU: sin cargar en la ficha');
+    expect(text).toContain(`Stock real: ${real}.`);
+    expect(text).toMatch(/Publicación: Publicación p1 .* · MLA1000001 · /);
+    expect(text).toMatch(/Publicación: Publicación p2 .* · MLA1000002 · /);
+    expect(text).not.toContain('se pausa la publicación');
+    expect(t.publications.map((p) => p.publicationId)).toEqual(expect.arrayContaining([ids.p1, ids.p2]));
+  };
+
+  it('mostrar más de 5: una venta en Mercado Libre que deja el stock en 0 sigue mostrando 6, con alarma y tarea, y nunca se pausa', async () => {
+    await withShowMore();
     const plan = (await plansFor(db, [ids.p1])).get(ids.p1)!;
     expect(plan).toMatchObject({ managed: true, lines: [{ quantity: 6 }], real: [{ quantity: 5 }] });
     expect(plannedText(plan as Extract<typeof plan, { managed: true }>)).toBe('6 · hay 5');
 
-    const sell = async (orderId: string, quantity: number) => {
-      const products = await recordOrder(db, { storeId, order: sale(orderId, [{ listingId: 'MLA1000001', variationId: null, sku: null, quantity }]) });
-      return syncStock(db, { publicationIds: await affectedPublications(db, products) });
-    };
-    const alarm = () => db.productStock.findUniqueOrThrow({ where: { productId_key: { productId: ids.bulon, key: '' } } });
-    const task = () => db.task.findFirst({ where: { autoKey: `stock:${ids.bulon}:` }, include: { assignees: true } });
-
-    // De 5 a 2: nada. Mercado Libre bajó la vendida a 3: se le vuelve a subir 6 enseguida.
-    writes.length = 0;
+    // De 5 a 2: nada. Mercado Libre bajó la vendida a 3: se le vuelve a subir 6.
     await sell('4001', 3);
     expect(await task()).toBeNull();
-    expect(pushedTo()).toEqual(['MLA1000001=6']);
-    // De 2 a 1: el aviso temprano, y se sigue viendo 6. El kit lleva 2 bulones: no alcanza para uno, y un combo nunca se vende sin tener.
+    expect(toBulon()).toEqual(['MLA1000001=6']);
+    // Se vende hasta 0: la alarma y la tarea, y se sigue viendo 6.
     writes.length = 0;
-    await sell('4002', 1);
-    expect((await alarm()).lowAt).toEqual(expect.any(Date));
-    expect(await task()).toMatchObject({ title: 'Queda 1: Bulón de tapa', status: 'PENDING', remindAt: expect.any(Date) });
-    expect((await task())!.assignees.map((a) => a.userId)).toEqual(['ana']);
-    expect(pushedTo().sort()).toEqual(['MLA1000001=6', 'MLA1000004=0']);
-
-    // Se vende la última: la alarma, y se sigue viendo 6.
-    writes.length = 0;
-    await sell('4003', 1);
+    await sell('4002', 2);
     expect((await alarm()).outSince).toEqual(expect.any(Date));
-    expect((await task())!.title).toBe('Reponer: Bulón de tapa, se vendió la última');
-    expect((await task())!.description).toContain('se pausa la publicación');
-    // Arriba, lo que hay que pedir y dónde se vende; la tarea queda en sus publicaciones y en la del kit.
-    const head = plainLinks((await task())!.description).split('\n\n')[0].split('\n');
-    expect(head.slice(0, 2)).toEqual([expect.stringMatching(/^Producto: Bulón de tapa \(http.*\/a\/prueba\/productos\/\w+\?seccion=stock\)$/), 'SKU: sin cargar en la ficha']);
-    expect(head[2]).toMatch(/^Publicación: Publicación p1 \(http.*\/a\/prueba\/publicaciones\/\w+\) · MLA1000001 · Ver en Mercado Libre \(https:\/\/.*MLA/);
-    expect(await db.taskPublication.count({ where: { task: { autoKey: `stock:${ids.bulon}:` } } })).toBe(4);
-    expect(pushedTo()).toEqual(['MLA1000001=6']);
-    expect(await db.task.count({ where: { autoKey: { startsWith: 'stock:' } } })).toBe(1);
+    expect((await task())!.title).toBe('Reponer: Bulón de tapa, sin stock');
+    await expectRestockTask(0);
+    expect(toBulon()).toEqual(['MLA1000001=6']);
+    // Vendidas sin tener: sigue en 6.
+    writes.length = 0;
+    await sell('4003', 2);
+    expect((await task())!.title).toBe('Reponer: Bulón de tapa, faltan 2 para entregar');
+    expect((await plansFor(db, [ids.p1, ids.p2])).get(ids.p2)).toMatchObject({ lines: [{ quantity: 6 }] });
+    expect(toBulon()).toEqual(['MLA1000001=6']);
 
-    // Una sin tenerla: todavía 6, sin pedir revisar el stock. Falta 1 para entregar.
-    await sell('4004', 1);
-    expect((await alarm()).quantity).toBe(-1);
-    expect((await task())!.title).toBe('Reponer: Bulón de tapa, falta 1 para entregar');
-    expect((await db.product.findUniqueOrThrow({ where: { id: ids.bulon } })).stockReview ?? '').not.toContain('Se vendió más de lo que había');
-    expect((await plansFor(db, [ids.p1])).get(ids.p1)).toMatchObject({ lines: [{ quantity: 6 }] });
-
-    // El cortafuegos: al día, otro aviso; a los dos días, se pausa y se sube 0.
+    // Sin reponer: al día, otro aviso; a los dos días, ni pausa ni 0.
     const later = (hours: number) => new Date(Date.now() + hours * 3600_000);
-    expect(await stockAlarmPass(db, { budgetMs: 10_000, now: later(1) })).toEqual({ reminded: 0, cut: [], pending: false });
-    expect(await stockAlarmPass(db, { budgetMs: 10_000, now: later(25) })).toEqual({ reminded: 1, cut: [], pending: false });
+    expect(await stockAlarmPass(db, { budgetMs: 10_000, now: later(25) })).toEqual({ reminded: 1, pending: false });
     expect((await task())!.description).toContain('Pasó un día sin reponer.');
-    expect(await stockAlarmPass(db, { budgetMs: 10_000, now: later(26) })).toEqual({ reminded: 0, cut: [], pending: false });
-    const cut = await stockAlarmPass(db, { budgetMs: 10_000, now: later(49) });
-    expect(cut.cut).toEqual([ids.bulon]);
+    expect(await stockAlarmPass(db, { budgetMs: 10_000, now: later(49) })).toEqual({ reminded: 0, pending: false });
     writes.length = 0;
-    await syncStock(db, { publicationIds: await affectedPublications(db, cut.cut) });
-    expect(pushedTo().sort()).toEqual(['MLA1000001=0', 'MLA1000002=0']);
-    expect((await task())!.title).toBe('Reponer y reactivar: Bulón de tapa, falta 1 para entregar');
+    await reconcileStock(db, { budgetMs: 10_000 });
+    expect(toBulon()).toEqual([]);
+    expect((await alarm()).cutAt).toBeNull();
+    expect(writes.filter((w) => w.body.available_quantity === 0 && (w.path.endsWith('MLA1000001') || w.path.endsWith('MLA1000002')))).toEqual([]);
 
-    // Al cargar el stock, la alarma se borra, la tarea se cierra y vuelve a verse 6.
-    writes.length = 0;
+    // Al cargar el stock, la alarma se borra y la tarea se cierra.
     await setProductStock(db, { accountId, productId: ids.bulon, userId: 'ana', stock: { '': 3 } });
-    expect(await alarm()).toMatchObject({ quantity: 3, outSince: null, remindedAt: null, cutAt: null, lowAt: null });
+    expect(await alarm()).toMatchObject({ quantity: 3, outSince: null, remindedAt: null, lowAt: null });
     expect(await task()).toMatchObject({ status: 'DONE' });
-    expect(pushedTo().sort()).toEqual(['MLA1000001=6', 'MLA1000002=6', 'MLA1000004=6']);
   });
 
-  it('mostrar más de 5: la segunda sin tener pausa, cargar 0 dice que no hay y al apagarla se cierra', async () => {
-    await startStock(db);
-    await setProductStock(db, { accountId, productId: ids.bulon, userId: 'ana', stock: { '': 1 } });
-    // Prenderla con 0 no muestra 6: solo cuenta lo que se vende después.
-    await setProductStock(db, { accountId, productId: ids.bulon, userId: 'ana', stock: { '': 0 } });
-    await setShowMore(db, { accountId, productId: ids.bulon, on: true, userId: 'ana' });
-    expect((await plansFor(db, [ids.p1])).get(ids.p1)).toMatchObject({ lines: [{ quantity: 0 }] });
-
-    await setProductStock(db, { accountId, productId: ids.bulon, userId: 'ana', stock: { '': 1 } });
-    const sell = (orderId: string, quantity: number) => recordOrder(db, { storeId, order: sale(orderId, [{ listingId: 'MLA1000002', variationId: null, sku: null, quantity }]) });
-    await sell('5001', 1);
-    await sell('5002', 1);
-    expect((await plansFor(db, [ids.p1])).get(ids.p1)).toMatchObject({ lines: [{ quantity: 6 }] });
-    // La segunda sin tenerla: ya no se muestra 6.
-    await sell('5003', 1);
-    expect((await plansFor(db, [ids.p1])).get(ids.p1)).toMatchObject({ lines: [{ quantity: 0 }] });
-    const task = () => db.task.findFirstOrThrow({ where: { autoKey: `stock:${ids.bulon}:` } });
-    expect((await task()).title).toBe('Reponer y reactivar: Bulón de tapa, faltan 2 para entregar');
-    expect((await task()).description).toContain('Ya se vendieron 2 sin tener');
-
-    // Una venta cancelada vuelve: falta 1 y se vuelve a ver 6.
-    const products = await recordOrder(db, {
-      storeId,
-      order: sale('5003', [{ listingId: 'MLA1000002', variationId: null, sku: null, quantity: 1 }], { cancelled: true }),
+  it('mostrar más de 5: una venta por otro canal que deja el stock en 0 sigue mostrando 6 en Mercado Libre, con alarma y tarea', async () => {
+    // Otra tienda del mismo producto, en otro canal de venta.
+    const channel = await db.channel.findFirstOrThrow();
+    const other = (await db.store.create({ data: { accountId, channelId: channel.id, name: 'OTRA TIENDA', salesSince: new Date(Date.now() - 3600_000) } })).id;
+    await db.channelConnection.create({
+      data: {
+        storeId: other,
+        appId: '1234567890',
+        appSecret: encrypt('secreto-de-prueba'),
+        appSecretHint: 'ueba',
+        status: 'ACTIVE',
+        externalUserId: '7',
+        accessToken: encrypt('llave'),
+        refreshToken: encrypt('renovar'),
+        expiresAt: new Date(Date.now() + 6 * 3600_000),
+      },
     });
-    expect(products).toEqual([ids.bulon]);
-    expect((await plansFor(db, [ids.p1])).get(ids.p1)).toMatchObject({ lines: [{ quantity: 6 }] });
-    expect((await task()).title).toBe('Reponer: Bulón de tapa, falta 1 para entregar');
+    items.MLA2000001 = { quantity: 5 };
+    await db.publication.create({ data: { productId: ids.bulon, storeId: other, externalId: 'MLA2000001', title: 'En la otra tienda', channelCopy: { create: copy(5) } } });
+    await withShowMore();
+    writes.length = 0;
+    await sell('4101', 5, 'MLA2000001', other);
+    expect((await alarm()).quantity).toBe(0);
+    expect((await task())!.title).toBe('Reponer: Bulón de tapa, sin stock');
+    await expectRestockTask(0);
+    // Las de Mercado Libre siguen mostrando 6: no se les manda nada que las pause.
+    expect((await plansFor(db, [ids.p1])).get(ids.p1)).toMatchObject({ lines: [{ quantity: 6 }], pending: false });
+    expect(toBulon()).toEqual([]);
+  });
 
-    // Cargar 0 a mano dice que no hay: se sube 0 y la tarea se cierra.
+  it('mostrar más de 5: un ajuste a mano a 0, en la pantalla o por Claude, sigue mostrando 6, con alarma y tarea', async () => {
+    await withShowMore();
+    items.MLA1000001.pausesAtZero = true;
     await setProductStock(db, { accountId, productId: ids.bulon, userId: 'ana', stock: { '': 0 } });
-    expect((await plansFor(db, [ids.p1])).get(ids.p1)).toMatchObject({ lines: [{ quantity: 0 }] });
-    expect((await task()).status).toBe('DONE');
+    // Ya mostraban 6: no se les manda nada, y menos un 0.
+    expect(toBulon()).toEqual([]);
+    expect(items.MLA1000001).toMatchObject({ quantity: 6 });
+    expect((await plansFor(db, [ids.p1])).get(ids.p1)).toMatchObject({ lines: [{ quantity: 6 }], real: [{ quantity: 0 }] });
+    expect(items.MLA1000001.status ?? 'active').toBe('active');
+    expect((await alarm()).outSince).toEqual(expect.any(Date));
+    expect((await task())!.title).toBe('Reponer: Bulón de tapa, sin stock');
+    await expectRestockTask(0);
+    // Guardar 0 otra vez no repite el aviso.
+    const first = (await task())!.remindAt;
+    await setProductStock(db, { accountId, productId: ids.bulon, userId: 'ana', stock: { '': 0 } });
+    expect((await task())!.remindAt).toEqual(first);
+    expect(await db.task.count({ where: { autoKey: { startsWith: 'stock:' } } })).toBe(1);
 
-    // Apagarla: se ve lo que hay, y un combo no se puede prender solo.
-    await setProductStock(db, { accountId, productId: ids.bulon, userId: 'ana', stock: { '': 2 } });
+    // Por Claude, con set_product_stock: lo mismo.
+    await setProductStock(db, { accountId, productId: ids.bulon, userId: 'ana', stock: { '': 4 } });
+    expect(await task()).toMatchObject({ status: 'DONE' });
+    writes.length = 0;
+    const tool = STOCK_TOOLS.find((t) => t.name === 'set_product_stock')!;
+    const ctx: McpContext = { db, userId: 'ana', access: { isAdmin: true, permissions: {}, accountIds: [] }, baseUrl: 'https://app.ejemplo.com' };
+    await tool.run(ctx, tool.input.parse({ publicacion: 'MLA1000001', unidades: 0 }));
+    expect(toBulon()).toEqual([]);
     expect((await plansFor(db, [ids.p1])).get(ids.p1)).toMatchObject({ lines: [{ quantity: 6 }] });
+    expect(await db.task.count({ where: { autoKey: `stock:${ids.bulon}:`, status: { in: ['PENDING', 'IN_PROGRESS'] } } })).toBe(1);
+    expect(items.MLA1000001.status ?? 'active').toBe('active');
+  });
+
+  it('mostrar más de 5: con stock en 1, el aviso de que queda 1 y se sigue viendo 6', async () => {
+    await withShowMore();
+    // Por un ajuste a mano.
+    await setProductStock(db, { accountId, productId: ids.bulon, userId: 'ana', stock: { '': 1 } });
+    expect((await alarm()).lowAt).toEqual(expect.any(Date));
+    expect(await task()).toMatchObject({ title: 'Queda 1: Bulón de tapa', status: 'PENDING', remindAt: expect.any(Date) });
+    expect(plainLinks((await task())!.description)).toContain('Stock real: 1.');
+    expect((await plansFor(db, [ids.p1])).get(ids.p1)).toMatchObject({ lines: [{ quantity: 6 }] });
+    // Por una venta que deja 1.
+    await setProductStock(db, { accountId, productId: ids.bulon, userId: 'ana', stock: { '': 3 } });
+    expect(await task()).toMatchObject({ status: 'DONE' });
+    writes.length = 0;
+    await sell('4201', 2);
+    expect(await task()).toMatchObject({ title: 'Queda 1: Bulón de tapa', status: 'PENDING' });
+    expect(toBulon()).toEqual(['MLA1000001=6']);
+    // Una cancelada que vuelve de 0 a 1 también avisa que queda 1.
+    await sell('4202', 1);
+    expect((await task())!.title).toBe('Reponer: Bulón de tapa, sin stock');
+    await recordOrder(db, { storeId, order: sale('4202', [{ listingId: 'MLA1000001', variationId: null, sku: null, quantity: 1 }], { cancelled: true }) });
+    expect(await task()).toMatchObject({ title: 'Queda 1: Bulón de tapa', status: 'PENDING' });
+    expect((await alarm()).outSince).toBeNull();
+
+    // Apagarla: se ve lo que hay, y la tarea se cierra.
     await setShowMore(db, { accountId, productId: ids.bulon, on: false, userId: 'ana' });
-    expect((await plansFor(db, [ids.p1])).get(ids.p1)).toMatchObject({ lines: [{ quantity: 2 }] });
+    expect((await plansFor(db, [ids.p1])).get(ids.p1)).toMatchObject({ lines: [{ quantity: 1 }] });
+    expect(await task()).toMatchObject({ status: 'DONE' });
     await expect(setShowMore(db, { accountId, productId: ids.kit, on: true, userId: 'ana' })).rejects.toThrow('todas sus piezas');
+  });
+
+  it('una publicación que el canal pausó sin stock: la app lee el estado al momento, y el 6 de "Mostrar más de 5" no la reactiva sola', async () => {
+    await startStock(db);
+    // Sin la opción, cargar 0 manda 0 y Mercado Libre la pausa: la app lo lee enseguida.
+    items.MLA1000001.pausesAtZero = true;
+    await setProductStock(db, { accountId, productId: ids.bulon, userId: 'ana', stock: { '': 0 } });
+    expect(items.MLA1000001.status).toBe('paused');
+    expect((await db.publication.findUniqueOrThrow({ where: { id: ids.p1 } })).channelStatus).toBe('PAUSED');
+
+    // Prender la opción con 0: no se le sube 6, así no se reactiva sin que una persona lo decida.
+    writes.length = 0;
+    await setShowMore(db, { accountId, productId: ids.bulon, on: true, userId: 'ana' });
+    expect(pushedTo()).not.toContain('MLA1000001=6');
+    expect((await plansFor(db, [ids.p1])).get(ids.p1)).toMatchObject({ lines: [{ quantity: 6 }], pending: false, held: true });
+    // Con stock de verdad, sí.
+    await setProductStock(db, { accountId, productId: ids.bulon, userId: 'ana', stock: { '': 2 } });
+    expect(pushedTo()).toContain('MLA1000001=6');
+
+    // Si la app todavía la ve activa, pausar o reactivar lee antes el estado del canal.
+    items.MLA1000002.status = 'paused';
+    const tool = STATUS_TOOLS[0];
+    const ctx: McpContext = { db, userId: 'ana', access: { isAdmin: true, permissions: {}, accountIds: [] }, baseUrl: 'https://app.ejemplo.com' };
+    expect((await db.publication.findUniqueOrThrow({ where: { id: ids.p2 } })).channelStatus).toBe('ACTIVE');
+    expect(await tool.run(ctx, { publicacion: 'MLA1000002', accion: 'reactivar' })).toMatchObject({ listo: true, estado: 'Activa' });
+    expect(items.MLA1000002.status).toBe('active');
   });
 
   it('una venta cancelada antes de entregarse vuelve; entregada, no', async () => {

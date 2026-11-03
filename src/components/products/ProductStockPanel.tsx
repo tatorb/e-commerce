@@ -11,7 +11,7 @@ import { DropOrphanStockButton, ShowMoreSwitch, StockForm, StockReviewedButton }
 import { CostForm } from './CostForm';
 import { formatPrice } from '@/domain/money';
 import type { ProductCostLine } from '@/lib/costs';
-import { cushionDeadlines, cushionText, owed, owedText, SELL_WITHOUT_STOCK, SHOWN_WHEN_SHORT } from '@/domain/stock-cushion';
+import { cushionText, owed, owedText, SHOWN_WHEN_SHORT } from '@/domain/stock-cushion';
 
 // El costo y el stock del producto. El costo de reposición sin IVA, uno por
 // medida, lo heredan sus publicaciones en el paso Precio. El stock: cuánto
@@ -120,7 +120,7 @@ export function ProductStockPanel({
               <ShowMoreSwitch accountSlug={accountSlug} productId={view.id} on={view.showMore} readOnly={!canEdit || !view.managed} />
               <p className="text-xs text-muted-foreground">
                 {view.managed
-                  ? `Prendido, los canales muestran ${SHOWN_WHEN_SHORT} aunque haya de 1 a 5, para que la publicación no se pause al vender la última. Avisa cuando queda 1 y cuando se vende la última; se pueden vender ${SELL_WITHOUT_STOCK} sin tenerlas. Al día sin reponer avisa otra vez y a los dos días se pausa. Lo resuelve cargar el stock.`
+                  ? `Prendido, los canales muestran ${SHOWN_WHEN_SHORT} con 5 o menos, también en 0, así la publicación nunca se pausa sola. Cuando queda 1 o 0 salta la alarma con una tarea para reponer, y al día sin reponer avisa otra vez. Si hay que pausar, se pausa a mano. Lo resuelve cargar el stock.`
                   : 'Se prende cuando la app lleva el stock del producto.'}
               </p>
               {view.showMore ? (
@@ -241,12 +241,10 @@ function MeasureAlarm({
   const when = (d: Date) => formatDateTime(d, timeZone);
   const missing = owed(quantity);
   const extra = missing > 0 ? ` ${owedText(missing)}.` : '';
-  if (alarm?.cutAt) return <span className="text-xs text-destructive">Pausada el {when(alarm.cutAt)} por no reponer en dos días.{extra}</span>;
-  if (alarm?.outSince && quantity <= -SELL_WITHOUT_STOCK) return <span className="text-xs text-destructive">Ya se vendieron {SELL_WITHOUT_STOCK} sin tener: pausada hasta cargar el stock.</span>;
   if (alarm?.outSince) {
     return (
       <span className="text-xs text-destructive">
-        Sin stock desde el {when(alarm.outSince)}: se pausa el {when(cushionDeadlines(alarm.outSince).cutAt)}.{extra}
+        Sin stock desde el {when(alarm.outSince)}: en los canales se sigue viendo {SHOWN_WHEN_SHORT}.{extra}
       </span>
     );
   }

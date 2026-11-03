@@ -158,7 +158,7 @@ export function shownAvailable(source: StockSource, v: VariantLike | null): numb
   const product = source.product;
   if (!product.showMore || !product.stock) return n;
   const key = unitParts(source, v)![0].key;
-  return Math.min(cushionShown(product.stock[key] ?? 0, true, product.alarms?.[key] ?? null), MAX_QUANTITY);
+  return Math.min(cushionShown(product.stock[key] ?? 0, true), MAX_QUANTITY);
 }
 
 /**

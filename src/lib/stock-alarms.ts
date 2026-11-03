@@ -5,20 +5,8 @@ import { quantityKey } from '@/domain/quantities';
 import { titleOrUntitled } from '@/domain/publication-title';
 import { getChannelAdapter } from '@/channels';
 import { PLAN_SELECT, planFor, singleMeasure, sourceOf } from '@/lib/stock-plan';
-import {
-  alarmLevel,
-  CUT_AFTER_MS,
-  cushionDeadlines,
-  owed,
-  owedText,
-  REMIND_AFTER_MS,
-  saleAlarm,
-  SELL_WITHOUT_STOCK,
-  SHOWN_WHEN_SHORT,
-  type AlarmLevel,
-  type SaleAlarm,
-} from '@/domain/stock-cushion';
-import { dayIn, dueDate, OPEN_STATUSES, TASK_TITLE_MAX } from '@/domain/tasks';
+import { alarmLevel, changeAlarm, owed, owedText, REMIND_AFTER_MS, remindAt, saleAlarm, SHOWN_WHEN_SHORT, type AlarmLevel, type SaleAlarm } from '@/domain/stock-cushion';
+import { OPEN_STATUSES, TASK_TITLE_MAX } from '@/domain/tasks';
 import { formatDateTime } from '@/lib/format';
 import { notifyAssigned, notifyTaskAgain } from '@/lib/task-mail';
 import { publicAppUrl } from '@/lib/public-url';
@@ -27,7 +15,7 @@ import { textLink } from '@/domain/text-links';
 // Las alarmas de stock de los productos con "Mostrar más de 5"
 // (src/domain/stock-cushion.ts): una tarea por medida, para todos los
 // administradores, que se crea con el aviso temprano o al venderse la última,
-// cambia con cada venta y con el cortafuegos, y se cierra sola al cargar
+// cambia con cada venta o ajuste, y se cierra sola al cargar
 // stock. Cada aviso sale también por mail. Recibe la base por parámetro para
 // poder probarlo.
 
@@ -39,17 +27,18 @@ export const stockAlarmKey = (productId: string, key: string) => `stock:${produc
 const KEY_PREFIX = 'stock:';
 
 /** Un cambio en el stock de una medida: de cuánto a cuánto y por qué. */
-export type StockChange = { productId: string; key: string; before: number; after: number; cause: 'sale' | 'cancel' | 'manual' };
+export type StockChange = { productId: string; key: string; before: number; after: number; cause: 'sale' | 'cancel' | 'manual' | 'import' };
 
 /** Lo que hay que avisar después de guardar: qué medida y qué pasó. */
-export type AlarmEvent = { productId: string; key: string; kind: SaleAlarm | 'restock' | 'remind' | 'cut' | 'off' };
+export type AlarmEvent = { productId: string; key: string; kind: SaleAlarm | 'restock' | 'remind' | 'off' };
 
 /**
  * Dentro de la transacción que cambió el stock: deja anotado el estado de la
- * alarma de cada medida de los productos con la opción. Una venta que deja 1
- * anota el aviso temprano; una que deja 0 o menos, desde cuándo falta.
- * Cargar stock, o que vuelva una venta cancelada, lo borra. Cargar 0 a mano
- * dice que no hay: tampoco se muestra 6. Devuelve lo que hay que avisar.
+ * alarma de cada medida de los productos con la opción, venga de donde venga
+ * el cambio. Llegar a 1 anota el aviso temprano; llegar a 0 o menos, desde
+ * cuándo falta. Cada venta que la deja en 1, en 0 o sin tener avisa; un
+ * ajuste, una carga o una cancelación avisan al entrar en 1 o en 0. Cargar 2
+ * o más lo borra. Devuelve lo que hay que avisar.
  */
 export async function markStockAlarms(tx: Tx, changes: StockChange[], now: Date): Promise<AlarmEvent[]> {
   const events: AlarmEvent[] = [];
@@ -61,23 +50,24 @@ export async function markStockAlarms(tx: Tx, changes: StockChange[], now: Date)
     }
     if (!showsMore.get(c.productId)) continue;
     const where = { productId_key: { productId: c.productId, key: c.key } };
-    if (c.cause === 'sale') {
-      const alarm = saleAlarm(c.before, c.after);
-      if (!alarm) continue;
-      const row = await tx.productStock.findUnique({ where, select: { outSince: true, lowAt: true } });
-      if (alarm === 'low') await tx.productStock.update({ where, data: { lowAt: row?.lowAt ?? now } });
-      else await tx.productStock.update({ where, data: { outSince: row?.outSince ?? now } });
-      events.push({ productId: c.productId, key: c.key, kind: alarm });
+    const row = await tx.productStock.findUnique({ where, select: { outSince: true, lowAt: true } });
+    const state = { outSince: row?.outSince ?? null, lowAt: row?.lowAt ?? null };
+    // Hay 2 o más: no falta nada.
+    if (c.after >= 2) {
+      await tx.productStock.update({ where, data: { outSince: null, remindedAt: null, cutAt: null, lowAt: null } });
+      events.push({ productId: c.productId, key: c.key, kind: 'restock' });
       continue;
     }
-    // Entró stock, o se cargó a mano.
-    if (c.after >= 1 || c.cause === 'manual') {
-      await tx.productStock.update({ where, data: { outSince: null, remindedAt: null, cutAt: null, ...(c.after === 1 ? {} : { lowAt: null }) } });
-      events.push({ productId: c.productId, key: c.key, kind: 'restock' });
-    } else {
-      // Volvió una venta cancelada, pero sigue faltando.
-      events.push({ productId: c.productId, key: c.key, kind: 'restock' });
+    const alarm = c.cause === 'sale' ? saleAlarm(c.before, c.after) : changeAlarm(c.after, state);
+    if (c.after === 1) {
+      // Queda 1: el aviso temprano. Si venía sin stock, ya no falta.
+      await tx.productStock.update({ where, data: { lowAt: state.lowAt ?? now, outSince: null, remindedAt: null, cutAt: null } });
+      events.push({ productId: c.productId, key: c.key, kind: alarm ?? 'restock' });
+      continue;
     }
+    // 0 o menos: desde cuándo falta.
+    await tx.productStock.update({ where, data: { outSince: state.outSince ?? now, cutAt: null } });
+    events.push({ productId: c.productId, key: c.key, kind: alarm ?? 'restock' });
   }
   return events;
 }
@@ -159,32 +149,24 @@ export function alarmTaskText(
   ].join('\n');
   const real = row.quantity;
   const missing = owed(real);
-  const closing = 'Esta tarea se cierra sola al cargar el stock en el producto.';
-  const deadlines = row.outSince ? cushionDeadlines(row.outSince) : null;
+  const stock = `Stock real: ${real}. En los canales se sigue viendo ${SHOWN_WHEN_SHORT}, así que la publicación no se pausa.`;
+  const closing = 'Esta tarea se cierra sola al cargar el stock en el producto. Si hay que pausar la publicación, se pausa a mano.';
   const when = (d: Date) => formatDateTime(d, tz);
-  const cut = row.cutAt !== null || real <= -SELL_WITHOUT_STOCK;
 
   if (!row.outSince && real === 1) {
     return {
-      title: `Queda 1: ${what}`,
-      description: `${head}\n\nQueda 1 unidad. En los canales se sigue viendo ${SHOWN_WHEN_SHORT}, así que no se nota. Si se vende esta, la app avisa para reponer. ${closing}`,
+      title: `Queda 1: ${what}`.slice(0, TASK_TITLE_MAX),
+      description: `${head}\n\n${stock} Queda 1 unidad: si se vende, la app avisa de nuevo. ${closing}`,
     };
   }
-  const state = missing > 0 ? owedText(missing).toLowerCase() : 'se vendió la última';
-  const parts: string[] = [];
+  const state = missing > 0 ? owedText(missing).toLowerCase() : 'sin stock';
+  const parts: string[] = [stock];
   if (row.outSince) parts.push(`Se quedó sin stock el ${when(row.outSince)}.`);
   if (missing > 0) parts.push(`Se ${missing === 1 ? 'vendió 1' : `vendieron ${missing}`} sin tenerla${missing === 1 ? '' : 's'}: hay que comprar${missing === 1 ? 'la' : 'las'} en fábrica para entregar${missing === 1 ? 'la' : 'las'}.`);
-  if (row.cutAt) parts.push(`Pasaron dos días sin reponer: el ${when(row.cutAt)} se pausó en los canales.`);
-  else if (real <= -SELL_WITHOUT_STOCK) parts.push(`Ya se vendieron ${SELL_WITHOUT_STOCK} sin tener: no se muestra más ${SHOWN_WHEN_SHORT} y la publicación se pausa en los canales hasta cargar el stock.`);
-  else if (deadlines) {
-    parts.push(`En los canales se sigue viendo ${SHOWN_WHEN_SHORT} para que no se pause.`);
-    if (kind === 'remind') parts.push('Pasó un día sin reponer.');
-    else parts.push(`Si no se repone, el ${when(deadlines.remindAt)} sale otro aviso.`);
-    parts.push(`El ${when(deadlines.cutAt)} se pausa la publicación.`);
-  }
+  if (kind === 'remind') parts.push('Pasó un día sin reponer.');
+  else if (row.outSince) parts.push(`Si no se repone, el ${when(remindAt(row.outSince))} sale otro aviso.`);
   parts.push(closing);
-  const title = cut ? `Reponer y reactivar: ${what}, ${state}` : `Reponer: ${what}, ${state}`;
-  return { title: title.slice(0, TASK_TITLE_MAX), description: `${head}\n\n${parts.join(' ')}` };
+  return { title: `Reponer: ${what}, ${state}`.slice(0, TASK_TITLE_MAX), description: `${head}\n\n${parts.join(' ')}` };
 }
 
 /** Las claves de stock de las medidas que vende la publicación. */
@@ -241,9 +223,9 @@ async function announceOne(db: Db, e: AlarmEvent, now: Date): Promise<void> {
   if (!row) return;
   const accountId = row.product.accountId;
   const autoKey = stockAlarmKey(e.productId, e.key);
-  // Se cierra al cargar stock (2 o más), al cargar 0 a mano (dice que no hay) o al apagar la opción sin nada que entregar.
+  // Se cierra al cargar stock (2 o más) o al apagar la opción sin nada que entregar.
   const pubs = await taskPublications(db, e.productId, e.key);
-  const settled = e.kind === 'off' ? row.quantity >= 0 : e.kind === 'restock' && !row.outSince && (row.quantity >= 2 || row.quantity <= 0);
+  const settled = e.kind === 'off' ? row.quantity >= 0 : e.kind === 'restock' && !row.outSince && row.quantity >= 2;
   const notify = e.kind !== 'restock' && e.kind !== 'off';
 
   const taskId = await db.$transaction(async (tx) => {
@@ -254,11 +236,11 @@ async function announceOne(db: Db, e: AlarmEvent, now: Date): Promise<void> {
       return null;
     }
     const text = alarmTaskText(row, e.kind, pubs.listings);
-    const cutDay = row.outSince && !row.cutAt ? dueDate(dayIn(cushionDeadlines(row.outSince).cutAt, row.product.account.timezone)) : null;
     const data = {
       title: text.title,
       description: text.description,
-      dueOn: cutDay,
+      // Sin fecha de pausa: la pausa la decide una persona.
+      dueOn: null,
       // El aviso es ya: el mail sale ahora, no en la pasada de cada hora.
       ...(notify ? { remindAt: now, remindedAt: now } : {}),
     };
@@ -288,33 +270,19 @@ async function announceOne(db: Db, e: AlarmEvent, now: Date): Promise<void> {
 
 // ───────────────────────────── El cortafuegos ─────────────────────────────
 
-export type AlarmPassResult = { reminded: number; cut: string[]; pending: boolean };
+export type AlarmPassResult = { reminded: number; pending: boolean };
 
 /**
  * En la tarea de cada hora: a las medidas que siguen sin stock, otro aviso al
- * día y, a los dos días, la pausa. Devuelve los productos que se pausaron,
- * para subirles la cantidad nueva.
+ * día. Con "Mostrar más de 5" la app nunca pausa la publicación: eso lo
+ * decide una persona al ver la alarma.
  */
 export async function stockAlarmPass(db: Db, opts: { budgetMs: number; now?: Date }): Promise<AlarmPassResult> {
   const now = opts.now ?? new Date();
   const started = Date.now();
-  const result: AlarmPassResult = { reminded: 0, cut: [], pending: false };
-  const base = { cutAt: null, product: { showMore: true } } satisfies Prisma.ProductStockWhereInput;
-
-  const toCut = await db.productStock.findMany({
-    where: { ...base, outSince: { lte: new Date(now.getTime() - CUT_AFTER_MS) } },
-    select: { productId: true, key: true },
-    take: 100,
-  });
-  for (const r of toCut) {
-    if (Date.now() - started > opts.budgetMs) return { ...result, pending: true };
-    await db.productStock.update({ where: { productId_key: r }, data: { cutAt: now } });
-    await announceStockAlarms(db, [{ ...r, kind: 'cut' }], now);
-    result.cut.push(r.productId);
-  }
-
+  const result: AlarmPassResult = { reminded: 0, pending: false };
   const toRemind = await db.productStock.findMany({
-    where: { ...base, remindedAt: null, outSince: { lte: new Date(now.getTime() - REMIND_AFTER_MS) } },
+    where: { product: { showMore: true }, remindedAt: null, outSince: { lte: new Date(now.getTime() - REMIND_AFTER_MS) } },
     select: { productId: true, key: true },
     take: 100,
   });
@@ -324,7 +292,6 @@ export async function stockAlarmPass(db: Db, opts: { budgetMs: number; now?: Dat
     await announceStockAlarms(db, [{ ...r, kind: 'remind' }], now);
     result.reminded++;
   }
-  result.cut = [...new Set(result.cut)];
   return result;
 }
 
@@ -366,10 +333,8 @@ export type AlarmRow = {
   level: AlarmLevel;
   outSince: Date | null;
   remindedAt: Date | null;
-  cutAt: Date | null;
-  // Cuándo sale el aviso del día y cuándo se pausa, si todavía no pasó.
+  // Cuándo sale el aviso del día, si todavía no pasó.
   remindAt: Date | null;
-  pauseAt: Date | null;
   taskId: string | null;
 };
 
@@ -393,8 +358,8 @@ export function alarmFilterOf(row: Pick<AlarmRow, 'real'>, filter: AlarmFilter):
 
 /**
  * Las publicaciones de la cuenta que muestran más stock del que hay, por
- * medida, y las que se quedaron sin stock aunque ya se hayan pausado. Primero
- * las sin stock que se pausan antes.
+ * medida, y las que se quedaron sin stock. Primero las que hace más que
+ * faltan.
  */
 export async function loadStockAlarms(db: Db, accountId: string): Promise<AlarmRow[]> {
   const pubs = await db.publication.findMany({
@@ -405,7 +370,7 @@ export async function loadStockAlarms(db: Db, accountId: string): Promise<AlarmR
   if (pubs.length === 0) return [];
   const productIds = [...new Set(pubs.map((p) => p.product.id))];
   const [states, tasks] = await Promise.all([
-    db.productStock.findMany({ where: { productId: { in: productIds } }, select: { productId: true, key: true, quantity: true, outSince: true, remindedAt: true, cutAt: true } }),
+    db.productStock.findMany({ where: { productId: { in: productIds } }, select: { productId: true, key: true, quantity: true, outSince: true, remindedAt: true } }),
     db.task.findMany({ where: { accountId, autoKey: { startsWith: KEY_PREFIX }, status: { in: [...OPEN_STATUSES] } }, select: { id: true, autoKey: true } }),
   ]);
   const stateOf = new Map(states.map((r) => [`${r.productId}:${r.key}`, r]));
@@ -430,7 +395,6 @@ export async function loadStockAlarms(db: Db, accountId: string): Promise<AlarmR
       const shown = plan.lines.find((l) => l.key === m.lineKey)?.quantity ?? 0;
       const out = state?.outSince ?? null;
       if (shown <= Math.max(real, 0) && !out) continue;
-      const deadlines = out ? cushionDeadlines(out) : null;
       rows.push({
         publicationId: pub.id,
         title: titleOrUntitled(pub.title),
@@ -444,12 +408,10 @@ export async function loadStockAlarms(db: Db, accountId: string): Promise<AlarmR
         real,
         shown,
         inChannel: plan.channel?.find((l) => l.key === m.lineKey)?.quantity ?? null,
-        level: alarmLevel(real, { outSince: out, cutAt: state?.cutAt ?? null }),
+        level: alarmLevel(real, { outSince: out }),
         outSince: out,
         remindedAt: state?.remindedAt ?? null,
-        cutAt: state?.cutAt ?? null,
-        remindAt: deadlines && !state?.remindedAt && !state?.cutAt ? deadlines.remindAt : null,
-        pauseAt: deadlines && !state?.cutAt && real > -SELL_WITHOUT_STOCK ? deadlines.cutAt : null,
+        remindAt: out && !state?.remindedAt ? remindAt(out) : null,
         taskId: taskOf.get(stockAlarmKey(pub.product.id, key)) ?? null,
       });
     }

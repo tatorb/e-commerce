@@ -1,11 +1,11 @@
 import Link from 'next/link';
-import { AlertTriangle, BellRing, ExternalLink, ListTodo, PauseCircle } from 'lucide-react';
+import { AlertTriangle, BellRing, ExternalLink, ListTodo } from 'lucide-react';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Card } from '@/components/ui/card';
 import { TabLinks } from '@/components/ui/tab-links';
 import { can } from '@/domain/access';
-import { owed, owedText, SELL_WITHOUT_STOCK, SHOWN_WHEN_SHORT } from '@/domain/stock-cushion';
+import { owed, owedText, SHOWN_WHEN_SHORT } from '@/domain/stock-cushion';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { prisma } from '@/lib/db';
 import { formatDateTime, formatDuration, plural } from '@/lib/format';
@@ -42,8 +42,8 @@ export default async function StockAlarmsPage({ params, searchParams }: { params
           <h1 className="text-2xl font-bold tracking-tight">Alarmas de stock</h1>
           <p className="max-w-3xl text-sm text-muted-foreground">
             Las publicaciones que muestran más stock del que hay en <strong>{account.name}</strong>. Con «Mostrar más de 5» prendido en un producto, los canales
-            muestran {SHOWN_WHEN_SHORT} aunque haya de 1 a 5, y se pueden vender {SELL_WITHOUT_STOCK} sin tenerlas. Al día sin reponer sale otro aviso y a los dos
-            días la publicación se pausa. Se resuelve cargando el stock en el producto.
+            muestran {SHOWN_WHEN_SHORT} con 5 o menos, también en 0: la publicación nunca se pausa sola. Cuando queda 1 o 0 sale la alarma y una tarea para reponer,
+            y al día sin reponer otro aviso. Si hay que pausar, se pausa a mano. Se resuelve cargando el stock en el producto.
           </p>
         </div>
         <TabLinks
@@ -159,25 +159,9 @@ function AlarmLine({
   );
 }
 
-/** Cómo está, en palabras: desde cuándo falta, si salió el aviso del día y cuándo se pausa. */
+/** Cómo está, en palabras: desde cuándo falta y si salió el aviso del día. */
 function Situation({ row: r, when, now }: { row: AlarmRow; when: (d: Date) => string; now: Date }) {
   const line = 'flex items-start gap-1.5 text-sm';
-  if (r.cutAt) {
-    return (
-      <p className={cn(line, 'text-destructive')}>
-        <PauseCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-        Pausada el {when(r.cutAt)}: pasaron dos días sin reponer. Vuelve a mostrar {SHOWN_WHEN_SHORT} al cargar el stock.
-      </p>
-    );
-  }
-  if (r.outSince && r.real <= -SELL_WITHOUT_STOCK) {
-    return (
-      <p className={cn(line, 'text-destructive')}>
-        <PauseCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-        Ya se vendieron {SELL_WITHOUT_STOCK} sin tener: se pausó hasta cargar el stock.
-      </p>
-    );
-  }
   if (r.outSince) {
     return (
       <div className="space-y-0.5">
@@ -186,8 +170,8 @@ function Situation({ row: r, when, now }: { row: AlarmRow; when: (d: Date) => st
           Sin stock hace {formatDuration(r.outSince, now)}, desde el {when(r.outSince)}.
         </p>
         <p className="pl-5 text-xs text-muted-foreground">
-          {r.remindedAt ? `Ya salió el aviso del primer día. ` : r.remindAt ? `Otro aviso el ${when(r.remindAt)}. ` : ''}
-          {r.pauseAt ? `Se pausa el ${when(r.pauseAt)}.` : ''}
+          {r.remindedAt ? 'Ya salió el aviso del primer día. ' : r.remindAt ? `Otro aviso el ${when(r.remindAt)}. ` : ''}
+          {`En los canales se sigue viendo ${SHOWN_WHEN_SHORT}.`}
         </p>
       </div>
     );

@@ -1,3 +1,4 @@
+import { STOPPED_STATUSES } from '@/domain/channel-status';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
 import { parseVariations, variantKey, type VariantLike } from '@/domain/media';
@@ -65,7 +66,7 @@ export const PLAN_SELECT = {
   variantKey: true,
   followsStock: true,
   channelStatus: true,
-  store: { select: { id: true, name: true, salesSince: true, salesError: true, channel: { select: { kind: true, name: true } } } },
+  store: { select: { id: true, name: true, accountId: true, salesSince: true, salesError: true, channel: { select: { kind: true, name: true } } } },
   channelCopy: { select: { quantity: true, variations: true, stockInChannel: true, missingSince: true, readAt: true, details: true } },
   product: { select: SOURCE_SELECT },
 } satisfies Prisma.PublicationSelect;
@@ -79,7 +80,8 @@ export type StockPlan =
   // Sigue al stock: lo que le toca, lo que tiene en el canal, si hay que subirlo
   // y, si vende una sola medida del producto, cuál. real: lo que hay de verdad,
   // si con "Mostrar más de 5" se muestra más.
-  | { managed: true; lines: QuantityLine[]; channel: QuantityLine[] | null; pending: boolean; measure: ListingMeasure | null; real?: QuantityLine[] }
+  // held: está pausada en el canal sin stock de verdad; el 6 de "Mostrar más de 5" no la reactiva sola.
+  | { managed: true; lines: QuantityLine[]; channel: QuantityLine[] | null; pending: boolean; measure: ListingMeasure | null; real?: QuantityLine[]; held?: boolean }
   // off: la cantidad automática está apagada en la publicación.
   | { managed: false; reason: string; off?: boolean };
 
@@ -153,6 +155,13 @@ export function planFor(p: PlanRow): StockPlan {
   const plan: ManagedPlan = { managed: true, lines: planned.lines, channel, pending: !sameQuantities(planned.lines, channel), measure };
   const real = plannedQuantities(variations, realSource(source), single);
   if ('lines' in real && !sameQuantities(real.lines, planned.lines)) plan.real = real.lines;
+  // Pausada en el canal con 0 y sin stock de verdad: el 6 de "Mostrar más de 5" no la reactiva sola.
+  // La reactiva una persona; si se carga stock, se sube como siempre.
+  const total = (lines: QuantityLine[]) => lines.reduce((sum, l) => sum + Math.max(l.quantity, 0), 0);
+  if (plan.pending && plan.real && STOPPED_STATUSES.includes(p.channelStatus) && channel !== null && total(channel) === 0 && total(plan.real) === 0) {
+    plan.pending = false;
+    plan.held = true;
+  }
   return plan;
 }
 
