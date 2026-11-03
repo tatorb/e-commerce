@@ -22,6 +22,7 @@ import {
   submitFailure,
   submitResult,
   unansweredPhotos,
+  unansweredPhotosOfAccount,
   type JobDeps,
 } from '@/lib/photo-queue';
 import { addChannelPhotos, addDriveOriginal } from '@/lib/photos';
@@ -410,6 +411,8 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     const { job } = await work(w, { partes: ['lente', 'perspectiva', 'blancos', 'luces', 'color', 'fondo', 'recorte', 'sombra', 'exportar'].map((p) => part(p, p === 'perspectiva' ? { propuesta: sinClaude } : {})) });
     await work(w);
     expect(await unansweredPhotos(db, productId)).toEqual([missed.id]);
+    // En toda la cuenta, por producto: la misma.
+    expect(await unansweredPhotosOfAccount(db, accountId)).toEqual([{ productId, name: 'Kit de pistones', editIds: [missed.id] }]);
 
     // Rehacer con valores no lo arregla: Claude no vuelve a mirar y sigue figurando.
     await approveStep(db, { runId: job.id, userId });

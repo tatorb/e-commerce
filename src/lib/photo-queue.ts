@@ -467,6 +467,30 @@ export async function unansweredPhotos(db: PrismaClient | Tx, productId: string)
 }
 
 /**
+ * Las fotos de toda la cuenta en que Claude no respondió en algún ajuste, por
+ * producto, en el orden de cada lista. Para procesarlas de cero de una vez,
+ * por ejemplo después de quedarse sin crédito.
+ */
+export async function unansweredPhotosOfAccount(db: PrismaClient, accountId: string): Promise<{ productId: string; name: string; editIds: string[] }[]> {
+  const products = await db.product.findMany({
+    where: { accountId, photoEdits: { some: { archivedAt: null, asIs: false } } },
+    orderBy: { name: 'asc' },
+    select: {
+      id: true,
+      name: true,
+      photoEdits: {
+        where: { archivedAt: null, asIs: false },
+        orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+        select: { id: true, asIs: true, runs: { select: { step: true, status: true, createdAt: true, parts: true } } },
+      },
+    },
+  });
+  return products
+    .map((p) => ({ productId: p.id, name: p.name, editIds: p.photoEdits.filter(missedByClaude).map((e) => e.id) }))
+    .filter((p) => p.editIds.length > 0);
+}
+
+/**
  * Usa el original tal cual, porque ya viene editado: la Mac no lo procesa y
  * Claude no lo mira. Lo que estaba en la cola o esperando aprobación se corta.
  * Al volver a corregirla, si ya tenía una corrección aprobada vale esa; si no,

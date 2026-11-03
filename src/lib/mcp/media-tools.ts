@@ -2,9 +2,9 @@ import { z } from 'zod';
 import type { PrismaClient } from '@/generated/prisma/client';
 import { photoKey, photoVariants, withMarks, withVariants, type PhotoRef } from '@/domain/media';
 import { loadMediaSources, MediaError, saveMedia, type MediaItem, type MediaSources } from '@/lib/media';
-import { addChannelPhotosOf, setPhotoAsIs } from '@/lib/photo-commands';
+import { addChannelPhotosOf, setPhotoAsIs, tidyCorrected } from '@/lib/photo-commands';
 import { PhotoError } from '@/lib/photos';
-import { PhotoQueueError } from '@/lib/photo-queue';
+import { PhotoQueueError, redoFromScratch, unansweredPhotosOfAccount } from '@/lib/photo-queue';
 import { storageError } from '@/lib/stored-files';
 import { VideoError } from '@/lib/videos';
 import { appLink, McpToolError, accountArg, defineTool, publicationArg, resolveAccount, resolvePublication, type McpContext } from './tool';
@@ -244,6 +244,47 @@ const setAsIsTool = defineTool({
   },
 });
 
+// Ordenar la carpeta Corregidas del Drive lleva tiempo: pasado esto, se ordena al aprobar.
+const TIDY_BUDGET_MS = 40_000;
+
+const redoWithoutAiTool = defineTool({
+  name: 'redo_photos_without_ai',
+  section: ['pipeline', 'productos'],
+  title: 'Procesar de cero las fotos que Claude no miró',
+  description:
+    'Busca en toda la cuenta las fotos del paso Imágenes en que Claude no respondió en algún ajuste (por ejemplo, porque se acabó el crédito) y quedaron con los valores que midió la Mac. Sin confirmar, solo cuenta cuántas son y de qué productos. Con confirmar true, las manda todas a la cola de la Mac para procesarlas de cero, como recién llegadas, con Claude proponiendo todos los ajustes. Se pierden los valores cambiados a mano y el giro de 90°; las aprobadas vuelven a quedar para revisar; lo que ya está subido al canal no cambia hasta aprobar y subir las nuevas. Claude vuelve a cobrar cada foto. Antes de confirmar, avisale a la persona cuántas son y que tiene que haber crédito.',
+  input: z.object({
+    cuenta: accountArg,
+    confirmar: z.boolean().optional().describe('true: las manda a procesar de cero. Sin mandarlo, solo las cuenta.'),
+  }),
+  readOnly: false,
+  destructive: true,
+  async run(ctx, args) {
+    const account = await resolveAccount(ctx, args.cuenta);
+    const products = await unansweredPhotosOfAccount(ctx.db, account.id);
+    const total = products.reduce((n, p) => n + p.editIds.length, 0);
+    const list = products.map((p) => ({ producto: p.name, fotos: p.editIds.length }));
+    if (!args.confirmar) return { fotos_sin_claude: total, productos: list, ...(total > 0 ? { siguiente: 'Para procesarlas de cero, llamá de nuevo con confirmar true.' } : {}) };
+    const started = Date.now();
+    let queued = 0;
+    let skipped = 0;
+    for (const p of products) {
+      for (const editId of p.editIds) {
+        try {
+          await redoFromScratch(ctx.db, { editId });
+          queued++;
+        } catch (e) {
+          // Una que cambió mientras tanto, por ejemplo porque alguien la sacó de la lista, se deja.
+          if (!(e instanceof PhotoQueueError)) throw e;
+          skipped++;
+        }
+      }
+      if (Date.now() - started < TIDY_BUDGET_MS) await tidyCorrected(ctx.db, p.productId);
+    }
+    return { en_cola: queued, ...(skipped > 0 ? { no_se_pudieron: skipped } : {}), productos: list };
+  },
+});
+
 /**
  * Copia las fotos elegidas (con sus medidas) y los clips de otra publicación
  * del mismo producto. Las fotos del canal de la otra solo se copian si esta
@@ -273,4 +314,4 @@ export async function copyMedia(
   return out;
 }
 
-export const MEDIA_TOOLS = [getMediaTool, setMediaTool, addChannelPhotosTool, setAsIsTool];
+export const MEDIA_TOOLS = [getMediaTool, setMediaTool, addChannelPhotosTool, setAsIsTool, redoWithoutAiTool];
