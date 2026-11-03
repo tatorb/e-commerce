@@ -24,6 +24,8 @@ export type FiguresInput = {
   // La medida elegida, si vende una sola.
   variantKey?: string | null;
   measurements: { metrics: unknown }[];
+  // Las unidades vendidas en 90 días según las ventas leídas del canal, si la tienda las tiene completas.
+  salesLast90?: number | null;
   channelCopy: {
     price: Numeric | null;
     discount: Numeric | null;
@@ -68,7 +70,7 @@ export function publicationFigures(pub: FiguresInput, product: { variants: Varia
   const metrics = latestMetrics(pub.measurements);
   const sales = {
     sold: typeof metrics.sold_visible === 'number' ? metrics.sold_visible : null,
-    last90: typeof metrics.sales_90d === 'number' ? metrics.sales_90d : null,
+    last90: pub.salesLast90 ?? (typeof metrics.sales_90d === 'number' ? metrics.sales_90d : null),
   };
   return { price, quantity, sales };
 }

@@ -87,4 +87,9 @@ export interface ChannelListings {
    * null; uno que no se pudo leer no está, para probar de nuevo otro día.
    */
   readFamilies?(accessToken: string, userId: string, channelProductIds: string[]): Promise<Map<string, ChannelFamily | null>>;
+  /**
+   * Las visitas de cada uno de los últimos días de una publicación, del más
+   * viejo al de hoy, con la fecha como AAAA-MM-DD. Null si el canal no la tiene.
+   */
+  readDailyVisits?(accessToken: string, listingId: string, days: number): Promise<{ day: string; visits: number }[] | null>;
 }

@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation';
+import { unitsLast90 } from '@/lib/sales/units';
 import { ProductStockPanel } from '@/components/products/ProductStockPanel';
 import { loadProductStock } from '@/lib/stock';
 import { loadProductCosts } from '@/lib/costs';
@@ -106,14 +107,17 @@ export default async function ProductPage({
   ]);
   if (!product || !combo || !stock || !costs) notFound();
   // Lo que le toca a cada publicación del stock del producto, para su cantidad.
-  const plans = await plansFor(prisma, product.publications.map((p) => p.id));
+  const [plans, units] = await Promise.all([
+    plansFor(prisma, product.publications.map((p) => p.id)),
+    unitsLast90(prisma, product.publications.map((p) => p.id)),
+  ]);
 
   const base = `/a/${account.slug}/productos`;
   const storeOptions = stores.map((s) => ({ id: s.id, name: s.name, channel: channelInfo(s.channel.kind, s.channel.name) }));
   const pubs = product.publications;
   const channels = new Map(pubs.map((p) => [p.id, channelInfo(p.store.channel.kind, p.store.channel.name)]));
   const scores = new Map(pubs.map((p) => [p.id, scorePublication(rules.get(p.store.channelId) ?? [], toScoreInput(product, p)).score]));
-  const figures = new Map(pubs.map((p) => [p.id, publicationFigures(p, product, plans.get(p.id) ?? null)]));
+  const figures = new Map(pubs.map((p) => [p.id, publicationFigures({ ...p, salesLast90: units.get(p.id) ?? null }, product, plans.get(p.id) ?? null)]));
   const facts = new Map(pubs.map((p) => [p.id, publicationFacts(p, product)]));
   const known = [...scores.values()].filter((s): s is number => s !== null);
   const inPipeline = pubs.filter((p) => p.pipelineStatus === 'IN_PIPELINE').length;

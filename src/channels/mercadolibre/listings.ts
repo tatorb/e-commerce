@@ -275,6 +275,19 @@ async function visitsOf(accessToken: string, ids: string[]): Promise<Map<string,
   return out;
 }
 
+/** Las visitas por día de Mercado Libre, en el formato neutro. */
+export function parseDailyVisits(body: unknown): { day: string; visits: number }[] | null {
+  if (!isObj(body)) return null;
+  const out: { day: string; visits: number }[] = [];
+  for (const r of arr(body.results)) {
+    if (!isObj(r)) continue;
+    const day = str(r.date)?.slice(0, 10);
+    const visits = num(r.total);
+    if (day && /^\d{4}-\d{2}-\d{2}$/.test(day) && visits !== null && visits >= 0) out.push({ day, visits: Math.round(visits) });
+  }
+  return out.sort((a, b) => a.day.localeCompare(b.day));
+}
+
 /** Solo para las pruebas: vuelve a probar el pedido de visitas conjunto. */
 export function resetVisitsTogether() {
   visitsTogether = true;
@@ -401,6 +414,17 @@ export const mercadolibreListings: ChannelListings = {
       for (const id of await idsWithStatus(accessToken, userId, status)) if (!out.includes(id)) out.push(id);
     }
     return out;
+  },
+
+  async readDailyVisits(accessToken, listingId, days) {
+    if (!/^[A-Z]{3}\d{1,15}$/.test(listingId)) return null;
+    try {
+      const body = await mlGet(`/items/${listingId}/visits/time_window?last=${Math.max(1, Math.min(days, 150))}&unit=day`, accessToken);
+      return parseDailyVisits(body);
+    } catch (e) {
+      if (e instanceof MercadoLibreRequestError && (e.status === 404 || e.status === 400)) return null;
+      throw e;
+    }
   },
 
   async readListings(accessToken, userId, ids, opts) {

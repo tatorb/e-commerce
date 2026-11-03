@@ -465,17 +465,17 @@ enum Stage {
 
 // Publicación: el producto armado para una tienda puntual.
 model Publication {
-  id                String               @id @default(cuid())
+  id                String                @id @default(cuid())
   productId         String
-  product           Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product           Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
   storeId           String
-  store             Store                @relation(fields: [storeId], references: [id])
+  store             Store                 @relation(fields: [storeId], references: [id])
   externalId        String? // por ejemplo MLA123456
   url               String?
   title             String?
   description       String?
   // Atributos tal como se cargan en el canal: lista de { name, value }.
-  attributes        Json                 @default("[]")
+  attributes        Json                  @default("[]")
   // Las preguntas de los compradores en esta publicación, pegadas tal cual.
   // Las de la competencia son del producto (ProductResearch).
   ownQuestions      String?
@@ -484,25 +484,25 @@ model Publication {
   faq               String?
   answerRules       String?
   // Claude manda solo las respuestas que está seguro de que están bien.
-  autoAnswer        Boolean              @default(false)
+  autoAnswer        Boolean               @default(false)
   // El precio publicado, como lo decide el paso Precio o lo trae el canal.
-  price             Decimal?             @db.Decimal(14, 2)
+  price             Decimal?              @db.Decimal(14, 2)
   // Las cuotas: 0 sin cuotas, 1 la cuota promocionada, o 3, 6, 9 o 12 sin
   // interés. Null mientras no se leyó del canal.
   installments      Int?
   // El descuento sobre el precio publicado, en %. 0 sin descuento; null mientras no se leyó.
-  discount          Decimal?             @db.Decimal(5, 2)
+  discount          Decimal?              @db.Decimal(5, 2)
   // Las cantidades disponibles que se cambiaron en la app y faltan subir: una
   // lista de { key, label, quantity }, una por medida o una sola sin medidas.
   // Null: sigue a las del canal.
   quantities        Json?
-  currency          String               @default("ARS")
-  channelStatus     ChannelStatus        @default(ACTIVE)
+  currency          String                @default("ARS")
+  channelStatus     ChannelStatus         @default(ACTIVE)
   // Estado de la propuesta completa con IA.
-  stage             Stage                @default(IMPORTED)
+  stage             Stage                 @default(IMPORTED)
   // Pipeline: dónde está y en qué paso. El paso se conserva al sacarla del
   // pipeline, para retomar ahí si se vuelve a agregar.
-  pipelineStatus    PipelineStatus       @default(UNTOUCHED)
+  pipelineStatus    PipelineStatus        @default(UNTOUCHED)
   pipelineStep      PipelineStep?
   pipelineRemoval   PipelineRemoval?
   // Título bloqueado marcado a mano, para cuando no hay datos de ventas.
@@ -515,33 +515,36 @@ model Publication {
   media             Json?
   // De qué medidas es cada video del producto en esta publicación:
   // { "<id del video>": ["sku:..."] }. Sin marcar, el video es de todas.
-  videoVariants     Json                 @default("{}")
+  videoVariants     Json                  @default("{}")
   // Cuando el canal guarda cada medida como una publicación aparte, agrupadas
   // en una familia: el código, el SKU y la medida de cada una, en el orden de
   // la ficha. La primera es externalId. Vacío: una sola publicación en el canal.
-  variantListings   Json                 @default("[]")
+  variantListings   Json                  @default("[]")
   // Si la cantidad en el canal se actualiza sola con el stock del producto.
   // Apagado, se cambia a mano en la publicación; sus ventas igual descuentan.
-  followsStock      Boolean              @default(true)
+  followsStock      Boolean               @default(true)
   // La familia, cuando el canal guarda cada medida como una publicación aparte
   // y las agrupa (src/lib/families.ts). Sin familia: una publicación suelta.
   familyId          String?
-  family            ListingFamily?       @relation("FamilyMembers", fields: [familyId], references: [id], onDelete: SetNull)
+  family            ListingFamily?        @relation("FamilyMembers", fields: [familyId], references: [id], onDelete: SetNull)
   // La familia de la que es la principal: ahí se guarda el trabajo del pipeline.
-  leadOf            ListingFamily?       @relation("FamilyLead")
+  leadOf            ListingFamily?        @relation("FamilyLead")
   // La medida que vende, cuando vende una sola: la clave de src/domain/media.ts
   // (variantKey). Null: vende todas, o todavía no se sabe.
   variantKey        String?
   // En una familia: la medida tiene su propio precio y no sigue al de la familia.
-  ownPrice          Boolean              @default(false)
-  source            RecordSource         @default(MANUAL)
+  ownPrice          Boolean               @default(false)
+  source            RecordSource          @default(MANUAL)
   // Importación que la creó, para poder deshacerla.
   importRunId       String?
-  importRun         ImportRun?           @relation(fields: [importRunId], references: [id], onDelete: SetNull)
-  createdAt         DateTime             @default(now())
-  updatedAt         DateTime             @updatedAt
+  importRun         ImportRun?            @relation(fields: [importRunId], references: [id], onDelete: SetNull)
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
   stageMovements    StageMovement[]
   measurements      Measurement[]
+  // Las visitas de cada día, como las cuenta el canal, y cuándo se leyeron por última vez.
+  visitDays         PublicationVisitDay[]
+  visitsReadAt      DateTime?
   importChanges     ImportChange[]
   proposals         Proposal[]
   applications      ChannelApplication[]
@@ -2319,4 +2322,16 @@ model SaleReader {
   noticeAt      DateTime?
 
   @@map("sale_readers")
+}
+
+// Las visitas de una publicación en un día, como las cuenta el canal. Sirven
+// para ver si ganó o perdió visitas después de corregirla.
+model PublicationVisitDay {
+  publicationId String
+  publication   Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  day           DateTime    @db.Date
+  visits        Int
+
+  @@id([publicationId, day])
+  @@map("publication_visit_days")
 }

@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db';
+import { unitsLast90 } from '@/lib/sales/units';
 import { productCode } from '@/lib/publication-facts';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
@@ -105,6 +106,8 @@ export async function listScoredPublications(
     }),
   ]);
 
+  // Las ventas de 90 días salen de las ventas leídas del canal; si la tienda todavía no las tiene, del dato importado.
+  const units = await unitsLast90(db, publications.map((p) => p.id));
   return publications.map((p) => {
     const result: ScoreResult = scorePublication(rules.get(p.store.channelId) ?? [], toScoreInput(p.product, p));
     const metrics = latestMetrics(p.measurements);
@@ -148,7 +151,7 @@ export async function listScoredPublications(
       productType: p.product.productType?.trim() || null,
       kind: p.product.kind,
       visits: typeof metrics.visits_90d === 'number' ? metrics.visits_90d : null,
-      sales: typeof metrics.sales_90d === 'number' ? metrics.sales_90d : null,
+      sales: units.get(p.id) ?? (typeof metrics.sales_90d === 'number' ? metrics.sales_90d : null),
       score: result.score,
       missing: result.missing,
       // Cómo está frente a lo que se leyó del canal.

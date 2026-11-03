@@ -13,6 +13,7 @@ import { settleReactivations } from '@/lib/restock';
 import { placeAllShotPhotos } from '@/lib/shoot';
 import { readAllSales } from '@/lib/sales/read';
 import { saleAlarmPass } from '@/lib/sales/alarms';
+import { readAllVisits } from '@/lib/visits';
 
 // La tarea programada: lee las preguntas de los compradores y las
 // publicaciones de las tiendas conectadas, responde las preguntas de las
@@ -21,8 +22,8 @@ import { saleAlarmPass } from '@/lib/sales/alarms';
 // renueva los descuentos que subió la app antes de que venzan, avisa otra vez
 // de las alarmas de stock sin reponer, y suma a sus
 // publicaciones las fotos de Registro de productos que quedaron listas, y al
-// final trae las ventas para la sección Ventas, con su envío y su pago, y abre
-// las tareas de despachar y de reclamos. La llaman Vercel una vez por día
+// final trae las ventas para la sección Ventas, con su envío y su pago, abre
+// las tareas de despachar y de reclamos, y lee las visitas de cada día. La llaman Vercel una vez por día
 // (vercel.json) y GitHub cada hora (.github/workflows/leer-canales.yml), con
 // la clave CRON_SECRET. Cada pedido lee lo que alcanza en su tiempo; pending
 // dice si conviene llamar otra vez.
@@ -48,6 +49,8 @@ const ALARMS_BUDGET_MS = 3_000;
 const SHOTS_BUDGET_MS = 3_000;
 // Las ventas de la sección Ventas: las nuevas, un tramo de las viejas y su envío y su pago.
 const LEDGER_BUDGET_MS = 6_000;
+// Las visitas de cada día de las publicaciones que no se leyeron hoy.
+const VISITS_BUDGET_MS = 4_000;
 
 const digest = (s: string) => createHash('sha256').update(s).digest();
 
@@ -77,6 +80,7 @@ export async function GET(request: Request) {
   const shots = await placeAllShotPhotos(prisma, { budgetMs: SHOTS_BUDGET_MS });
   const ledger = await readAllSales(prisma, { budgetMs: LEDGER_BUDGET_MS });
   const saleTasks = await saleAlarmPass(prisma);
+  const visits = await readAllVisits(prisma, { budgetMs: VISITS_BUDGET_MS });
   return NextResponse.json({
     pending:
       result.pending ||
@@ -89,7 +93,8 @@ export async function GET(request: Request) {
       started.pending ||
       stock.pending ||
       shots.pending ||
-      ledger.pending,
+      ledger.pending ||
+      visits.pending,
     stores: result.stores.map((s) => ({ status: s.status, read: s.position, total: s.total })),
     renewed: renewals.renewed,
     answered: alone.sent,
@@ -103,5 +108,6 @@ export async function GET(request: Request) {
     ledgerRead: ledger.read,
     ledgerCompleted: ledger.completed,
     saleTasksOpened: saleTasks.opened,
+    visitsRead: visits.read,
   });
 }

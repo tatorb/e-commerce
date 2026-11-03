@@ -22,6 +22,8 @@ import { InfoStrip } from '@/components/ui/info-strip';
 import { NavRow } from '@/components/ui/nav-row';
 import { measuresText } from '@/lib/publication-facts';
 import { buyerKey, type BuyerFacts } from '@/lib/buyers';
+import { loadVisits } from '@/lib/visits';
+import { VisitsCard } from '@/components/publication/VisitsCard';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Breadcrumb } from '@/components/navigation/Breadcrumb';
@@ -145,7 +147,11 @@ export default async function PublicationPage({
 }) {
   const [{ cuenta, id }, { cara }] = await Promise.all([params, searchParams]);
   const { user, account } = await requireAccount(cuenta, 'publicaciones');
-  const [data, media] = await Promise.all([loadPublicationFaces(account.id, id), loadMediaSources(prisma, account.id, id).catch(() => null)]);
+  const [data, media, visits] = await Promise.all([
+    loadPublicationFaces(account.id, id),
+    loadMediaSources(prisma, account.id, id).catch(() => null),
+    loadVisits(prisma, id).catch(() => null),
+  ]);
   // Sin publicar: lo que hace falta para crearla en el canal.
   const create = data && !data.publication.externalId ? await createChecks(prisma, { accountId: account.id, publicationId: id }) : null;
   // Finalizada: lo que hace falta para republicarla.
@@ -528,6 +534,8 @@ export default async function PublicationPage({
             stepHref={`/a/${account.slug}/pipeline/${p.id}?paso=preguntas`}
           />
         ) : null}
+
+        {p.externalId ? <VisitsCard visits={visits} channelName={channelName} timeZone={tz} /> : null}
 
         <SectionCard
           title="Preguntas de los compradores"

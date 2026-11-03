@@ -47,6 +47,9 @@ import { catalogForClaude } from './catalog';
 import { loadTitleContext, RECEIVED_QUESTIONS } from '@/lib/queries/title-step';
 import { familyOf } from '@/lib/families';
 import { buyerForClaude, buyerKey, loadBuyerFacts } from '@/lib/buyers';
+import { loadVisits } from '@/lib/visits';
+import { unitsLast90 } from '@/lib/sales/units';
+import { visitsForClaude } from '@/domain/visits';
 import {
   McpToolError,
   accountArg,
@@ -349,7 +352,7 @@ const getPublication = defineTool({
   section: ['publicaciones', 'pipeline', 'productos'],
   title: 'Ver una publicación',
   description:
-    'Muestra todo de una publicación: la ficha del producto (la fuente de verdad), el título y la descripción actuales, los atributos del canal, los datos de catálogo del canal (cada campo del formulario de su categoría, con sus opciones y lo cargado), el precio (el de la app, el que leyó del canal y el último guardado en el paso Precio, con su margen), el puntaje y lo que le falta, la última medición, el estado e historial del pipeline, el candado del título, la competencia cargada, las preguntas frecuentes y las reglas de la publicación (paso Preguntas y respuestas) y la investigación del producto: lo del fabricante, las aclaraciones para las imágenes, las preguntas de los compradores (las que llegaron solas del canal, con su respuesta y quién la hizo: su usuario, de dónde es, cuántas preguntas hizo y si ya compró; y las pegadas) y sus dolores y objeciones. La ficha y la investigación son del producto y las comparten todas sus publicaciones; las preguntas de la publicación propia son solo de esta.',
+    'Muestra todo de una publicación: la ficha del producto (la fuente de verdad), el título y la descripción actuales, los atributos del canal, los datos de catálogo del canal (cada campo del formulario de su categoría, con sus opciones y lo cargado), el precio (el de la app, el que leyó del canal y el último guardado en el paso Precio, con su margen), el puntaje y lo que le falta, la última medición, las visitas por semana (con las de antes y después de corregirla), las unidades vendidas en 90 días, el estado e historial del pipeline, el candado del título, la competencia cargada, las preguntas frecuentes y las reglas de la publicación (paso Preguntas y respuestas) y la investigación del producto: lo del fabricante, las aclaraciones para las imágenes, las preguntas de los compradores (las que llegaron solas del canal, con su respuesta y quién la hizo: su usuario, de dónde es, cuántas preguntas hizo y si ya compró; y las pegadas) y sus dolores y objeciones. La ficha y la investigación son del producto y las comparten todas sus publicaciones; las preguntas de la publicación propia son solo de esta.',
   input: z.object({ cuenta: accountArg, publicacion: publicationArg }),
   readOnly: true,
   async run(ctx, args) {
@@ -425,7 +428,7 @@ const getPublication = defineTool({
       loadCatalogData(ctx.db, id),
     ]);
     const product = pub.product;
-    const [combo, knowledge, plans, stock, buyers] = await Promise.all([
+    const [combo, knowledge, plans, stock, buyers, visits, units] = await Promise.all([
       loadCombo(ctx.db, product.id),
       loadKnowledge(ctx.db, product.id),
       plansFor(ctx.db, [id]),
@@ -434,6 +437,8 @@ const getPublication = defineTool({
         select: { stockSince: true, showMore: true, stock: { select: { key: true, quantity: true, outSince: true } }, ...COST_SELECT },
       }),
       loadBuyerFacts(ctx.db, pub.buyerQuestions),
+      loadVisits(ctx.db, id).catch(() => null),
+      unitsLast90(ctx.db, [id]),
     ]);
     const plan = plans.get(id) ?? null;
     const r = research.research;
@@ -564,6 +569,9 @@ const getPublication = defineTool({
         le_falta: scored.missing.map((m) => ({ regla: m.name, peso: m.weight, detalle: m.detail })),
       },
       ultima_medicion: measurement ? { fecha: when(measurement.takenAt, account), metricas: metricsOf(latestMetrics(pub.measurements)) } : null,
+      // Contadas con las ventas leídas del canal; si la tienda todavía no las tiene, no está.
+      ...(units.has(id) ? { unidades_vendidas_90d: units.get(id) } : {}),
+      visitas: visitsForClaude(visits),
       titulo_bloqueado: lockValue(scored.titleLock),
       pipeline: {
         estado: PIPELINE_STATUS_LABEL[scored.pipelineStatus],
