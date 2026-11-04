@@ -150,7 +150,7 @@ export default async function PerformancePage({ params, searchParams }: { params
 
         {data.withoutVisits > 0 ? (
           <p className="text-xs text-muted-foreground">
-            {plural(data.withoutVisits, 'publicación todavía no tiene', 'publicaciones todavía no tienen')} las visitas por día leídas. Se leen solas una vez por día, o ahora con Leer visitas ahora.
+            {plural(data.withoutVisits, 'publicación todavía no tiene', 'publicaciones todavía no tienen')} las visitas por día leídas. Se leen solas una vez por día, o ahora con el botón de actualizar de arriba.
           </p>
         ) : null}
 

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { readVisitsNowAction } from '@/app/a/[cuenta]/rendimiento/actions';
 import { plural } from '@/lib/format';
@@ -49,8 +50,8 @@ export function ReadVisitsButton({ accountSlug }: { accountSlug: string }) {
 
   return (
     <div className="space-y-2">
-      <Button size="sm" variant="outline" onClick={run} disabled={running} pending={running}>
-        Leer visitas ahora
+      <Button size="icon" variant="outline" onClick={run} disabled={running} pending={running} aria-label="Leer visitas ahora" title="Leer visitas ahora">
+        <RefreshCw className="h-4 w-4" aria-hidden />
       </Button>
       {status ? (
         <p role="status" className="text-xs text-muted-foreground">
