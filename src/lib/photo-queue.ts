@@ -18,13 +18,18 @@ import {
   type WorkerDone,
 } from '@/domain/photo-contract';
 import { getChannelAdapter } from '@/channels';
-import { LAST_PHOTO_STEP, LIVE_PARTS, missedByClaude, OPEN_RUN_STATUSES, PHOTO_STEPS, photoProgress } from '@/domain/photo-steps';
+import { autoApproval, LAST_PHOTO_STEP, LIVE_PARTS, missedByClaude, OPEN_RUN_STATUSES, PHOTO_STEPS, photoProgress } from '@/domain/photo-steps';
 import { parsePhotoSettings, type PhotoSettingsValues } from '@/domain/photo-settings';
 import { loadPhotoSettings } from './photo-settings';
+import { markState } from '@/domain/photo-measures';
+import { measuresOf } from '@/lib/media';
+import { placeShotPhotosQuietly } from '@/lib/shoot';
 
 // La cola de la línea de imágenes. Cada foto avanza de a un paso: el
 // trabajador toma un intento, hace sus ajustes de corrido y entrega el
-// resultado, y una persona lo aprueba o lo rehace. Recibe la base por parámetro
+// resultado, y una persona lo aprueba o lo rehace. Las fotos sacadas con un
+// protocolo que salieron bien se aprueban solas y pasan a Organización de
+// multimedia en su lugar. Recibe la base por parámetro
 // para poder probarlo con una base de prueba.
 //
 // Las reglas que cuidan que nada se pise:
@@ -319,7 +324,28 @@ export async function submitResult(
         },
       });
     }
-    return { aceptado: true as const };
+    // Una foto del protocolo que salió bien no espera a nadie.
+    const edit = await tx.photoEdit.findUniqueOrThrow({
+      where: { id: run.editId },
+      select: { shootStepId: true, variantKey: true, variantLabel: true, product: { select: { variants: { select: { sku: true, measure: true } } } } },
+    });
+    const measures = measuresOf(edit.product.variants);
+    const auto = autoApproval({
+      fromProtocol: edit.shootStepId !== null,
+      parts,
+      measureOk: measures.length < 2 || markState(edit.variantKey, edit.variantLabel, measures).kind !== 'unknown',
+    });
+    if (!auto.ok) return { aceptado: true as const, placed: false };
+    await tx.photoStepRun.update({ where: { id: run.id }, data: { status: 'APPROVED', openFor: null, autoApproved: true, decidedAt: new Date() } });
+    if (run.step < LAST_PHOTO_STEP) {
+      await queueStep(tx, run.editId, run.step + 1);
+      return { aceptado: true as const, placed: false };
+    }
+    return { aceptado: true as const, placed: true };
+  }).then(async (r) => {
+    // Lista: pasa a Organización de multimedia de sus publicaciones, en el lugar de su paso.
+    if (r.aceptado && 'placed' in r && r.placed) await placeShotPhotosQuietly(db, run.edit.productId);
+    return r.aceptado ? { aceptado: true as const } : r;
   });
 }
 

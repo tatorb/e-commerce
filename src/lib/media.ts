@@ -6,6 +6,7 @@ import {
   arrangedMedia,
   asIsProblem,
   photoSizeProblem,
+  placeFixedPhotos,
   protocolUse,
   type PhotoSize,
   channelPhotos,
@@ -309,7 +310,7 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
       media: true,
       videoVariants: true,
       variantKey: true,
-      textImage: { select: { id: true, pngRef: true, pngAt: true } },
+      textImages: { select: { textImage: { select: { id: true, slot: true, mediaPlace: true, pngRef: true, pngAt: true } } } },
       store: { select: { id: true, channel: { select: { kind: true, name: true } } } },
       product: {
         select: {
@@ -380,20 +381,23 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
     delete out.place;
     return out;
   });
-  // El PNG del paso Imágenes con texto, si ya se generó.
-  const ti = p.textImage;
-  const text: MediaItem[] =
-    ti?.pngRef && ti.pngAt
+  // Los PNG del paso Imágenes con texto que ya se generaron, con su lugar fijo si tienen.
+  const pieces = p.textImages.map((t) => t.textImage).sort((a, b) => a.slot - b.slot);
+  const textPlaces = pieces.flatMap((ti) => (ti.pngRef && ti.pngAt && ti.mediaPlace ? [{ ref: { kind: 'text' as const, id: ti.id }, place: ti.mediaPlace }] : []));
+  const text: MediaItem[] = pieces.flatMap((ti) =>
+    ti.pngRef && ti.pngAt
       ? [
           {
             ref: { kind: 'text', id: ti.id },
             key: photoKey({ kind: 'text', id: ti.id }),
             thumb: textImageHref(ti.id, ti.pngAt),
-            label: 'Imagen con texto',
-            note: `Generada el ${ti.pngAt.toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })}`,
+            label: `Imagen con texto ${ti.slot}`,
+            note: `Generada el ${ti.pngAt.toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })}${ti.mediaPlace ? `. Va en el lugar ${ti.mediaPlace}` : ''}`,
           },
         ]
-      : [];
+      : [],
+  );
+  const textFixed = textPlaces.map((t) => ({ item: text.find((m) => m.key === photoKey(t.ref))!, place: t.place }));
   const all = new Map([...channel, ...corrected, ...text, ...assets].map((m) => [m.key, m]));
   const saved = parseMedia(p.media);
   const media = saved && sole ? soleMeasurePhotos(saved, allMeasures, sole) : saved;
@@ -423,7 +427,9 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
     // Sin elegir: usa las del canal.
     following: media === null,
     // Las corregidas armadas en el orden del protocolo, cada una en su medida. Null si ninguna salió de un protocolo.
-    protocol: protocolMedia(corrected, sole ? [sole.key] : allMeasures.map((m) => m.key), allMeasures),
+    protocol: protocolMedia(corrected, sole ? [sole.key] : allMeasures.map((m) => m.key), allMeasures, textFixed),
+    // Las imágenes con texto con lugar fijo, que le ganan al orden del protocolo.
+    textPlaces: textFixed,
     current,
     available: { channel: plain(channel), corrected, text, assets },
     // Las medidas que se pueden marcar: con menos de dos, no hay nada que elegir.
@@ -467,7 +473,13 @@ export type MediaSources = Awaited<ReturnType<typeof loadMediaSources>>;
  * canal no acepta. sells son las medidas que vende. Null si ninguna salió de un
  * protocolo, o si no queda ninguna.
  */
-export function protocolMedia(corrected: MediaItem[], sells: string[], measures: Measure[]): MediaItem[] | null {
+export function protocolMedia(
+  corrected: MediaItem[],
+  sells: string[],
+  measures: Measure[],
+  // Las imágenes con texto con lugar fijo: le ganan al orden del protocolo.
+  texts: { item: MediaItem; place: number }[] = [],
+): MediaItem[] | null {
   if (!corrected.some((m) => m.shot?.step)) return null;
   const known = measures.map((m) => m.key);
   const items = corrected.flatMap((m) => {
@@ -475,11 +487,18 @@ export function protocolMedia(corrected: MediaItem[], sells: string[], measures:
     return use === null ? [] : [{ item: m, use }];
   });
   if (items.length === 0) return null;
+  const windows = sells.length >= 2 ? sells : [];
   const refs = arrangedMedia(
     items.map(({ item, use }) => ({ ref: item.ref, use })),
-    sells.length >= 2 ? sells : [],
+    windows,
   );
-  return items.map(({ item }, i) => ({ ...item, ref: refs[i] }));
+  const placed = placeFixedPhotos(
+    refs,
+    texts.map((t) => ({ ref: t.item.ref, place: t.place })),
+    windows,
+  );
+  const byKey = new Map([...items.map(({ item }) => item), ...texts.map((t) => t.item)].map((m) => [m.key, m]));
+  return placed.map((ref) => ({ ...byKey.get(photoKey(ref))!, ref }));
 }
 
 /**

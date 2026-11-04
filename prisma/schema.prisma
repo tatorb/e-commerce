@@ -536,10 +536,9 @@ model Publication {
   // y las agrupa (src/lib/families.ts). Sin familia: una publicación suelta.
   familyId          String?
   family            ListingFamily?        @relation("FamilyMembers", fields: [familyId], references: [id], onDelete: SetNull)
-  // La imagen con texto de la publicación (paso Imágenes con texto). En una
-  // familia, todas sus medidas apuntan a la misma.
-  textImageId       String?
-  textImage         TextImage?            @relation(fields: [textImageId], references: [id], onDelete: SetNull)
+  // Las imágenes con texto de la publicación (paso Imágenes con texto). En una
+  // familia, todas sus medidas comparten las mismas.
+  textImages        PublicationTextImage[]
   // La familia de la que es la principal: ahí se guarda el trabajo del pipeline.
   leadOf            ListingFamily?        @relation("FamilyLead")
   // La medida que vende, cuando vende una sola: la clave de src/domain/media.ts
@@ -1407,6 +1406,9 @@ model PhotoStepRun {
   decidedById String?
   decidedBy   User?          @relation(fields: [decidedById], references: [id], onDelete: SetNull)
   decidedAt   DateTime?
+  // Aprobado solo, sin que nadie lo mire: una foto del protocolo que la Mac
+  // procesó sin problemas (src/domain/photo-steps.ts, autoApproval).
+  autoApproved Boolean       @default(false)
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
@@ -2407,8 +2409,10 @@ model VehicleBrand {
 }
 
 // La imagen con texto de una publicación, o de toda su familia: lo que dice
-// (content), la foto del paso Fotos que lleva y el último PNG generado. Las
-// publicaciones apuntan a ella con textImageId.
+// (content), la foto del paso Fotos que lleva y el último PNG generado. Una
+// publicación puede tener varias, cada una con su número (slot) y, si se
+// eligió, su lugar fijo en Organización de multimedia (mediaPlace, desde 1),
+// que le gana al orden del protocolo.
 model TextImage {
   id           String        @id @default(cuid())
   accountId    String
@@ -2420,11 +2424,26 @@ model TextImage {
   pngRef       String?
   pngAt        DateTime?
   pngHash      String?
+  // Imagen 1, Imagen 2...
+  slot         Int           @default(1)
+  mediaPlace   Int?
   updatedById  String?
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
-  publications Publication[]
+  publications PublicationTextImage[]
 
   @@index([accountId])
   @@map("text_images")
+}
+
+// Qué publicaciones usan cada imagen con texto.
+model PublicationTextImage {
+  publicationId String
+  publication   Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  textImageId   String
+  textImage     TextImage   @relation(fields: [textImageId], references: [id], onDelete: Cascade)
+
+  @@id([publicationId, textImageId])
+  @@index([textImageId])
+  @@map("publication_text_images")
 }

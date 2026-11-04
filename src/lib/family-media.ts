@@ -60,7 +60,7 @@ export async function loadFamilyMedia(db: Db, accountId: string, publicationId: 
     family: true,
     following: sources.every((s) => s.following),
     // Armadas para las medidas de la familia, no solo para la de la principal.
-    protocol: lost.length > 0 ? null : protocolMedia(lead.available.corrected, measures.map((m) => m.key), all),
+    protocol: lost.length > 0 ? null : protocolMedia(lead.available.corrected, measures.map((m) => m.key), all, lead.textPlaces),
     current,
     available: { ...lead.available, channel: [...channel.values()] },
     measures: measures.length >= 2 ? measures : [],

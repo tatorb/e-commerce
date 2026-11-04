@@ -5,7 +5,7 @@ import { PrismaClient } from '@/generated/prisma/client';
 import type { StepPart, Transfer, UploadKind, WorkerDone } from '@/domain/photo-contract';
 import { PHOTO_PROTOCOL } from '@/domain/photo-contract';
 import { DEFAULT_PHOTO_SETTINGS } from '@/domain/photo-settings';
-import { cleanPhotoNote, PHOTO_NOTE_MAX } from '@/domain/photo-steps';
+import { autoApproval, cleanPhotoNote, PHOTO_NOTE_MAX } from '@/domain/photo-steps';
 import {
   approveStep,
   archivePhoto,
@@ -480,6 +480,38 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     expect((await openRun(edit.id)).note).toBe('Apagá la segunda pasada.');
     await redoFromScratch(db, { editId: edit.id });
     expect((await openRun(edit.id)).note).toBeNull();
+  });
+
+  it('una foto del protocolo que salió bien se aprueba sola; las demás esperan a una persona', async () => {
+    const w = await worker();
+    const protocol = await db.shootProtocol.create({ data: { accountId, name: 'Subconjuntos' } });
+    const step = await db.shootStep.create({ data: { protocolId: protocol.id, title: 'Frente' } });
+    const fromProtocol = await photo('IMG_1.HEIC');
+    await db.photoEdit.update({ where: { id: fromProtocol.id }, data: { shootStepId: step.id, shot: true } });
+    const manual = await photo('IMG_2.HEIC');
+    // Una del protocolo en la que Claude no respondió: la Mac usó lo medido.
+    const missed = await photo('IMG_3.HEIC');
+    await db.photoEdit.update({ where: { id: missed.id }, data: { shootStepId: step.id, shot: true } });
+
+    for (let i = 0; i < 3; i++) {
+      const claimed = (await claimNext(db, w))!;
+      const job = await buildJob(db, claimed.runId, deps);
+      for (const kind of Object.keys(job.subidas) as UploadKind[]) uploaded.add(`${job.id}:${kind}`);
+      const run = await db.photoStepRun.findUniqueOrThrow({ where: { id: job.id } });
+      const partes = run.editId === missed.id ? done(job).partes.map((p, k) => (k === 0 ? { ...p, propuesta: { ...p.propuesta!, origen: 'medido' as const } } : p)) : undefined;
+      expect(await submitResult(db, w, done(job, { archivos: Object.keys(job.subidas) as UploadKind[], ...(partes ? { partes } : {}) }), { collect })).toEqual({ aceptado: true });
+    }
+    const last = async (editId: string) => (await runsOf(editId)).at(-1)!;
+    expect(await last(fromProtocol.id)).toMatchObject({ status: 'APPROVED', autoApproved: true, decidedById: null, openFor: null });
+    expect(await last(manual.id)).toMatchObject({ status: 'REVIEW', autoApproved: false });
+    expect(await last(missed.id)).toMatchObject({ status: 'REVIEW', autoApproved: false });
+  });
+
+  it('la regla de aprobar sola: solo del protocolo, con Claude y con una medida de la ficha', () => {
+    expect(autoApproval({ fromProtocol: true, parts: [], measureOk: true })).toEqual({ ok: true });
+    expect(autoApproval({ fromProtocol: false, parts: [], measureOk: true }).ok).toBe(false);
+    expect(autoApproval({ fromProtocol: true, parts: [{ propuesta: { origen: 'medido' } }], measureOk: true }).ok).toBe(false);
+    expect(autoApproval({ fromProtocol: true, parts: [], measureOk: false })).toEqual({ ok: false, reason: 'La foto apunta a una medida que ya no está en la ficha.' });
   });
 
   it('la indicación puntual se guarda sin espacios de más y tiene un largo máximo', () => {

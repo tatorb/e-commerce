@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SectionBody, SectionCard } from '@/components/ui/section-card';
-import { completeTextImageAction, generateTextImageAction, saveTextImageAction } from '@/app/a/[cuenta]/pipeline/text-image-actions';
+import { completeTextImageAction, generateTextImageAction, removeTextImageAction, saveTextImageAction } from '@/app/a/[cuenta]/pipeline/text-image-actions';
 import { DEFAULT_DOUBTS_TITLE, MAX_ITEMS_A, pieceVersion, TEXT_LIMITS, type PieceContent, type PieceDoubt, type PieceItem } from '@/domain/text-images';
 import { formatDateTime } from '@/lib/format';
 import type { PieceFit } from '@/lib/text-images/piece-html';
@@ -31,6 +31,7 @@ export function TextImagesStep({
   aiDisabledReason,
   photosHref,
   infoHref,
+  stepHref,
 }: {
   accountSlug: string;
   data: TextImageStep;
@@ -38,22 +39,30 @@ export function TextImagesStep({
   aiDisabledReason: string | null;
   photosHref: string;
   infoHref: string;
+  // El paso, para ir a otra imagen con &imagen=n.
+  stepHref: string;
 }) {
   const router = useRouter();
   const [content, setContent] = useState<PieceContent>(data.content);
   const [photoEditId, setPhotoEditId] = useState<string | null>(data.photoEditId);
+  const [place, setPlace] = useState(data.mediaPlace ? String(data.mediaPlace) : '');
   const [loaded, setLoaded] = useState(data);
   const [fit, setFit] = useState<PieceFit | null>(null);
-  const [busy, setBusy] = useState<'save' | 'ai' | 'png' | null>(null);
+  const [busy, setBusy] = useState<'save' | 'ai' | 'png' | 'remove' | null>(null);
   const [msg, setMsg] = useState<Msg>(null);
   // Después de guardar llega lo guardado: la pantalla arranca de ahí.
   if (loaded !== data) {
     setLoaded(data);
     setContent(data.content);
     setPhotoEditId(data.photoEditId);
+    setPlace(data.mediaPlace ? String(data.mediaPlace) : '');
   }
 
-  const dirty = JSON.stringify(content) !== JSON.stringify(data.content) || photoEditId !== data.photoEditId;
+  const placeValue = place.trim() === '' ? null : Number(place);
+  const placeBad = placeValue !== null && !(Number.isInteger(placeValue) && placeValue >= 1 && placeValue <= 30);
+  const dirty = JSON.stringify(content) !== JSON.stringify(data.content) || photoEditId !== data.photoEditId || placeValue !== data.mediaPlace;
+  const saved = data.pieces.some((p) => p.slot === data.slot);
+  const nextSlot = [...Array(data.maxPieces)].map((_, i) => i + 1).find((n) => !data.pieces.some((p) => p.slot === n) && n !== data.slot) ?? null;
   const photo = data.photos.find((p) => p.editId === photoEditId) ?? null;
   const brandMap = Object.fromEntries(data.brands.map((b) => [b.key, { nombre: b.name, logo: b.logo }]));
   const version = pieceVersion(content);
@@ -66,7 +75,7 @@ export function TextImagesStep({
   ];
   const tooBig = fit !== null && !fit.fits;
 
-  async function run(kind: 'save' | 'ai' | 'png', action: () => Promise<{ ok: true; message: string } | { ok: false; error: string }>) {
+  async function run(kind: 'save' | 'ai' | 'png' | 'remove', action: () => Promise<{ ok: true; message: string } | { ok: false; error: string }>) {
     setBusy(kind);
     setMsg(null);
     const r = await action().catch(() => ({ ok: false as const, error: 'Se cortó la conexión con la app. Probá de nuevo.' }));
@@ -76,17 +85,25 @@ export function TextImagesStep({
     return r.ok;
   }
 
-  const save = () => run('save', () => saveTextImageAction(accountSlug, data.publication.id, { content, photoEditId }));
+  const save = () =>
+    placeBad
+      ? Promise.resolve((setMsg({ ok: false, text: 'El lugar va del 1 al 30, o vacío para no fijarlo.' }), false))
+      : run('save', () => saveTextImageAction(accountSlug, data.publication.id, { slot: data.slot, content, photoEditId, mediaPlace: placeValue }));
 
   async function generate() {
     // Lo que está en la pantalla es lo que va: si hay cambios, primero se guardan.
     if (dirty && !(await save())) return;
-    await run('png', () => generateTextImageAction(accountSlug, data.publication.id));
+    await run('png', () => generateTextImageAction(accountSlug, data.publication.id, data.slot));
   }
 
   function complete() {
     if (filled && !window.confirm('Ya hay contenido cargado. ¿Reemplazarlo por lo que proponga Claude? La foto queda como está.')) return;
-    run('ai', () => completeTextImageAction(accountSlug, data.publication.id, filled));
+    run('ai', () => completeTextImageAction(accountSlug, data.publication.id, filled, data.slot));
+  }
+
+  async function remove() {
+    if (!window.confirm(`¿Sacar la imagen con texto ${data.slot}? Se saca también de Organización de multimedia.`)) return;
+    if (await run('remove', () => removeTextImageAction(accountSlug, data.publication.id, data.slot))) router.push(`${stepHref}&imagen=1`);
   }
 
   const set = (patch: Partial<PieceContent>) => setContent((c) => ({ ...c, ...patch }));
@@ -118,8 +135,36 @@ export function TextImagesStep({
       </div>
 
       <div className="space-y-4">
+        {/* Las imágenes con texto de la publicación: cada una con su número y su lugar en multimedia. */}
+        <nav aria-label="Imágenes con texto" className="flex flex-wrap items-center gap-2">
+          {[...data.pieces.map((p) => p.slot), ...(saved ? [] : [data.slot])]
+            .sort((a, b) => a - b)
+            .map((n) => {
+              const piece = data.pieces.find((p) => p.slot === n);
+              const on = n === data.slot;
+              return (
+                <Link
+                  key={n}
+                  href={`${stepHref}&imagen=${n}`}
+                  aria-current={on ? 'page' : undefined}
+                  className={cn('rounded-full border px-3 py-1 text-sm', on ? 'border-primary bg-primary text-primary-foreground' : 'hover:bg-muted')}
+                >
+                  Imagen {n}
+                  {piece?.mediaPlace ? <span className="opacity-80"> · lugar {piece.mediaPlace}</span> : null}
+                  {piece && !piece.generated ? <span className="opacity-80"> · sin PNG</span> : null}
+                </Link>
+              );
+            })}
+          {nextSlot && saved ? (
+            <Link href={`${stepHref}&imagen=${nextSlot}`} className="inline-flex items-center gap-1 rounded-full border border-dashed px-3 py-1 text-sm hover:bg-muted">
+              <Plus className="h-3.5 w-3.5" aria-hidden />
+              Otra imagen
+            </Link>
+          ) : null}
+        </nav>
+
         <SectionCard
-          title="Imagen con texto"
+          title={`Imagen con texto ${data.slot}`}
           icon={<Type />}
           description={
             data.sharedBy > 1
@@ -128,6 +173,22 @@ export function TextImagesStep({
           }
         >
           <SectionBody>
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="space-y-1">
+                <Label htmlFor="lugar-multimedia">Lugar en Organización de multimedia</Label>
+                <Input
+                  id="lugar-multimedia"
+                  inputMode="numeric"
+                  value={place}
+                  placeholder="Sin lugar fijo"
+                  onChange={(e) => setPlace(e.target.value)}
+                  className="w-36 tabular-nums"
+                />
+              </div>
+              <p className="max-w-sm pb-1 text-xs text-muted-foreground">
+                Le gana al orden del protocolo: por ejemplo, en el lugar 2 va segunda y las fotos del protocolo llenan los demás lugares. Vacío, se elige a mano.
+              </p>
+            </div>
             <div className="flex flex-wrap items-center gap-2">
               <Button
                 size="sm"
@@ -147,6 +208,12 @@ export function TextImagesStep({
                 <ImageIcon />
                 Generar PNG
               </Button>
+              {saved ? (
+                <Button size="sm" variant="ghost" onClick={remove} disabled={busy !== null} pending={busy === 'remove'}>
+                  <Trash2 />
+                  Sacar esta imagen
+                </Button>
+              ) : null}
               {dirty ? <span className="text-xs text-muted-foreground">Hay cambios sin guardar.</span> : null}
             </div>
             {busy === 'ai' ? <p className="text-xs text-muted-foreground">Claude está leyendo el paso Información. Tarda alrededor de un minuto.</p> : null}

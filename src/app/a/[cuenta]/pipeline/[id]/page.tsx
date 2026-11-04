@@ -31,7 +31,7 @@ import { MediaOrganizer } from '@/components/publication/MediaOrganizer';
 import { MeasureCheckCard } from '@/components/pipeline/MeasureCheckCard';
 import { measureCheck } from '@/lib/photo-measures';
 import { TextImagesStep } from '@/components/text-images/TextImagesStep';
-import { loadTextImageStep } from '@/lib/text-images/step';
+import { loadTextImageStep, MAX_TEXT_IMAGES } from '@/lib/text-images/step';
 import { loadMediaSources } from '@/lib/media';
 import { loadFamilyMedia } from '@/lib/family-media';
 import { CreateInChannelCard } from '@/components/publication/CreateInChannelCard';
@@ -109,10 +109,12 @@ export default async function PipelineStepPage({
   searchParams,
 }: {
   params: Promise<{ cuenta: string; id: string }>;
-  searchParams: Promise<{ paso?: string | string[]; foto?: string | string[]; fotos?: string | string[] }>;
+  searchParams: Promise<{ paso?: string | string[]; foto?: string | string[]; fotos?: string | string[]; imagen?: string | string[] }>;
 }) {
   const { cuenta, id } = await params;
-  const { paso, foto, fotos } = await searchParams;
+  const { paso, foto, fotos, imagen } = await searchParams;
+  // Paso Imágenes con texto: qué imagen se ve.
+  const textSlot = Math.min(Math.max(Number.parseInt(String(imagen ?? '1'), 10) || 1, 1), MAX_TEXT_IMAGES);
   const { user, account } = await requireAccount(cuenta, 'pipeline');
   // Una familia se trabaja desde su principal: las demás medidas llevan ahí.
   const leadId = await familyLeadId(prisma, id);
@@ -199,7 +201,7 @@ export default async function PipelineStepPage({
       prisma.channelCopy.findUnique({ where: { publicationId: pub.id }, select: { photos: true } }),
       productCovers([pub.productId]),
     ]).then(([copy, covers]) => firstPhoto(copy?.photos) ?? covers.get(pub.productId) ?? null),
-    viewing === 'TEXT_IMAGES' ? loadTextImageStep(prisma, { accountId: account.id, publicationId: pub.id }) : null,
+    viewing === 'TEXT_IMAGES' ? loadTextImageStep(prisma, { accountId: account.id, publicationId: pub.id, slot: textSlot }) : null,
   ]);
   const warranty = viewing === 'PUBLISH' ? await warrantyOverview(prisma, { accountId: account.id, publicationId: pub.id }) : null;
   // Fotos y Organización de multimedia: las fotos o publicaciones de la familia con una medida que ya no está.
@@ -448,6 +450,7 @@ export default async function PipelineStepPage({
             aiDisabledReason={isAiConfigured() ? null : AI_NOT_CONFIGURED}
             photosHref={`${pageHref}?paso=${PIPELINE_STEP_SLUG.IMAGES}`}
             infoHref={`${pageHref}?paso=${PIPELINE_STEP_SLUG.INFO}`}
+            stepHref={`${pageHref}?paso=${PIPELINE_STEP_SLUG.TEXT_IMAGES}`}
           />
         ) : videos && viewing === 'VIDEOS' ? (
           <VideosStep

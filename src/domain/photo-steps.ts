@@ -135,3 +135,23 @@ export function photoProgressText(p: PhotoProgress): string {
   if (PHOTO_STEPS.length === 1) return status.charAt(0).toUpperCase() + status.slice(1);
   return `Paso ${p.step + 1} de ${PHOTO_STEPS.length} · ${PHOTO_STEPS[p.step].label} · ${status}`;
 }
+
+/**
+ * Si un paso que entregó la Mac se aprueba solo, sin esperar a una persona:
+ * solo las fotos sacadas con un protocolo, que tienen su lugar en
+ * Organización de multimedia, y solo si salió todo bien. Si no, queda
+ * esperando aprobación y dice por qué.
+ */
+export function autoApproval(args: {
+  // La foto salió de un paso de un protocolo de Registro de productos.
+  fromProtocol: boolean;
+  // Lo que devolvió la Mac en cada ajuste.
+  parts: unknown;
+  // La medida de la foto: ok si es de todas o de una medida de la ficha.
+  measureOk: boolean;
+}): { ok: true } | { ok: false; reason: string } {
+  if (!args.fromProtocol) return { ok: false, reason: 'No salió de un protocolo.' };
+  if (claudeMissed(args.parts)) return { ok: false, reason: 'Claude no respondió en algún ajuste: la Mac usó lo medido.' };
+  if (!args.measureOk) return { ok: false, reason: 'La foto apunta a una medida que ya no está en la ficha.' };
+  return { ok: true };
+}

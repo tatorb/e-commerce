@@ -338,3 +338,41 @@ export function addInOrder(
   }
   return list;
 }
+
+/**
+ * Pone cada una de lugar fijo en su lugar, contando desde 1, y las demás
+ * llenan los huecos en su orden. Por ejemplo, seis fotos y dos con lugar fijo
+ * en 2 y 4 quedan: 1.ª, fija del 2, 2.ª, fija del 4, 3.ª, 4.ª, 5.ª y 6.ª. Un
+ * lugar más allá del final va al final.
+ */
+export function withFixedPlaces<T>(items: T[], fixed: { item: T; place: number }[]): T[] {
+  const out = [...items];
+  for (const f of [...fixed].sort((a, b) => a.place - b.place)) out.splice(Math.min(Math.max(f.place, 1) - 1, out.length), 0, f.item);
+  return out;
+}
+
+/**
+ * Deja las fotos de lugar fijo (las imágenes con texto) en su lugar, en la
+ * lista y en cada medida: son de todas las medidas y le ganan al orden del
+ * protocolo. Las que ya estaban en la lista se mueven; las que no, se suman.
+ */
+export function placeFixedPhotos(list: PhotoRef[], fixed: { ref: PhotoRef; place: number }[], measures: string[]): PhotoRef[] {
+  if (fixed.length === 0) return list;
+  const keys = new Set(fixed.map((f) => photoKey(f.ref)));
+  const rest = list.filter((r) => !keys.has(photoKey(r)));
+  // De todas las medidas, sin lugar propio todavía.
+  const own = fixed.map((f) => {
+    const item = withVariants(f.ref, []);
+    delete item.positions;
+    return { item, place: f.place };
+  });
+  let out = withFixedPlaces(rest, own);
+  if (measures.length < 2) return out;
+  for (const w of measures) {
+    // Lo que ve esa medida, con las de lugar fijo en su lugar, y todas numeradas así.
+    const shown = withFixedPlaces(variantPhotos(rest, w), own);
+    const at = new Map(shown.map((r, i) => [photoKey(r), i]));
+    out = out.map((r) => (at.has(photoKey(r)) ? { ...r, positions: { ...r.positions, [w]: at.get(photoKey(r))! } } : r));
+  }
+  return out;
+}

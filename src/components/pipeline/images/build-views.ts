@@ -89,7 +89,9 @@ function runView(run: PhotoStepRun & { decidedBy: { name: string } | null }, bef
     attempts: run.attempts,
     decided:
       run.decidedAt && (run.status === 'APPROVED' || run.status === 'SKIPPED')
-        ? `${run.status === 'APPROVED' ? 'Aprobado' : 'Salteado'}${run.decidedBy ? ` por ${run.decidedBy.name}` : ' solo'} el ${formatDateTime(run.decidedAt, timeZone)}`
+        ? run.autoApproved
+          ? `Aprobado solo, sin que nadie lo mire, porque vino del protocolo y salió bien, el ${formatDateTime(run.decidedAt, timeZone)}`
+          : `${run.status === 'APPROVED' ? 'Aprobado' : 'Salteado'}${run.decidedBy ? ` por ${run.decidedBy.name}` : ' solo'} el ${formatDateTime(run.decidedAt, timeZone)}`
         : null,
   };
 }

@@ -27,21 +27,28 @@ import { brandLogoHref, brandsForPiece, listBrands } from './brands';
 import { textImageHref } from './files';
 import type { PieceFit } from './piece-html';
 import { renderPiece, type PieceRenderer } from './render';
+import { placeTextImages } from './place';
 
-// El paso Imágenes con texto: la pieza de una publicación, o de toda su
-// familia (una sola para todas sus medidas), su foto, la IA que la completa y
-// el PNG que arma el servidor. Recibe la base por parámetro para poder probarla.
+// El paso Imágenes con texto: las piezas de una publicación, o de toda su
+// familia (las mismas para todas sus medidas), cada una con su número
+// (Imagen 1, Imagen 2...), su foto, su lugar fijo en Organización de
+// multimedia, la IA que la completa y el PNG que arma el servidor. Recibe la
+// base por parámetro para poder probarla.
 
 type Db = PrismaClient;
 
 export class TextImageError extends Error {}
+
+// Cuántas imágenes con texto puede tener una publicación, y el lugar más lejano en multimedia.
+export const MAX_TEXT_IMAGES = 4;
+export const MAX_MEDIA_PLACE = 30;
 
 // ───────────────────────────── La publicación y su familia ─────────────────────────────
 
 async function publicationFor(db: Db, accountId: string, publicationId: string) {
   const pub = await db.publication.findFirst({
     where: { id: publicationId, product: { accountId } },
-    select: { id: true, title: true, productId: true, textImageId: true, product: { select: { name: true } } },
+    select: { id: true, title: true, productId: true, product: { select: { name: true } } },
   });
   if (!pub) throw new TextImageError('La publicación no es de esta cuenta.');
   return pub;
@@ -53,12 +60,30 @@ async function sharing(db: Db, publicationId: string): Promise<{ ids: string[]; 
   return family && family.members.length > 1 ? { ids: family.members.map((m) => m.id), family: true } : { ids: [publicationId], family: false };
 }
 
-/** La pieza de la publicación, o la de alguna de su familia si ella todavía no tiene. */
-async function pieceOf(db: Db, publicationId: string) {
+/** Las piezas de la publicación y su familia, por número. Si dos tienen el mismo número, la de ella. */
+async function piecesOf(db: Db, publicationId: string) {
   const { ids } = await sharing(db, publicationId);
-  const rows = await db.publication.findMany({ where: { id: { in: ids }, textImageId: { not: null } }, select: { id: true, textImageId: true } });
-  const id = rows.find((r) => r.id === publicationId)?.textImageId ?? rows[0]?.textImageId ?? null;
-  return id ? db.textImage.findUnique({ where: { id } }) : null;
+  const links = await db.publicationTextImage.findMany({ where: { publicationId: { in: ids } }, select: { publicationId: true, textImage: true } });
+  const bySlot = new Map<number, (typeof links)[number]['textImage']>();
+  for (const l of [...links].sort((a, b) => Number(b.publicationId === publicationId) - Number(a.publicationId === publicationId))) {
+    if (!bySlot.has(l.textImage.slot)) bySlot.set(l.textImage.slot, l.textImage);
+  }
+  return [...bySlot.values()].sort((a, b) => a.slot - b.slot);
+}
+
+/** La pieza de ese número, o null si todavía no hay. */
+async function pieceOf(db: Db, publicationId: string, slot: number) {
+  return (await piecesOf(db, publicationId)).find((p) => p.slot === slot) ?? null;
+}
+
+function checkSlot(slot: number) {
+  if (!Number.isInteger(slot) || slot < 1 || slot > MAX_TEXT_IMAGES) throw new TextImageError(`Puede haber hasta ${MAX_TEXT_IMAGES} imágenes con texto por publicación.`);
+}
+
+function checkPlace(place: number | null) {
+  if (place !== null && (!Number.isInteger(place) || place < 1 || place > MAX_MEDIA_PLACE)) {
+    throw new TextImageError(`El lugar en Organización de multimedia va del 1 al ${MAX_MEDIA_PLACE}.`);
+  }
 }
 
 // ───────────────────────────── Las fotos ─────────────────────────────
@@ -127,9 +152,12 @@ async function pieceHash(db: Db, content: PieceContent, photoVersion: string | n
 // ───────────────────────────── El paso ─────────────────────────────
 
 
-export async function loadTextImageStep(db: Db, args: { accountId: string; publicationId: string }) {
+export async function loadTextImageStep(db: Db, args: { accountId: string; publicationId: string; slot?: number }) {
+  const slot = args.slot ?? 1;
+  checkSlot(slot);
   const pub = await publicationFor(db, args.accountId, args.publicationId);
-  const [row, share, photos, brands] = await Promise.all([pieceOf(db, pub.id), sharing(db, pub.id), photoOptions(db, pub.productId), listBrands(db)]);
+  const [pieces, share, photos, brands] = await Promise.all([piecesOf(db, pub.id), sharing(db, pub.id), photoOptions(db, pub.productId), listBrands(db)]);
+  const row = pieces.find((p) => p.slot === slot) ?? null;
   const content = row ? parsePiece(row.content) : emptyPiece();
   const photo = photos.find((p) => p.editId === row?.photoEditId) ?? null;
   const used = usedBrands(content);
@@ -139,6 +167,11 @@ export async function loadTextImageStep(db: Db, args: { accountId: string; publi
     publication: { id: pub.id, title: pub.title, productName: pub.product.name },
     // En una familia, cuántas publicaciones comparten la pieza.
     sharedBy: share.family ? share.ids.length : 1,
+    // La imagen que se está viendo, y todas las que tiene la publicación.
+    slot,
+    mediaPlace: row?.mediaPlace ?? null,
+    pieces: pieces.map((p) => ({ slot: p.slot, mediaPlace: p.mediaPlace, generated: Boolean(p.pngRef) })),
+    maxPieces: MAX_TEXT_IMAGES,
     content,
     saved: row !== null,
     photoEditId: photo?.editId ?? null,
@@ -166,10 +199,23 @@ export type TextImageStep = Awaited<ReturnType<typeof loadTextImageStep>>;
  */
 export async function saveTextImage(
   db: Db,
-  args: { accountId: string; publicationId: string; content?: Partial<PieceContent>; photoEditId?: string | null; userId: string | null },
+  args: {
+    accountId: string;
+    publicationId: string;
+    // Imagen 1, Imagen 2...; sin decir, la 1.
+    slot?: number;
+    content?: Partial<PieceContent>;
+    photoEditId?: string | null;
+    // El lugar fijo en Organización de multimedia, desde 1; null sin lugar fijo. Sin mandar, queda como estaba.
+    mediaPlace?: number | null;
+    userId: string | null;
+  },
 ): Promise<void> {
+  const slot = args.slot ?? 1;
+  checkSlot(slot);
+  if (args.mediaPlace !== undefined) checkPlace(args.mediaPlace);
   const pub = await publicationFor(db, args.accountId, args.publicationId);
-  const row = await pieceOf(db, pub.id);
+  const row = await pieceOf(db, pub.id, slot);
   const before = row ? parsePiece(row.content) : emptyPiece();
   const merged = pieceSchema.safeParse({ ...before, ...(args.content ?? {}) });
   if (!merged.success) throw new TextImageError(problemOf(merged.error));
@@ -184,13 +230,38 @@ export async function saveTextImage(
     }
     photoEditId = args.photoEditId;
   }
+  if (args.mediaPlace) {
+    const taken = (await piecesOf(db, pub.id)).find((p) => p.slot !== slot && p.mediaPlace === args.mediaPlace);
+    if (taken) throw new TextImageError(`La imagen con texto ${taken.slot} ya va en el lugar ${args.mediaPlace}: elegí otro.`);
+  }
   const { ids } = await sharing(db, pub.id);
   await db.$transaction(async (tx) => {
-    const data = { content: content as Prisma.InputJsonValue, photoEditId, updatedById: args.userId };
-    const id = row ? (await tx.textImage.update({ where: { id: row.id }, data })).id : (await tx.textImage.create({ data: { accountId: args.accountId, ...data } })).id;
-    // Todas las medidas de la familia apuntan a la misma.
-    await tx.publication.updateMany({ where: { id: { in: ids } }, data: { textImageId: id } });
+    const data = {
+      content: content as Prisma.InputJsonValue,
+      photoEditId,
+      updatedById: args.userId,
+      ...(args.mediaPlace !== undefined ? { mediaPlace: args.mediaPlace } : {}),
+    };
+    const id = row ? (await tx.textImage.update({ where: { id: row.id }, data })).id : (await tx.textImage.create({ data: { accountId: args.accountId, slot, ...data } })).id;
+    // Todas las medidas de la familia la usan.
+    await tx.publicationTextImage.createMany({ data: ids.map((publicationId) => ({ publicationId, textImageId: id })), skipDuplicates: true });
   });
+  // Si ya tiene PNG y cambió su lugar, se mueve en Organización de multimedia.
+  if (row?.pngRef && args.mediaPlace !== undefined && args.mediaPlace !== row.mediaPlace) await placeTextImages(db, ids);
+}
+
+/**
+ * Saca una imagen con texto de la publicación y su familia, y de su
+ * Organización de multimedia. El PNG queda en el Drive.
+ */
+export async function removeTextImage(db: Db, args: { accountId: string; publicationId: string; slot: number }): Promise<void> {
+  checkSlot(args.slot);
+  const pub = await publicationFor(db, args.accountId, args.publicationId);
+  const row = await pieceOf(db, pub.id, args.slot);
+  if (!row) throw new TextImageError('Esa imagen con texto no existe.');
+  const { ids } = await sharing(db, pub.id);
+  await placeTextImages(db, ids, { remove: [row.id] });
+  await db.textImage.delete({ where: { id: row.id } });
 }
 
 function problemOf(e: { issues: { path: PropertyKey[]; message: string }[] }): string {
@@ -224,11 +295,13 @@ async function paintFor(db: Db, content: PieceContent, file: { url: string; type
  */
 export async function generateTextImage(
   db: Db,
-  args: { accountId: string; publicationId: string; userId: string | null; now?: Date },
+  args: { accountId: string; publicationId: string; slot?: number; userId: string | null; now?: Date },
   render: PieceRenderer = renderPiece,
 ): Promise<GenerateResult> {
+  const slot = args.slot ?? 1;
+  checkSlot(slot);
   const pub = await publicationFor(db, args.accountId, args.publicationId);
-  const row = await pieceOf(db, pub.id);
+  const row = await pieceOf(db, pub.id, slot);
   if (!row) throw new TextImageError('Todavía no hay nada cargado en la imagen con texto.');
   const content = parsePiece(row.content);
   const photo = (await photoOptions(db, pub.productId)).find((p) => p.editId === row.photoEditId) ?? null;
@@ -239,7 +312,7 @@ export async function generateTextImage(
   const hash = await pieceHash(db, content, photo!.version);
   const at = args.now ?? new Date();
   const owner = await folderOwner(db, pub.productId);
-  const name = `${pub.product.name} · imagen con texto · ${at.toISOString().slice(0, 16).replace('T', ' ').replace(':', '.')}.png`;
+  const name = `${pub.product.name} · imagen con texto ${slot} · ${at.toISOString().slice(0, 16).replace('T', ' ').replace(':', '.')}.png`;
   const ref = await withDriveToken(db, async (token, email) => {
     const folderId = await ensureFolder(db, token, email, textImagesFolder(owner.account, owner.product));
     return driveRef((await uploadContent(token, { folderId, name, type: 'image/png', data: png, properties: { mrbProducto: pub.productId } })).id);
@@ -248,6 +321,8 @@ export async function generateTextImage(
   await db.textImage.update({ where: { id: row.id }, data: { pngRef: ref, pngAt: at, pngHash: hash, updatedById: args.userId } });
   // El anterior, a la papelera del Drive. Si no se puede, queda ahí.
   if (old && old !== ref) await removeStored(db, old).catch((e) => console.error('No se pudo sacar el PNG anterior del Drive.', e));
+  // Con lugar fijo, queda en su lugar en Organización de multimedia.
+  if (row.mediaPlace) await placeTextImages(db, (await sharing(db, pub.id)).ids);
   return { fit, at, version: fit.version };
 }
 
@@ -263,11 +338,13 @@ export type CompleteResult = { ok: true; costUsd: number; missingBrands: string[
  */
 export async function completeTextImage(
   db: Db,
-  args: { accountId: string; publicationId: string; userId: string | null; replace?: boolean },
+  args: { accountId: string; publicationId: string; slot?: number; userId: string | null; replace?: boolean },
   request: Requester = requestTextImage,
 ): Promise<CompleteResult> {
+  const slot = args.slot ?? 1;
+  checkSlot(slot);
   const pub = await publicationFor(db, args.accountId, args.publicationId);
-  const row = await pieceOf(db, pub.id);
+  const row = await pieceOf(db, pub.id, slot);
   const current = row ? parsePiece(row.content) : emptyPiece();
   const filled = Boolean(current.TIPO_PRODUCTO || current.MOTOR || current.compatible.length || current.no_compatible.length || current.dudas.length);
   if (filled && !args.replace) return { ok: false, error: 'Ya hay contenido cargado: confirmá que querés reemplazarlo.', costUsd: 0 };
@@ -307,7 +384,7 @@ export async function completeTextImage(
     dudas: o.dudas.slice(0, 4),
   };
   try {
-    await saveTextImage(db, { accountId: args.accountId, publicationId: pub.id, content, userId: args.userId });
+    await saveTextImage(db, { accountId: args.accountId, publicationId: pub.id, slot, content, userId: args.userId });
   } catch (e) {
     if (e instanceof TextImageError) return { ok: false, error: e.message, costUsd: r.usage.costUsd };
     throw e;

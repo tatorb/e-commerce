@@ -10,9 +10,9 @@ export const textImageHref = (id: string, at: Date) => `/api/imagenes-con-texto/
 
 /** El PNG de una imagen con texto. Null si todavía no se generó o ya no está en el Drive. */
 export async function textImagePng(db: PrismaClient, id: string): Promise<{ data: Uint8Array; productId: string | null; at: Date } | null> {
-  const row = await db.textImage.findUnique({ where: { id }, select: { pngRef: true, pngAt: true, publications: { select: { productId: true }, take: 1 } } });
+  const row = await db.textImage.findUnique({ where: { id }, select: { pngRef: true, pngAt: true, publications: { select: { publication: { select: { productId: true } } }, take: 1 } } });
   if (!row?.pngRef || !row.pngAt) return null;
   const res = await readStored(db, row.pngRef);
   if (!res) return null;
-  return { data: new Uint8Array(await res.arrayBuffer()), productId: row.publications[0]?.productId ?? null, at: row.pngAt };
+  return { data: new Uint8Array(await res.arrayBuffer()), productId: row.publications[0]?.publication.productId ?? null, at: row.pngAt };
 }

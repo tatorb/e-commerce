@@ -11,7 +11,8 @@ import { loadMediaSources, picturesFor } from '@/lib/media';
 import { addBrand, BrandError, brandUsage, removeBrand, setBrandLogo, updateBrand } from '@/lib/text-images/brands';
 import type { PiecePaint } from '@/lib/text-images/piece-html';
 import { renderPiece, type PieceRenderer } from '@/lib/text-images/render';
-import { completeTextImage, generateTextImage, loadTextImageStep, saveTextImage, TextImageError } from '@/lib/text-images/step';
+import { completeTextImage, generateTextImage, loadTextImageStep, removeTextImage, saveTextImage, TextImageError } from '@/lib/text-images/step';
+import { placeShotPhotos } from '@/lib/shoot';
 import type { TextImageInput, TextImageOutput } from '@/ai/text-images';
 import { startFakeGoogle, type FakeGoogle } from './fake-google';
 
@@ -212,9 +213,9 @@ describe.skipIf(!url)('el paso en la base', () => {
 
   it('en una familia la pieza es una sola: se guarda en todas las medidas', async () => {
     await saveTextImage(db, { accountId, publicationId: halfId, content: VERSION_A, photoEditId: editId, userId });
-    const rows = await db.publication.findMany({ where: { id: { in: [stdId, halfId] } }, select: { textImageId: true } });
+    const rows = await db.publicationTextImage.findMany({ where: { publicationId: { in: [stdId, halfId] } } });
+    expect(rows).toHaveLength(2);
     expect(new Set(rows.map((r) => r.textImageId)).size).toBe(1);
-    expect(rows[0].textImageId).not.toBeNull();
     const step = await loadTextImageStep(db, { accountId, publicationId: stdId });
     expect(step).toMatchObject({ sharedBy: 2, version: 'A', photoEditId: editId, missing: [], png: null });
     expect(step.photos).toEqual([
@@ -271,6 +272,59 @@ describe.skipIf(!url)('el paso en la base', () => {
     step = await loadTextImageStep(db, { accountId, publicationId: stdId });
     expect(step.png!.outdated).toBe(true);
     expect(step.withoutLogo).toEqual([]);
+  });
+
+  it('dos imágenes con texto, cada una con su lugar: le ganan al orden del protocolo, también a las fotos que llegan después', async () => {
+    // Las dos medidas ya tienen fotos elegidas: tres corregidas del protocolo, de todas las medidas.
+    const protocol = await db.shootProtocol.create({ data: { accountId, name: 'Subconjuntos' } });
+    const shots: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      const step = await db.shootStep.create({ data: { protocolId: protocol.id, title: `Paso ${i + 1}`, position: i, mediaPosition: i } });
+      const e = await db.photoEdit.create({
+        data: { productId, source: 'UPLOAD', originalUrl: `drive:p${i}`, originalName: `p${i}.jpg`, originalType: 'image/jpeg', originalSize: 10, position: 10 + i, shot: true, shootStepId: step.id },
+      });
+      await db.photoStepRun.create({ data: { editId: e.id, step: 0, status: 'APPROVED', settings: {}, jpgUrl: `drive:j${i}`, pngUrl: 'drive:png-1' } });
+      shots.push(e.id);
+    }
+    const ref = (id: string) => ({ kind: 'edit' as const, editId: id });
+    for (const pub of [stdId, halfId]) await db.publication.update({ where: { id: pub }, data: { media: shots.slice(0, 3).map(ref) } });
+    await db.photoEdit.updateMany({ where: { id: { in: shots.slice(0, 3) } }, data: { placedAt: new Date() } });
+
+    // Imagen 1 en el lugar 2 e imagen 2 en el lugar 4; no pueden compartir lugar.
+    await saveTextImage(db, { accountId, publicationId: stdId, slot: 1, content: VERSION_B, photoEditId: editId, mediaPlace: 2, userId });
+    await saveTextImage(db, { accountId, publicationId: stdId, slot: 2, content: VERSION_A, photoEditId: editId, mediaPlace: 4, userId });
+    await expect(saveTextImage(db, { accountId, publicationId: stdId, slot: 2, mediaPlace: 2, userId })).rejects.toThrow('ya va en el lugar 2');
+    const step = await loadTextImageStep(db, { accountId, publicationId: halfId, slot: 2 });
+    expect(step.pieces).toEqual([
+      { slot: 1, mediaPlace: 2, generated: false },
+      { slot: 2, mediaPlace: 4, generated: false },
+    ]);
+    const t1 = (await db.textImage.findFirstOrThrow({ where: { slot: 1 } })).id;
+    const t2 = (await db.textImage.findFirstOrThrow({ where: { slot: 2 } })).id;
+    await generateTextImage(db, { accountId, publicationId: stdId, slot: 1, userId }, fakeRender);
+    await generateTextImage(db, { accountId, publicationId: stdId, slot: 2, userId }, fakeRender);
+
+    const order = async (pub: string) =>
+      ((await db.publication.findUniqueOrThrow({ where: { id: pub }, select: { media: true } })).media as { kind: string; editId?: string; id?: string }[]).map((r) =>
+        r.kind === 'text' ? (r.id === t1 ? 'T1' : 'T2') : `P${shots.indexOf(r.editId!) + 1}`,
+      );
+    expect(await order(stdId)).toEqual(['P1', 'T1', 'P2', 'T2', 'P3']);
+    expect(await order(halfId)).toEqual(['P1', 'T1', 'P2', 'T2', 'P3']);
+
+    // Llega sola la cuarta foto del protocolo: va al final, sin mover las imágenes con texto.
+    await placeShotPhotos(db, productId);
+    expect(await order(stdId)).toEqual(['P1', 'T1', 'P2', 'T2', 'P3', 'P4']);
+
+    // Ordenar como el protocolo también las deja en su lugar.
+    const media = await loadMediaSources(db, accountId, stdId);
+    // Las corregidas que no son del protocolo siguen al final, como siempre.
+    expect(media.protocol!.map((m) => m.key).slice(0, 6)).toEqual([`corregida:${shots[0]}`, `texto:${t1}`, `corregida:${shots[1]}`, `texto:${t2}`, `corregida:${shots[2]}`, `corregida:${shots[3]}`]);
+
+    // Cambia el lugar de la imagen 2: se mueve. Sacar la imagen 1 la saca de multimedia.
+    await saveTextImage(db, { accountId, publicationId: stdId, slot: 2, mediaPlace: 1, userId });
+    expect(await order(stdId)).toEqual(['T2', 'T1', 'P1', 'P2', 'P3', 'P4']);
+    await removeTextImage(db, { accountId, publicationId: stdId, slot: 1 });
+    expect(await order(halfId)).toEqual(['T2', 'P1', 'P2', 'P3', 'P4']);
   });
 
   it('no arma el PNG si falta algo o si no entra', async () => {

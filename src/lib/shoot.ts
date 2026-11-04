@@ -1,6 +1,7 @@
 import type { z } from 'zod';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
-import { addInOrder, parseMedia, photoKey, withVariants, type PhotoRef } from '@/domain/media';
+import { addInOrder, parseMedia, photoKey, placeFixedPhotos, withVariants, type PhotoRef } from '@/domain/media';
+import { fixedTextPlaces } from '@/lib/text-images/place';
 import { addToPipeline } from '@/domain/pipeline';
 import { createPipelinePublication } from '@/domain/pipeline-publications';
 import { productInputSchema, writeProduct } from '@/domain/products';
@@ -664,7 +665,10 @@ export async function placeShotPhotos(db: Db, productId: string, now = new Date(
         else atEnd.push(ref);
       }
       if (inOrder.length + atEnd.length === 0) continue;
-      const media = [...addInOrder(current, inOrder, placeOf, pub.measures.sole ? [] : pub.measures.measures), ...atEnd];
+      const windows = pub.measures.sole ? [] : pub.measures.measures;
+      // Las imágenes con texto con lugar fijo le ganan al orden del protocolo: quedan en su lugar.
+      const fixed = (await fixedTextPlaces(tx, [pub.id])).get(pub.id) ?? [];
+      const media = placeFixedPhotos([...addInOrder(current, inOrder, placeOf, windows), ...atEnd], fixed, windows);
       await tx.publication.update({ where: { id: pub.id }, data: { media: media as Prisma.InputJsonValue } });
     }
     return mine.length;
