@@ -200,6 +200,9 @@ model Account {
   slug                String               @unique
   name                String
   timezone            String               @default("America/Argentina/Buenos_Aires")
+  // La garantía de la cuenta, para las publicaciones nuevas y para cargarla en
+  // todas: { type, amount, unit } (src/domain/warranty.ts). Null: sin definir.
+  warranty            Json?
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
   stores              Store[]
@@ -499,6 +502,9 @@ model Publication {
   // lista de { key, label, quantity }, una por medida o una sola sin medidas.
   // Null: sigue a las del canal.
   quantities        Json?
+  // La garantía: { type, amount, unit } (src/domain/warranty.ts). Null: sigue
+  // a la del canal. En una familia, la misma en todas sus medidas.
+  warranty          Json?
   currency          String                @default("ARS")
   channelStatus     ChannelStatus         @default(ACTIVE)
   // Estado de la propuesta completa con IA.
@@ -1439,6 +1445,8 @@ model ChannelCopy {
   quantity          Int?
   // El canal maneja el stock, como en Full: la cantidad no se cambia desde la app.
   stockInChannel    Boolean       @default(false)
+  // La garantía como la informa el canal: { type, amount, unit }. Null: no se leyó.
+  warranty          Json?
   status            ChannelStatus
   url               String?
   photos            Json          @default("[]")

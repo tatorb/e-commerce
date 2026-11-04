@@ -6,6 +6,7 @@ import { isInstallmentPlan, LOW_INTEREST_PLAN } from '@/domain/pricing';
 import { campaignPrice, dealPrice } from '@/domain/promotions';
 import { JOIN_WITH_PRICE, needsDetail, NEEDS_OFFER, parsePromotions, readRef, withDetail } from './promotions';
 import { MAX_QUANTITY, quantityKey } from '@/domain/quantities';
+import { warrantyTerms, withWarranty } from './warranty';
 import {
   PublishError,
   type ChannelAttributeUpdate,
@@ -367,9 +368,7 @@ async function createMembers(accessToken: string, l: ChannelNewListing, family: 
           // Las categorías de repuestos no traen un campo de medida: va con su nombre.
           ...(m.measure ? [{ name: 'Medida', value_name: m.measure }] : []),
         ],
-        ...(l.warranty
-          ? { sale_terms: [{ id: 'WARRANTY_TYPE', value_name: 'Garantía del vendedor' }, { id: 'WARRANTY_TIME', value_name: l.warranty }] }
-          : {}),
+        ...(l.warranty ? { sale_terms: warrantyTerms(l.warranty) } : {}),
       });
     } catch (e) {
       // Si ya se creó otra, se sigue con las demás y se avisa cuál faltó.
@@ -600,6 +599,17 @@ export const mercadolibrePublisher: ChannelPublisher = {
       // Ya no estaba: no hay nada que sacar.
       if (e instanceof MercadoLibreRequestError && (e.status === 404 || /no offers? found/i.test(detailOf(e.body) ?? ''))) return;
       throw rejectedAs('la salida de la campaña', e);
+    }
+  },
+
+  async setWarranty(accessToken, externalId, warranty) {
+    const id = encodeURIComponent(externalId);
+    // Los demás términos de venta, como los días de disponibilidad, van como estaban: así no se pierden.
+    const item = await get(`/items/${id}?attributes=sale_terms`, accessToken);
+    try {
+      await mlSend('PUT', `/items/${id}`, accessToken, { sale_terms: withWarranty(isObj(item) ? item.sale_terms : [], warranty) });
+    } catch (e) {
+      throw rejectedAs('la garantía', e);
     }
   },
 

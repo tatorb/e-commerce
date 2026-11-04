@@ -144,6 +144,8 @@ function writeFace(field: FaceField, value: FaceValues[FaceField]): Prisma.Publi
   if (field === 'photos') return { media: Prisma.DbNull };
   // Las cantidades también: vuelven a seguir a las del canal.
   if (field === 'quantity') return { quantities: Prisma.DbNull };
+  // La garantía también: vuelve a seguir a la del canal.
+  if (field === 'warranty') return { warranty: Prisma.DbNull };
   if (field === 'attributes') return { attributes: value as NameValue[] };
   if (field === 'installments') return { installments: value === null ? null : Number(value) };
   return { [field]: (value as string | null) ?? null };
@@ -185,6 +187,7 @@ async function applyListing(
       installments: true,
       discount: true,
       quantities: true,
+      warranty: true,
       importRun: { select: { origin: true } },
       channelCopy: {
         select: {
@@ -214,13 +217,16 @@ async function applyListing(
     installments: installmentsText(listing.installments),
     discount: discountText(listing.discount),
     quantity: channelQuantities(listing.quantity, listing.variations),
+    warranty: listing.warranty ?? null,
   };
   const appPrints = fingerprintsOf(app);
   const channelPrints = fingerprintsOf(channel);
+  // Un canal que no informa la garantía: del lado del canal queda vacía, para que la de la app se pueda subir.
+  if (channel.warranty === null) channelPrints.warranty = '';
   // La primera vez, el precio del canal gana: el que tenía la app venía de una planilla.
   const lastAgreed: Fingerprints = p.channelCopy ? storedPrints(p.channelCopy).agreed : { price: appPrints.price };
-  // Las cuotas y el descuento que se decidieron en la app antes de conocer los del canal quedan para subir.
-  for (const field of ['installments', 'discount'] as const) {
+  // Las cuotas, el descuento y la garantía que se decidieron en la app antes de conocer los del canal quedan para subir.
+  for (const field of ['installments', 'discount', 'warranty'] as const) {
     if (!lastAgreed[field] && app[field] !== null) lastAgreed[field] = channelPrints[field];
   }
   // Traída del canal: lo de la app salió del canal, así que lo que cambió antes
@@ -302,6 +308,7 @@ async function applyListing(
     discount: listing.discount,
     quantity: listing.quantity,
     stockInChannel: listing.stockInChannel,
+    warranty: asJson(listing.warranty ?? null),
     // Un descuento que llegó del canal no es de la app: no se renueva.
     ...(taken.includes('discount') ? { discountUntil: null, discountSentAt: null } : {}),
     status: listing.status,
@@ -536,7 +543,7 @@ export async function runSyncStep(
 async function countToChoose(db: Db, storeId: string): Promise<number> {
   const publications = await db.publication.findMany({
     where: { storeId, channelCopy: { isNot: null } },
-    select: { title: true, description: true, attributes: true, media: true, price: true, installments: true, discount: true, quantities: true, channelCopy: { select: { fingerprints: true, agreed: true, missingSince: true, price: true, installments: true, discount: true } } },
+    select: { title: true, description: true, attributes: true, media: true, price: true, installments: true, discount: true, quantities: true, warranty: true, channelCopy: { select: { fingerprints: true, agreed: true, missingSince: true, price: true, installments: true, discount: true } } },
   });
   return publications.filter((p) => !p.channelCopy?.missingSince && faceSummary(fingerprintsOf(faceValues(p)), p.channelCopy).choose.length > 0)
     .length;
@@ -649,8 +656,9 @@ export async function chooseFaces(
           installments: true,
           discount: true,
           quantities: true,
+          warranty: true,
           channelCopy: {
-            select: { title: true, description: true, attributes: true, photos: true, photoIds: true, variations: true, price: true, installments: true, discount: true, quantity: true, fingerprints: true, agreed: true, missingSince: true },
+            select: { title: true, description: true, attributes: true, photos: true, photoIds: true, variations: true, price: true, installments: true, discount: true, quantity: true, warranty: true, fingerprints: true, agreed: true, missingSince: true },
           },
         },
       });
@@ -705,8 +713,9 @@ export async function discardDrafts(
         installments: true,
         discount: true,
         quantities: true,
+        warranty: true,
         channelCopy: {
-          select: { title: true, description: true, attributes: true, photos: true, photoIds: true, variations: true, price: true, installments: true, discount: true, quantity: true, fingerprints: true, agreed: true, missingSince: true },
+          select: { title: true, description: true, attributes: true, photos: true, photoIds: true, variations: true, price: true, installments: true, discount: true, quantity: true, warranty: true, fingerprints: true, agreed: true, missingSince: true },
         },
       },
     });

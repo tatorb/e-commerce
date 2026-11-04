@@ -38,6 +38,7 @@ import { resolveTitleLock } from '@/domain/title-lock';
 import { channelFamilyNameOf } from '@/domain/families';
 import { FAMILY_LOCK_SELECT, titleLockFromData } from '@/lib/family-lock';
 import { isInstallmentPlan } from '@/domain/pricing';
+import { WARRANTY_TYPE_LABEL, type Warranty } from '@/domain/warranty';
 import { checkTitle } from '@/domain/titles';
 import { readOne } from '@/lib/channel-sync';
 import { photoOriginsOf, photoSiblings, picturesFor } from '@/lib/media';
@@ -83,6 +84,7 @@ async function loadForPush(db: Db, accountId: string, publicationId: string) {
       installments: true,
       discount: true,
       quantities: true,
+      warranty: true,
       titleLockedManual: true,
       store: { select: { id: true, channel: { select: { id: true, kind: true, name: true } }, connection: { select: { status: true } } } },
       measurements: { orderBy: { takenAt: 'desc' }, take: LATEST_MEASUREMENTS, select: { metrics: true } },
@@ -108,6 +110,7 @@ async function loadForPush(db: Db, accountId: string, publicationId: string) {
           discount: true,
           discountUntil: true,
           quantity: true,
+          warranty: true,
           stockInChannel: true,
         },
       },
@@ -293,7 +296,7 @@ export async function pushDrafts(
 
   // Ya está en el canal: la cara del canal y lo acordado pasan a ser lo que se subió.
   // Si el canal lo guardó un poco distinto, la lectura de confirmación lo trae.
-  const accept = async (field: FaceField, value: string | NameValue[] | QuantityLine[], extra: Prisma.ChannelCopyUpdateInput = {}) => {
+  const accept = async (field: FaceField, value: string | NameValue[] | QuantityLine[] | Warranty, extra: Prisma.ChannelCopyUpdateInput = {}) => {
     const print = fingerprint(field, value);
     await db.$transaction(async (tx) => {
       const current = await tx.channelCopy.findUniqueOrThrow({ where: { publicationId: p.id }, select: { fingerprints: true, agreed: true, rejections: true } });
@@ -368,7 +371,7 @@ export async function pushDrafts(
         continue;
       }
       let send: () => Promise<void>;
-      let value: string | NameValue[] | QuantityLine[];
+      let value: string | NameValue[] | QuantityLine[] | Warranty;
       let problems: string[] = [];
       let extra: Prisma.ChannelCopyUpdateInput = {};
       if (field === 'attributes') {
@@ -430,6 +433,16 @@ export async function pushDrafts(
         send = () => sendQuantities(db, p, publisher, lines);
         extra = quantityCopy(copy.variations, lines);
         if (needsReactivation(p.channelStatus, channel.quantity, lines)) restock = lines;
+      } else if (field === 'warranty') {
+        const warranty = app.warranty;
+        if (!warranty) continue;
+        if (warranty.type !== 'none' && (warranty.amount === null || warranty.unit === null)) {
+          result.rejected.push({ field, message: `Falta el tiempo de la ${WARRANTY_TYPE_LABEL[warranty.type].toLowerCase()}, por ejemplo 15 días.` });
+          continue;
+        }
+        value = warranty;
+        // Cada publicación del canal lleva la suya: en una familia vieja con varios códigos, todas.
+        send = () => withAccessToken(db, p.store.id, (token) => eachTarget(p, (id) => publisher.setWarranty(token, id, warranty)));
       } else {
         if (field === 'title' && titleLocked(p)) {
           result.rejected.push({ field, message: LOCKED_TITLE });

@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db';
 import { photoVariants } from '@/domain/media';
 import { channelFaceValues, faceSummary, faceValues, fingerprintsOf, priceFaceText, type FaceField, type FaceValues } from '@/domain/channel-sync';
 import { quantityText, type QuantityLine } from '@/domain/quantities';
+import { warrantyLabel, type Warranty } from '@/domain/warranty';
 import type { NameValue } from '@/domain/name-value';
 import { getChannelListings } from '@/channels/listings';
 import { getChannelPublisher } from '@/channels/publish';
@@ -34,6 +35,7 @@ function preview(field: FaceField, value: FaceValues[FaceField], other: FaceValu
   }
   if (field === 'price' || field === 'installments' || field === 'discount') return priceFaceText(field, value as string | null);
   if (field === 'quantity') return quantityText(value as QuantityLine[] | null);
+  if (field === 'warranty') return value ? warrantyLabel(value as Warranty) : '';
   if (field !== 'attributes') return ((value as string | null) ?? '').trim();
   // De los datos de catálogo, solo los que no coinciden.
   const theirs = new Map((other as NameValue[]).map((a) => [a.name.trim().toLowerCase(), a.value.trim()]));
@@ -70,10 +72,11 @@ export async function loadSyncOverview(accountId: string) {
         installments: true,
         discount: true,
         quantities: true,
+        warranty: true,
         pipelineStatus: true,
         store: { select: { name: true, channel: { select: { name: true } } } },
         channelCopy: {
-          select: { title: true, description: true, attributes: true, photos: true, photoIds: true, variations: true, price: true, installments: true, discount: true, quantity: true, fingerprints: true, agreed: true, missingSince: true },
+          select: { title: true, description: true, attributes: true, photos: true, photoIds: true, variations: true, price: true, installments: true, discount: true, quantity: true, warranty: true, fingerprints: true, agreed: true, missingSince: true },
         },
       },
       orderBy: { externalId: 'asc' },
@@ -169,6 +172,7 @@ export async function listToPush(accountId: string, db: PrismaClient = prisma): 
       installments: true,
       discount: true,
       quantities: true,
+      warranty: true,
       pipelineStatus: true,
       pipelineStep: true,
       pipelineRemoval: true,

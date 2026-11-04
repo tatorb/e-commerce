@@ -4,12 +4,13 @@ import { formatPercent, formatPrice } from './money';
 import { parseNameValueList, type NameValue } from './name-value';
 import { planLabel } from './pricing';
 import { channelQuantities, parseQuantities, type QuantityLine } from './quantities';
+import { parseWarranty, warrantyKey, type Warranty } from './warranty';
 
 // Las caras de una publicación: lo que tiene la app y lo que está en el canal.
 // Para saber de qué lado cambió cada dato se guarda, además, la huella de lo
 // último en que las dos coincidieron. Este módulo no sabe nada de canales.
 
-export const FACE_FIELDS = ['title', 'description', 'attributes', 'photos', 'price', 'installments', 'discount', 'quantity'] as const;
+export const FACE_FIELDS = ['title', 'description', 'attributes', 'photos', 'price', 'installments', 'discount', 'quantity', 'warranty'] as const;
 export type FaceField = (typeof FACE_FIELDS)[number];
 
 export const FACE_FIELD_LABEL: Record<FaceField, string> = {
@@ -21,6 +22,7 @@ export const FACE_FIELD_LABEL: Record<FaceField, string> = {
   installments: 'Cuotas',
   discount: 'Descuento',
   quantity: 'Cantidad',
+  warranty: 'Garantía',
 };
 
 // Cómo se cuenta cada cambio en el historial.
@@ -50,6 +52,7 @@ export function isFaceField(value: string): value is FaceField {
 // installments: el plan de cuotas, por ejemplo "6". discount: el descuento en
 // %, por ejemplo "27.3", o "0" sin descuento. Null mientras no se sabe.
 // quantity: la cantidad disponible de cada medida; en la app, null sigue a la del canal.
+// warranty: el tipo y el tiempo de la garantía; en la app, null sigue a la del canal.
 export type FaceValues = {
   title: string | null;
   description: string | null;
@@ -59,6 +62,7 @@ export type FaceValues = {
   installments: string | null;
   discount: string | null;
   quantity: QuantityLine[] | null;
+  warranty: Warranty | null;
 };
 export type Fingerprints = Partial<Record<FaceField, string>>;
 
@@ -98,7 +102,7 @@ type PriceValues = { price: Numeric | null; installments: number | null; discoun
 const priceFaces = (v: PriceValues) => ({ price: priceText(v.price), installments: installmentsText(v.installments), discount: discountText(v.discount) });
 
 /** Los datos de la cara de la app, como los guarda la publicación. */
-export function faceValues(p: { title: string | null; description: string | null; attributes: unknown; media?: unknown; quantities: unknown } & PriceValues): FaceValues {
+export function faceValues(p: { title: string | null; description: string | null; attributes: unknown; media?: unknown; quantities: unknown; warranty: unknown } & PriceValues): FaceValues {
   return {
     title: p.title,
     description: p.description,
@@ -106,6 +110,7 @@ export function faceValues(p: { title: string | null; description: string | null
     photos: parseMedia(p.media),
     ...priceFaces(p),
     quantity: parseQuantities(p.quantities),
+    warranty: parseWarranty(p.warranty),
   };
 }
 
@@ -119,6 +124,8 @@ export function channelFaceValues(
     photoIds: unknown;
     variations: unknown;
     quantity: number | null;
+    // Las copias leídas antes de que la app leyera la garantía no la tienen.
+    warranty?: unknown;
   } & PriceValues,
 ): FaceValues {
   return {
@@ -128,6 +135,7 @@ export function channelFaceValues(
     photos: channelPhotos(c.photos, c.photoIds, c.variations),
     ...priceFaces(c),
     quantity: channelQuantities(c.quantity, parseVariations(c.variations)),
+    warranty: parseWarranty(c.warranty),
   };
 }
 
@@ -153,6 +161,7 @@ function normalized(field: FaceField, value: FaceValues[FaceField]): string {
       .join('\n');
   }
   if (field === 'price' || field === 'installments' || field === 'discount') return (value as string | null) ?? '';
+  if (field === 'warranty') return warrantyKey(value as Warranty | null);
   if (field === 'quantity') {
     return ((value as QuantityLine[] | null) ?? [])
       .map((l) => `${l.key}=${l.quantity}`)
@@ -171,7 +180,7 @@ function normalized(field: FaceField, value: FaceValues[FaceField]): string {
 
 // Un dato vacío tiene huella vacía.
 const EMPTY = '';
-// Las fotos o las cantidades que la app no cambió: siguen a las del canal, así que siempre son iguales.
+// Las fotos, las cantidades o la garantía que la app no cambió: siguen a las del canal, así que siempre son iguales.
 const FOLLOW = 'sigue-al-canal';
 
 /** Huella corta del texto, para comparar sin guardar dos veces lo mismo. */
@@ -189,7 +198,7 @@ function hash(text: string): string {
 }
 
 export function fingerprint(field: FaceField, value: FaceValues[FaceField]): string {
-  if ((field === 'photos' || field === 'quantity') && value === null) return FOLLOW;
+  if ((field === 'photos' || field === 'quantity' || field === 'warranty') && value === null) return FOLLOW;
   const text = normalized(field, value);
   return text === '' ? EMPTY : hash(text);
 }
@@ -204,6 +213,7 @@ export function fingerprintsOf(values: FaceValues): Record<FaceField, string> {
     installments: fingerprint('installments', values.installments),
     discount: fingerprint('discount', values.discount),
     quantity: fingerprint('quantity', values.quantity),
+    warranty: fingerprint('warranty', values.warranty),
   };
 }
 

@@ -6,6 +6,7 @@ import { attributeDiff, FACE_FIELD_LABEL, isFaceField, priceFaceText, RENEWAL_FA
 import { parseMedia, photoVariants, type PhotoRef } from './media';
 import { parseNameValueList, type NameValue } from './name-value';
 import { parseQuantities, quantityText } from './quantities';
+import { parseWarranty, warrantyLabel } from './warranty';
 
 // El Registro: todo lo que pasó entre la app y el canal, publicación por
 // publicación y dato por dato, con el antes y el después y, si no se pudo, el
@@ -214,6 +215,13 @@ export function changeSides(field: string, before: unknown, after: unknown): { b
     return { before: label(before), after: label(after) };
   }
   if (field === 'quantity') return { before: quantityText(parseQuantities(before)), after: quantityText(parseQuantities(after)) };
+  if (field === 'warranty') {
+    const label = (v: unknown) => {
+      const w = parseWarranty(v);
+      return w ? warrantyLabel(w) : '';
+    };
+    return { before: label(before), after: label(after) || 'La del canal' };
+  }
   if (field === 'status') {
     const label = (v: unknown) => (typeof v === 'string' && v in CHANNEL_STATUS_LABEL ? CHANNEL_STATUS_LABEL[v as ChannelStatus] : '');
     return { before: label(before), after: label(after) };

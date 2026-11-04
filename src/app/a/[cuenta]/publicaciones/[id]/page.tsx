@@ -10,6 +10,7 @@ import {
   Package,
   Percent,
   Ruler,
+  ShieldCheck,
   Tag,
   Type,
   Boxes,
@@ -51,6 +52,8 @@ import { relistInfo } from '@/lib/channel-status';
 import { FACE_FIELDS, FACE_FIELD_LABEL, priceFaceText, SYNC_CHANGE_LABEL, type FaceField, type FaceValues } from '@/domain/channel-sync';
 import { quantityText, type QuantityLine } from '@/domain/quantities';
 import { QuantityEditor } from '@/components/publication/QuantityEditor';
+import { WarrantyEditor } from '@/components/publication/WarrantyEditor';
+import { warrantyLabel } from '@/domain/warranty';
 import { RichTextView } from '@/components/ui/rich-text-view';
 import { KnowledgeParts } from '@/components/products/KnowledgeParts';
 import { loadKnowledge } from '@/lib/queries/research';
@@ -97,10 +100,11 @@ const FIELD_ICON: Record<FaceField, ReactNode> = {
   installments: <CreditCard />,
   discount: <Percent />,
   quantity: <Boxes />,
+  warranty: <ShieldCheck />,
 };
 
 // Los datos cortos: en la vista del canal van como filas que llevan a cambiarlos.
-const SHORT_FIELDS: FaceField[] = ['price', 'installments', 'discount', 'quantity'];
+const SHORT_FIELDS: FaceField[] = ['price', 'installments', 'discount', 'quantity', 'warranty'];
 
 const STATE: Record<State, { label: string; variant: 'secondary' | 'destructive' | 'outline' }> = {
   same: { label: 'Igual en los dos lados', variant: 'outline' },
@@ -124,6 +128,7 @@ function asText(values: FaceValues, field: FaceField): string {
   if (field === 'photos') return '';
   if (field === 'price' || field === 'installments' || field === 'discount') return priceFaceText(field, values[field]);
   if (field === 'quantity') return quantityText(values.quantity);
+  if (field === 'warranty') return values.warranty ? warrantyLabel(values.warranty) : '';
   return values[field] ?? '';
 }
 
@@ -353,8 +358,9 @@ export default async function PublicationPage({
 
             {FACE_FIELDS.map((field) => {
               const state = states[field];
-              // La cantidad que no se cambió en la app es la del canal.
+              // La cantidad y la garantía que no se cambiaron en la app son las del canal.
               const quantities = app.quantity ?? channel?.quantity ?? null;
+              const warranty = app.warranty ?? channel?.warranty ?? null;
               const editable =
                 field === 'attributes' && !data.catalog
                   ? `${channelName} todavía no tiene datos de catálogo en la app.`
@@ -395,7 +401,17 @@ export default async function PublicationPage({
                       publicationId={p.id}
                       field={field}
                       state={state}
-                      value={field === 'quantity' ? (stockPlan?.managed ? plannedText(stockPlan) : quantityText(quantities)) : asText(app, field)}
+                      value={
+                        field === 'quantity'
+                          ? stockPlan?.managed
+                            ? plannedText(stockPlan)
+                            : quantityText(quantities)
+                          : field === 'warranty'
+                            ? warranty
+                              ? warrantyLabel(warranty)
+                              : ''
+                            : asText(app, field)
+                      }
                       channelValue={channel ? asText(channel, field) : null}
                       channelName={channelName}
                       editable={editable}
@@ -406,6 +422,14 @@ export default async function PublicationPage({
                           <CatalogCard accountSlug={account.slug} publicationId={p.id} data={data.catalog} bare />
                         ) : field === 'photos' && media ? (
                           <MediaOrganizer accountSlug={account.slug} publicationId={p.id} sources={media} />
+                        ) : field === 'warranty' ? (
+                          <WarrantyEditor
+                            accountSlug={account.slug}
+                            target={{ kind: 'publication', publicationId: p.id }}
+                            initial={warranty}
+                            channelName={channelName}
+                            canClear={app.warranty !== null}
+                          />
                         ) : field === 'quantity' && quantities ? (
                           <QuantityEditor
                             accountSlug={account.slug}

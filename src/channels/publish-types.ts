@@ -3,10 +3,11 @@
 // nunca conoce el formato del canal. Solo corre en el servidor.
 
 import type { VariantLike } from '@/domain/media';
+import type { Warranty } from '@/domain/warranty';
 
 /** Los datos que hoy se pueden subir. */
-export type PublishField = 'title' | 'description' | 'attributes' | 'photos' | 'price' | 'installments' | 'discount' | 'quantity';
-export const PUBLISH_FIELDS: PublishField[] = ['title', 'description', 'attributes', 'photos', 'price', 'installments', 'discount', 'quantity'];
+export type PublishField = 'title' | 'description' | 'attributes' | 'photos' | 'price' | 'installments' | 'discount' | 'quantity' | 'warranty';
+export const PUBLISH_FIELDS: PublishField[] = ['title', 'description', 'attributes', 'photos', 'price', 'installments', 'discount', 'quantity', 'warranty'];
 
 /** Un dato de catálogo para subir: el código del campo en el canal y su valor; con multiple, varios separados por coma. */
 export type ChannelAttributeUpdate = { id: string; value: string; multiple: boolean };
@@ -48,8 +49,8 @@ export type ChannelNewListing = {
   attributes: ChannelAttributeUpdate[];
   // Las fotos de todas: una foto que va en varias se sube una sola vez.
   pictures: ChannelPicture[];
-  // Por ejemplo "6 meses".
-  warranty: string | null;
+  // La garantía; null: el canal la deja como venga.
+  warranty: Warranty | null;
   // Una sola, o una por medida, todas en la misma familia.
   members: ChannelNewMember[];
 };
@@ -185,6 +186,11 @@ export interface ChannelPublisher {
    * no lo acepta, por ejemplo si el stock lo maneja el canal.
    */
   setQuantity(accessToken: string, externalId: string, lines: { key: string; quantity: number }[]): Promise<void>;
+  /**
+   * Deja esa garantía, con su tipo y su tiempo. Lo demás de la publicación
+   * queda como está. Lanza PublishError si el canal no lo acepta.
+   */
+  setWarranty(accessToken: string, externalId: string, warranty: Warranty): Promise<void>;
   /** Cambia esos datos de catálogo; los demás quedan como están. Lanza PublishError si el canal no lo acepta. */
   updateAttributes(accessToken: string, externalId: string, attributes: ChannelAttributeUpdate[]): Promise<void>;
   /** Pausa, reactiva, finaliza o elimina. Lanza PublishError si el canal no lo acepta. */

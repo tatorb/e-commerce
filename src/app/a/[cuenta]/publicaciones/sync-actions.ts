@@ -24,6 +24,8 @@ import { settleReactivations } from '@/lib/restock';
 import { saveFamilyMedia } from '@/lib/family-media';
 import { familyMemberIds } from '@/domain/family-members';
 import { CampaignError, familyCampaignAction, sendCampaignNow, type CampaignChoice } from '@/lib/channel-campaigns';
+import { WarrantyError, warrantyFromInput } from '@/domain/warranty';
+import { clearWarranty, setWarranties } from '@/lib/warranty';
 import { familyCampaignInput, type FamilyCampaignActionResult, type FamilyCampaignInput } from '@/lib/family-campaign-input';
 
 // Lo que se hace desde la página de una publicación y desde Por subir: cambiar
@@ -93,6 +95,31 @@ export async function saveQuantitiesAction(accountSlug: string, publicationIds: 
       revalidatePath(`/a/${accountSlug}/pipeline`, 'layout');
       return { ok: true, ...result };
     } catch (e) {
+      return failure(e);
+    }
+  });
+}
+
+/**
+ * Carga la garantía de la publicación, y de toda su familia: queda como
+ * borrador, para subir. Sin garantía (null), vuelve a seguir a la del canal.
+ */
+export async function saveWarrantyAction(accountSlug: string, publicationId: string, input: unknown): Promise<Result<{ changed: number }>> {
+  return act(accountSlug, { section: ['publicaciones', 'pipeline'], does: input === null ? 'Volvió a la garantía del canal' : 'Cambió la garantía', publicationId }, async () => {
+    await requireUser();
+    const account = await getAccountBySlug(accountSlug);
+    if (!account) return { ok: false, error: 'La cuenta no existe.' };
+    const id = idSchema.safeParse(publicationId);
+    if (!id.success) return { ok: false, error: 'La publicación no existe.' };
+    try {
+      const changed =
+        input === null
+          ? await clearWarranty(prisma, { accountId: account.id, publicationId: id.data })
+          : (await setWarranties(prisma, { accountId: account.id, publicationIds: [id.data], warranty: warrantyFromInput(input) })).changing.length;
+      refresh(accountSlug, id.data);
+      return { ok: true, changed };
+    } catch (e) {
+      if (e instanceof WarrantyError) return { ok: false, error: e.message };
       return failure(e);
     }
   });

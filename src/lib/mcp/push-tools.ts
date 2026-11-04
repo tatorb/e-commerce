@@ -5,15 +5,16 @@ import { familyOf } from '@/lib/families';
 import { pushDrafts, PushError } from '@/lib/channel-push';
 import { listToPush } from '@/lib/queries/sync';
 import { PUSH_BUDGET_MS } from './price-tools';
+import { parseWarranty, warrantyLabel } from '@/domain/warranty';
 import { McpToolError, accountArg, defineTool, findPublication, resolveAccount } from './tool';
 
-// Subir al canal un solo dato que quedó en Por subir, el título o la
-// descripción, como el botón de subir de Por subir pero solo eso. Son de la
+// Subir al canal un solo dato que quedó en Por subir, el título, la
+// descripción o la garantía, como el botón de subir de Por subir pero solo eso. Son de la
 // familia: con una medida van todas. Por cada publicación dice si quedó bien o
 // el motivo exacto del rechazo del canal; lo que no entra en una vuelta vuelve
 // en quedan.
 
-type Field = 'title' | 'description';
+type Field = 'title' | 'description' | 'warranty';
 
 const TEXTS: Record<Field, { name: string; title: string; the: string; it: string; done: string; none: string; from: string; show: string }> = {
   title: {
@@ -35,6 +36,16 @@ const TEXTS: Record<Field, { name: string; title: string; the: string; it: strin
     none: 'No hay descripciones por subir en la cuenta.',
     from: 'save_description o el paso Descripción',
     show: 'qué descripción se va a mandar y a cuáles',
+  },
+  warranty: {
+    name: 'push_warranties',
+    title: 'Subir garantías al canal',
+    the: 'la garantía',
+    it: 'subida',
+    done: 'Subió la garantía',
+    none: 'No hay garantías por subir en la cuenta.',
+    from: 'set_warranty o la publicación',
+    show: 'qué garantía se va a mandar y a cuántas',
   },
 };
 
@@ -91,7 +102,7 @@ function pushFieldTool(field: Field) {
         (
           await ctx.db.publication.findMany({
             where: { id: { in: ids } },
-            select: { id: true, externalId: true, title: true, description: true, store: { select: { channel: { select: { name: true } } } } },
+            select: { id: true, externalId: true, title: true, description: true, warranty: true, store: { select: { channel: { select: { name: true } } } } },
           })
         ).map((p) => [p.id, p]),
       );
@@ -119,8 +130,14 @@ function pushFieldTool(field: Field) {
           quedan.push(code);
           continue;
         }
-        const value = (field === 'title' ? p.title : p.description)?.trim() ?? '';
-        const base = { publicacion: code, titulo: p.title, ...(field === 'description' ? { caracteres: value.length } : {}) };
+        const value = (field === 'title' ? p.title : field === 'description' ? p.description : null)?.trim() ?? '';
+        const warranty = field === 'warranty' ? parseWarranty(p.warranty) : null;
+        const base = {
+          publicacion: code,
+          titulo: p.title,
+          ...(field === 'description' ? { caracteres: value.length } : {}),
+          ...(field === 'warranty' ? { garantia: warrantyLabel(warranty) } : {}),
+        };
         try {
           const r = await pushDrafts(ctx.db, { accountId: account.id, publicationId: id, fields: [field], campaigns: false, userId: ctx.userId });
           const rejected = r.rejected.find((x) => x.field === field);
@@ -162,4 +179,4 @@ function pushFieldTool(field: Field) {
   });
 }
 
-export const PUSH_TOOLS = [pushFieldTool('title'), pushFieldTool('description')];
+export const PUSH_TOOLS = [pushFieldTool('title'), pushFieldTool('description'), pushFieldTool('warranty')];

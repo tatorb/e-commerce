@@ -1,6 +1,7 @@
 import type { ChannelStatus } from '@/generated/prisma/enums';
 import type { ChannelFamily } from '@/domain/families';
 import type { ChannelVariation } from '@/domain/media';
+import type { Warranty } from '@/domain/warranty';
 
 export type { ChannelFamily };
 
@@ -63,6 +64,8 @@ export type ChannelListing = {
   // El nombre de la familia, cuando el canal agrupa las medidas en una
   // familia: es el título que comparten todas.
   channelFamilyName?: string | null;
+  // La garantía: sin garantía, type none. Sin el dato, el canal no la informa.
+  warranty?: Warranty | null;
 };
 
 export interface ChannelListings {

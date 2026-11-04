@@ -35,7 +35,7 @@ function useBusy() {
 
 /** Cuenta lo que pasó al subir, en una línea. */
 export function pushMessage(r: PushResult, channelName: string): Message {
-  const article: Record<FaceField, string> = { title: 'el', description: 'la', attributes: 'los', photos: 'las', price: 'el', installments: 'las', discount: 'el', quantity: 'la' };
+  const article: Record<FaceField, string> = { title: 'el', description: 'la', attributes: 'los', photos: 'las', price: 'el', installments: 'las', discount: 'el', quantity: 'la', warranty: 'la' };
   const sent = r.sent.map((f) => `${article[f]} ${FACE_FIELD_LABEL[f].toLowerCase()}`);
   const rejected = [...r.rejected.map((x) => `${FACE_FIELD_LABEL[x.field]}: ${x.message}`), ...r.campaigns.filter((c) => !c.ok).map((c) => `${c.name}: ${c.message}`)];
   const campaigns = r.campaigns.filter((c) => c.ok).map((c) => `${c.action === 'join' ? 'Se sumó a' : 'Salió de'} ${c.name}.`);

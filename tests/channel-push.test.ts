@@ -98,6 +98,8 @@ type Item = {
   campaignLater?: boolean;
   // El canal no acepta la descripción: el motivo.
   descriptionRejected?: string;
+  // Los términos de venta, como la garantía, tal cual los manda.
+  saleTerms?: Record<string, unknown>[];
 };
 
 const variationBody = (v: NonNullable<Item['variations']>[number]) => ({
@@ -149,6 +151,7 @@ describe.skipIf(!url)('subir al canal en la base', () => {
           listing_type_id: it.listing_type_id ?? 'gold_special',
           tags: it.tags ?? [],
           shipping: { logistic_type: it.full ? 'fulfillment' : 'cross_docking' },
+          sale_terms: it.saleTerms ?? [],
         });
       }
       if (item && req.method === 'PUT') {
@@ -179,6 +182,12 @@ describe.skipIf(!url)('subir al canal en la base', () => {
         }
         if (body.tags) {
           it.tags = body.tags;
+          return json(200, { id: item[1] });
+        }
+        // Como Mercado Libre: los términos de venta se reemplazan por los que llegan.
+        if (body.sale_terms) {
+          it.saleTerms = body.sale_terms;
+          it.last_updated = new Date().toISOString();
           return json(200, { id: item[1] });
         }
         if (body.attributes) {
@@ -316,6 +325,7 @@ describe.skipIf(!url)('subir al canal en la base', () => {
                 last_updated: it.last_updated,
                 category_id: it.category_id ?? 'MLA999',
                 attributes: it.attributes ?? [],
+                sale_terms: it.saleTerms ?? [],
               },
             };
           }),
@@ -1465,5 +1475,96 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     await db.publication.update({ where: { id: q.id }, data: { pipelineStatus: 'IN_PIPELINE', pipelineStep: 'PRICE' } });
     await db.pipelineMovement.create({ data: { publicationId: q.id, step: 'PRICE' } });
     expect(await db.$transaction((tx) => advanceStep(tx, { publicationId: q.id, expected: 'PRICE', userId: null }))).toEqual({ step: 'IMAGES' });
+  });
+  it('la garantía: se lee del canal, Claude la carga contando antes, y se sube sin perder los demás términos', async () => {
+    process.env.DATABASE_URL ??= url;
+    const { WARRANTY_TOOLS } = await import('@/lib/mcp/warranty-tools');
+    const { PUSH_TOOLS } = await import('@/lib/mcp/push-tools');
+    const tool = (name: string) => [...WARRANTY_TOOLS, ...PUSH_TOOLS].find((t) => t.name === name)!;
+    await db.user.create({ data: { id: 'u8', name: 'Persona', email: 'persona8@example.com' } });
+    const ctx: McpContext = { db, userId: 'u8', access: { isAdmin: true, permissions: {}, accountIds: [] }, baseUrl: 'https://app.ejemplo.com' };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const run = async (name: string, args: Record<string, unknown>): Promise<any> => tool(name).run(ctx, tool(name).input.parse(args));
+
+    // MLA1 tiene 30 días del vendedor y los días de disponibilidad; MLA2 ya tiene 15 días; MLA3, nada.
+    items.MLA1.saleTerms = [
+      { id: 'WARRANTY_TYPE', value_id: '2230280', value_name: 'Garantía del vendedor' },
+      { id: 'WARRANTY_TIME', value_name: '30 días', value_struct: { number: 30, unit: 'días' } },
+      { id: 'MANUFACTURING_TIME', value_name: '5 días', value_struct: { number: 5, unit: 'días' } },
+    ];
+    items.MLA2.saleTerms = [
+      { id: 'WARRANTY_TYPE', value_name: 'Garantía del vendedor' },
+      { id: 'WARRANTY_TIME', value_name: '15 días' },
+    ];
+    for (const code of ['MLA1', 'MLA2', 'MLA3']) await readOne(db, { accountId, publicationId: (await pub(code)).id });
+    expect((await pub('MLA1')).channelCopy?.warranty).toEqual({ type: 'seller', amount: 30, unit: 'days' });
+    expect((await pub('MLA3')).channelCopy?.warranty).toEqual({ type: 'none', amount: null, unit: null });
+    // Leerla no cambia nada en la app: sigue a la del canal.
+    expect((await state('MLA1')).draft).toEqual([]);
+
+    // Primero cuenta, sin cambiar nada.
+    const counted = await run('set_warranty', { cuenta: 'prueba', tipo: 'vendedor', tiempo: 15, unidad: 'dias', solo_contar: true });
+    expect(counted).toMatchObject({ garantia: 'Garantía del vendedor, 15 días', solo_contadas: true, publicaciones_miradas: 3, cambiarian: 2, ya_la_tienen: 1 });
+    expect(counted.publicaciones.map((x: { publicacion: string; hoy: string }) => [x.publicacion, x.hoy])).toEqual([
+      ['MLA1', 'Garantía del vendedor, 30 días'],
+      ['MLA3', 'Sin garantía'],
+    ]);
+    expect((await pub('MLA1')).warranty).toBeNull();
+
+    // Al confirmar, quedan en Por subir; también como la de la cuenta.
+    const done = await run('set_warranty', { cuenta: 'prueba', tipo: 'vendedor', tiempo: 15, unidad: 'dias', guardar_en_la_cuenta: true });
+    expect(done).toMatchObject({ listo: true, cambiaron: 2 });
+    expect((await db.account.findUniqueOrThrow({ where: { id: accountId } })).warranty).toEqual({ type: 'seller', amount: 15, unit: 'days' });
+    expect((await state('MLA1')).draft).toEqual(['warranty']);
+    expect((await state('MLA2')).draft).toEqual([]);
+    writes.length = 0;
+
+    // Claude sube solo la garantía: los días de disponibilidad siguen como estaban.
+    const pushed = await run('push_warranties', { cuenta: 'prueba' });
+    expect(pushed.subidas).toEqual([
+      expect.objectContaining({ publicacion: 'MLA1', garantia: 'Garantía del vendedor, 15 días', resultado: 'subida', confirmado_en_el_canal: true }),
+      expect.objectContaining({ publicacion: 'MLA3', resultado: 'subida' }),
+    ]);
+    expect(writes.find((w) => w.path === '/items/MLA1')?.body).toEqual({
+      sale_terms: [
+        { id: 'MANUFACTURING_TIME', value_name: '5 días' },
+        { id: 'WARRANTY_TYPE', value_name: 'Garantía del vendedor' },
+        { id: 'WARRANTY_TIME', value_name: '15 días' },
+      ],
+    });
+    expect((await pub('MLA1')).channelCopy?.warranty).toEqual({ type: 'seller', amount: 15, unit: 'days' });
+    expect(await state('MLA1')).toEqual({ draft: [], choose: [], rejected: [] });
+    expect(await state('MLA3')).toEqual({ draft: [], choose: [], rejected: [] });
+    expect(await run('push_warranties', { cuenta: 'prueba' })).toEqual({ subidas: [], aviso: 'No hay garantías por subir en la cuenta.' });
+    const sent = await db.channelSyncChange.findFirstOrThrow({ where: { publicationId: (await pub('MLA1')).id, field: 'warranty', kind: 'SENT' } });
+    expect(sent.after).toEqual({ type: 'seller', amount: 15, unit: 'days' });
+
+    // Si después cambia en el canal y la app no la tocó, la app la toma.
+    items.MLA1.saleTerms = [{ id: 'WARRANTY_TYPE', value_name: 'Garantía de fábrica' }, { id: 'WARRANTY_TIME', value_name: '6 meses' }];
+    items.MLA1.last_updated = '2026-10-29T10:00:00.000Z';
+    await readOne(db, { accountId, publicationId: (await pub('MLA1')).id });
+    const after = await pub('MLA1');
+    expect(after.warranty).toBeNull();
+    expect(after.channelCopy?.warranty).toEqual({ type: 'factory', amount: 6, unit: 'months' });
+    expect((await state('MLA1')).draft).toEqual([]);
+  });
+
+  it('la garantía en una familia: se carga en todas sus medidas, y sin tiempo no se guarda', async () => {
+    process.env.DATABASE_URL ??= url;
+    const { setWarranties, clearWarranty } = await import('@/lib/warranty');
+    const [p1, p2, p3] = [await pub('MLA1'), await pub('MLA2'), await pub('MLA3')];
+    await db.listingFamily.create({ data: { storeId, productId, channelFamilyId: 'FAM-7', leadId: p1.id, members: { connect: [{ id: p1.id }, { id: p2.id }] } } });
+    const plan = await setWarranties(db, { accountId, publicationIds: [p2.id], warranty: { type: 'factory', amount: 1, unit: 'years' } });
+    expect(plan.changing.map((r) => r.externalId).sort()).toEqual(['MLA1', 'MLA2']);
+    expect((await pub('MLA1')).warranty).toEqual({ type: 'factory', amount: 1, unit: 'years' });
+    expect((await pub('MLA3')).warranty).toBeNull();
+    // Volver a la del canal saca la de las dos.
+    expect(await clearWarranty(db, { accountId, publicationId: p1.id })).toBe(2);
+    expect((await pub('MLA2')).warranty).toBeNull();
+    const { warrantyFromInput } = await import('@/domain/warranty');
+    expect(() => warrantyFromInput({ type: 'seller' })).toThrow('Falta el tiempo');
+    expect(() => warrantyFromInput({ type: 'seller', amount: 0, unit: 'days' })).toThrow('mayor que 0');
+    expect(warrantyFromInput({ type: 'none', amount: 15, unit: 'days' })).toEqual({ type: 'none', amount: null, unit: null });
+    expect(p3.id).toBeTruthy();
   });
 });

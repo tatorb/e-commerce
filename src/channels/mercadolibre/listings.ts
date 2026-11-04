@@ -3,6 +3,7 @@ import { BULK_MAX, MercadoLibreRequestError, mlGet, readItems } from './http';
 import { mercadolibreCatalog } from './catalog';
 import type { ChannelFamily, ChannelListing, ChannelListings, ListingStatus } from '../listings-types';
 import { LOW_INTEREST_PLAN } from '@/domain/pricing';
+import { warrantyOf } from './warranty';
 
 // Leer las publicaciones propias de la cuenta conectada. Solo lo público de
 // cada publicación: no se leen órdenes, compradores ni mensajes.
@@ -37,6 +38,7 @@ const ITEM_FIELDS = [
   'seller_custom_field',
   'user_product_id',
   'family_name',
+  'sale_terms',
   'health',
   'last_updated',
 ];
@@ -202,6 +204,8 @@ export function parseItem(item: Obj): ChannelListing {
     // En el modelo de producto de usuario: las publicaciones del mismo producto comparten sus fotos.
     channelProductId: str(item.user_product_id),
     channelFamilyName: str(item.family_name),
+    // Solo si vino el dato: sin pedirlo, no se sabe cuál tiene.
+    ...('sale_terms' in item ? { warranty: warrantyOf(item) } : {}),
   };
 }
 

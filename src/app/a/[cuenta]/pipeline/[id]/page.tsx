@@ -35,6 +35,8 @@ import { loadTextImageStep } from '@/lib/text-images/step';
 import { loadMediaSources } from '@/lib/media';
 import { loadFamilyMedia } from '@/lib/family-media';
 import { CreateInChannelCard } from '@/components/publication/CreateInChannelCard';
+import { WarrantyCard } from '@/components/publication/WarrantyCard';
+import { warrantyOverview } from '@/lib/warranty';
 import { createChecks } from '@/lib/channel-create';
 import { loadPublicationFaces } from '@/lib/queries/publication-faces';
 import { channelInfo, getChannelAdapter } from '@/channels';
@@ -199,6 +201,7 @@ export default async function PipelineStepPage({
     ]).then(([copy, covers]) => firstPhoto(copy?.photos) ?? covers.get(pub.productId) ?? null),
     viewing === 'TEXT_IMAGES' ? loadTextImageStep(prisma, { accountId: account.id, publicationId: pub.id }) : null,
   ]);
+  const warranty = viewing === 'PUBLISH' ? await warrantyOverview(prisma, { accountId: account.id, publicationId: pub.id }) : null;
   // Fotos y Organización de multimedia: las fotos o publicaciones de la familia con una medida que ya no está.
   const measures = viewing === 'IMAGES' || viewing === 'MEDIA' ? await measureCheck(prisma, pub.productId) : null;
   // Con varias medidas y fotos marcadas, Fotos las muestra separadas por medida: las de una no se mezclan con las de otra.
@@ -518,6 +521,7 @@ export default async function PipelineStepPage({
               stockInChannel={faces?.copy?.stockInChannel ?? false}
               stock={stockPlans?.get(pub.id) ? { plan: stockPlans.get(pub.id)!, productHref: `/a/${account.slug}/productos/${pub.productId}?seccion=stock` } : null}
             />
+            {warranty ? <WarrantyCard accountSlug={account.slug} publicationId={pub.id} channelName={pub.channelName} w={warranty} /> : null}
             {create ? <CreateInChannelCard accountSlug={account.slug} publicationId={pub.id} info={create} /> : null}
             <PublicationCodeCard
               accountSlug={account.slug}

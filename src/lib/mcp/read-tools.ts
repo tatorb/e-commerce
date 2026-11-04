@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { parseWarranty, warrantyLabel } from '@/domain/warranty';
 import { CHANNEL_STATUS_LABEL } from '@/domain/channel-status';
 import { COMPETITOR_SELECT, offerOf, offerPrices, storedCompetitor } from '@/domain/competitors';
 import { LATEST_MEASUREMENTS, METRICS, formatMetric, isMetricKey, latestMetrics, type Metrics } from '@/domain/measurements';
@@ -373,7 +374,8 @@ const getPublication = defineTool({
             take: LOG_SHOWN,
             select: { createdAt: true, field: true, kind: true, message: true, user: { select: { name: true } } },
           },
-          channelCopy: { select: { readAt: true, photos: true, price: true, discount: true, installments: true, missingSince: true } },
+          channelCopy: { select: { readAt: true, photos: true, price: true, discount: true, installments: true, warranty: true, missingSince: true } },
+          warranty: true,
           price: true,
           discount: true,
           installments: true,
@@ -475,6 +477,11 @@ const getPublication = defineTool({
         ...(c.message ? { motivo: c.message } : {}),
         quien: c.user?.name ?? 'Automático',
       })),
+      // La garantía: la que cargó la app (para subir con push_warranties) y la que leyó del canal. Se carga con set_warranty.
+      garantia: {
+        en_la_app: pub.warranty ? warrantyLabel(parseWarranty(pub.warranty)) : 'Sigue a la del canal',
+        en_el_canal: pub.channelCopy?.warranty ? warrantyLabel(parseWarranty(pub.channelCopy.warranty)) : 'Sin leer del canal',
+      },
       cantidad_disponible: {
         actualizacion_automatica: pub.followsStock ? 'prendida' : 'apagada',
         ...(plan?.managed

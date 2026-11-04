@@ -27,6 +27,9 @@ import { loadTitleRules } from '@/lib/title-rules';
 // cantidad y sus fotos. Antes de crear se revisa todo y se dice qué falta.
 // Recibe la base por parámetro para poder probarlo.
 
+import { warrantyLabel } from '@/domain/warranty';
+import { accountWarranty, warrantyForCreate } from '@/lib/warranty';
+
 type Db = PrismaClient;
 
 export class CreateError extends Error {}
@@ -87,6 +90,7 @@ async function load(db: Db, accountId: string, publicationId: string) {
       installments: true,
       discount: true,
       quantities: true,
+      warranty: true,
       currency: true,
       familyId: true,
       family: { select: { members: { select: MEMBER_SELECT, orderBy: { createdAt: 'asc' } } } },
@@ -253,11 +257,13 @@ export async function createChecks(db: Db, args: { accountId: string; publicatio
     detail: p.description?.trim() ? `${p.description.trim().length} caracteres.` : 'Sin descripción: se puede crear igual y subirla después.',
     blocking: false,
   });
-  const warranty = warrantyText(p.product.warranty);
+  const chosen = warrantyForCreate(p.warranty, await accountWarranty(db, args.accountId), p.product.warranty);
   checks.push({
     label: 'Garantía',
-    ok: warranty !== null,
-    detail: warranty ?? (p.product.warranty ? `«${p.product.warranty}» no tiene la forma «6 meses»: se crea sin garantía.` : 'La ficha no tiene garantía: se crea sin garantía.'),
+    ok: chosen.warranty !== null,
+    detail: chosen.warranty
+      ? `${warrantyLabel(chosen.warranty)}, ${chosen.from === 'publicación' ? 'la de la publicación' : chosen.from === 'cuenta' ? 'la de la cuenta' : 'la de la ficha'}.`
+      : 'Sin garantía cargada en la publicación ni en la cuenta: se crea sin garantía. Cargala en Ajustes, Garantía.',
     blocking: false,
   });
 
@@ -401,6 +407,8 @@ async function create(db: Db, args: CreateArgs, info: CreateInfo): Promise<Creat
   }
   const priceOf = (t: Target) => t.ownPrice ?? args.price;
 
+  // La de la publicación, la de la cuenta o la de la ficha.
+  const { warranty } = warrantyForCreate(p.warranty, await accountWarranty(db, args.accountId), p.product.warranty);
   let created;
   try {
     created = await withAccessToken(db, p.store.id, (token) =>
@@ -412,7 +420,7 @@ async function create(db: Db, args: CreateArgs, info: CreateInfo): Promise<Creat
         description: p.description?.trim() || null,
         attributes,
         pictures,
-        warranty: warrantyText(p.product.warranty),
+        warranty,
         members: targets.map((t, i) => ({
           sku: t.sku,
           measure: t.measure,
@@ -448,6 +456,8 @@ async function create(db: Db, args: CreateArgs, info: CreateInfo): Promise<Creat
         discount: fingerprint('discount', null),
         // La cantidad también: hasta leerla, la app sigue a la del canal.
         quantity: fingerprint('quantity', []),
+        // La garantía que se mandó; sin mandar, vacía, y la que tenga la app queda para subir.
+        warranty: warranty ? fingerprint('warranty', warranty) : '',
       };
       await tx.publication.update({
         where: { id: t.id! },
@@ -467,6 +477,7 @@ async function create(db: Db, args: CreateArgs, info: CreateInfo): Promise<Creat
         photoOrigins: Object.fromEntries(ids.flatMap((id, k) => (origins[own[i][k]] ? [[id, origins[own[i][k]]]] : []))),
         categoryId: category.id,
         attributeIds: Object.fromEntries(catalog.fields.map((f) => [normalizeText(f.label), { id: f.id, multiple: Boolean(f.multiple) }])),
+        warranty: warranty ?? Prisma.DbNull,
         fingerprints: channelPrints,
         agreed: channelPrints,
       };
