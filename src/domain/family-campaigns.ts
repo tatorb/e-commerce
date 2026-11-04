@@ -1,6 +1,6 @@
 import type { ChannelCampaign } from '@/channels/publish-types';
 import { formatPrice } from './money';
-import { campaignPrice, campaignPriceProblem } from './promotions';
+import { campaignPrice, campaignPriceProblem, campaignRevenue } from './promotions';
 
 // Las campañas de una familia: la misma campaña del canal en cada una de sus
 // medidas, que en el canal son publicaciones aparte, cada una con su invitación
@@ -130,4 +130,30 @@ export function rangeText(c: Pick<ChannelCampaign, 'range'>): string | null {
   if (r.maxPrice !== null) return `hasta ${formatPrice(r.maxPrice)}`;
   if (r.minPrice !== null) return `desde ${formatPrice(r.minPrice)}`;
   return null;
+}
+
+/** La promoción que cuenta en el simulador de precio: lo que paga el comprador y lo que recibe la tienda. */
+export type SimPromo = { name: string; state: string; price: number; revenue: number };
+
+/**
+ * La promoción con que se calcula el resultado del simulador: la campaña
+ * abierta para sumarse, con su precio; si no, la activa de esas publicaciones
+ * y, si no hay, la programada. La que se está por dejar no cuenta.
+ */
+export function promoForSimulation(
+  reads: { publicationId: string; promotions: { campaigns: ChannelCampaign[] } }[],
+  publicationIds: string[],
+  draft: { campaign: string; name: string; action: 'join' | 'leave'; problem: string | null; buyerPrice: number | null; channelPct: number | null; listPrice: number | null } | null,
+): SimPromo | null {
+  if (draft && draft.action === 'join' && !draft.problem && draft.buyerPrice) {
+    const revenue = campaignRevenue({ price: draft.buyerPrice, channelPct: draft.channelPct, listPrice: draft.listPrice });
+    if (revenue !== null) return { name: draft.name, state: 'por sumarse', price: draft.buyerPrice, revenue };
+  }
+  const campaigns = reads
+    .filter((r) => publicationIds.includes(r.publicationId))
+    .flatMap((r) => r.promotions.campaigns)
+    .filter((c) => isIn(c) && !(draft?.action === 'leave' && campaignKey(c) === draft.campaign));
+  const c = campaigns.find((x) => x.status === 'active') ?? campaigns[0];
+  const revenue = c ? campaignRevenue(c) : null;
+  return c && revenue !== null ? { name: c.name ?? c.kind, state: c.status === 'active' ? 'activa' : 'programada', price: c.price!, revenue } : null;
 }

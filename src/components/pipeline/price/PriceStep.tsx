@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { measuresText } from '@/domain/costs';
 import { formatPercent, formatPrice, parsePrice } from '@/domain/money';
 import { compare } from '@/domain/price-comparison';
+import { promoForSimulation, type SimPromo } from '@/domain/family-campaigns';
 import {
   availablePlans,
   breakdown,
@@ -21,6 +22,8 @@ import {
   isInstallmentPlan,
   listPriceForMargin,
   LOW_INTEREST_PLAN,
+  marginLevel,
+  marginOf,
   planLabel,
   maxDiscount,
   parsePricingText,
@@ -31,6 +34,7 @@ import {
   targetListPrice,
   wholeUp,
   type InstallmentPlan,
+  type MarginLevel,
   type PricingKey,
   type PricingParams,
 } from '@/domain/pricing';
@@ -108,6 +112,57 @@ function draftText(d: CampaignDraft): string {
   return action === 'leave' ? `salir de ${name}` : `sumarse a ${name}${price !== null ? ` con ${formatPrice(price)} para el comprador` : ''}`;
 }
 
+/** El resultado con la promoción: lo que paga el comprador y el margen con lo que recibe la tienda. */
+function PromoResult({
+  promo,
+  marginPct,
+  level,
+  cost,
+  params,
+  channelName,
+}: {
+  promo: SimPromo;
+  marginPct: number | null;
+  level: MarginLevel | null;
+  cost: number | null;
+  params: PricingParams;
+  channelName: string;
+}) {
+  const box = level ? LEVEL[level] : null;
+  const profit = marginPct !== null && cost ? (marginPct * cost) / 100 : null;
+  const extra = promo.revenue - promo.price;
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1">
+        <p className="text-xs text-muted-foreground">
+          Con la promoción {promo.name}, {promo.state}
+        </p>
+        <p className="text-3xl font-semibold tabular-nums">{formatPrice(Math.round(promo.price))}</p>
+        <p className="text-sm text-muted-foreground">
+          Es lo que paga el comprador.{extra > 0.5 ? ` ${channelName} pone ${formatPrice(Math.round(extra))} más, y la tienda recibe ${formatPrice(Math.round(promo.revenue))}.` : ''}
+        </p>
+      </div>
+      {box && level && marginPct !== null ? (
+        <div className={cn('space-y-1 rounded-md border px-3 py-2', box.box)}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-muted-foreground">Margen sobre el costo</p>
+            <MarginBadge level={level} />
+          </div>
+          <p className={cn('text-3xl font-semibold tabular-nums', box.text)}>{formatPercent(marginPct)}</p>
+          {profit !== null ? (
+            <p className="text-sm">
+              Ganancia de {formatPrice(Math.round(profit))} por venta, {formatPercent((profit / promo.price) * 100)} de lo que paga el comprador.
+            </p>
+          ) : null}
+          <p className="text-xs text-muted-foreground">
+            Mínimo {formatPercent(params.minMarginPct)}, objetivo {formatPercent(params.targetMarginPct)}.
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function PriceStep(props: StepProps) {
   const { groups } = props.data;
   const [chosen, setChosen] = useState(groups[0].anchorId);
@@ -183,6 +238,11 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
   const [campaign, setCampaign] = useState<CampaignDraft | null>(null);
   // Cambia para cerrar la campaña abierta en Promociones, después de dejarla en Por subir.
   const [campaignsKey, setCampaignsKey] = useState(0);
+  // Con una promoción, el comprador paga su precio y el resultado se calcula con lo que recibe la tienda.
+  const reads = promotions.state.kind === 'done' && promotions.state.result.ok ? promotions.state.result.read : [];
+  const promo = promoForSimulation(reads, group.publicationIds, campaign);
+  const promoMargin = promo && cost ? marginOf(promo.revenue, cost, params, plan) : null;
+  const promoLevel = promoMargin !== null ? marginLevel(promoMargin, params) : null;
   const own = ownValues(account, overrides);
   const saved = start ? start.listPrice === Math.round(listPrice) && start.discountPct === discount && start.installments === plan : false;
   const dirty = !saved || JSON.stringify(own) !== JSON.stringify(ownValues(account, initialOverrides));
@@ -411,33 +471,39 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
                 .
               </p>
             ) : null}
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">Precio final al comprador</p>
-              <p className="text-3xl font-semibold tabular-nums">{listPrice > 0 ? formatPrice(Math.round(sim.finalPrice)) : '—'}</p>
-              <p className="text-sm text-muted-foreground">
-                {discount > 0 ? `Publicado a ${formatPrice(Math.round(listPrice))} con ${formatPercent(discount)} de descuento. ` : ''}
-                {plan === LOW_INTEREST_PLAN
-                  ? 'Cuota promocionada: de 3 a 12 cuotas con interés bajo.'
-                  : plan > 0 && listPrice > 0
-                    ? `${plan} cuotas sin interés de ${formatPrice(Math.round(sim.finalPrice / plan))}.`
-                    : 'Sin cuotas.'}
-              </p>
-            </div>
-            {ready && levelBox ? (
-              <div className={cn('space-y-1 rounded-md border px-3 py-2', levelBox.box)}>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-xs text-muted-foreground">Margen sobre el costo</p>
-                  <MarginBadge level={sim.level} />
-                </div>
-                <p className={cn('text-3xl font-semibold tabular-nums', levelBox.text)}>{formatPercent(sim.marginPct)}</p>
-                <p className="text-sm">
-                  Ganancia de {formatPrice(Math.round(sim.profit))} por venta, {formatPercent(sim.profitShareOfPrice)} del precio final.
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Mínimo {formatPercent(params.minMarginPct)}, objetivo {formatPercent(params.targetMarginPct)}.
+            {promo ? (
+              <PromoResult promo={promo} marginPct={promoMargin} level={promoLevel} cost={cost} params={params} channelName={data.channelName} />
+            ) : null}
+            <div className={cn('space-y-3', promo && 'rounded-md border border-dashed p-3')}>
+              {promo ? <p className="text-xs font-medium text-muted-foreground">Sin la promoción</p> : null}
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground">Precio final al comprador</p>
+                <p className="text-3xl font-semibold tabular-nums">{listPrice > 0 ? formatPrice(Math.round(sim.finalPrice)) : '—'}</p>
+                <p className="text-sm text-muted-foreground">
+                  {discount > 0 ? `Publicado a ${formatPrice(Math.round(listPrice))} con ${formatPercent(discount)} de descuento. ` : ''}
+                  {plan === LOW_INTEREST_PLAN
+                    ? 'Cuota promocionada: de 3 a 12 cuotas con interés bajo.'
+                    : plan > 0 && listPrice > 0
+                      ? `${plan} cuotas sin interés de ${formatPrice(Math.round(sim.finalPrice / plan))}.`
+                      : 'Sin cuotas.'}
                 </p>
               </div>
-            ) : null}
+              {ready && levelBox ? (
+                <div className={cn('space-y-1 rounded-md border px-3 py-2', levelBox.box)}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs text-muted-foreground">Margen sobre el costo</p>
+                    <MarginBadge level={sim.level} />
+                  </div>
+                  <p className={cn('text-3xl font-semibold tabular-nums', levelBox.text)}>{formatPercent(sim.marginPct)}</p>
+                  <p className="text-sm">
+                    Ganancia de {formatPrice(Math.round(sim.profit))} por venta, {formatPercent(sim.profitShareOfPrice)} del precio final.
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Mínimo {formatPercent(params.minMarginPct)}, objetivo {formatPercent(params.targetMarginPct)}.
+                  </p>
+                </div>
+              ) : null}
+            </div>
           </SectionBody>
         </SectionCard>
       </div>

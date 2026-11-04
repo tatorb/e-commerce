@@ -42,6 +42,11 @@ export type CampaignDraft = {
   action: 'join' | 'leave';
   price: number | null;
   problem: string | null;
+  // Para el simulador: lo que paga el comprador al sumarse, la parte que pone
+  // el canal y el precio publicado sobre el que la calcula.
+  buyerPrice: number | null;
+  channelPct: number | null;
+  listPrice: number | null;
 };
 
 const STATUS: Record<'active' | 'scheduled' | 'invited' | 'none', string> = {
@@ -82,6 +87,7 @@ function draftOf(g: FamilyCampaign, tabIds: string[], action: 'join' | 'leave', 
   const price = withPrice ? (typeof typed === 'number' ? typed : null) : null;
   const plans = planFamilyAction(g, { action, price, samePrice: tabIds, channelName });
   const any = plans.some((p) => p.outcome === 'do');
+  const c = leadOf(g, tabIds);
   return {
     plans,
     draft: {
@@ -91,6 +97,9 @@ function draftOf(g: FamilyCampaign, tabIds: string[], action: 'join' | 'leave', 
       action,
       price: withPrice ? (plans.find((p) => p.outcome === 'do')?.price ?? price) : null,
       problem: any ? null : (plans.find((p) => p.outcome === 'skip' || p.outcome === 'elsewhere')?.message ?? 'Ninguna medida tiene algo para cambiar.'),
+      buyerPrice: action === 'join' ? (withPrice ? price : c.price) : null,
+      channelPct: c.channelPct,
+      listPrice: c.listPrice,
     },
   };
 }

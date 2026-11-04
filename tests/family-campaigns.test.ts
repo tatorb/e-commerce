@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ChannelCampaign } from '@/channels/publish-types';
-import { familyCampaigns, membersText, planFamilyAction, splitText } from '@/domain/family-campaigns';
+import { familyCampaigns, membersText, planFamilyAction, promoForSimulation, splitText } from '@/domain/family-campaigns';
 import { formatPrice } from '@/domain/money';
 
 // La misma campaña en cada medida de una familia: cada una con su invitación,
@@ -135,5 +135,28 @@ describe('campañas en una familia', () => {
     expect(g.split).toBe(false);
     expect(planFamilyAction(g, { ...opts, action: 'join', price: 95, samePrice: ['a'] })[0].message).toBe(`Es más alto de lo que acepta el canal. Acepta de ${formatPrice(50)} a ${formatPrice(90)}.`);
     expect(planFamilyAction(g, { ...opts, action: 'leave', price: null, samePrice: ['a'] })[0].message).toBe('La publicación no está en Cyber Monday.');
+  });
+});
+
+describe('la promoción en el simulador de precio', () => {
+  const reads = [
+    { publicationId: 'a', promotions: { campaigns: [campaign({ status: 'invited', price: 70 }), campaign({ group: 'SMART:1', name: 'Co-fondeada', status: 'active', price: 80, channelPct: 10 })] } },
+    { publicationId: 'b', promotions: { campaigns: [campaign({ status: 'scheduled', price: 85 })] } },
+  ];
+  const noDraft = null;
+
+  it('usa la activa, con lo que pone el canal sumado a lo que recibe la tienda', () => {
+    expect(promoForSimulation(reads, ['a'], noDraft)).toEqual({ name: 'Co-fondeada', state: 'activa', price: 80, revenue: 90 });
+  });
+
+  it('sin activa, la programada; una invitación no cuenta', () => {
+    expect(promoForSimulation(reads, ['b'], noDraft)).toMatchObject({ name: 'Cyber Monday', state: 'programada', price: 85 });
+    expect(promoForSimulation([reads[0]].map((r) => ({ ...r, promotions: { campaigns: [r.promotions.campaigns[0]] } })), ['a'], noDraft)).toBeNull();
+  });
+
+  it('la que se está por cargar le gana, y la que se está por dejar no cuenta', () => {
+    const draft = { campaign: 'DEAL:P-CYBER', name: 'Cyber Monday', action: 'join' as const, problem: null, buyerPrice: 75, channelPct: null, listPrice: 100 };
+    expect(promoForSimulation(reads, ['a'], draft)).toEqual({ name: 'Cyber Monday', state: 'por sumarse', price: 75, revenue: 75 });
+    expect(promoForSimulation(reads, ['a', 'b'], { ...draft, campaign: 'SMART:1', action: 'leave', buyerPrice: null })).toMatchObject({ state: 'programada', price: 85 });
   });
 });
