@@ -22,6 +22,8 @@ export const photoRefSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('channel'), id: z.string().min(1).max(100), url: z.string().max(2000).default(''), ...variants }),
   z.object({ kind: z.literal('edit'), editId: z.string().min(1).max(40), ...variants }),
   z.object({ kind: z.literal('asset'), url: z.string().url().max(2000), ...variants }),
+  // El PNG del paso Imágenes con texto, por el id de la pieza: sigue siendo la misma aunque se vuelva a generar.
+  z.object({ kind: z.literal('text'), id: z.string().min(1).max(40), ...variants }),
 ]);
 
 export type PhotoRef = z.infer<typeof photoRefSchema>;
@@ -141,6 +143,7 @@ export function asIsProblem(
 export function photoKey(ref: PhotoRef): string {
   if (ref.kind === 'channel') return `canal:${ref.id}`;
   if (ref.kind === 'edit') return `corregida:${ref.editId}`;
+  if (ref.kind === 'text') return `texto:${ref.id}`;
   return `link:${ref.url}`;
 }
 

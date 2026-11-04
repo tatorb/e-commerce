@@ -22,7 +22,7 @@ import { BrandMark } from '@/components/ui/brand-loader';
 import { ZoomImage } from '@/components/ui/zoom-image';
 
 
-// El paso Imágenes: las fotos del producto, cada una con su línea de
+// El paso Fotos: las fotos del producto, cada una con su línea de
 // corrección. El trabajador de la Mac procesa cada paso; acá se aprueba. Una
 // foto que ya viene editada se usa tal cual, sin pasar por la Mac.
 // Se pueden abrir varias fotos juntas, una debajo de otra, para revisarlas

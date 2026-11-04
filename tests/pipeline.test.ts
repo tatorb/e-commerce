@@ -16,10 +16,12 @@ import { resolveTitleLock, titleLockText } from '@/domain/title-lock';
 describe('pasos del pipeline', () => {
   it('van en orden, sin anterior al primero ni siguiente al último', () => {
     expect(nextStep('INFO')).toBe('TITLE');
-    expect(nextStep('DESCRIPTION')).toBe('QA');
-    expect(nextStep('QA')).toBe('PRICE');
-    expect(previousStep('PRICE')).toBe('QA');
-    expect(nextStep('PRICE')).toBe('PUBLISH');
+    expect(nextStep('TITLE')).toBe('DESCRIPTION');
+    expect(nextStep('DESCRIPTION')).toBe('PRICE');
+    expect(previousStep('PRICE')).toBe('DESCRIPTION');
+    expect(nextStep('PRICE')).toBe('IMAGES');
+    expect(nextStep('IMAGES')).toBe('TEXT_IMAGES');
+    expect(nextStep('QA')).toBe('PUBLISH');
     expect(nextStep('PUBLISH')).toBeNull();
     expect(previousStep('TITLE')).toBe('INFO');
     expect(previousStep('INFO')).toBeNull();

@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils/cn';
 
 // Las fotos y los videos del producto, para verlos de un vistazo: cada foto
 // con el color de su estado y los videos que tiene. Son del producto y los
-// comparten todas sus publicaciones; se trabajan en los pasos Imágenes y Videos.
+// comparten todas sus publicaciones; se trabajan en los pasos Fotos y Videos.
 
 type Photos = Awaited<ReturnType<typeof loadPhotoLine>>;
 
@@ -68,7 +68,7 @@ export function ProductMediaPanel({
           {stepHref ? (
             <Button size="sm" variant="outline" asChild>
               <Link href={stepHref('imagenes')}>
-                Trabajarlas en el paso Imágenes
+                Trabajarlas en el paso Fotos
                 <ArrowRight />
               </Link>
             </Button>

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { openPhotoIds, photosHref, toggledPhotos } from '@/components/pipeline/images/open-photos';
 
-describe('fotos abiertas en el paso Imágenes', () => {
+describe('fotos abiertas en el paso Fotos', () => {
   it('lee varias fotos de la dirección, y también el link viejo de una sola', () => {
     expect(openPhotoIds({ fotos: 'a,b,,a' })).toEqual(['a', 'b']);
     expect(openPhotoIds({ foto: 'a' })).toEqual(['a']);

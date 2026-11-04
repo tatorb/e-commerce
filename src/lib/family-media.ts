@@ -94,7 +94,7 @@ export async function saveFamilyMedia(
   else if (args.refs) {
     const refs = cleanMedia(args.refs).map((r) => knownMarks(r, measures));
     if (refs.length === 0) throw new MediaError('Elegí al menos una foto.');
-    const allowed = new Map([...sources.available.channel, ...sources.available.corrected, ...sources.available.assets].map((m) => [m.key, m]));
+    const allowed = new Map([...sources.available.channel, ...sources.available.corrected, ...sources.available.text, ...sources.available.assets].map((m) => [m.key, m]));
     if (refs.some((r) => !allowed.has(photoKey(r)))) throw new MediaError('Una de las fotos ya no está disponible. Recargá la página.');
     const blocked = sources.available.corrected.find((m) => m.blocked && refs.some((r) => photoKey(r) === m.key));
     if (blocked) throw new MediaError(`${blocked.label}: ${blocked.blocked}`);

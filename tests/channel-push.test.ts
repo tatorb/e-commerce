@@ -1453,7 +1453,7 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     expect(r.skipped[0].reason).toContain('Full');
   });
 
-  it('debajo del margen mínimo hay que confirmarlo; sin precio guardado igual se avanza a Publicación', async () => {
+  it('debajo del margen mínimo hay que confirmarlo; sin precio guardado igual se avanza al paso siguiente', async () => {
     const p = await pub('MLA1');
     await expect(decide(p.id, 150_000)).rejects.toThrow(/debajo del mínimo/);
     await expect(decide(p.id, 150_000, { plan: 9, overrides: { installments9Pct: null } })).rejects.toThrow(/costo de 9 cuotas/);
@@ -1464,6 +1464,6 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     const q = await pub('MLA2');
     await db.publication.update({ where: { id: q.id }, data: { pipelineStatus: 'IN_PIPELINE', pipelineStep: 'PRICE' } });
     await db.pipelineMovement.create({ data: { publicationId: q.id, step: 'PRICE' } });
-    expect(await db.$transaction((tx) => advanceStep(tx, { publicationId: q.id, expected: 'PRICE', userId: null }))).toEqual({ step: 'PUBLISH' });
+    expect(await db.$transaction((tx) => advanceStep(tx, { publicationId: q.id, expected: 'PRICE', userId: null }))).toEqual({ step: 'IMAGES' });
   });
 });

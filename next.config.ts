@@ -1,6 +1,13 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
+  // El Chromium que arma el PNG de las imágenes con texto va tal cual, sin empaquetar.
+  serverExternalPackages: ['@sparticuz/chromium', 'puppeteer-core'],
+  // Sus archivos comprimidos no se importan desde el código: van a mano, solo donde se arma el PNG.
+  outputFileTracingIncludes: {
+    '/a/*/pipeline/*': ['./node_modules/@sparticuz/chromium/bin/**'],
+    '/api/mcp': ['./node_modules/@sparticuz/chromium/bin/**'],
+  },
   // El logo y el ícono se cargan del WordPress de studiomrb.com, igual que
   // en app.studiomrb.com.
   images: {

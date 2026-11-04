@@ -28,9 +28,10 @@ import { inProtocolOrder, type ProtocolPlace, type PublicationMeasures } from '@
 import { BY_BROWSER, setClips } from '@/lib/videos';
 import { photoFileHref } from '@/lib/photo-rules';
 import { readStored } from '@/lib/stored-files';
+import { textImageHref, textImagePng } from '@/lib/text-images/files';
 
 // Las fotos de una publicación: de dónde se pueden tomar (las que ya están en
-// el canal, las del paso Imágenes, corregidas o tal cual, y las del producto) y cuáles
+// el canal, las del paso Fotos, corregidas o tal cual, y las del producto) y cuáles
 // quedaron elegidas, en orden. Si el producto tiene varias medidas, también de
 // cuáles es cada foto y cada video. Recibe la base por parámetro para poder probarlo.
 
@@ -49,7 +50,7 @@ export type MediaItem = {
   note: string | null;
   // Por qué no se puede elegir para este canal, por ejemplo un original que no acepta tal cual.
   blocked?: string;
-  // Las fotos del paso Imágenes que se sacaron en Registro de productos: el paso del protocolo y la medida.
+  // Las fotos del paso Fotos que se sacaron en Registro de productos: el paso del protocolo y la medida.
   shot?: { step: string | null; measure: string | null };
 };
 
@@ -149,7 +150,7 @@ export function photosPerMeasure(refs: PhotoRef[], measures: Measure[]): { measu
 const viewUrl = (runId: string) => `/api/imagenes/ver?tipo=vista&paso=${encodeURIComponent(runId)}`;
 
 /**
- * Las fotos del paso Imágenes que se pueden usar: las corregidas, con su JPG
+ * Las fotos del paso Fotos que se pueden usar: las corregidas, con su JPG
  * final aprobado, y las que se usan tal cual, con su original sin tocar.
  */
 type FinishedEdit = {
@@ -229,7 +230,7 @@ async function finishedEdits(db: Db, productId: string): Promise<FinishedEdit[]>
   });
 }
 
-/** Cómo se nombra una foto del paso Imágenes en la lista. */
+/** Cómo se nombra una foto del paso Fotos en la lista. */
 const editLabel = (e: { asIs: boolean }, n: number) => (e.asIs ? `Original ${n}, sin editar` : `Corregida ${n}`);
 
 /** De qué foto corregida salió cada foto que la app subió al canal, por su código allá. */
@@ -238,7 +239,7 @@ export function photoOriginsOf(raw: unknown): Record<string, string> {
   return Object.fromEntries(Object.entries(raw as Record<string, unknown>).filter((e): e is [string, string] => typeof e[1] === 'string'));
 }
 
-/** Las fotos del paso Imágenes que ya pueden ir a una publicación: las corregidas aprobadas y las que se usan tal cual. */
+/** Las fotos del paso Fotos que ya pueden ir a una publicación: las corregidas aprobadas y las que se usan tal cual. */
 export async function readyPhotoIds(db: Db, productId: string): Promise<Set<string>> {
   return new Set((await finishedEdits(db, productId)).map((e) => e.id));
 }
@@ -286,6 +287,7 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
       media: true,
       videoVariants: true,
       variantKey: true,
+      textImage: { select: { id: true, pngRef: true, pngAt: true } },
       store: { select: { id: true, channel: { select: { kind: true, name: true } } } },
       product: {
         select: {
@@ -356,15 +358,29 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
     delete out.place;
     return out;
   });
-  const all = new Map([...channel, ...corrected, ...assets].map((m) => [m.key, m]));
+  // El PNG del paso Imágenes con texto, si ya se generó.
+  const ti = p.textImage;
+  const text: MediaItem[] =
+    ti?.pngRef && ti.pngAt
+      ? [
+          {
+            ref: { kind: 'text', id: ti.id },
+            key: photoKey({ kind: 'text', id: ti.id }),
+            thumb: textImageHref(ti.id, ti.pngAt),
+            label: 'Imagen con texto',
+            note: `Generada el ${ti.pngAt.toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })}`,
+          },
+        ]
+      : [];
+  const all = new Map([...channel, ...corrected, ...text, ...assets].map((m) => [m.key, m]));
   const saved = parseMedia(p.media);
   const media = saved && sole ? soleMeasurePhotos(saved, allMeasures, sole) : saved;
   const current = (media ?? channel.map((c) => c.ref)).map((ref): MediaItem => {
     const found = all.get(photoKey(ref)) ?? {
       ref,
       key: photoKey(ref),
-      thumb: ref.kind === 'edit' ? null : ref.url || null,
-      label: ref.kind === 'edit' ? 'Corregida' : 'Foto',
+      thumb: ref.kind === 'edit' || ref.kind === 'text' ? null : ref.url || null,
+      label: ref.kind === 'edit' ? 'Corregida' : ref.kind === 'text' ? 'Imagen con texto' : 'Foto',
       note: 'Ya no está disponible',
     };
     // Con las medidas que tiene en esta publicación; las que ya no están en la ficha se caen.
@@ -387,7 +403,7 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
     // Las corregidas armadas en el orden del protocolo, cada una en su medida. Null si ninguna salió de un protocolo.
     protocol: protocolMedia(corrected, sole ? [sole.key] : allMeasures.map((m) => m.key), allMeasures),
     current,
-    available: { channel: plain(channel), corrected, assets },
+    available: { channel: plain(channel), corrected, text, assets },
     // Las medidas que se pueden marcar: con menos de dos, no hay nada que elegir.
     measures: measures.length >= 2 ? measures : [],
     // Leída del canal y sin variantes: allá todas las fotos se ven juntas.
@@ -471,7 +487,7 @@ export async function saveMedia(
   else if (args.refs) {
     const refs = cleanMedia(args.refs).map((r) => knownMarks(r, sources.measures));
     if (refs.length === 0) throw new MediaError('Elegí al menos una foto.');
-    const allowed = new Set([...sources.available.channel, ...sources.available.corrected, ...sources.available.assets].map((m) => m.key));
+    const allowed = new Set([...sources.available.channel, ...sources.available.corrected, ...sources.available.text, ...sources.available.assets].map((m) => m.key));
     if (refs.some((r) => !allowed.has(photoKey(r)))) throw new MediaError('Una de las fotos ya no está disponible. Recargá la página.');
     const blocked = sources.available.corrected.find((m) => m.blocked && refs.some((r) => photoKey(r) === m.key));
     if (blocked) throw new MediaError(`${blocked.label}: ${blocked.blocked}`);
@@ -484,7 +500,7 @@ export async function saveMedia(
 }
 
 /**
- * El archivo de una foto del paso Imágenes, para subirlo al canal: el JPG
+ * El archivo de una foto del paso Fotos, para subirlo al canal: el JPG
  * final de la corregida o el original de la que se usa tal cual. Null si ya no está.
  */
 export async function correctedPhotoFile(db: PrismaClient, productId: string, editId: string): Promise<{ data: Uint8Array; type: string; name: string } | null> {
@@ -520,10 +536,17 @@ export async function picturesFor(
   for (const ref of chosen) {
     if (ref.kind === 'channel') pictures.push({ kind: 'existing', id: ref.id });
     else if (ref.kind === 'asset') pictures.push({ kind: 'link', url: ref.url });
-    else {
+    else if (ref.kind === 'text') {
+      const png = await textImagePng(db, ref.id);
+      if (!png) {
+        problems.push('La imagen con texto ya no está disponible: generala de nuevo o sacala de la lista.');
+        continue;
+      }
+      pictures.push({ kind: 'file', data: png.data, type: 'image/png', name: 'imagen-con-texto.png' });
+    } else {
       const file = await correctedPhotoFile(db, productId, ref.editId);
       if (!file) {
-        problems.push('Una foto del paso Imágenes ya no está disponible: sacala de la lista.');
+        problems.push('Una foto del paso Fotos ya no está disponible: sacala de la lista.');
         continue;
       }
       pictures.push({ kind: 'file', ...file });

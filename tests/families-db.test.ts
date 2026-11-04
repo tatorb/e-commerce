@@ -258,12 +258,12 @@ describe.skipIf(!url)('juntar y separar familias', () => {
 
     // Después, se mueven y se guardan juntas.
     await db.$transaction((tx) => advanceStep(tx, { publicationId: half.id, expected: 'DESCRIPTION', userId: null }));
-    expect((await db.publication.findMany({ select: { pipelineStep: true } })).map((r) => r.pipelineStep)).toEqual(['QA', 'QA']);
+    expect((await db.publication.findMany({ select: { pipelineStep: true } })).map((r) => r.pipelineStep)).toEqual(['PRICE', 'PRICE']);
     await saveQaTexts(db, { accountId, publicationId: std.id, faq: '<p>Una sola respuesta.</p>' });
     expect((await db.publication.findMany({ select: { faq: true } })).map((r) => r.faq)).toEqual(['<p>Una sola respuesta.</p>', '<p>Una sola respuesta.</p>']);
     await db.$transaction((tx) => writeContentField(tx, { productId: p.id, publicationId: half.id }, 'description', 'Nueva para las dos'));
     expect((await db.publication.findMany({ select: { description: true } })).map((r) => r.description)).toEqual(['Nueva para las dos', 'Nueva para las dos']);
-    await db.$transaction((tx) => removeFromPipeline(tx, { publicationId: std.id, expected: 'QA', reason: 'LATER', userId: null }));
+    await db.$transaction((tx) => removeFromPipeline(tx, { publicationId: std.id, expected: 'PRICE', reason: 'LATER', userId: null }));
     expect((await db.publication.findMany({ select: { pipelineStatus: true } })).map((r) => r.pipelineStatus)).toEqual(['DISCARDED', 'DISCARDED']);
     // Volver a agregar una agrega la familia entera, en el mismo paso.
     const added = await db.$transaction((tx) => addToPipeline(tx, { accountId, publicationIds: [std.id], userId: null }));

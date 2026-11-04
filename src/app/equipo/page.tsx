@@ -287,7 +287,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
               <CardHeader>
                 <CardTitle>Trabajador de imágenes</CardTitle>
                 <CardDescription>
-                  El programa que corrige las fotos del paso Imágenes. Corre en la Mac del estudio y es uno solo para todas
+                  El programa que corrige las fotos del paso Fotos. Corre en la Mac del estudio y es uno solo para todas
                   las cuentas. Entra con su propia llave, que se carga una vez en la Mac. Cómo instalarlo está en IMAGENES.md.
                 </CardDescription>
               </CardHeader>

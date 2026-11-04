@@ -128,10 +128,11 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
   const labelOf = (keys: string[]) => measures.filter((m) => keys.includes(m.key)).map((m) => m.label);
 
   // Todo lo que se puede usar, en grupos. Las elegidas que ya no están disponibles también, para poder sacarlas.
-  const available = [...sources.available.corrected, ...sources.available.channel, ...sources.available.assets];
+  const available = [...sources.available.corrected, ...sources.available.text, ...sources.available.channel, ...sources.available.assets];
   const gone = sources.current.filter((m) => !available.some((a) => a.key === m.key));
   const groups = [
-    { title: 'Del paso Imágenes', items: sources.available.corrected },
+    { title: 'Del paso Fotos', items: sources.available.corrected },
+    { title: 'Imágenes con texto', items: sources.available.text },
     { title: `En ${channelName}`, items: sources.available.channel },
     { title: 'Otras fotos del producto', items: sources.available.assets },
     { title: 'Ya no disponibles', items: gone },
@@ -364,7 +365,7 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
           </div>
         ) : null}
         {groups.length === 0 && sources.videos.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Todavía no hay fotos ni videos para usar. Se suman en los pasos Imágenes y Videos.</p>
+          <p className="text-sm text-muted-foreground">Todavía no hay fotos ni videos para usar. Se suman en los pasos Fotos y Videos.</p>
         ) : null}
       </section>
 

@@ -17,7 +17,7 @@ import { placeShotPhotosQuietly } from '@/lib/shoot';
 import { plural } from '@/lib/format';
 import { cleanPhotoNote } from '@/domain/photo-steps';
 
-// Lo que se hace desde el paso Imágenes: sumar fotos y decidir cada paso de
+// Lo que se hace desde el paso Fotos: sumar fotos y decidir cada paso de
 // su línea. Las fotos son del producto: las ven todas sus publicaciones, y se
 // guardan en su carpeta Fotos del Drive del estudio.
 

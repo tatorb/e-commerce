@@ -11,7 +11,7 @@ import { appLink, McpToolError, accountArg, defineTool, publicationArg, resolveA
 
 // Las fotos y los videos de una publicación desde Claude, con las mismas
 // reglas que el paso Organización de multimedia: ver qué hay, elegir y
-// ordenar las fotos y sus medidas, elegir los clips, sumar al paso Imágenes
+// ordenar las fotos y sus medidas, elegir los clips, sumar al paso Fotos
 // las fotos del canal y decidir si una foto se usa tal cual. Lo que se elige
 // queda en el borrador hasta que se sube al canal.
 
@@ -83,6 +83,7 @@ function mediaOut(ctx: McpContext, sources: MediaSources, lines: { id: string; o
     para_elegir: {
       en_el_canal: sources.available.channel.map(option),
       corregidas_en_el_paso_imagenes: sources.available.corrected.map(option),
+      imagenes_con_texto: sources.available.text.map(option),
       del_producto: sources.available.assets.map(option),
     },
     linea_del_paso_imagenes: lines.map((l) => ({
@@ -138,7 +139,7 @@ const getMediaTool = defineTool({
   section: ['pipeline', 'publicaciones'],
   title: 'Ver las fotos y los videos de una publicación',
   description:
-    'Muestra las fotos y los videos de una publicación como en Organización de multimedia: las fotos elegidas en orden (la primera es la portada) con sus medidas, las que hay para elegir (las que tiene en el canal, las corregidas en el paso Imágenes y las demás del producto), la línea del paso Imágenes, las medidas que se pueden marcar, y los videos del producto con cuáles son clips. Cada foto tiene una clave en «foto» que se usa para elegirla con set_publication_media.',
+    'Muestra las fotos y los videos de una publicación como en Organización de multimedia: las fotos elegidas en orden (la primera es la portada) con sus medidas, las que hay para elegir (las que tiene en el canal, las corregidas en el paso Fotos y las demás del producto), la línea del paso Fotos, las medidas que se pueden marcar, y los videos del producto con cuáles son clips. Cada foto tiene una clave en «foto» que se usa para elegirla con set_publication_media.',
   input: z.object({ cuenta: accountArg, publicacion: publicationArg }),
   readOnly: true,
   async run(ctx, args) {
@@ -196,7 +197,7 @@ const setMediaTool = defineTool({
         refs = sources.protocol.map((m) => m.ref);
       } else if (args.fotos) {
         const byKey = new Map(
-          [...sources.available.channel, ...sources.available.corrected, ...sources.available.assets].map((m) => [m.key, m.ref]),
+          [...sources.available.channel, ...sources.available.corrected, ...sources.available.text, ...sources.available.assets].map((m) => [m.key, m.ref]),
         );
         refs = args.fotos.map((f) => {
           const ref = byKey.get(f.foto.trim());
@@ -230,9 +231,9 @@ const setMediaTool = defineTool({
 const addChannelPhotosTool = defineTool({
   name: 'add_channel_photos',
   section: ['pipeline', 'productos'],
-  title: 'Sumar al paso Imágenes las fotos del canal',
+  title: 'Sumar al paso Fotos las fotos del canal',
   description:
-    'Baja las fotos que la publicación tiene en el canal, en su tamaño más grande, y las suma a la línea del paso Imágenes del producto para corregirlas o usarlas tal cual. Las que ya estaban no se repiten. Las fotos son del producto: las ven todas sus publicaciones.',
+    'Baja las fotos que la publicación tiene en el canal, en su tamaño más grande, y las suma a la línea del paso Fotos del producto para corregirlas o usarlas tal cual. Las que ya estaban no se repiten. Las fotos son del producto: las ven todas sus publicaciones.',
   input: z.object({ cuenta: accountArg, publicacion: publicationArg }),
   readOnly: false,
   async run(ctx, args) {
@@ -248,11 +249,11 @@ const setAsIsTool = defineTool({
   section: ['pipeline', 'productos'],
   title: 'Usar una foto tal cual o mandarla a corregir',
   description:
-    'Una foto de la línea del paso Imágenes que ya viene editada se usa tal cual: no pasa por la Mac y al canal va el mismo archivo. Con tal_cual false vuelve a la línea para corregirla en la Mac. El canal tiene que aceptar el archivo así; si no, devuelve el motivo. La foto se nombra por su clave en linea_del_paso_imagenes de get_publication_media.',
+    'Una foto de la línea del paso Fotos que ya viene editada se usa tal cual: no pasa por la Mac y al canal va el mismo archivo. Con tal_cual false vuelve a la línea para corregirla en la Mac. El canal tiene que aceptar el archivo así; si no, devuelve el motivo. La foto se nombra por su clave en linea_del_paso_imagenes de get_publication_media.',
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg,
-    foto: z.string().min(1).describe('La clave de la foto en la línea del paso Imágenes.'),
+    foto: z.string().min(1).describe('La clave de la foto en la línea del paso Fotos.'),
     tal_cual: z.boolean(),
   }),
   readOnly: false,
@@ -260,7 +261,7 @@ const setAsIsTool = defineTool({
     const { account, id } = await target(ctx, args);
     const editId = args.foto.trim().replace(/^corregida:/, '');
     const message = await asToolError(() => setPhotoAsIs(ctx.db, { publicationId: id, editId, asIs: args.tal_cual }));
-    if (message === null) throw new McpToolError(`No hay una foto «${args.foto}» en la línea del paso Imágenes de este producto.`);
+    if (message === null) throw new McpToolError(`No hay una foto «${args.foto}» en la línea del paso Fotos de este producto.`);
     return { listo: true, resultado: message, link_app: appLink(ctx, account, id) };
   },
 });
@@ -273,7 +274,7 @@ const redoWithoutAiTool = defineTool({
   section: ['pipeline', 'productos'],
   title: 'Procesar de cero las fotos que Claude no miró',
   description:
-    'Busca en toda la cuenta las fotos del paso Imágenes en que Claude no respondió en algún ajuste (por ejemplo, porque se acabó el crédito) y quedaron con los valores que midió la Mac. Sin confirmar, solo cuenta cuántas son y de qué productos. Con confirmar true, las manda todas a la cola de la Mac para procesarlas de cero, como recién llegadas, con Claude proponiendo todos los ajustes. Se pierden los valores cambiados a mano y el giro de 90°; las aprobadas vuelven a quedar para revisar; lo que ya está subido al canal no cambia hasta aprobar y subir las nuevas. Claude vuelve a cobrar cada foto. Antes de confirmar, avisale a la persona cuántas son y que tiene que haber crédito.',
+    'Busca en toda la cuenta las fotos del paso Fotos en que Claude no respondió en algún ajuste (por ejemplo, porque se acabó el crédito) y quedaron con los valores que midió la Mac. Sin confirmar, solo cuenta cuántas son y de qué productos. Con confirmar true, las manda todas a la cola de la Mac para procesarlas de cero, como recién llegadas, con Claude proponiendo todos los ajustes. Se pierden los valores cambiados a mano y el giro de 90°; las aprobadas vuelven a quedar para revisar; lo que ya está subido al canal no cambia hasta aprobar y subir las nuevas. Claude vuelve a cobrar cada foto. Antes de confirmar, avisale a la persona cuántas son y que tiene que haber crédito.',
   input: z.object({
     cuenta: accountArg,
     confirmar: z.boolean().optional().describe('true: las manda a procesar de cero. Sin mandarlo, solo las cuenta.'),

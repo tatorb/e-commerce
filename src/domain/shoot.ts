@@ -194,7 +194,7 @@ export function videoMarks(pub: PublicationMeasures, variantKey: string | null):
   return pub.measures.includes(variantKey) ? [variantKey] : [];
 }
 
-/** Cómo se dice en los pasos Imágenes y Videos lo que se sacó en Registro de productos: "Registro: medida 0.50, Frente". */
+/** Cómo se dice en los pasos Fotos y Videos lo que se sacó en Registro de productos: "Registro: medida 0.50, Frente". */
 export function shotText(variantLabel: string | null, stepTitle: string | null): string {
   return `Registro: ${[variantLabel ? `medida ${variantLabel}` : 'todas las medidas', stepTitle].filter(Boolean).join(', ')}`;
 }

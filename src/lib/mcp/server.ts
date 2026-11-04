@@ -19,6 +19,7 @@ import { DESCRIPTION_TOOLS } from './description-tools';
 import { PUSH_TOOLS } from './push-tools';
 import { SALES_TOOLS } from './sales-tools';
 import { CREATE_TOOLS } from './create-tools';
+import { TEXT_IMAGE_TOOLS } from './text-image-tools';
 import { MCP_INSTRUCTIONS } from './instructions';
 import { McpToolError, type McpContext, type McpTool } from './tool';
 import { can, SECTIONS } from '@/domain/access';
@@ -30,7 +31,7 @@ import { logActivity } from '@/lib/activity';
 const SUPPORTED_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 const SERVER_INFO = { name: 'ecommerce-studio-mrb', title: 'E-commerce Studio MRB', version: '1.0.0' };
 
-export const TOOLS: McpTool[] = [...READ_TOOLS, ...WRITE_TOOLS, ...TASK_TOOLS, ...STOCK_TOOLS, ...STATUS_TOOLS, ...MEDIA_TOOLS, ...DESCRIPTION_TOOLS, ...PUSH_TOOLS, ...CREATE_TOOLS, ...PRICE_TOOLS, ...SALES_TOOLS];
+export const TOOLS: McpTool[] = [...READ_TOOLS, ...WRITE_TOOLS, ...TASK_TOOLS, ...STOCK_TOOLS, ...STATUS_TOOLS, ...MEDIA_TOOLS, ...DESCRIPTION_TOOLS, ...PUSH_TOOLS, ...CREATE_TOOLS, ...PRICE_TOOLS, ...SALES_TOOLS, ...TEXT_IMAGE_TOOLS];
 
 export type RpcMessage = {
   jsonrpc?: string;

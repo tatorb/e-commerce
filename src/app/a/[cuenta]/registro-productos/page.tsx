@@ -58,7 +58,7 @@ export default async function ShootPage({ params, searchParams }: { params: Prom
       <div className="space-y-1">
         <h1 className="text-2xl font-bold tracking-tight">Registro de productos</h1>
         <p className="text-sm text-muted-foreground">
-          Sacá las fotos y los videos de cada producto con el celular. Se suben tal como salen de la cámara y van a los pasos Imágenes y Videos.
+          Sacá las fotos y los videos de cada producto con el celular. Se suben tal como salen de la cámara y van a los pasos Fotos y Videos.
           {can(user.access, 'protocolos', 'read') ? (
             <>
               {' '}

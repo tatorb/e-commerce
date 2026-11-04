@@ -10,7 +10,7 @@ import { placeShotPhotosQuietly } from '@/lib/shoot';
 import { driveRef, storageError } from '@/lib/stored-files';
 
 // Lo que se hace con las fotos de un producto desde una publicación, igual
-// desde el paso Imágenes que desde Claude: sumar las que tiene en el canal y
+// desde el paso Fotos que desde Claude: sumar las que tiene en el canal y
 // decidir si una se usa tal cual. Las fotos son del producto: las ven todas
 // sus publicaciones.
 
@@ -33,7 +33,7 @@ export async function tidyCorrected(db: PrismaClient, productId: string) {
   }
 }
 
-/** Suma al paso Imágenes las fotos que el producto tiene publicadas en el canal, en su tamaño más grande. */
+/** Suma al paso Fotos las fotos que el producto tiene publicadas en el canal, en su tamaño más grande. */
 export async function addChannelPhotosOf(db: PrismaClient, args: { productId: string; userId: string | null }): Promise<string> {
   const owner = await photoOwner(db, args.productId);
   const r = await withDriveToken(db, async (token, email) => {

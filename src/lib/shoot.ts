@@ -33,7 +33,7 @@ import { finishVideoUpload, startVideoUpload } from '@/lib/videos';
 
 // Registro de productos: los protocolos de cada cuenta con sus pasos e
 // ilustraciones, y lo que sube el operario desde el celular. Las fotos van a
-// la carpeta Originales del producto y entran al paso Imágenes como cualquier
+// la carpeta Originales del producto y entran al paso Fotos como cualquier
 // foto; cuando están listas se suman solas a las publicaciones del producto,
 // con su medida. Los videos van a la carpeta Videos y quedan marcados con su
 // medida al subirse. Recibe la base por parámetro para poder probarlo.
@@ -389,7 +389,7 @@ export async function startShotUpload(
   );
 }
 
-/** Anota la foto que terminó de subir el navegador: entra al paso Imágenes con su paso del protocolo y su medida. */
+/** Anota la foto que terminó de subir el navegador: entra al paso Fotos con su paso del protocolo y su medida. */
 export async function finishShotPhoto(
   db: Db,
   args: { accountId: string; productId: string; fileId: string; userId: string | null; stepId: string | null; variantKey: string | null },

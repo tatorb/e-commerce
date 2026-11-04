@@ -5,17 +5,20 @@ import { lockFamily } from '@/domain/family-members';
 // Pipeline: el recorrido por pasos para corregir una publicación de punta a
 // punta. Es por publicación y no sabe nada de ningún canal.
 
-export const PIPELINE_STEPS: PipelineStep[] = ['INFO', 'TITLE', 'IMAGES', 'VIDEOS', 'MEDIA', 'DESCRIPTION', 'QA', 'PRICE', 'PUBLISH'];
+// El código de cada paso no cambia aunque cambie el orden o el nombre que se ve:
+// IMAGES se muestra como Fotos.
+export const PIPELINE_STEPS: PipelineStep[] = ['INFO', 'TITLE', 'DESCRIPTION', 'PRICE', 'IMAGES', 'TEXT_IMAGES', 'VIDEOS', 'MEDIA', 'QA', 'PUBLISH'];
 
 export const PIPELINE_STEP_LABEL: Record<PipelineStep, string> = {
   INFO: 'Información',
   TITLE: 'Título',
-  IMAGES: 'Imágenes',
+  DESCRIPTION: 'Descripción',
+  PRICE: 'Precio',
+  IMAGES: 'Fotos',
+  TEXT_IMAGES: 'Imágenes con texto',
   VIDEOS: 'Videos',
   MEDIA: 'Organización de multimedia',
-  DESCRIPTION: 'Descripción',
   QA: 'Preguntas y respuestas',
-  PRICE: 'Precio',
   PUBLISH: 'Publicación',
 };
 
@@ -23,12 +26,13 @@ export const PIPELINE_STEP_LABEL: Record<PipelineStep, string> = {
 export const PIPELINE_STEP_SLUG: Record<PipelineStep, string> = {
   INFO: 'informacion',
   TITLE: 'titulo',
+  DESCRIPTION: 'descripcion',
+  PRICE: 'precio',
   IMAGES: 'imagenes',
+  TEXT_IMAGES: 'imagenes-con-texto',
   VIDEOS: 'videos',
   MEDIA: 'multimedia',
-  DESCRIPTION: 'descripcion',
   QA: 'preguntas',
-  PRICE: 'precio',
   PUBLISH: 'publicacion',
 };
 

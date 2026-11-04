@@ -28,6 +28,8 @@ import { PublicationCodeCard } from '@/components/pipeline/PublicationCodeCard';
 import { PendingChangesCard } from '@/components/publication/PendingChangesCard';
 import { campaignText, pendingCampaigns } from '@/lib/channel-campaigns';
 import { MediaOrganizer } from '@/components/publication/MediaOrganizer';
+import { TextImagesStep } from '@/components/text-images/TextImagesStep';
+import { loadTextImageStep } from '@/lib/text-images/step';
 import { loadMediaSources } from '@/lib/media';
 import { loadFamilyMedia } from '@/lib/family-media';
 import { CreateInChannelCard } from '@/components/publication/CreateInChannelCard';
@@ -131,7 +133,7 @@ export default async function PipelineStepPage({
   // Lo que usa el paso que se mira, pedido todo junto: con la base lejos, cada
   // consulta en fila suma una ida y vuelta.
   const canTask = can(user.access, 'tareas', 'write');
-  const [ctx, info, images, channel, faces, media, create, videos, description, qa, price, decision, tasks, people, stockPlans, factsOf, family, cover] = await Promise.all([
+  const [ctx, info, images, channel, faces, media, create, videos, description, qa, price, decision, tasks, people, stockPlans, factsOf, family, cover, textImage] = await Promise.all([
     // Información y Título usan la ficha, la competencia y lo leído del buscador.
     viewing === 'INFO' || viewing === 'TITLE' ? loadTitleContext(prisma, account.id, pub.id) : null,
     viewing === 'INFO'
@@ -193,6 +195,7 @@ export default async function PipelineStepPage({
       prisma.channelCopy.findUnique({ where: { publicationId: pub.id }, select: { photos: true } }),
       productCovers([pub.productId]),
     ]).then(([copy, covers]) => firstPhoto(copy?.photos) ?? covers.get(pub.productId) ?? null),
+    viewing === 'TEXT_IMAGES' ? loadTextImageStep(prisma, { accountId: account.id, publicationId: pub.id }) : null,
   ]);
   // Sumarse a una campaña o salir, pedido en Promociones: se sube con los demás cambios.
   const pendingCampaignTexts =
@@ -411,6 +414,15 @@ export default async function PipelineStepPage({
             photoRules={images[5]}
             sharedWith={images[3]}
             drive={images[4]}
+          />
+        ) : textImage && viewing === 'TEXT_IMAGES' ? (
+          <TextImagesStep
+            accountSlug={account.slug}
+            data={textImage}
+            timeZone={account.timezone}
+            aiDisabledReason={isAiConfigured() ? null : AI_NOT_CONFIGURED}
+            photosHref={`${pageHref}?paso=${PIPELINE_STEP_SLUG.IMAGES}`}
+            infoHref={`${pageHref}?paso=${PIPELINE_STEP_SLUG.INFO}`}
           />
         ) : videos && viewing === 'VIDEOS' ? (
           <VideosStep

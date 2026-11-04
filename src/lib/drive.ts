@@ -369,6 +369,11 @@ export function photoFolder(account: Named, product: Named, which: PhotoFolder):
   return { key: `${which}:${product.id}`, name: PHOTO_FOLDER_NAME[which], parent: photos };
 }
 
+/** Los PNG del paso Imágenes con texto. */
+export function textImagesFolder(account: Named, product: Named): FolderSpec {
+  return { key: `imagenes-con-texto:${product.id}`, name: 'Imágenes con texto', parent: productFolder(account, product) };
+}
+
 /** Las imágenes y los PDF del fabricante. */
 export function manufacturerFolder(account: Named, product: Named): FolderSpec {
   return { key: `fabricante:${product.id}`, name: 'Fabricante', parent: productFolder(account, product) };

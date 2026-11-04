@@ -1,4 +1,4 @@
-// Las fotos abiertas del paso Imágenes van en la dirección, en `fotos`, separadas
+// Las fotos abiertas del paso Fotos van en la dirección, en `fotos`, separadas
 // por coma: así se pueden abrir varias juntas y el link se puede compartir.
 
 const MAX_OPEN = 50;
