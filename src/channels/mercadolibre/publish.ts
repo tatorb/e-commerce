@@ -77,6 +77,23 @@ function translated(e: unknown): unknown {
 }
 
 /**
+ * El rechazo de la descripción, siempre con la respuesta completa de Mercado
+ * Libre: el pedido que se hizo, el código HTTP y el cuerpo (message, error y
+ * cause). Hay rechazos que solo se entienden con todo eso.
+ */
+export function descriptionRejected(method: 'PUT' | 'POST', path: string, e: unknown, before?: string): unknown {
+  if (!(e instanceof MercadoLibreRequestError) || e.status === 401 || e.status === 429) return e;
+  const body = e.body === null || e.body === undefined ? 'sin cuerpo' : typeof e.body === 'string' ? e.body.slice(0, 1500) : JSON.stringify(e.body).slice(0, 1500);
+  const detail = detailOf(e.body);
+  // Un motivo conocido va explicado en castellano; si no, el genérico.
+  const causes = isObj(e.body) && Array.isArray(e.body.cause) ? e.body.cause.filter(isObj) : [];
+  const codes = [...causes.map((c) => `${c.code ?? ''} ${c.message ?? ''}`), isObj(e.body) ? `${e.body.error ?? ''} ${e.body.message ?? ''}` : ''].join(' ');
+  const known = KNOWN.find(([pattern]) => /description|under_review|closed/.test(pattern.source) && pattern.test(codes));
+  const reason = known && known[1] !== 'Mercado Libre no aceptó la descripción.' ? known[1].slice(0, -1) : e.status === 403 ? 'Mercado Libre no dejó cambiar la descripción' : 'Mercado Libre no aceptó la descripción';
+  return new PublishError(`${reason}${detail ? `: ${detail}` : ''}. Pedido: ${method} ${path}. Código HTTP ${e.status}. Respuesta: ${body}${before ? ` ${before}` : ''}`);
+}
+
+/**
  * El rechazo de algo puntual, como las cuotas o el descuento: lo que no
  * aceptó y el detalle que manda Mercado Libre.
  */
@@ -387,7 +404,10 @@ async function createMembers(accessToken: string, l: ChannelNewListing, family: 
     members.push({ externalId: id, url: isObj(body) && typeof body.permalink === 'string' ? body.permalink : null, pictureIds: keeper.learn(m.pictures, pictureIdsOf(body)) });
     if (l.description) {
       try {
-        await send('POST', `/items/${encodeURIComponent(id)}/description`, accessToken, { plain_text: l.description });
+        const path = `/items/${encodeURIComponent(id)}/description`;
+        await mlSend('POST', path, accessToken, { plain_text: l.description }).catch((e) => {
+          throw descriptionRejected('POST', path, e);
+        });
       } catch (e) {
         if (!(e instanceof PublishError)) throw e;
         warnings.push(`${name} se creó, pero la descripción no: ${e.message} Queda en el borrador para subirla.`);
@@ -634,11 +654,17 @@ export const mercadolibrePublisher: ChannelPublisher = {
       return;
     }
     // La descripción: se reemplaza; si la publicación no tenía, se crea.
+    const put = `/items/${id}/description?api_version=2`;
     try {
-      await mlSend('PUT', `/items/${id}/description?api_version=2`, accessToken, { plain_text: value });
+      await mlSend('PUT', put, accessToken, { plain_text: value });
     } catch (e) {
-      if (!(e instanceof MercadoLibreRequestError) || e.status !== 404) throw translated(e);
-      await send('POST', `/items/${id}/description`, accessToken, { plain_text: value });
+      if (!(e instanceof MercadoLibreRequestError) || e.status !== 404) throw descriptionRejected('PUT', put, e);
+      const post = `/items/${id}/description`;
+      try {
+        await mlSend('POST', post, accessToken, { plain_text: value });
+      } catch (e2) {
+        throw descriptionRejected('POST', post, e2, `Antes, PUT ${put} respondió 404.`);
+      }
     }
   },
 };

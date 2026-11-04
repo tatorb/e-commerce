@@ -3,7 +3,8 @@ import type { AddressInfo } from 'node:net';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@/generated/prisma/client';
-import { rejectionMessage } from '@/channels/mercadolibre/publish';
+import { descriptionRejected, rejectionMessage } from '@/channels/mercadolibre/publish';
+import { MercadoLibreRequestError } from '@/channels/mercadolibre/http';
 import { faceSummary, faceValues, fingerprint, fingerprintsOf } from '@/domain/channel-sync';
 import { DraftError, pushDrafts, PushError, renewDiscounts, saveDraft } from '@/lib/channel-push';
 import { discardDrafts, readOne, runSyncStep, startSync } from '@/lib/channel-sync';
@@ -23,6 +24,16 @@ import type { McpContext } from '@/lib/mcp/tool';
 // simulado. Los datos son de prueba.
 
 describe('por qué Mercado Libre no aceptó un cambio', () => {
+  it('en la descripción, siempre el pedido, el código HTTP y la respuesta completa', () => {
+    const body = { message: 'Validation error', error: 'validation_error', status: 400, cause: [{ code: 'item.description.invalid', message: 'Invented reason' }] };
+    const e = descriptionRejected('PUT', '/items/MLA1/description?api_version=2', new MercadoLibreRequestError('x', 400, body)) as Error;
+    expect(e.message).toBe(
+      `Mercado Libre no aceptó la descripción: Invented reason. Pedido: PUT /items/MLA1/description?api_version=2. Código HTTP 400. Respuesta: ${JSON.stringify(body)}`,
+    );
+    const post = descriptionRejected('POST', '/items/MLA1/description', new MercadoLibreRequestError('x', 403, null), 'Antes, PUT respondió 404.') as Error;
+    expect(post.message).toBe('Mercado Libre no dejó cambiar la descripción. Pedido: POST /items/MLA1/description. Código HTTP 403. Respuesta: sin cuerpo Antes, PUT respondió 404.');
+  });
+
   it('explica los motivos conocidos en castellano', () => {
     expect(rejectionMessage(400, { cause: [{ code: 'item.title.not_modifiable', message: 'Title is not modifiable' }] })).toBe(
       'Mercado Libre no deja cambiar el título: Title is not modifiable Respuesta completa: {"cause":[{"code":"item.title.not_modifiable","message":"Title is not modifiable"}]}',
@@ -1337,7 +1348,12 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     await run('save_description', { cuenta: 'prueba', descripciones: [{ publicacion: p3.id, descripcion: 'Juego de 3 pistones con aros.' }] });
     const rejected = await run('push_descriptions', { cuenta: 'prueba' });
     expect(rejected.subidas).toEqual([
-      expect.objectContaining({ publicacion: 'MLA3', resultado: 'rechazado', motivo: 'Mercado Libre no acepta links, mails, teléfonos ni etiquetas HTML en la descripción.' }),
+      expect.objectContaining({
+        publicacion: 'MLA3',
+        resultado: 'rechazado',
+        motivo:
+          'Mercado Libre no acepta links, mails, teléfonos ni etiquetas HTML en la descripción: The description contains a phone number. Pedido: PUT /items/MLA3/description?api_version=2. Código HTTP 400. Respuesta: {"message":"validation_error","cause":[{"message":"The description contains a phone number"}]}',
+      }),
     ]);
     expect((await state('MLA3')).draft).toEqual(['description']);
     delete items.MLA3.descriptionRejected;
