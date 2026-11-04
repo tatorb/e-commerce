@@ -25,7 +25,7 @@ import { importSoldListings } from '@/lib/sold-listings';
 // publicaciones las fotos de Registro de productos que quedaron listas, y al
 // final trae las ventas para la sección Ventas, con su envío y su pago, abre
 // las tareas de despachar y de reclamos, trae las publicaciones vendidas que
-// no están en la app y lee las visitas de cada día. La llaman Vercel una vez por día
+// no están en la app. Las visitas de cada día se leen temprano, después de las preguntas. La llaman Vercel una vez por día
 // (vercel.json) y GitHub cada hora (.github/workflows/leer-canales.yml), con
 // la clave CRON_SECRET. Cada pedido lee lo que alcanza en su tiempo; pending
 // dice si conviene llamar otra vez.
@@ -51,8 +51,11 @@ const ALARMS_BUDGET_MS = 3_000;
 const SHOTS_BUDGET_MS = 3_000;
 // Las ventas de la sección Ventas: las nuevas, un tramo de las viejas y su envío y su pago.
 const LEDGER_BUDGET_MS = 6_000;
-// Las visitas de cada día de las publicaciones que no se leyeron hoy.
-const VISITS_BUDGET_MS = 4_000;
+// Las visitas de cada día de las publicaciones que no se leyeron hoy. Van temprano: al final del
+// pedido nunca les quedaba tiempo y Rendimiento se quedaba sin visitas.
+const VISITS_BUDGET_MS = 6_000;
+// Todo el pedido: lo que queda se lo reparten las partes, para no pasarse del tope de 60 segundos.
+const TOTAL_MS = 45_000;
 // Las publicaciones vendidas que no están en la app: se traen del canal.
 const SOLD_BUDGET_MS = 5_000;
 
@@ -67,25 +70,27 @@ export async function GET(request: Request) {
   if (!secret) return NextResponse.json({ error: 'Falta configurar CRON_SECRET.' }, { status: 503 });
   if (!authorized(request, secret)) return NextResponse.json({ error: 'No autorizado.' }, { status: 401 });
   const begun = Date.now();
+  // Cada parte usa su tiempo, pero nunca más de lo que le queda al pedido.
+  const budget = (ms: number) => Math.max(0, Math.min(ms, TOTAL_MS - (Date.now() - begun)));
   const questions = await readAllQuestions(prisma, { budgetMs: QUESTIONS_BUDGET_MS });
   // Las que llegaron sin el aviso del canal: una por pedido.
   const alone = await answerAlone(prisma, { aiReady: isAiConfigured() });
-  const mails = await sendTaskMail(prisma, { budgetMs: MAIL_BUDGET_MS });
-  const sales = await readSales(prisma, { budgetMs: SALES_BUDGET_MS });
+  const visits = await readAllVisits(prisma, { budgetMs: budget(VISITS_BUDGET_MS) });
+  const mails = await sendTaskMail(prisma, { budgetMs: budget(MAIL_BUDGET_MS) });
+  const sales = await readSales(prisma, { budgetMs: budget(SALES_BUDGET_MS) });
   // Con las ventas al día: el aviso de las alarmas de stock sin reponer.
-  const alarms = await stockAlarmPass(prisma, { budgetMs: ALARMS_BUDGET_MS });
-  const renewals = await renewDiscounts(prisma, { budgetMs: RENEW_BUDGET_MS });
-  const result = await syncAllStores(prisma, { budgetMs: BUDGET_MS - (Date.now() - begun) });
+  const alarms = await stockAlarmPass(prisma, { budgetMs: budget(ALARMS_BUDGET_MS) });
+  const renewals = await renewDiscounts(prisma, { budgetMs: budget(RENEW_BUDGET_MS) });
+  const result = await syncAllStores(prisma, { budgetMs: Math.max(0, BUDGET_MS - (Date.now() - begun)) });
   // Con lo recién leído: el stock de partida de los productos nuevos y lo que quedó distinto del stock.
-  const started = await startStock(prisma, { budgetMs: STOCK_BUDGET_MS });
-  const stock = await reconcileStock(prisma, { budgetMs: STOCK_BUDGET_MS });
+  const started = await startStock(prisma, { budgetMs: budget(STOCK_BUDGET_MS) });
+  const stock = await reconcileStock(prisma, { budgetMs: budget(STOCK_BUDGET_MS) });
   // Con lo recién leído: las tareas de reactivar de las que ya están activas se cierran.
   const reactivated = await settleReactivations(prisma);
-  const shots = await placeAllShotPhotos(prisma, { budgetMs: SHOTS_BUDGET_MS });
-  const ledger = await readAllSales(prisma, { budgetMs: LEDGER_BUDGET_MS });
+  const shots = await placeAllShotPhotos(prisma, { budgetMs: budget(SHOTS_BUDGET_MS) });
+  const ledger = await readAllSales(prisma, { budgetMs: budget(LEDGER_BUDGET_MS) });
   const saleTasks = await saleAlarmPass(prisma);
-  const sold = await importSoldListings(prisma, { budgetMs: SOLD_BUDGET_MS });
-  const visits = await readAllVisits(prisma, { budgetMs: VISITS_BUDGET_MS });
+  const sold = await importSoldListings(prisma, { budgetMs: budget(SOLD_BUDGET_MS) });
   return NextResponse.json({
     pending:
       result.pending ||
