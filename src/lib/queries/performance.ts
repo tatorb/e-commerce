@@ -2,6 +2,8 @@ import type { PrismaClient } from '@/generated/prisma/client';
 import { loadProductOptions } from '@/lib/product-options';
 import type { ChannelStatus } from '@/generated/prisma/enums';
 import { latestMetrics } from '@/domain/measurements';
+import { copySkus } from '@/domain/stock';
+import { singleMeasure } from '@/lib/stock-plan';
 import { conversionPct, CORRECTION_FIELDS, lightOf, LIGHT_ORDER, PERIODS, type Light, type Period } from '@/domain/performance';
 
 // Lo que muestra Rendimiento de publicaciones: por publicación, las visitas y
@@ -56,6 +58,9 @@ export type PerformanceRow = {
   title: string | null;
   externalId: string;
   url: string | null;
+  productId: string;
+  // El SKU de la publicación, o los del producto si el canal no lo informa.
+  sku: string | null;
   channelStatus: ChannelStatus;
   visits: number | null;
   sales: number;
@@ -99,6 +104,16 @@ async function lastCorrections(db: Db, ids: string[]): Promise<Map<string, { at:
   return new Map(rows.map((r) => [r.publicationId, { at: r.at, fields: r.fields }]));
 }
 
+/** El SKU que vende la publicación: el que leyó el canal, el de su medida o los del producto. */
+function publicationSku(product: { variants: { sku: string | null; measure: string | null }[] }, copy: { details: unknown } | null, chosen: string | null): string | null {
+  const read = copySkus(copy?.details);
+  if (read.length > 0) return read.join(' / ');
+  const sole = singleMeasure(product, copy, chosen)?.sku?.trim();
+  if (sole) return sole;
+  const all = product.variants.map((v) => v.sku?.trim()).filter((s): s is string => Boolean(s));
+  return all.length > 0 ? all.join(' / ') : null;
+}
+
 /** Las opciones de marca y tipo de producto: las listas fijas de la cuenta. */
 const options = (db: Db, accountId: string) => loadProductOptions(db, accountId).then((o) => ({ brands: o.brands, types: o.types }));
 
@@ -122,8 +137,12 @@ export async function loadPerformance(db: Db, accountId: string, f: PerformanceF
       externalId: true,
       url: true,
       storeId: true,
+      productId: true,
+      variantKey: true,
       channelStatus: true,
       visitsReadAt: true,
+      channelCopy: { select: { details: true } },
+      product: { select: { variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } } } },
       // Para las de 90 días todavía sin las visitas por día.
       measurements: { orderBy: { takenAt: 'desc' }, take: 1, select: { metrics: true } },
     },
@@ -148,6 +167,8 @@ export async function loadPerformance(db: Db, accountId: string, f: PerformanceF
       title: p.title,
       externalId: p.externalId!,
       url: p.url,
+      productId: p.productId,
+      sku: publicationSku(p.product, p.channelCopy, p.variantKey),
       channelStatus: p.channelStatus,
       visits: v,
       sales,

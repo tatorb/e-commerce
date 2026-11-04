@@ -191,19 +191,23 @@ export default async function PerformancePage({ params, searchParams }: { params
                       </span>
                     </td>
                     <td className="max-w-md px-3 py-2.5">
-                      {r.url ? (
-                        <a href={r.url} target="_blank" rel="noreferrer" className="inline-flex items-start gap-1 font-medium leading-snug underline-offset-4 hover:underline">
-                          {titleOrUntitled(r.title)}
-                          <ExternalLink className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
-                        </a>
-                      ) : (
-                        <span className="font-medium">{titleOrUntitled(r.title)}</span>
-                      )}
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        <Link href={`/a/${account.slug}/publicaciones/${r.id}`} className="underline-offset-4 hover:underline">
-                          {r.externalId}
+                      <Link href={`/a/${account.slug}/publicaciones/${r.id}`} className="font-medium leading-snug underline-offset-4 hover:underline" title="Ver la publicación en la app">
+                        {titleOrUntitled(r.title)}
+                      </Link>
+                      <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
+                        {r.url ? (
+                          <a href={r.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 underline-offset-4 hover:underline" title="Ver la publicación en el canal">
+                            {r.externalId}
+                            <ExternalLink className="h-3 w-3 shrink-0" aria-hidden />
+                          </a>
+                        ) : (
+                          <span>{r.externalId}</span>
+                        )}
+                        <span aria-hidden>·</span>
+                        <Link href={`/a/${account.slug}/productos/${r.productId}`} className="underline-offset-4 hover:underline" title="Ver el producto en la app">
+                          {r.sku ?? 'Producto'}
                         </Link>
-                        {r.channelStatus !== 'ACTIVE' ? <span className="font-medium text-amber-700"> · {CHANNEL_STATUS_LABEL[r.channelStatus]}</span> : null}
+                        {r.channelStatus !== 'ACTIVE' ? <span className="font-medium text-amber-700">· {CHANNEL_STATUS_LABEL[r.channelStatus]}</span> : null}
                       </p>
                     </td>
                     <td className="px-3 py-2.5 text-right tabular-nums">{r.visits === null ? '—' : num(r.visits)}</td>

@@ -235,6 +235,8 @@ describe.skipIf(!url)('rendimiento en la base', () => {
     // 60 días: entran las visitas y la venta de hace 45 y 50 días.
     const d60 = await load({ periodo: '60' });
     expect(d60.rows.find((r) => r.externalId === 'MLA1000000001')).toMatchObject({ visits: 52, sales: 3 });
+    // Sin SKU leído del canal ni medida elegida: los SKU del producto, y el link al producto.
+    expect(d60.rows.find((r) => r.externalId === 'MLA1000000001')).toMatchObject({ productId, sku: 'SP-1-00 / SP-1-50' });
     // Todas: entra la pausada, sin visitas leídas en el período.
     const all = await load({ estado: 'todas' });
     expect(all.rows.map((r) => r.externalId)).toContain('MLA1000000004');
