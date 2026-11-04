@@ -77,6 +77,22 @@ function translated(e: unknown): unknown {
 }
 
 /**
+ * Si Mercado Libre rechaza por el estado de la publicación, el estado y el
+ * subestado que tiene ahora, leídos en el momento: la app puede no saberlo todavía.
+ */
+async function statusNow(e: unknown, id: string, token: string): Promise<string | undefined> {
+  if (!(e instanceof MercadoLibreRequestError) || !isObj(e.body) || e.body.error !== 'item.status.invalid') return undefined;
+  try {
+    const item = await mlGet(`/items/${id}?attributes=status,sub_status`, token);
+    if (!isObj(item)) return undefined;
+    const sub = Array.isArray(item.sub_status) && item.sub_status.length > 0 ? item.sub_status.join(', ') : 'ninguno';
+    return `Estado en Mercado Libre ahora: status ${String(item.status ?? 'sin dato')}, sub_status ${sub}.`;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * El rechazo de la descripción, siempre con la respuesta completa de Mercado
  * Libre: el pedido que se hizo, el código HTTP y el cuerpo (message, error y
  * cause). Hay rechazos que solo se entienden con todo eso.
@@ -658,7 +674,7 @@ export const mercadolibrePublisher: ChannelPublisher = {
     try {
       await mlSend('PUT', put, accessToken, { plain_text: value });
     } catch (e) {
-      if (!(e instanceof MercadoLibreRequestError) || e.status !== 404) throw descriptionRejected('PUT', put, e);
+      if (!(e instanceof MercadoLibreRequestError) || e.status !== 404) throw descriptionRejected('PUT', put, e, await statusNow(e, id, accessToken));
       const post = `/items/${id}/description`;
       try {
         await mlSend('POST', post, accessToken, { plain_text: value });

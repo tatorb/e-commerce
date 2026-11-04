@@ -109,6 +109,8 @@ type Item = {
   campaignLater?: boolean;
   // El canal no acepta la descripción: el motivo.
   descriptionRejected?: string;
+  // El estado en el canal, cuando no deja cambiar la descripción por el estado.
+  statusNow?: { status: string; sub_status: string[] };
   // Los términos de venta, como la garantía, tal cual los manda.
   saleTerms?: Record<string, unknown>[];
 };
@@ -163,6 +165,7 @@ describe.skipIf(!url)('subir al canal en la base', () => {
           tags: it.tags ?? [],
           shipping: { logistic_type: it.full ? 'fulfillment' : 'cross_docking' },
           sale_terms: it.saleTerms ?? [],
+          ...(it.statusNow ?? {}),
         });
       }
       if (item && req.method === 'PUT') {
@@ -298,6 +301,7 @@ describe.skipIf(!url)('subir al canal en la base', () => {
       if (desc && req.method === 'PUT') {
         const it = items[desc[1]];
         if (it?.descriptionRejected) return json(400, { message: 'validation_error', cause: [{ message: it.descriptionRejected }] });
+        if (it?.statusNow) return json(400, { cause: [], message: 'To add a description the item status should be one of [active, paused]', error: 'item.status.invalid', status: 400 });
         if (!it || it.description === null) return json(404, { message: 'no description' });
         it.description = body.plain_text;
         return json(200, {});
@@ -1357,6 +1361,12 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     ]);
     expect((await state('MLA3')).draft).toEqual(['description']);
     delete items.MLA3.descriptionRejected;
+    // Rechazada por el estado: va el estado que tiene ahora en el canal.
+    items.MLA3.statusNow = { status: 'under_review', sub_status: ['forbidden'] };
+    const byStatus = await run('push_descriptions', { cuenta: 'prueba' });
+    expect(byStatus.subidas[0].motivo).toContain('error":"item.status.invalid"');
+    expect(byStatus.subidas[0].motivo).toMatch(/Estado en Mercado Libre ahora: status under_review, sub_status forbidden\.$/);
+    delete items.MLA3.statusNow;
     expect((await run('push_descriptions', { cuenta: 'prueba' })).subidas).toEqual([expect.objectContaining({ publicacion: 'MLA3', resultado: 'subida' })]);
     expect(await run('push_descriptions', { cuenta: 'prueba' })).toEqual({ subidas: [], aviso: 'No hay descripciones por subir en la cuenta.' });
   });
