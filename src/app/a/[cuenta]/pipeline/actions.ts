@@ -1,6 +1,7 @@
 'use server';
 
 import { act } from '@/lib/auth/guard';
+import { OptionError } from '@/lib/product-options';
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@/lib/db';
 import { requireUser } from '@/lib/auth/session';
@@ -138,7 +139,7 @@ export async function createPipelinePublicationAction(
       revalidatePath(`/a/${accountSlug}`, 'layout');
       return { ok: true, id: r.publicationId };
     } catch (e) {
-      if (e instanceof PipelineError) return { ok: false, error: e.message };
+      if (e instanceof PipelineError || e instanceof OptionError) return { ok: false, error: e.message };
       throw e;
     }
   });

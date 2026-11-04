@@ -1,4 +1,6 @@
 import { PageHeader } from '@/components/dashboard/PageHeader';
+import { loadProductOptions } from '@/lib/product-options';
+import { prisma } from '@/lib/db';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Breadcrumb } from '@/components/navigation/Breadcrumb';
 import { EMPTY_PRODUCT, ProductForm } from '@/components/products/ProductForm';
@@ -9,6 +11,7 @@ export const metadata = { title: 'Nuevo producto' };
 export default async function NewProductPage({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
   const { account } = await requireAccount(cuenta, 'productos');
+  const options = await loadProductOptions(prisma, account.id);
   const base = `/a/${account.slug}/productos`;
 
   return (
@@ -27,7 +30,7 @@ export default async function NewProductPage({ params }: { params: Promise<{ cue
         </div>
       </PageHeader>
       <PageBody>
-        <ProductForm accountSlug={account.slug} productId={null} initial={EMPTY_PRODUCT} />
+        <ProductForm accountSlug={account.slug} productId={null} initial={EMPTY_PRODUCT} options={options} />
       </PageBody>
     </>
   );

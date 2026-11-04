@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { cookies } from 'next/headers';
-import { AlignLeft, BellRing, Receipt, Camera, ClipboardList, DollarSign, History, Image as ImageIcon, KanbanSquare, ListChecks, ListTodo, MessageCircleQuestion, MessageSquareText, Package, PlugZap, RefreshCw, SlidersHorizontal, Type, Upload, Users, TrendingUp } from 'lucide-react';
+import { AlignLeft, BellRing, Receipt, Camera, ClipboardList, DollarSign, History, Image as ImageIcon, KanbanSquare, ListChecks, ListTodo, MessageCircleQuestion, MessageSquareText, Package, PlugZap, RefreshCw, SlidersHorizontal, Type, Upload, Users, TrendingUp, Shapes } from 'lucide-react';
 import { NavLink } from '@/components/dashboard/NavLink';
 import { SidebarShell } from '@/components/dashboard/SidebarShell';
 import { SidebarToggle } from '@/components/dashboard/SidebarToggle';
@@ -150,6 +150,11 @@ export async function Sidebar({
             <p className="mt-3 mb-1 px-3 text-[10px] uppercase tracking-wide text-muted-foreground font-medium md:group-data-[collapsed=true]:hidden">
               Ajustes
             </p>
+          ) : null}
+          {sees('productos') ? (
+            <NavLink href={`${accountHome}/tipos-y-marcas`} label="Tipos y marcas">
+              <Shapes className="h-4 w-4" />
+            </NavLink>
           ) : null}
           {sees('estandar') ? (
             <NavLink href={`${accountHome}/estandar`} label="Estándar">

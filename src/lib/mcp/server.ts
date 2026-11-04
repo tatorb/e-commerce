@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { OptionError } from '@/lib/product-options';
 import { CatalogError } from '@/domain/catalog-data';
 import { ComboError } from '@/domain/combos';
 import { PipelineError } from '@/domain/pipeline';
@@ -112,7 +113,8 @@ async function callTool(ctx: McpContext, name: string, rawArgs: unknown) {
       e instanceof ComboError ||
       e instanceof TechnicalSheetError ||
       e instanceof TaskError ||
-      e instanceof StockError
+      e instanceof StockError ||
+      e instanceof OptionError
     ) {
       return text(e.message.replace(/Recargá la página\./g, 'Volvé a consultarla antes de seguir.'), true);
     }

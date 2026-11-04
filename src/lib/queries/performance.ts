@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@/generated/prisma/client';
+import { loadProductOptions } from '@/lib/product-options';
 import type { ChannelStatus } from '@/generated/prisma/enums';
 import { latestMetrics } from '@/domain/measurements';
 import { conversionPct, CORRECTION_FIELDS, lightOf, LIGHT_ORDER, PERIODS, type Light, type Period } from '@/domain/performance';
@@ -98,15 +99,8 @@ async function lastCorrections(db: Db, ids: string[]): Promise<Map<string, { at:
   return new Map(rows.map((r) => [r.publicationId, { at: r.at, fields: r.fields }]));
 }
 
-/** Las opciones de marca y tipo de producto de la cuenta, de la ficha de cada producto. */
-async function options(db: Db, accountId: string) {
-  const products = await db.product.findMany({
-    where: { accountId, publications: { some: { externalId: { not: null } } } },
-    select: { brand: true, productType: true },
-  });
-  const sorted = (list: (string | null)[]) => [...new Set(list.map((v) => v?.trim()).filter((v): v is string => !!v))].sort((a, b) => a.localeCompare(b, 'es'));
-  return { brands: sorted(products.map((p) => p.brand)), types: sorted(products.map((p) => p.productType)) };
-}
+/** Las opciones de marca y tipo de producto: las listas fijas de la cuenta. */
+const options = (db: Db, accountId: string) => loadProductOptions(db, accountId).then((o) => ({ brands: o.brands, types: o.types }));
 
 export async function loadPerformance(db: Db, accountId: string, f: PerformanceFilters, now = new Date()) {
   const from = new Date(now.getTime() - f.period * DAY);

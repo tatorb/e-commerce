@@ -1,4 +1,5 @@
 import { SectionBody, SectionCard } from '@/components/ui/section-card';
+import type { ProductOptions } from '@/lib/product-options';
 import type { CatalogData } from '@/lib/catalog-data';
 import type { ComboData } from '@/lib/queries/combos';
 import { ComboItemsCard } from '@/components/products/ComboItemsCard';
@@ -53,10 +54,13 @@ export function InfoStep({
   combo,
   driveReady,
   shippingCost,
+  options,
 }: {
   accountSlug: string;
   timeZone: string;
   ctx: TitleContext;
+  // Las listas fijas de la cuenta para el tipo y la marca.
+  options: ProductOptions;
   research: ResearchData;
   catalog: CatalogData | null;
   combo: ComboData | null;
@@ -81,6 +85,7 @@ export function InfoStep({
           <ProductInfoForm
             accountSlug={accountSlug}
             publicationId={publicationId}
+            options={options}
             initial={{
               productType: s(p.productType),
               brand: s(p.brand),

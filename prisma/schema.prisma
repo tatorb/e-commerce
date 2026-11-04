@@ -217,6 +217,7 @@ model Account {
   pricingSettings     PricingSettings?
   tasks               Task[]
   shootProtocols      ShootProtocol[]
+  productOptions      ProductOption[]
 
   @@map("accounts")
 }
@@ -2347,4 +2348,24 @@ model ChannelListingMiss {
 
   @@id([storeId, externalId])
   @@map("channel_listing_misses")
+}
+
+enum ProductOptionKind {
+  TYPE
+  BRAND
+}
+
+// Las opciones fijas de la ficha de cada cuenta: los tipos de producto y las
+// marcas. La ficha guarda el nombre, siempre uno de esta lista. Se agregan,
+// renombran y borran en Ajustes, Tipos y marcas.
+model ProductOption {
+  id        String            @id @default(cuid())
+  accountId String
+  account   Account           @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  kind      ProductOptionKind
+  name      String
+  createdAt DateTime          @default(now())
+
+  @@unique([accountId, kind, name])
+  @@map("product_options")
 }

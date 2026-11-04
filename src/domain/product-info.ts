@@ -3,6 +3,7 @@ import type { Prisma } from '@/generated/prisma/client';
 import { withEngineData } from './engine';
 import { moveMeasureRefs, type MeasureRow } from './measure-moves';
 import { productInputSchema } from './products';
+import { resolveProductOptions } from '@/lib/product-options';
 
 // Los datos de la ficha que se editan desde el paso Información: tipo de
 // producto, marca, número de pieza, línea, origen, medidas y compatibilidades. Se
@@ -30,7 +31,10 @@ export type ProductInfo = z.output<typeof productInfoSchema>;
 type Tx = Prisma.TransactionClient;
 
 export async function updateProductInfo(tx: Tx, args: { accountId: string; productId: string; data: ProductInfo }) {
-  const { productId, data } = args;
+  const { productId } = args;
+  // El tipo y la marca, siempre de las listas de la cuenta. Lo que ya tenía y no cambia, queda.
+  const current = await tx.product.findFirst({ where: { id: productId, accountId: args.accountId }, select: { productType: true, brand: true } });
+  const data = await resolveProductOptions(tx, args.accountId, args.data, undefined, current);
   const product = await tx.product.findFirst({ where: { id: productId, accountId: args.accountId }, select: { id: true } });
   if (!product) throw new Error('El producto no existe en esta cuenta.');
   await tx.product.update({

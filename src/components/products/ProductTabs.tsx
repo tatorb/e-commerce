@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState, type ReactNode } from 'react';
+import type { ProductOptions } from '@/lib/product-options';
 import { ProductForm, type ProductFormSection, type ProductFormValues } from '@/components/products/ProductForm';
 import { TAB_ROW, TabCount, tabClass } from '@/components/ui/tab-links';
 
@@ -30,7 +31,7 @@ export function ProductTabs({
   panels: Partial<Record<ProductTabKey, ReactNode>>;
   // Lo de cada pestaña después de la ficha, por ejemplo borrar el producto.
   after?: Partial<Record<ProductTabKey, ReactNode>>;
-  form: { accountSlug: string; productId: string; initial: ProductFormValues };
+  form: { accountSlug: string; productId: string; initial: ProductFormValues; options: ProductOptions };
 }) {
   const [active, setActive] = useState<ProductTabKey>(tabs.some((t) => t.key === initial) ? initial : tabs[0].key);
   const nav = useRef<HTMLElement>(null);
@@ -74,7 +75,7 @@ export function ProductTabs({
       ))}
       {/* La ficha queda armada siempre, para no perder lo que se está cargando. */}
       <div hidden={!sections}>
-        <ProductForm accountSlug={form.accountSlug} productId={form.productId} initial={form.initial} sections={sections ?? []} />
+        <ProductForm accountSlug={form.accountSlug} productId={form.productId} initial={form.initial} sections={sections ?? []} options={form.options} />
       </div>
       {tabs.map((t) =>
         after?.[t.key] ? (

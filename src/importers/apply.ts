@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { loadProductOptions, resolveOrDrop } from '@/lib/product-options';
 import { Prisma, type PrismaClient } from '@/generated/prisma/client';
 import type { ChannelAdapter } from '@/channels/types';
 import {
@@ -149,12 +150,26 @@ export async function applyRows(db: PrismaClient, ctx: ApplyContext, rows: RowIn
     errors: [],
   };
 
+  // El tipo y la marca solo de las listas de la cuenta: lo que no está, no se carga y se avisa.
+  const lists = await loadProductOptions(db, ctx.accountId);
+  // Una cuenta sin listas todavía: esta importación las arma con lo que trae.
+  const open = { TYPE: lists.types.length === 0, BRAND: lists.brands.length === 0 };
+
   for (const row of rows) {
     result.processed++;
     const record = toRecord(row, ctx.adapter);
     if (record.error || !record.product) {
       result.errors.push({ row: record.rowNumber, message: record.error ?? 'Datos inválidos.' });
       continue;
+    }
+    // Los avisos de lo que no está en la lista salen solo si ese dato se iba a cargar.
+    const optionWarnings: { field: 'productType' | 'brand'; message: string }[] = [];
+    for (const [kind, field] of [['TYPE', 'productType'], ['BRAND', 'brand']] as const) {
+      const r = await resolveOrDrop(db, ctx.accountId, lists, kind, record.product[field], open[kind]);
+      record.product = { ...record.product, [field]: r.value === undefined ? null : r.value };
+      if (r.value === undefined) delete record.content[field];
+      else if (r.value !== null) record.content[field] = r.value;
+      if (r.warning) optionWarnings.push({ field, message: r.warning });
     }
     const publicationData = publicationDataSchema.safeParse({
       ...record.publication,
@@ -177,6 +192,8 @@ export async function applyRows(db: PrismaClient, ctx: ApplyContext, rows: RowIn
         let kind: 'existing' | 'link' | 'new';
         let publicationId: string;
         let changed = 0;
+        // Si el producto ya tenía el dato, lo que no está en la lista no se iba a usar: no se avisa.
+        let warnings = optionWarnings;
 
         if (found?.publicationId) {
           kind = 'existing';
@@ -213,6 +230,7 @@ export async function applyRows(db: PrismaClient, ctx: ApplyContext, rows: RowIn
         if (found) {
           const target = { productId: found.productId, publicationId: found.publicationId };
           const current = await loadContent(tx, target.productId, target.publicationId);
+          if (mode === 'FILL_EMPTY' || !target.publicationId || ctx.fromChannel) warnings = optionWarnings.filter((w) => !current[w.field]);
           const { changes } = planContentUpdate(current, record.content, target.publicationId ? mode : 'FILL_EMPTY', {
             publication: target.publicationId !== null,
             productMode: ctx.fromChannel ? 'FILL_EMPTY' : undefined,
@@ -278,8 +296,9 @@ export async function applyRows(db: PrismaClient, ctx: ApplyContext, rows: RowIn
           });
           measured = true;
         }
-        return { kind, measured, changed };
+        return { kind, measured, changed, warnings };
       });
+      for (const w of outcome.warnings) result.errors.push({ row: record.rowNumber, message: w.message });
 
       if (outcome.kind === 'new') {
         result.productsCreated++;
@@ -425,7 +444,7 @@ export async function undoImportRun(
           kept++;
           continue;
         }
-        await writeContentField(tx, { productId, publicationId: c.publicationId }, c.field, c.before);
+        await writeContentField(tx, { productId, publicationId: c.publicationId }, c.field, c.before, { dropUnknown: true });
         // Las fotos guardadas de este producto se actualizan con lo devuelto.
         for (const s of snapshots.values()) {
           if (!isPublicationField(c.field) || s === snapshot) (s as Record<string, unknown>)[c.field] = c.before;

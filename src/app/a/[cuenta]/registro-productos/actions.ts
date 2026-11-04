@@ -1,6 +1,7 @@
 'use server';
 
 import { headers } from 'next/headers';
+import { OptionError } from '@/lib/product-options';
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@/lib/db';
 import { act } from '@/lib/auth/guard';
@@ -34,7 +35,7 @@ async function guard<T extends object>(accountSlug: string, run: () => Promise<T
     revalidatePath(`/a/${accountSlug}`, 'layout');
     return { ok: true, ...r };
   } catch (e) {
-    if (e instanceof ShootError || e instanceof PhotoError || e instanceof VideoError || e instanceof PipelineError) return { ok: false, error: e.message };
+    if (e instanceof ShootError || e instanceof PhotoError || e instanceof VideoError || e instanceof PipelineError || e instanceof OptionError) return { ok: false, error: e.message };
     const storage = storageError(e);
     if (storage) return { ok: false, error: storage };
     throw e;

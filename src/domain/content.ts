@@ -1,4 +1,5 @@
 import type { Prisma } from '@/generated/prisma/client';
+import { OptionError, resolveProductOptions } from '@/lib/product-options';
 import { parseEngine } from './engine';
 import { parseNameValueList, type NameValue } from './name-value';
 import { writeToFamily } from './family-members';
@@ -314,6 +315,8 @@ export async function writeContentField(
   target: { productId: string; publicationId: string | null },
   field: ContentField,
   value: unknown,
+  // Un tipo o una marca que ya no está en la lista queda sin dato, en vez de frenar. Para deshacer una importación.
+  opts: { dropUnknown?: boolean } = {},
 ): Promise<void> {
   const { productId, publicationId } = target;
   if (isPublicationField(field)) {
@@ -378,6 +381,20 @@ export async function writeContentField(
         before,
         before.map((v) => ({ ...v, measure: changes.has(v.id) ? changes.get(v.id)! : v.measure })),
       );
+      return;
+    }
+    case 'brand':
+    case 'productType': {
+      // El tipo y la marca, siempre de las listas de la cuenta.
+      const { accountId } = await tx.product.findUniqueOrThrow({ where: { id: productId }, select: { accountId: true } });
+      let next: string | null;
+      try {
+        next = (await resolveProductOptions(tx, accountId, { [field]: value as string | null }))[field] ?? null;
+      } catch (e) {
+        if (!(opts.dropUnknown && e instanceof OptionError)) throw e;
+        next = null;
+      }
+      await tx.product.update({ where: { id: productId }, data: { [field]: next } });
       return;
     }
     default:

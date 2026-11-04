@@ -1,6 +1,8 @@
 'use client';
 
 import { useMemo, useState, useTransition } from 'react';
+import { OptionSelect } from '@/components/products/OptionSelect';
+import type { ProductOptions } from '@/lib/product-options';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -76,10 +78,13 @@ export function ProductForm({
   productId,
   initial,
   sections,
+  options,
 }: {
   accountSlug: string;
   productId: string | null;
   initial: ProductFormValues;
+  // Las listas fijas de la cuenta para el tipo y la marca.
+  options: ProductOptions;
   // Las partes que se ven; sin elegir, todas. Lo que no se ve se guarda igual, como está.
   sections?: ProductFormSection[];
 }) {
@@ -186,14 +191,26 @@ export function ProductForm({
               {GENERAL_FIELDS.map((f) => (
                 <div key={f.key} className="space-y-1.5">
                   <Label htmlFor={f.key}>{f.label}</Label>
-                  <Input
-                    id={f.key}
-                    value={values[f.key] as string}
-                    onChange={(e) => set(f.key, e.target.value)}
-                    placeholder={f.placeholder}
-                    disabled={pending}
-                    maxLength={200}
-                  />
+                  {f.key === 'brand' || f.key === 'productType' ? (
+                    <OptionSelect
+                      id={f.key}
+                      value={values[f.key] as string}
+                      options={f.key === 'brand' ? options.brands : options.types}
+                      onChange={(v) => set(f.key, v)}
+                      disabled={pending}
+                      empty={f.key === 'brand' ? 'Sin marca' : 'Sin tipo'}
+                      accountSlug={accountSlug}
+                    />
+                  ) : (
+                    <Input
+                      id={f.key}
+                      value={values[f.key] as string}
+                      onChange={(e) => set(f.key, e.target.value)}
+                      placeholder={f.placeholder}
+                      disabled={pending}
+                      maxLength={200}
+                    />
+                  )}
                 </div>
               ))}
             </div>

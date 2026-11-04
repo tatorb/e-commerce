@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { loadProductOptions } from '@/lib/product-options';
 import { Check, ChevronRight, Search } from 'lucide-react';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
@@ -38,7 +39,7 @@ export default async function ShootPage({ params, searchParams }: { params: Prom
   const { user, account } = await requireAccount(cuenta, 'captura');
   const base = `/a/${account.slug}/registro-productos`;
   const productId = one(sp.producto);
-  const plan = productId ? await shootPlan(prisma, account.id, productId) : null;
+  const [plan, options] = await Promise.all([productId ? shootPlan(prisma, account.id, productId) : null, loadProductOptions(prisma, account.id)]);
   // Lo ya registrado como lo muestra el celular, con la hora de la cuenta.
   const shots: SessionShot[] = (plan?.shots ?? []).map((s) => ({
     id: s.id,
@@ -97,7 +98,7 @@ export default async function ShootPage({ params, searchParams }: { params: Prom
               {q.trim().length < 2 && products.length > 0 ? <p className="text-xs font-medium text-muted-foreground">Los últimos registrados</p> : null}
               <ProductList products={products} base={base} />
               {/* Si no está, se crea acá con lo básico, con lo buscado ya cargado. */}
-              <NewProductForm key={q} accountSlug={account.slug} base={base} search={q.trim()} startOpen={q.trim().length >= 2 && products.length === 0} />
+              <NewProductForm key={q} accountSlug={account.slug} base={base} search={q.trim()} startOpen={q.trim().length >= 2 && products.length === 0} options={options} />
             </section>
           </div>
         </PageBody>

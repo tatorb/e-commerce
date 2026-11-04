@@ -218,7 +218,7 @@ const createPublicationTool = defineTool({
     producto_nuevo: z
       .object({
         nombre: z.string().describe('El nombre del producto: lo que es y su código, por ejemplo "Subconjunto SP-413". No es el título de la publicación.'),
-        tipo: z.string().optional().describe('Tipo de producto, por ejemplo "Kit de embrague".'),
+        tipo: z.string().optional().describe('Tipo de producto, uno de la lista de la cuenta, por ejemplo "Kit de embrague".'),
         individual_o_combo: z.enum(['individual', 'combo']).optional().describe('Sin mandar, individual.'),
       })
       .optional()
@@ -365,12 +365,12 @@ const updateProductInfoTool = defineTool({
   section: ['productos', 'pipeline'],
   title: 'Corregir la ficha',
   description:
-    'Corrige la ficha del producto de una publicación: tipo, marca, número de pieza, línea, origen, medidas y compatibilidades. También si es individual o combo, y los productos del combo: un combo se arma solo con productos individuales, y un producto que está dentro de un combo no puede ser combo. La ficha es la fuente de verdad y la comparten todas las publicaciones del producto. Lo que no se manda queda como está; las listas reemplazan la lista entera. Usá solo datos que te dio la persona o que están en la ficha, nunca supuestos.',
+    'Corrige la ficha del producto de una publicación: tipo, marca, número de pieza, línea, origen, medidas y compatibilidades. También si es individual o combo, y los productos del combo: un combo se arma solo con productos individuales, y un producto que está dentro de un combo no puede ser combo. La ficha es la fuente de verdad y la comparten todas las publicaciones del producto. Lo que no se manda queda como está; las listas reemplazan la lista entera. El tipo y la marca son de listas fijas de la cuenta (Ajustes, Tipos y marcas): tienen que ser uno de la lista; si no está, devuelve las que hay y no se guarda nada. Usá solo datos que te dio la persona o que están en la ficha, nunca supuestos.',
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg,
-    tipo: optionalText('Tipo de producto, por ejemplo "Kit de embrague"'),
-    marca: optionalText('Marca del repuesto'),
+    tipo: optionalText('Tipo de producto, uno de la lista de la cuenta, por ejemplo "Kit de embrague"'),
+    marca: optionalText('Marca del repuesto, una de la lista de la cuenta'),
     numero_de_pieza: optionalText('Número de pieza u OEM'),
     linea: optionalText('Línea, por ejemplo "Liviano nafta"'),
     origen: optionalText('País de origen, por ejemplo "Argentina"'),

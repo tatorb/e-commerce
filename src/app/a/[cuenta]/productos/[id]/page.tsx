@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation';
+import { loadProductOptions } from '@/lib/product-options';
 import { unitsLast90 } from '@/lib/sales/units';
 import { ProductStockPanel } from '@/components/products/ProductStockPanel';
 import { loadProductStock } from '@/lib/stock';
@@ -107,9 +108,10 @@ export default async function ProductPage({
   ]);
   if (!product || !combo || !stock || !costs) notFound();
   // Lo que le toca a cada publicación del stock del producto, para su cantidad.
-  const [plans, units] = await Promise.all([
+  const [plans, units, options] = await Promise.all([
     plansFor(prisma, product.publications.map((p) => p.id)),
     unitsLast90(prisma, product.publications.map((p) => p.id)),
+    loadProductOptions(prisma, account.id),
   ]);
 
   const base = `/a/${account.slug}/productos`;
@@ -179,7 +181,7 @@ export default async function ProductPage({
         <ProductTabs
           tabs={tabs}
           initial={initial}
-          form={{ accountSlug: account.slug, productId: product.id, initial: toFormValues(product) }}
+          form={{ accountSlug: account.slug, productId: product.id, initial: toFormValues(product), options }}
           panels={{
             publicaciones:
               pubs.length > 0 ? (

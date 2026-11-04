@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { loadProductOptions } from '@/lib/product-options';
 import { ListChecks } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TabLinks } from '@/components/ui/tab-links';
@@ -40,11 +41,12 @@ export default async function PipelinePage({
   const kinds = parseKinds(tipo);
   const toPushView = vista === 'por-subir';
   // Por subir mira todas las publicaciones de la cuenta: se carga solo en su pestaña.
-  const [all, stores, toPush, questions] = await Promise.all([
+  const [all, stores, toPush, questions, options] = await Promise.all([
     toPushView ? Promise.resolve([]) : listBoard(account.id),
     listStores(account.id),
     toPushView ? listToPush(account.id) : Promise.resolve([]),
     unansweredSummary(account.id),
+    loadProductOptions(prisma, account.id),
   ]);
   const items = kinds.length > 0 ? all.filter((i) => kinds.includes(i.kind)) : all;
   // Cuántas tareas abiertas tiene cada tarjeta.
@@ -72,6 +74,7 @@ export default async function PipelinePage({
             <NewPipelinePublicationDialog
               accountSlug={account.slug}
               stores={stores.map((s) => ({ id: s.id, name: s.name, channelName: s.channel.name }))}
+              types={options.types}
             />
           </div>
         </div>

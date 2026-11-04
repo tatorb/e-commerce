@@ -113,7 +113,7 @@ describe.skipIf(!url)('rendimiento en la base', () => {
 
   beforeEach(async () => {
     await db.$executeRawUnsafe(
-      'TRUNCATE channel_listing_misses, channel_sync_changes, publication_visit_days, sales, sale_readers, import_runs, channel_connections, publications, product_variants, products, stores, channels, accounts, users CASCADE',
+      'TRUNCATE product_options, channel_listing_misses, channel_sync_changes, publication_visit_days, sales, sale_readers, import_runs, channel_connections, publications, product_variants, products, stores, channels, accounts, users CASCADE',
     );
     asked.length = 0;
     resetVisitsTogether();
@@ -191,6 +191,8 @@ describe.skipIf(!url)('rendimiento en la base', () => {
     const c = await mk('MLA1000000004', 'C pausada', { channelStatus: 'PAUSED' });
     const other = await db.product.create({ data: { accountId, name: 'Otro', brand: 'Otra marca', productType: 'Subconjunto (pistones + aros)' } });
     await db.publication.create({ data: { productId: other.id, storeId, externalId: 'MLA1000000009', title: 'De otra marca', channelStatus: 'ACTIVE' } });
+    // Las marcas de los filtros son las de la lista de la cuenta.
+    await db.productOption.createMany({ data: ['Persan', 'Otra marca'].map((name) => ({ accountId, kind: 'BRAND' as const, name })) });
     // Visitas por día: 12 en A en el último mes, 80 en B, y 40 de A de hace 50 días.
     const visit = (publicationId: string, days: number, visits: number) =>
       db.publicationVisitDay.create({ data: { publicationId, day: new Date(`${ago(days).toISOString().slice(0, 10)}T00:00:00Z`), visits } });

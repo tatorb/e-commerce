@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { resolveProductOptions } from '@/lib/product-options';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { RecordSource } from '@/generated/prisma/enums';
 import { moveMeasureRefs, type MeasureRow } from './measure-moves';
@@ -130,7 +131,10 @@ export async function saveProduct(db: PrismaClient, args: SaveArgs): Promise<{ i
 
 /** Lo mismo que saveProduct, dentro de una transacción que ya está abierta. */
 export async function writeProduct(tx: Tx, args: SaveArgs): Promise<{ id: string }> {
-  const { accountId, productId, data } = args;
+  const { accountId, productId } = args;
+  // El tipo y la marca, siempre de las listas de la cuenta. Lo que ya tenía y no cambia, queda.
+  const current = productId ? await tx.product.findFirst({ where: { id: productId, accountId }, select: { productType: true, brand: true } }) : null;
+  const data = await resolveProductOptions(tx, accountId, args.data, undefined, current);
   const fields = {
     name: data.name,
     brand: data.brand,

@@ -1,6 +1,8 @@
 'use client';
 
 import { useState } from 'react';
+import type { ProductOptions } from '@/lib/product-options';
+import { OptionSelect } from '@/components/products/OptionSelect';
 import { useRouter } from 'next/navigation';
 import { Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -55,7 +57,20 @@ function MeasureRows({ rows, onChange, idPrefix }: { rows: MeasureRow[]; onChang
 }
 
 /** Crear un producto nuevo con lo básico y empezar a registrarlo. */
-export function NewProductForm({ accountSlug, base, search, startOpen }: { accountSlug: string; base: string; search: string; startOpen: boolean }) {
+export function NewProductForm({
+  accountSlug,
+  base,
+  search,
+  startOpen,
+  options,
+}: {
+  accountSlug: string;
+  base: string;
+  search: string;
+  startOpen: boolean;
+  // Las listas fijas de la cuenta para el tipo y la marca.
+  options: ProductOptions;
+}) {
   const router = useRouter();
   // Lo que se buscó: con números parece un código; si no, el nombre.
   const looksLikeCode = /\d/.test(search);
@@ -107,12 +122,12 @@ export function NewProductForm({ accountSlug, base, search, startOpen }: { accou
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="nuevo-marca">Marca</Label>
-          <Input id="nuevo-marca" value={brand} onChange={(e) => setBrand(e.target.value)} className="h-11 text-base" />
+          <OptionSelect id="nuevo-marca" value={brand} options={options.brands} onChange={setBrand} empty="Sin marca" className="h-11 text-base" />
         </div>
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="nuevo-tipo">Tipo de producto</Label>
-        <Input id="nuevo-tipo" value={productType} onChange={(e) => setProductType(e.target.value)} placeholder="Por ejemplo: Bujía" className="h-11 text-base" />
+        <OptionSelect id="nuevo-tipo" value={productType} options={options.types} onChange={setProductType} empty="Sin tipo" className="h-11 text-base" />
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="nuevo-medida">Medidas, si tiene</Label>

@@ -1,6 +1,7 @@
 'use server';
 
 import { act } from '@/lib/auth/guard';
+import { OptionError } from '@/lib/product-options';
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@/lib/db';
 import { requireUser } from '@/lib/auth/session';
@@ -72,7 +73,12 @@ export async function saveProductInfoAction(accountSlug: string, publicationId: 
       ),
     });
     if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Revisá los datos.' };
-    await prisma.$transaction((tx) => updateProductInfo(tx, { accountId: t.account.id, productId: t.pub.productId, data: parsed.data }));
+    try {
+      await prisma.$transaction((tx) => updateProductInfo(tx, { accountId: t.account.id, productId: t.pub.productId, data: parsed.data }));
+    } catch (e) {
+      if (e instanceof OptionError) return { ok: false, error: e.message };
+      throw e;
+    }
     return done(accountSlug, 'Guardado en la ficha.');
   });
 }

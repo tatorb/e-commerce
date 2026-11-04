@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import { OptionSelect } from '@/components/products/OptionSelect';
 import { useRouter } from 'next/navigation';
 import { Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -58,7 +59,7 @@ function Segmented<T extends string>({
 // "Nueva publicación" desde el tablero: elige el producto, o carga una ficha
 // corta, y la tienda. La publicación se crea sin publicar, entra en
 // Información y se abre su pantalla.
-export function NewPipelinePublicationDialog({ accountSlug, stores }: { accountSlug: string; stores: StoreChoice[] }) {
+export function NewPipelinePublicationDialog({ accountSlug, stores, types }: { accountSlug: string; stores: StoreChoice[]; types: string[] }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<Mode>('existing');
@@ -181,14 +182,7 @@ export function NewPipelinePublicationDialog({ accountSlug, stores }: { accountS
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="new-pub-type">Tipo de producto</Label>
-                <Input
-                  id="new-pub-type"
-                  value={productType}
-                  onChange={(e) => setProductType(e.target.value)}
-                  placeholder="Kit de embrague, subconjunto…"
-                  maxLength={200}
-                  disabled={pending}
-                />
+                <OptionSelect id="new-pub-type" value={productType} options={types} onChange={setProductType} empty="Sin tipo" disabled={pending} accountSlug={accountSlug} />
               </div>
               <div className="space-y-1.5">
                 <p className="text-sm font-medium">Individual o combo</p>

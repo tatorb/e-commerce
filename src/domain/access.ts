@@ -182,7 +182,7 @@ export const SECTION_PATH: Record<Section, string> = {
 
 /** La sección de una dirección de la app, por ejemplo /a/insur/pipeline/123. Null fuera de las secciones. */
 // Pantallas que no son una sección propia y se ven con el permiso de otra.
-const PATH_ALIASES: Record<string, Section> = { rendimiento: 'publicaciones' };
+const PATH_ALIASES: Record<string, Section> = { rendimiento: 'publicaciones', 'tipos-y-marcas': 'productos' };
 
 export function sectionFromPath(pathname: string | null): Section | null {
   const segment = pathname?.match(/^\/a\/[^/]+\/([^/?#]+)/)?.[1];

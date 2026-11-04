@@ -1,6 +1,8 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { OptionSelect } from '@/components/products/OptionSelect';
+import type { ProductOptions } from '@/lib/product-options';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -43,10 +45,13 @@ export function ProductInfoForm({
   accountSlug,
   publicationId,
   initial,
+  options,
 }: {
   accountSlug: string;
   publicationId: string;
   initial: ProductInfoValues;
+  // Las listas fijas de la cuenta para el tipo y la marca.
+  options: ProductOptions;
 }) {
   const [values, setValues] = useState(initial);
   const [saved, setSaved] = useState(initial);
@@ -81,14 +86,26 @@ export function ProductInfoForm({
         {FIELDS.map((f) => (
           <div key={f.key} className="space-y-1.5">
             <Label htmlFor={`info-${f.key}`}>{f.label}</Label>
-            <Input
-              id={`info-${f.key}`}
-              value={values[f.key]}
-              onChange={(e) => set(f.key, e.target.value)}
-              placeholder={f.placeholder}
-              disabled={action.pending}
-              maxLength={200}
-            />
+            {f.key === 'brand' || f.key === 'productType' ? (
+              <OptionSelect
+                id={`info-${f.key}`}
+                value={values[f.key]}
+                options={f.key === 'brand' ? options.brands : options.types}
+                onChange={(v) => set(f.key, v)}
+                disabled={action.pending}
+                empty={f.key === 'brand' ? 'Sin marca' : 'Sin tipo'}
+                accountSlug={accountSlug}
+              />
+            ) : (
+              <Input
+                id={`info-${f.key}`}
+                value={values[f.key]}
+                onChange={(e) => set(f.key, e.target.value)}
+                placeholder={f.placeholder}
+                disabled={action.pending}
+                maxLength={200}
+              />
+            )}
           </div>
         ))}
       </div>

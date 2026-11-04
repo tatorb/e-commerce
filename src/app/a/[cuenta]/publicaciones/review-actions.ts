@@ -1,6 +1,7 @@
 'use server';
 
 import { act } from '@/lib/auth/guard';
+import { OptionError } from '@/lib/product-options';
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@/lib/db';
 import { requireUser } from '@/lib/auth/session';
@@ -40,7 +41,7 @@ async function proposalFor(accountSlug: string, proposalId: string) {
 
 function failure(e: unknown): { ok: false; error: string; problems?: ReviewProblem[] } {
   if (e instanceof ReviewValidationError) return { ok: false, error: 'Todavía no se puede aprobar.', problems: e.problems };
-  if (e instanceof ReviewError) return { ok: false, error: e.message };
+  if (e instanceof ReviewError || e instanceof OptionError) return { ok: false, error: e.message };
   throw e;
 }
 

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { loadProductOptions } from '@/lib/product-options';
 import { notFound, redirect } from 'next/navigation';
 import { AppWindow, ExternalLink, Lock, Package, Tag } from 'lucide-react';
 import { EntityHero } from '@/components/navigation/EntityHero';
@@ -140,6 +141,7 @@ export default async function PipelineStepPage({
           loadCombo(prisma, pub.productId),
           driveEmail(prisma),
           productPricing(prisma, account.id, pub.productId),
+          loadProductOptions(prisma, account.id),
         ])
       : null,
     viewing === 'IMAGES'
@@ -369,6 +371,7 @@ export default async function PipelineStepPage({
               combo={info[2]}
               driveReady={info[3] !== null}
               shippingCost={info[4].shipping}
+              options={info[5]}
             />
             <StockFollowCard
               accountSlug={account.slug}
