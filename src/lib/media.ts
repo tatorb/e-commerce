@@ -310,7 +310,7 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
       media: true,
       videoVariants: true,
       variantKey: true,
-      textImages: { select: { textImage: { select: { id: true, slot: true, mediaPlace: true, pngRef: true, pngAt: true } } } },
+      textImages: { select: { textImage: { select: { id: true, slot: true, mediaPlace: true, pngRef: true, pngAt: true, fromDrive: true, fileName: true } } } },
       store: { select: { id: true, channel: { select: { kind: true, name: true } } } },
       product: {
         select: {
@@ -382,7 +382,7 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
     return out;
   });
   // Los PNG del paso Imágenes con texto que ya se generaron, con su lugar fijo si tienen.
-  const pieces = p.textImages.map((t) => t.textImage).sort((a, b) => a.slot - b.slot);
+  const pieces = p.textImages.map((t) => t.textImage).sort((a, b) => Number(a.fromDrive) - Number(b.fromDrive) || a.slot - b.slot);
   const textPlaces = pieces.flatMap((ti) => (ti.pngRef && ti.pngAt && ti.mediaPlace ? [{ ref: { kind: 'text' as const, id: ti.id }, place: ti.mediaPlace }] : []));
   const text: MediaItem[] = pieces.flatMap((ti) =>
     ti.pngRef && ti.pngAt
@@ -391,8 +391,11 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
             ref: { kind: 'text', id: ti.id },
             key: photoKey({ kind: 'text', id: ti.id }),
             thumb: textImageHref(ti.id, ti.pngAt),
-            label: `Imagen con texto ${ti.slot}`,
-            note: `Generada el ${ti.pngAt.toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })}${ti.mediaPlace ? `. Va en el lugar ${ti.mediaPlace}` : ''}`,
+            // Las subidas a mano a la carpeta del Drive, por su nombre.
+            label: ti.fromDrive ? `Imagen con texto del Drive: ${ti.fileName ?? 'sin nombre'}` : `Imagen con texto ${ti.slot}`,
+            note: ti.fromDrive
+              ? 'Subida a la carpeta Imágenes con texto del Drive'
+              : `Generada el ${ti.pngAt.toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })}${ti.mediaPlace ? `. Va en el lugar ${ti.mediaPlace}` : ''}`,
           },
         ]
       : [],
@@ -585,7 +588,7 @@ export async function picturesFor(
         problems.push('La imagen con texto ya no está disponible: generala de nuevo o sacala de la lista.');
         continue;
       }
-      pictures.push({ kind: 'file', data: png.data, type: 'image/png', name: 'imagen-con-texto.png' });
+      pictures.push({ kind: 'file', data: png.data, type: png.type, name: png.name });
     } else {
       const file = await correctedPhotoFile(db, productId, ref.editId);
       if (!file) {

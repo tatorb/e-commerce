@@ -37,6 +37,7 @@ import { loadFamilyMedia } from '@/lib/family-media';
 import { CreateInChannelCard } from '@/components/publication/CreateInChannelCard';
 import { WarrantyCard } from '@/components/publication/WarrantyCard';
 import { warrantyOverview } from '@/lib/warranty';
+import { syncDriveTextImagesQuietly } from '@/lib/text-images/drive-files';
 import { createChecks } from '@/lib/channel-create';
 import { loadPublicationFaces } from '@/lib/queries/publication-faces';
 import { channelInfo, getChannelAdapter } from '@/channels';
@@ -176,7 +177,12 @@ export default async function PipelineStepPage({
       : null,
     viewing === 'PUBLISH' ? loadPublicationFaces(account.id, pub.id) : null,
     // Una familia ordena las fotos de todas sus medidas juntas, una ventana por medida.
-    viewing === 'MEDIA' ? loadFamilyMedia(prisma, account.id, pub.id).then((f) => f ?? loadMediaSources(prisma, account.id, pub.id)) : null,
+    // Antes, las imágenes subidas a mano a la carpeta Imágenes con texto del Drive.
+    viewing === 'MEDIA'
+      ? syncDriveTextImagesQuietly(prisma, { accountId: account.id, productId: pub.productId }).then(() =>
+          loadFamilyMedia(prisma, account.id, pub.id).then((f) => f ?? loadMediaSources(prisma, account.id, pub.id)),
+        )
+      : null,
     // Sin publicar, o una familia con medidas sin publicar: lo que hace falta para crearlas en el canal.
     viewing === 'PUBLISH'
       ? createChecks(prisma, { accountId: account.id, publicationId: pub.id }).then((c) => (pub.externalId && c.measures.length === 0 ? null : c))

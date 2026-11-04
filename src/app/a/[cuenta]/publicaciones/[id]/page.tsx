@@ -24,6 +24,7 @@ import { NavRow } from '@/components/ui/nav-row';
 import { measuresText } from '@/lib/publication-facts';
 import { buyerKey, type BuyerFacts } from '@/lib/buyers';
 import { loadVisits } from '@/lib/visits';
+import { syncDriveTextImagesFor } from '@/lib/text-images/drive-files';
 import { VisitsCard } from '@/components/publication/VisitsCard';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
@@ -154,7 +155,10 @@ export default async function PublicationPage({
   const { user, account } = await requireAccount(cuenta, 'publicaciones');
   const [data, media, visits] = await Promise.all([
     loadPublicationFaces(account.id, id),
-    loadMediaSources(prisma, account.id, id).catch(() => null),
+    // Antes, las imágenes subidas a mano a la carpeta Imágenes con texto del Drive.
+    syncDriveTextImagesFor(prisma, { accountId: account.id, publicationId: id })
+      .then(() => loadMediaSources(prisma, account.id, id))
+      .catch(() => null),
     loadVisits(prisma, id).catch(() => null),
   ]);
   // Sin publicar: lo que hace falta para crearla en el canal.

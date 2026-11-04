@@ -19,8 +19,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     const download = new URL(req.url).searchParams.has('descargar');
     return new NextResponse(Buffer.from(png.data), {
       headers: {
-        'Content-Type': 'image/png',
-        'Content-Disposition': `${download ? 'attachment' : 'inline'}; filename="imagen-con-texto.png"`,
+        'Content-Type': png.type,
+        'Content-Disposition': `${download ? 'attachment' : 'inline'}; filename="${png.name}"`,
         'Cache-Control': 'private, max-age=86400, immutable',
         'X-Content-Type-Options': 'nosniff',
       },

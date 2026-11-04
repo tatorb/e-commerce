@@ -63,7 +63,7 @@ async function sharing(db: Db, publicationId: string): Promise<{ ids: string[]; 
 /** Las piezas de la publicación y su familia, por número. Si dos tienen el mismo número, la de ella. */
 async function piecesOf(db: Db, publicationId: string) {
   const { ids } = await sharing(db, publicationId);
-  const links = await db.publicationTextImage.findMany({ where: { publicationId: { in: ids } }, select: { publicationId: true, textImage: true } });
+  const links = await db.publicationTextImage.findMany({ where: { publicationId: { in: ids }, textImage: { fromDrive: false } }, select: { publicationId: true, textImage: true } });
   const bySlot = new Map<number, (typeof links)[number]['textImage']>();
   for (const l of [...links].sort((a, b) => Number(b.publicationId === publicationId) - Number(a.publicationId === publicationId))) {
     if (!bySlot.has(l.textImage.slot)) bySlot.set(l.textImage.slot, l.textImage);

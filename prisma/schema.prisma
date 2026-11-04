@@ -2427,6 +2427,12 @@ model TextImage {
   // Imagen 1, Imagen 2...
   slot         Int           @default(1)
   mediaPlace   Int?
+  // Subida a mano a la carpeta Imágenes con texto del Drive del producto: no
+  // tiene contenido, solo el archivo, su nombre y su tipo. Es de todas las
+  // publicaciones del producto.
+  fromDrive    Boolean       @default(false)
+  fileName     String?
+  fileType     String?
   updatedById  String?
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt

@@ -1,3 +1,4 @@
+import { syncDriveTextImagesFor } from '@/lib/text-images/drive-files';
 import { z } from 'zod';
 import type { PrismaClient } from '@/generated/prisma/client';
 import { photoKey, photoVariants, withMarks, withVariants, type PhotoRef } from '@/domain/media';
@@ -107,6 +108,8 @@ function mediaOut(ctx: McpContext, sources: MediaSources, lines: { id: string; o
 }
 
 async function loadOut(ctx: McpContext, accountId: string, publicationId: string) {
+  // Antes, las imágenes subidas a mano a la carpeta Imágenes con texto del Drive.
+  await syncDriveTextImagesFor(ctx.db, { accountId, publicationId });
   const sources = await loadMediaSources(ctx.db, accountId, publicationId);
   const lines = await ctx.db.photoEdit.findMany({
     where: { productId: sources.publication.productId, archivedAt: null },

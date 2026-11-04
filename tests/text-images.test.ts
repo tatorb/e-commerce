@@ -13,6 +13,7 @@ import type { PiecePaint } from '@/lib/text-images/piece-html';
 import { renderPiece, type PieceRenderer } from '@/lib/text-images/render';
 import { completeTextImage, generateTextImage, loadTextImageStep, removeTextImage, saveTextImage, TextImageError } from '@/lib/text-images/step';
 import { placeShotPhotos } from '@/lib/shoot';
+import { syncDriveTextImages } from '@/lib/text-images/drive-files';
 import type { TextImageInput, TextImageOutput } from '@/ai/text-images';
 import { startFakeGoogle, type FakeGoogle } from './fake-google';
 
@@ -325,6 +326,36 @@ describe.skipIf(!url)('el paso en la base', () => {
     expect(await order(stdId)).toEqual(['T2', 'T1', 'P1', 'P2', 'P3', 'P4']);
     await removeTextImage(db, { accountId, publicationId: stdId, slot: 1 });
     expect(await order(halfId)).toEqual(['T2', 'P1', 'P2', 'P3', 'P4']);
+  });
+
+  it('las imágenes subidas a mano a la carpeta del Drive aparecen en Organización de multimedia, y se van si se borran', async () => {
+    // La app arma su PNG en la carpeta: ese no se cuenta como subido a mano.
+    await saveTextImage(db, { accountId, publicationId: stdId, content: VERSION_B, photoEditId: editId, userId });
+    await generateTextImage(db, { accountId, publicationId: stdId, userId }, fakeRender);
+    const folder = [...google.files.values()].find((f) => f.name === 'Imágenes con texto')!;
+    const manual = google.addFile({ name: 'compatibilidad-a-mano.jpg', parents: [folder.id], mimeType: 'image/jpeg', data: Buffer.from('jpg') });
+    google.addFile({ name: 'notas.pdf', parents: [folder.id], mimeType: 'application/pdf', data: Buffer.from('pdf') });
+
+    expect(await syncDriveTextImages(db, { accountId, productId })).toEqual({ added: 1, removed: 0 });
+    // Leerla otra vez no la repite.
+    expect(await syncDriveTextImages(db, { accountId, productId })).toEqual({ added: 0, removed: 0 });
+    for (const pub of [stdId, halfId]) {
+      const media = await loadMediaSources(db, accountId, pub);
+      expect(media.available.text.map((m) => m.label)).toEqual(['Imagen con texto 1', 'Imagen con texto del Drive: compatibilidad-a-mano.jpg']);
+    }
+    // No es una pieza del paso.
+    expect((await loadTextImageStep(db, { accountId, publicationId: stdId })).pieces).toHaveLength(1);
+    // Al canal va como archivo, con su tipo.
+    const row = await db.textImage.findFirstOrThrow({ where: { fromDrive: true } });
+    const pics = await picturesFor(db, productId, [{ kind: 'text', id: row.id }]);
+    expect(pics.pictures[0]).toMatchObject({ kind: 'file', type: 'image/jpeg', name: 'imagen-con-texto.jpg' });
+
+    // Elegida y después borrada del Drive: sale de la lista y de las fotos elegidas.
+    await db.publication.update({ where: { id: stdId }, data: { media: [{ kind: 'text', id: row.id }] } });
+    manual.trashed = true;
+    expect(await syncDriveTextImages(db, { accountId, productId })).toEqual({ added: 0, removed: 1 });
+    expect((await db.publication.findUniqueOrThrow({ where: { id: stdId } })).media).toEqual([]);
+    expect(await db.textImage.count({ where: { fromDrive: true } })).toBe(0);
   });
 
   it('no arma el PNG si falta algo o si no entra', async () => {
