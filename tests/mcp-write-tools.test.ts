@@ -39,7 +39,8 @@ describe('herramientas de escritura en la lista', () => {
     expect(tools.get('create_in_channel')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('set_warranty')).toMatchObject({ readOnlyHint: false, destructiveHint: false });
     expect(tools.get('push_warranties')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
-    expect(tools.size).toBe(68);
+    expect(tools.get('read_visits')).toMatchObject({ readOnlyHint: false, destructiveHint: false });
+    expect(tools.size).toBe(69);
   });
 });
 

@@ -25,12 +25,24 @@ function Compare({ label, before, after, unit }: { label: string; before: number
   );
 }
 
-export function VisitsCard({ visits, channelName, timeZone }: { visits: (VisitsSummary & { readAt: Date | null }) | null; channelName: string; timeZone: string }) {
+export function VisitsCard({
+  visits,
+  channelName,
+  timeZone,
+  // Si se pidieron recién y el canal las rechazó, lo que respondió.
+  error = null,
+}: {
+  visits: (VisitsSummary & { readAt: Date | null }) | null;
+  channelName: string;
+  timeZone: string;
+  error?: string | null;
+}) {
   if (!visits) {
     return (
       <SectionCard title="Visitas" icon={<Eye />} description={`Las de cada día, como las cuenta ${channelName}.`}>
         <SectionBody>
           <p className="text-sm text-muted-foreground">Todavía no se leyeron. Se leen solas una vez por día.</p>
+          {error ? <p className="text-sm text-destructive">{`${channelName} no las devolvió: ${error}`}</p> : null}
         </SectionBody>
       </SectionCard>
     );

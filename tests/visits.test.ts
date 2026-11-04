@@ -125,7 +125,13 @@ describe.skipIf(!url)('visitas y ventas en la base', () => {
     await pub(null);
     const broken = await pub('MLA9');
     const clock = () => NOW;
-    expect(await readAllVisits(db, { budgetMs: 10_000, now: clock })).toMatchObject({ read: 1, pending: false });
+    expect(await readAllVisits(db, { budgetMs: 10_000, now: clock })).toMatchObject({
+      read: 1,
+      pending: false,
+      // La que el canal rechazó, con su motivo, y queda para leer.
+      failed: [{ externalId: 'MLA9', message: expect.stringContaining('internal') }],
+      left: 1,
+    });
     expect(asked).toEqual([{ id: 'MLA1', last: 90 }]);
     expect(await db.publicationVisitDay.count({ where: { publicationId: a.id } })).toBe(90);
     // La que falló queda para la próxima lectura.
@@ -147,6 +153,25 @@ describe.skipIf(!url)('visitas y ventas en la base', () => {
     expect(v).toMatchObject({ last30: 60, previous30: 60, correction: { on: dayAgo(10), beforePerDay: 2, afterPerDay: 2 } });
     expect(await loadVisits(db, broken.id, NOW)).toBeNull();
     // La que falla se reintenta varias veces antes de dejarla.
+  }, 30_000);
+
+  it('se piden ahora: de una cuenta o de una publicación, y con force también las leídas hoy', async () => {
+    const a = await pub('MLA1');
+    const b = await pub('MLA2');
+    const clock = () => NOW;
+    // Otra cuenta: no se toca.
+    const other = await db.account.create({ data: { slug: 'otra', name: 'Otra cuenta' } });
+    expect(await readAllVisits(db, { budgetMs: 10_000, now: clock, accountId: other.id })).toMatchObject({ read: 0, left: 0, failed: [] });
+    expect(asked).toEqual([]);
+
+    const account = await db.store.findUniqueOrThrow({ where: { id: storeId }, select: { accountId: true } });
+    expect(await readAllVisits(db, { budgetMs: 10_000, now: clock, accountId: account.accountId, publicationIds: [a.id] })).toMatchObject({ read: 1, left: 0 });
+    expect(asked.map((x) => x.id)).toEqual(['MLA1']);
+    expect((await db.publication.findUniqueOrThrow({ where: { id: b.id } })).visitsReadAt).toBeNull();
+
+    asked.length = 0;
+    await readAllVisits(db, { budgetMs: 10_000, now: clock, accountId: account.accountId, force: true });
+    expect(asked.map((x) => x.id).sort()).toEqual(['MLA1', 'MLA2']);
   }, 30_000);
 
   it('las ventas de 90 días salen de las ventas leídas, solo si la tienda ya trajo las viejas', async () => {

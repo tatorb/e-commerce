@@ -33,28 +33,51 @@ async function saveDays(db: Db, publicationId: string, days: VisitDay[], now: Da
   });
 }
 
-/** Lee las visitas de las publicaciones que no se leyeron hoy, con lo que queda de tiempo. */
-export async function readAllVisits(db: Db, opts: { budgetMs: number; now?: () => Date }): Promise<{ read: number; pending: boolean }> {
+export type VisitsRead = {
+  read: number;
+  pending: boolean;
+  // Las que el canal no devolvió, con el motivo: se vuelven a probar en la próxima lectura.
+  failed: { externalId: string; message: string }[];
+  // Las que faltan leer hoy, contando las de esta vuelta que no se pudieron.
+  left: number;
+};
+
+/**
+ * Lee las visitas de las publicaciones que no se leyeron hoy, con lo que queda
+ * de tiempo. Con accountId, solo las de esa cuenta; con publicationIds, solo
+ * esas. Con force, también las que ya se leyeron hoy.
+ */
+export async function readAllVisits(
+  db: Db,
+  opts: { budgetMs: number; now?: () => Date; accountId?: string; publicationIds?: string[]; force?: boolean },
+): Promise<VisitsRead> {
   const clock = opts.now ?? (() => new Date());
   const started = clock().getTime();
   const left = () => opts.budgetMs - (clock().getTime() - started);
   const stores = await db.store.findMany({
-    where: { connection: { status: 'ACTIVE' } },
+    where: { connection: { status: 'ACTIVE' }, ...(opts.accountId ? { accountId: opts.accountId } : {}) },
     select: { id: true, channel: { select: { kind: true } } },
     orderBy: { createdAt: 'asc' },
   });
-  let read = 0;
-  let pending = false;
+  const out: VisitsRead = { read: 0, pending: false, failed: [], left: 0 };
+  const stale = new Date(clock().getTime() - FRESH_MS);
+  const dueWhere = (storeId: string) => ({
+    storeId,
+    externalId: { not: null },
+    channelStatus: { notIn: ['DELETED' as const, 'UNPUBLISHED' as const] },
+    ...(opts.publicationIds ? { id: { in: opts.publicationIds } } : {}),
+    ...(opts.force ? {} : { OR: [{ visitsReadAt: null }, { visitsReadAt: { lt: stale } }] }),
+  });
   for (const store of stores) {
     const channel = getChannelListings(store.channel.kind);
-    if (!channel?.readDailyVisits || left() <= 0) {
-      if (channel?.readDailyVisits) pending = true;
+    if (!channel?.readDailyVisits) continue;
+    if (left() <= 0) {
+      out.pending = true;
       continue;
     }
     const readDailyVisits = channel.readDailyVisits.bind(channel);
-    const stale = new Date(clock().getTime() - FRESH_MS);
     const due = await db.publication.findMany({
-      where: { storeId: store.id, externalId: { not: null }, channelStatus: { notIn: ['DELETED', 'UNPUBLISHED'] }, OR: [{ visitsReadAt: null }, { visitsReadAt: { lt: stale } }] },
+      where: dueWhere(store.id),
       orderBy: [{ visitsReadAt: { sort: 'asc', nulls: 'first' } }],
       take: 200,
       select: { id: true, externalId: true, visitsReadAt: true },
@@ -64,28 +87,35 @@ export async function readAllVisits(db: Db, opts: { budgetMs: number; now?: () =
       await withAccessToken(db, store.id, async (token) => {
         for (let i = 0; i < due.length; i += BATCH) {
           if (left() <= 0) {
-            pending = true;
+            out.pending = true;
             return;
           }
           await Promise.all(
             due.slice(i, i + BATCH).map(async (p) => {
               const days = await readDailyVisits(token, p.externalId!, p.visitsReadAt ? RECENT_DAYS : VISIT_HISTORY_DAYS).catch((e) => {
-                console.error('No se pudieron leer las visitas', p.externalId, e instanceof Error ? e.message : e);
+                const message = e instanceof Error ? e.message : String(e);
+                console.error('No se pudieron leer las visitas', p.externalId, message);
+                out.failed.push({ externalId: p.externalId!, message });
                 return undefined;
               });
               // Si falló, se vuelve a probar en la próxima lectura.
               if (days === undefined) return;
               await saveDays(db, p.id, days ?? [], clock());
-              read++;
+              out.read++;
             }),
           );
         }
       });
     } catch (e) {
       if (!(e instanceof ConnectError)) throw e;
+      out.failed.push({ externalId: '', message: e.message });
     }
   }
-  return { read, pending };
+  // Lo que falta: lo que no se leyó todavía, salvo con force, que no deja nada pendiente.
+  if (!opts.force) {
+    for (const store of stores) out.left += await db.publication.count({ where: dueWhere(store.id) });
+  }
+  return out;
 }
 
 /** El día en que se terminó de corregir en el pipeline, el último si fueron varios. */

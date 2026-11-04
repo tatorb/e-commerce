@@ -23,7 +23,7 @@ import { InfoStrip } from '@/components/ui/info-strip';
 import { NavRow } from '@/components/ui/nav-row';
 import { measuresText } from '@/lib/publication-facts';
 import { buyerKey, type BuyerFacts } from '@/lib/buyers';
-import { loadVisits } from '@/lib/visits';
+import { loadVisits, readAllVisits } from '@/lib/visits';
 import { syncDriveTextImagesFor } from '@/lib/text-images/drive-files';
 import { VisitsCard } from '@/components/publication/VisitsCard';
 import { SalesHistoryCard } from '@/components/sales/SalesHistoryCard';
@@ -146,6 +146,21 @@ function BuyerName({ b, accountSlug }: { b: BuyerFacts | undefined; accountSlug:
   );
 }
 
+// Lo que tarda como mucho en pedir las visitas al abrir la publicación.
+const VISITS_NOW_MS = 6000;
+
+/** Pide al canal las visitas por día si todavía no se leyeron. Devuelve el motivo si el canal las rechazó. */
+async function visitsNow(accountId: string, publicationId: string): Promise<string | null> {
+  const p = await prisma.publication.findFirst({ where: { id: publicationId, product: { accountId } }, select: { externalId: true, visitsReadAt: true } });
+  if (!p?.externalId || p.visitsReadAt) return null;
+  try {
+    const r = await readAllVisits(prisma, { budgetMs: VISITS_NOW_MS, accountId, publicationIds: [publicationId] });
+    return r.failed[0]?.message ?? null;
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+}
+
 export default async function PublicationPage({
   params,
   searchParams,
@@ -155,13 +170,14 @@ export default async function PublicationPage({
 }) {
   const [{ cuenta, id }, { cara }] = await Promise.all([params, searchParams]);
   const { user, account } = await requireAccount(cuenta, 'publicaciones');
-  const [data, media, visits, sales] = await Promise.all([
+  const [data, media, { v: visits, error: visitsError }, sales] = await Promise.all([
     loadPublicationFaces(account.id, id),
     // Antes, las imágenes subidas a mano a la carpeta Imágenes con texto del Drive.
     syncDriveTextImagesFor(prisma, { accountId: account.id, publicationId: id })
       .then(() => loadMediaSources(prisma, account.id, id))
       .catch(() => null),
-    loadVisits(prisma, id).catch(() => null),
+    // Si todavía no tiene las visitas por día, se piden ahora al canal.
+    visitsNow(account.id, id).then((error) => loadVisits(prisma, id).then((v) => ({ v, error })).catch(() => ({ v: null, error }))),
     // El historial de ventas, solo para quien ve Ventas.
     can(user.access, 'ventas', 'read') ? salesHistory(prisma, account.id, [id]).catch(() => null) : null,
   ]);
@@ -567,7 +583,7 @@ export default async function PublicationPage({
           />
         ) : null}
 
-        {p.externalId ? <VisitsCard visits={visits} channelName={channelName} timeZone={tz} /> : null}
+        {p.externalId ? <VisitsCard visits={visits} error={visitsError} channelName={channelName} timeZone={tz} /> : null}
         {sales ? <SalesHistoryCard accountSlug={account.slug} history={sales} timeZone={tz} of="esta publicación" search={p.externalId} /> : null}
 
         <SectionCard

@@ -426,7 +426,11 @@ export const mercadolibreListings: ChannelListings = {
       const body = await mlGet(`/items/${listingId}/visits/time_window?last=${Math.max(1, Math.min(days, 150))}&unit=day`, accessToken);
       return parseDailyVisits(body);
     } catch (e) {
-      if (e instanceof MercadoLibreRequestError && (e.status === 404 || e.status === 400)) return null;
+      if (e instanceof MercadoLibreRequestError && e.status === 404) return null;
+      // Con lo que respondió, para saber por qué no las da.
+      if (e instanceof MercadoLibreRequestError && e.body !== null && e.body !== undefined) {
+        throw new MercadoLibreRequestError(`${e.message.replace(/\.$/, '')}: ${JSON.stringify(e.body).slice(0, 300)}`, e.status, e.body);
+      }
       throw e;
     }
   },

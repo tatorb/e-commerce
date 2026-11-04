@@ -4,6 +4,7 @@ import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Card } from '@/components/ui/card';
 import { FilterSelect } from '@/components/performance/FilterSelect';
+import { ReadVisitsButton } from '@/components/performance/ReadVisitsButton';
 import { CHANNEL_STATUS_LABEL } from '@/domain/channel-status';
 import { correctionText, lightHelp, LIGHT_LABEL, LIGHT_ORDER, PERIODS, type Light } from '@/domain/performance';
 import { titleOrUntitled } from '@/domain/publication-title';
@@ -92,13 +93,14 @@ export default async function PerformancePage({ params, searchParams }: { params
 
   return (
     <>
-      <PageHeader>
+      <PageHeader className="md:flex-row md:items-start md:justify-between">
         <div className="space-y-1">
           <h1 className="text-2xl font-bold tracking-tight">Rendimiento de publicaciones</h1>
           <p className="text-sm text-muted-foreground">
             {data.updatedAt ? `Datos actualizados al ${fullDateTime(data.updatedAt, tz)}` : 'Todavía no se leyeron las visitas ni las ventas.'}
           </p>
         </div>
+        <ReadVisitsButton accountSlug={cuenta} />
       </PageHeader>
       <PageBody>
         <Card className="p-4">
@@ -148,7 +150,7 @@ export default async function PerformancePage({ params, searchParams }: { params
 
         {data.withoutVisits > 0 ? (
           <p className="text-xs text-muted-foreground">
-            {plural(data.withoutVisits, 'publicación todavía no tiene', 'publicaciones todavía no tienen')} las visitas por día leídas: se leen solas, una vez por día.
+            {plural(data.withoutVisits, 'publicación todavía no tiene', 'publicaciones todavía no tienen')} las visitas por día leídas. Se leen solas una vez por día, o ahora con Leer visitas ahora.
           </p>
         ) : null}
 
