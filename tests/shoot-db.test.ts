@@ -14,6 +14,7 @@ import {
   listProtocols,
   markShotCheck,
   moveStep,
+  moveStepInMedia,
   placeAllShotPhotos,
   placeShotPhotos,
   removeIllustration,
@@ -28,7 +29,8 @@ import {
   undoShotCheck,
   updateStep,
 } from '@/lib/shoot';
-import { variantKey } from '@/domain/media';
+import { photoKey, variantKey } from '@/domain/media';
+import { loadMediaSources } from '@/lib/media';
 import { shotsPerStep } from '@/domain/shoot';
 import { startFakeGoogle, type FakeGoogle } from './fake-google';
 
@@ -237,6 +239,59 @@ describe.skipIf(!url)('Registro de productos', () => {
     // Una sola vez, aunque se vuelva a pasar.
     expect(await placeShotPhotos(db, productId)).toBe(0);
     expect(await placeAllShotPhotos(db, { budgetMs: 5000 })).toEqual({ placed: 0, pending: false });
+  });
+
+  it('el orden en multimedia es aparte del orden en que se sacan, y las fotos se suman en ese orden', async () => {
+    const pid = await createProtocol(db, { accountId, input: { name: 'Aros' }, userId });
+    const box = await addStep(db, { accountId, protocolId: pid, input: { title: 'Caja', kind: 'PHOTO' } });
+    const spin = await addStep(db, { accountId, protocolId: pid, input: { title: 'Giro', kind: 'VIDEO' } });
+    const front = await addStep(db, { accountId, protocolId: pid, input: { title: 'Frente', kind: 'PHOTO' } });
+    let [p] = await listProtocols(db, accountId);
+    expect(p.mediaOrder).toEqual([box, front]);
+    // En multimedia el frente va primero; se sigue sacando primero la caja.
+    await moveStepInMedia(db, { accountId, stepId: front, by: -1 });
+    [p] = await listProtocols(db, accountId);
+    expect(p.mediaOrder).toEqual([front, box]);
+    expect(p.steps.map((s) => s.id)).toEqual([box, spin, front]);
+    await expect(moveStepInMedia(db, { accountId, stepId: spin, by: 1 })).rejects.toThrow('Solo los pasos de foto');
+    await expect(moveStepInMedia(db, { accountId: otherAccountId, stepId: front, by: 1 })).rejects.toThrow('no es de esta cuenta');
+
+    const caja = await shootPhoto('IMG_1.JPG', { stepId: box });
+    const frontStd = await shootPhoto('IMG_2.JPG', { stepId: front, variantKey: STD });
+    const frontHalf = await shootPhoto('IMG_3.JPG', { stepId: front, variantKey: HALF });
+    // La caja queda lista antes: se suma al final.
+    await setAsIs(db, { editId: caja, asIs: true });
+    expect(await placeShotPhotos(db, productId)).toBe(1);
+    // Los frentes, después: van antes que la caja, en cada medida.
+    await setAsIs(db, { editId: frontStd, asIs: true });
+    await setAsIs(db, { editId: frontHalf, asIs: true });
+    expect(await placeShotPhotos(db, productId)).toBe(2);
+    expect(await mediaOf(bothId)).toEqual([
+      { kind: 'channel', id: 'F1', url: 'https://ml.ejemplo.com/F1.jpg', positions: { [STD]: 0, [HALF]: 0 } },
+      { kind: 'channel', id: 'F2', url: 'https://ml.ejemplo.com/F2.jpg', positions: { [STD]: 1, [HALF]: 1 } },
+      { kind: 'edit', editId: frontStd, variants: [STD], positions: { [STD]: 2 } },
+      { kind: 'edit', editId: frontHalf, variants: [HALF], positions: { [HALF]: 2 } },
+      { kind: 'edit', editId: caja, positions: { [STD]: 3, [HALF]: 3 } },
+    ]);
+    expect(await mediaOf(halfId)).toEqual([{ kind: 'channel', id: 'G1', url: 'https://ml.ejemplo.com/G1.jpg' }, { kind: 'edit', editId: frontHalf }, { kind: 'edit', editId: caja }]);
+    expect(await mediaOf(stdId)).toEqual([{ kind: 'channel', id: 'H1', url: 'https://ml.ejemplo.com/H1.jpg' }, { kind: 'edit', editId: frontStd }, { kind: 'edit', editId: caja }]);
+
+    // En Organización de multimedia: la biblioteca en ese orden, y las fotos armadas como dice el protocolo.
+    const both = await loadMediaSources(db, accountId, bothId);
+    expect(both.available.corrected.map((m) => [m.key, m.shot?.step])).toEqual([
+      [`corregida:${frontStd}`, 'Frente'],
+      [`corregida:${frontHalf}`, 'Frente'],
+      [`corregida:${caja}`, 'Caja'],
+    ]);
+    expect(both.protocol!.map((m) => m.ref)).toEqual([
+      { kind: 'edit', editId: frontStd, variants: [STD], positions: { [STD]: 0 } },
+      { kind: 'edit', editId: frontHalf, variants: [HALF], positions: { [HALF]: 0 } },
+      { kind: 'edit', editId: caja, positions: { [STD]: 1, [HALF]: 1 } },
+    ]);
+    // La que vende solo la 0.50 no lleva el frente de la STD.
+    const half = await loadMediaSources(db, accountId, halfId);
+    expect(half.protocol!.map((m) => photoKey(m.ref))).toEqual([`corregida:${frontHalf}`, `corregida:${caja}`]);
+    expect(half.protocol!.every((m) => !m.ref.variants && !m.ref.positions)).toBe(true);
   });
 
   it('respeta lo que ya se eligió, y la tarea de cada hora suma las que quedaron', async () => {

@@ -11,6 +11,7 @@ import {
   createProtocol,
   moveProtocol,
   moveStep,
+  moveStepInMedia,
   removeIllustration,
   removeStep,
   setIllustration,
@@ -102,6 +103,15 @@ export async function moveStepAction(accountSlug: string, stepId: string, by: nu
   return act(accountSlug, { section }, ({ account }) =>
     guard(accountSlug, async () => {
       await moveStep(prisma, { accountId: account.id, stepId: String(stepId), by: Number(by) });
+      return {};
+    }),
+  );
+}
+
+export async function moveStepInMediaAction(accountSlug: string, stepId: string, by: number): Promise<Result> {
+  return act(accountSlug, { section }, ({ account }) =>
+    guard(accountSlug, async () => {
+      await moveStepInMedia(prisma, { accountId: account.id, stepId: String(stepId), by: Number(by) });
       return {};
     }),
   );

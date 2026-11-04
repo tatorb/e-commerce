@@ -1869,6 +1869,9 @@ model ShootStep {
   protocolId       String
   protocol         ShootProtocol  @relation(fields: [protocolId], references: [id], onDelete: Cascade)
   position         Int            @default(0)
+  // El lugar de sus fotos en Organización de multimedia: puede ser distinto del
+  // orden en que se sacan. Solo cuenta en los pasos de foto.
+  mediaPosition    Int            @default(0)
   title            String
   kind             ShootKind      @default(PHOTO)
   explanation      String         @default("")

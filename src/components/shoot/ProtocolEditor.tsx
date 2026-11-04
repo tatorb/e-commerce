@@ -20,6 +20,7 @@ import {
   createProtocolAction,
   moveProtocolAction,
   moveStepAction,
+  moveStepInMediaAction,
   removeIllustrationAction,
   removeStepAction,
   setIllustrationAction,
@@ -221,6 +222,7 @@ function ProtocolCard({ accountSlug, protocol, index, total }: { accountSlug: st
           ))}
         </ol>
       )}
+      {protocol.mediaOrder.length > 0 ? <MediaOrder accountSlug={accountSlug} protocol={protocol} /> : null}
       {!protocol.archived ? (
         <div className="space-y-3 border-t px-4 py-3">
           {adding ? (
@@ -249,6 +251,58 @@ function ProtocolCard({ accountSlug, protocol, index, total }: { accountSlug: st
         </div>
       ) : null}
     </SectionCard>
+  );
+}
+
+/** El orden de las fotos de cada paso en Organización de multimedia, aparte del orden en que se sacan. */
+function MediaOrder({ accountSlug, protocol }: { accountSlug: string; protocol: ProtocolView }) {
+  const { pending, message, run } = useRun();
+  const steps = protocol.mediaOrder.flatMap((id) => protocol.steps.filter((s) => s.id === id));
+  return (
+    <div className="space-y-2 border-t px-4 py-3">
+      <div className="space-y-0.5">
+        <p className="text-sm font-medium">Orden en Organización de multimedia</p>
+        <p className="text-xs text-muted-foreground">
+          Cómo quedan ordenadas las fotos de cada paso en la publicación. La primera es la portada. Puede ser distinto del orden en que se sacan.
+        </p>
+      </div>
+      <ol className="space-y-1">
+        {steps.map((s, i) => (
+          <li key={s.id} className="flex items-center gap-2 rounded-md border px-2 py-1 text-sm">
+            <span className="w-6 text-center text-xs tabular-nums text-muted-foreground">{i + 1}</span>
+            <span className="min-w-0 flex-1 truncate">
+              {s.title}
+              {i === 0 ? <span className="text-xs text-muted-foreground"> · portada</span> : null}
+            </span>
+            {!protocol.archived ? (
+              <>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  title="Antes"
+                  aria-label={`${s.title} antes`}
+                  disabled={pending || i === 0}
+                  onClick={() => run(() => moveStepInMediaAction(accountSlug, s.id, -1))}
+                >
+                  <ArrowUp />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  title="Después"
+                  aria-label={`${s.title} después`}
+                  disabled={pending || i === steps.length - 1}
+                  onClick={() => run(() => moveStepInMediaAction(accountSlug, s.id, 1))}
+                >
+                  <ArrowDown />
+                </Button>
+              </>
+            ) : null}
+          </li>
+        ))}
+      </ol>
+      <Status message={message} />
+    </div>
   );
 }
 

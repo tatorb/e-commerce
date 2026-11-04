@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, ArrowLeft, ArrowRight, Clapperboard, ImageOff, Play, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ArrowRight, Clapperboard, ImageOff, ListOrdered, Play, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { IconButton } from '@/components/ui/section-card';
 import { photoKey, photoVariants, variantPhotos, withMarks, type PhotoRef } from '@/domain/media';
@@ -152,21 +152,33 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
     return { uses, order: next, clips: [...keptClips, ...newClips] };
   }
 
-  function initial(): State {
-    const uses: Record<string, Use> = {};
-    for (const m of sources.current) uses[m.key] = photoVariants(m.ref);
-    for (const v of sources.videos) uses[videoKey(v.id)] = sources.clipIds.includes(v.id) ? v.variants : null;
-    const refs = sources.current.map((m) => m.ref);
-    const order = Object.fromEntries(windows.map((w) => [w, w === ALL ? sources.current.map((m) => m.key) : variantPhotos(refs, w).map(photoKey)]));
-    return arrange(uses, order, sources.clipIds);
+  /** Las fotos de una lista puestas en las ventanas, cada una con sus medidas y su lugar. Lo demás, sin usar. */
+  function withPhotos(base: State, list: MediaItem[]): State {
+    const uses: Record<string, Use> = { ...base.uses };
+    for (const k of photoKeys) uses[k] = null;
+    for (const m of list) uses[m.key] = photoVariants(m.ref);
+    const refs = list.map((m) => m.ref);
+    const order = Object.fromEntries(windows.map((w) => [w, w === ALL ? list.map((m) => m.key) : variantPhotos(refs, w).map(photoKey)]));
+    return arrange(uses, order, base.clips);
   }
 
-  const [state, setState] = useState<State>(initial);
+  function initial(): State {
+    const uses: Record<string, Use> = {};
+    for (const v of sources.videos) uses[videoKey(v.id)] = sources.clipIds.includes(v.id) ? v.variants : null;
+    return withPhotos({ uses, order: {}, clips: sources.clipIds }, sources.current);
+  }
+
+  /** Las fotos corregidas en el orden del protocolo, sin tocar los videos. */
+  const byProtocol = (st: State) => (sources.protocol ? withPhotos(st, sources.protocol) : st);
+  // Sin fotos elegidas, arranca con el orden del protocolo: queda para guardar.
+  const opening = () => (sources.following && sources.protocol ? byProtocol(initial()) : initial());
+
+  const [state, setState] = useState<State>(opening);
   // Después de guardar llega lo guardado: la pantalla arranca de ahí.
   const [loaded, setLoaded] = useState(sources);
   if (loaded !== sources) {
     setLoaded(sources);
-    setState(initial());
+    setState(opening());
   }
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
@@ -178,6 +190,8 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
   const photosDirty = photoSig(state) !== photoSig(start);
   const videosDirty = videoSig(state) !== videoSig(start);
   const dirty = photosDirty || videosDirty;
+  // Las fotos están como dice el protocolo.
+  const inProtocol = sources.protocol !== null && photoSig(state) === photoSig(byProtocol(state));
 
   function setUse(key: string, use: Use) {
     setState((st) => arrange({ ...st.uses, [key]: use }, st.order, st.clips));
@@ -274,6 +288,7 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
       <li key={m.key} className={cn('space-y-1.5 rounded-lg border p-2', use !== null && 'border-foreground/60 bg-muted/40')}>
         <PhotoThumb item={m} />
         <p className="truncate text-xs">{m.label}</p>
+        {m.shot?.step ? <p className="truncate text-[11px] text-muted-foreground">Paso {m.shot.step}</p> : null}
         {m.note ? <p className={cn('text-[11px]', m.blocked ? 'text-destructive' : 'truncate text-muted-foreground')}>{m.note}</p> : null}
         <UsePicker
           measures={measures}
@@ -330,6 +345,11 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
             {clip ? ` Los videos que van son los ${clip.name}s.` : ''}
           </p>
           {sources.following && !dirty ? <p className="text-xs text-muted-foreground">Ahora están las que tiene en {channelName}.</p> : null}
+          {sources.following && inProtocol && photosDirty ? (
+            <p className="text-xs text-muted-foreground">
+              Las fotos ya están armadas en el orden del protocolo. Revisalas y tocá Guardar: hasta entonces la publicación sigue con las que tiene en {channelName}.
+            </p>
+          ) : null}
         </div>
         {groups.map((g) => (
           <div key={g.title} className="space-y-2">
@@ -350,7 +370,21 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
 
       <section className="space-y-3">
         <div className="space-y-1">
-          <h3 className="text-sm font-semibold">{withMeasures ? 'Lo que ve el comprador en cada medida' : 'Lo que ve el comprador'}</h3>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold">{withMeasures ? 'Lo que ve el comprador en cada medida' : 'Lo que ve el comprador'}</h3>
+            {sources.protocol ? (
+              <Button
+                size="sm"
+                variant="outline"
+                title="Pone las fotos corregidas en el orden de su protocolo, cada una en su medida. Las demás quedan sin usar."
+                disabled={busy !== null || inProtocol}
+                onClick={() => setState((st) => byProtocol(st))}
+              >
+                <ListOrdered />
+                Ordenar como el protocolo
+              </Button>
+            ) : null}
+          </div>
           <p className="text-xs text-muted-foreground">
             Ordená arrastrando cada foto a su lugar, o con las flechas: la primera foto es la portada.
             {clip && state.clips.length > 0 ? ` Los ${clip.name}s tienen un solo orden en ${channelName}: si movés uno, se mueve en todas las medidas. El primero es el que se muestra antes.` : ''}

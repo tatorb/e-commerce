@@ -1,6 +1,6 @@
 import type { z } from 'zod';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
-import { parseMedia, photoKey, withVariants, type PhotoRef } from '@/domain/media';
+import { addInOrder, parseMedia, photoKey, withVariants, type PhotoRef } from '@/domain/media';
 import { addToPipeline } from '@/domain/pipeline';
 import { createPipelinePublication } from '@/domain/pipeline-publications';
 import { productInputSchema, writeProduct } from '@/domain/products';
@@ -57,7 +57,7 @@ export async function listProtocols(db: Db, accountId: string, opts: { archived?
       steps: {
         where: { archivedAt: null },
         orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
-        select: { id: true, title: true, kind: true, explanation: true, editorNotes: true, illustrationUrl: true, illustrationName: true, updatedAt: true },
+        select: { id: true, title: true, kind: true, mediaPosition: true, position: true, explanation: true, editorNotes: true, illustrationUrl: true, illustrationName: true, updatedAt: true },
       },
     },
   });
@@ -74,12 +74,19 @@ export async function listProtocols(db: Db, accountId: string, opts: { archived?
       editorNotes: s.editorNotes,
       illustration: s.illustrationUrl ? { href: illustrationHref(s.id, s.updatedAt), name: s.illustrationName ?? 'Ilustración' } : null,
     })),
+    // Los pasos de foto en el orden en que aparecen sus fotos en Organización de multimedia.
+    mediaOrder: mediaOrderOf(p.steps).map((s) => s.id),
   }));
   return [...list.filter((p) => !p.archived), ...list.filter((p) => p.archived)];
 }
 
 export type ProtocolView = Awaited<ReturnType<typeof listProtocols>>[number];
 export type StepView = ProtocolView['steps'][number];
+
+/** Los pasos de foto en su orden en multimedia; a igual lugar, en el orden en que se sacan. */
+function mediaOrderOf<T extends { kind: string; mediaPosition: number; position: number }>(steps: T[]): T[] {
+  return steps.filter((s) => s.kind === 'PHOTO').sort((a, b) => a.mediaPosition - b.mediaPosition || a.position - b.position);
+}
 
 /** Dónde se ve la ilustración de un paso. Cambia con el paso, para no mostrar una vieja. */
 export const illustrationHref = (stepId: string, updatedAt: Date) => `/api/protocolos/${stepId}?v=${updatedAt.getTime()}`;
@@ -147,8 +154,11 @@ export async function moveProtocol(db: Db, args: { accountId: string; protocolId
 export async function addStep(db: Db, args: { accountId: string; protocolId: string; input: unknown }): Promise<string> {
   await protocolIn(db, args.accountId, args.protocolId);
   const data = parsed(stepInput, args.input);
-  const last = await db.shootStep.aggregate({ where: { protocolId: args.protocolId }, _max: { position: true } });
-  const s = await db.shootStep.create({ data: { protocolId: args.protocolId, ...data, position: (last._max.position ?? -1) + 1 } });
+  // Un paso nuevo va último, para sacarlo y en multimedia.
+  const last = await db.shootStep.aggregate({ where: { protocolId: args.protocolId }, _max: { position: true, mediaPosition: true } });
+  const s = await db.shootStep.create({
+    data: { protocolId: args.protocolId, ...data, position: (last._max.position ?? -1) + 1, mediaPosition: (last._max.mediaPosition ?? -1) + 1 },
+  });
   return s.id;
 }
 
@@ -170,6 +180,20 @@ export async function moveStep(db: Db, args: { accountId: string; stepId: string
   ).map((s) => s.id);
   await db.$transaction(async (tx) => {
     await reorder(ids, args.stepId, args.by, (id, position) => tx.shootStep.update({ where: { id }, data: { position } }));
+  });
+}
+
+/** Corre un paso de foto un lugar en el orden de Organización de multimedia. No cambia el orden en que se sacan. */
+export async function moveStepInMedia(db: Db, args: { accountId: string; stepId: string; by: number }): Promise<void> {
+  const step = await stepIn(db, args.accountId, args.stepId);
+  if (step.kind !== 'PHOTO') throw new ShootError('Solo los pasos de foto tienen lugar en multimedia.');
+  const steps = await db.shootStep.findMany({
+    where: { protocolId: step.protocolId, archivedAt: null },
+    select: { id: true, kind: true, mediaPosition: true, position: true },
+  });
+  const ids = mediaOrderOf(steps).map((s) => s.id);
+  await db.$transaction(async (tx) => {
+    await reorder(ids, args.stepId, args.by, (id, mediaPosition) => tx.shootStep.update({ where: { id }, data: { mediaPosition } }));
   });
 }
 
@@ -590,9 +614,10 @@ export async function markShotVideo(db: Db, videoId: string): Promise<void> {
 
 /**
  * Suma a las publicaciones del producto las fotos registradas que ya están
- * listas: corregidas y aprobadas, o para usar tal cual. Van al final, con su
- * medida; si la publicación seguía a las del canal, queda con esas y después
- * las nuevas. Cada foto se suma una sola vez. Si el producto todavía no tiene
+ * listas: corregidas y aprobadas, o para usar tal cual. Van con su medida, en
+ * el orden del protocolo entre las otras fotos del protocolo, sin mover las
+ * demás; las que no salieron de un paso, al final. Si la publicación seguía a
+ * las del canal, queda con esas y después las nuevas. Cada foto se suma una sola vez. Si el producto todavía no tiene
  * publicaciones, espera a la próxima. Devuelve cuántas fotos sumó.
  */
 export async function placeShotPhotos(db: Db, productId: string, now = new Date()): Promise<number> {
@@ -607,6 +632,13 @@ export async function placeShotPhotos(db: Db, productId: string, now = new Date(
   if (photos.length === 0) return 0;
   const pubs = await productPublicationsMedia(db, productId);
   if (pubs.length === 0) return 0;
+  // El lugar de cada foto del producto que salió de un paso: su protocolo, el lugar del paso en multimedia y su orden en la línea.
+  const stepped = await db.photoEdit.findMany({
+    where: { productId, shootStepId: { not: null } },
+    select: { id: true, position: true, shootStep: { select: { mediaPosition: true, protocol: { select: { position: true } } } } },
+  });
+  const places = new Map(stepped.flatMap((e) => (e.shootStep ? [[e.id, [e.shootStep.protocol.position, e.shootStep.mediaPosition, e.position]]] : [])));
+  const placeOf = (ref: PhotoRef) => (ref.kind === 'edit' ? (places.get(ref.editId) ?? null) : null);
   return db.$transaction(async (tx) => {
     // Cada foto la toma un solo pedido, aunque haya dos a la vez.
     const mine: typeof photos = [];
@@ -621,15 +653,19 @@ export async function placeShotPhotos(db: Db, productId: string, now = new Date(
       const row = await tx.publication.findUniqueOrThrow({ where: { id: pub.id }, select: { media: true } });
       const current: PhotoRef[] = parseMedia(row.media) ?? pub.channelRefs;
       const keys = new Set(current.map(photoKey));
-      const added: PhotoRef[] = [];
+      const inOrder: { ref: PhotoRef; place: number[] }[] = [];
+      const atEnd: PhotoRef[] = [];
       for (const p of mine) {
         const place = photoPlacement(pub.measures, p.variantKey);
-        const ref: PhotoRef = { kind: 'edit', editId: p.id };
+        const ref: PhotoRef = withVariants({ kind: 'edit', editId: p.id }, place.add ? place.variants : []);
         if (!place.add || keys.has(photoKey(ref))) continue;
-        added.push(withVariants(ref, place.variants));
+        const at = placeOf(ref);
+        if (at) inOrder.push({ ref, place: at });
+        else atEnd.push(ref);
       }
-      if (added.length === 0) continue;
-      await tx.publication.update({ where: { id: pub.id }, data: { media: [...current, ...added] as Prisma.InputJsonValue } });
+      if (inOrder.length + atEnd.length === 0) continue;
+      const media = [...addInOrder(current, inOrder, placeOf, pub.measures.sole ? [] : pub.measures.measures), ...atEnd];
+      await tx.publication.update({ where: { id: pub.id }, data: { media: media as Prisma.InputJsonValue } });
     }
     return mine.length;
   });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { illustrationType, measureRows, newProductInput, photoPlacement, protocolInput, qualityOf, shotsPerStep, stepInput, videoMarks } from '@/domain/shoot';
+import { illustrationType, inProtocolOrder, measureRows, newProductInput, photoPlacement, protocolInput, qualityOf, shotsPerStep, stepInput, videoMarks } from '@/domain/shoot';
+import { addInOrder, arrangedMedia, photoKey, protocolUse, type PhotoRef } from '@/domain/media';
 
 // Registro de productos sin la base: la calidad, los pasos hechos y adónde va cada foto.
 
@@ -100,5 +101,58 @@ describe('producto nuevo y medidas desde el registro', () => {
     expect(measureRows([{ measure: 'std', sku: '' }, { measure: 'STD', sku: '' }])).toEqual({ ok: false, error: 'La medida STD ya está.' });
     expect(measureRows([{ measure: '0.50', sku: 'bj-1' }], [{ measure: 'STD', sku: 'BJ-1' }])).toEqual({ ok: false, error: 'El SKU bj-1 ya está en otra medida.' });
     expect(measureRows([{ measure: 'std', sku: '' }], [{ measure: 'STD', sku: null }]).ok).toBe(false);
+  });
+});
+
+describe('orden en multimedia', () => {
+  const A = 'sku:A medida:std';
+  const B = 'sku:A medida:0.50';
+  const edit = (editId: string, more: { variants?: string[]; positions?: Record<string, number> } = {}): PhotoRef => ({ kind: 'edit', editId, ...more });
+
+  it('primero las de un paso, por su lugar en multimedia; las demás al final, como estaban', () => {
+    const items = [
+      { id: 'suelta', place: null },
+      { id: 'caja', place: { protocol: 0, step: 1 } },
+      { id: 'frente1', place: { protocol: 0, step: 0 } },
+      { id: 'otro', place: { protocol: 1, step: 0 } },
+      { id: 'frente2', place: { protocol: 0, step: 0 } },
+    ];
+    expect(inProtocolOrder(items, (i) => i.place).map((i) => i.id)).toEqual(['frente1', 'frente2', 'caja', 'otro', 'suelta']);
+  });
+
+  it('cada foto va a su medida, y no va donde no se vende esa medida', () => {
+    expect(protocolUse(A, [A, B], [A, B])).toEqual([A]);
+    expect(protocolUse(null, [A, B], [A, B])).toEqual([]);
+    expect(protocolUse(A, [B], [A, B])).toBeNull();
+    expect(protocolUse(B, [B], [A, B])).toEqual([]);
+    // Una medida que ya no está en la ficha cuenta como de todas.
+    expect(protocolUse('sku:VIEJA', [A, B], [A, B])).toEqual([]);
+  });
+
+  it('armadas en orden, cada medida con su lugar', () => {
+    expect(arrangedMedia([{ ref: edit('fa'), use: [A] }, { ref: edit('fb'), use: [B] }, { ref: edit('caja'), use: [] }], [A, B])).toEqual([
+      edit('fa', { variants: [A], positions: { [A]: 0 } }),
+      edit('fb', { variants: [B], positions: { [B]: 0 } }),
+      edit('caja', { positions: { [A]: 1, [B]: 1 } }),
+    ]);
+    expect(arrangedMedia([{ ref: edit('x', { variants: [A] }), use: [] }], [])).toEqual([edit('x')]);
+  });
+
+  it('suma la nueva en su lugar sin deshacer lo que se ordenó a mano', () => {
+    const places: Record<string, number[]> = { frente: [0, 0, 0], perfil: [0, 1, 0], caja: [0, 2, 0] };
+    const placeOf = (r: PhotoRef) => (r.kind === 'edit' ? (places[r.editId] ?? null) : null);
+    // A mano, la caja quedó antes que el frente, y una del canal en el medio.
+    const current: PhotoRef[] = [edit('caja'), { kind: 'channel', id: 'C1', url: '' }, edit('frente')];
+    expect(addInOrder(current, [{ ref: edit('perfil'), place: places.perfil }], placeOf, []).map(photoKey)).toEqual([
+      'corregida:caja',
+      'canal:C1',
+      'corregida:frente',
+      'corregida:perfil',
+    ]);
+    // Sin otras del protocolo, al final.
+    expect(addInOrder([{ kind: 'channel', id: 'C1', url: '' }], [{ ref: edit('caja'), place: places.caja }], placeOf, []).map(photoKey)).toEqual([
+      'canal:C1',
+      'corregida:caja',
+    ]);
   });
 });

@@ -49,6 +49,7 @@ function mediaOut(ctx: McpContext, sources: MediaSources, lines: { id: string; o
     nombre: m.label,
     link: linkOf(ctx, m.thumb),
     elegida: chosen.has(m.key),
+    ...(m.shot?.step ? { paso_del_protocolo: m.shot.step } : {}),
     ...(m.blocked ? { no_se_puede_usar: m.blocked } : {}),
   });
   const ready = new Set(sources.available.corrected.map((m) => m.key));
@@ -68,6 +69,17 @@ function mediaOut(ctx: McpContext, sources: MediaSources, lines: { id: string; o
       medidas: measureNames(photoVariants(m.ref), sources),
       ...(m.note ? { nota: m.note } : {}),
     })),
+    ...(sources.protocol
+      ? {
+          orden_del_protocolo: sources.protocol.map((m, i) => ({
+            orden: i + 1,
+            foto: m.key,
+            nombre: m.label,
+            paso: m.shot?.step ?? null,
+            medidas: measureNames(photoVariants(m.ref), sources),
+          })),
+        }
+      : {}),
     para_elegir: {
       en_el_canal: sources.available.channel.map(option),
       corregidas_en_el_paso_imagenes: sources.available.corrected.map(option),
@@ -140,7 +152,7 @@ const setMediaTool = defineTool({
   section: ['pipeline', 'publicaciones'],
   title: 'Elegir y ordenar las fotos y los videos de una publicación',
   description:
-    'Elige qué fotos lleva la publicación y en qué orden (la primera es la portada), en qué medidas va cada una, qué videos son clips y de qué medidas es cada video. Usá las claves de get_publication_media. Lo que no mandes queda como está; «fotos» reemplaza la lista entera. Sin medidas, o con «todas», la foto va en todas. usar_las_del_canal vuelve a las que tiene en el canal. Queda en el borrador: se sube al canal desde la app, con Subir. Mostrale a la persona cómo va a quedar y esperá que confirme.',
+    'Elige qué fotos lleva la publicación y en qué orden (la primera es la portada), en qué medidas va cada una, qué videos son clips y de qué medidas es cada video. Usá las claves de get_publication_media. Lo que no mandes queda como está; «fotos» reemplaza la lista entera. ordenar_como_el_protocolo pone las fotos corregidas en el orden del protocolo de Registro de productos, cada una en su medida (el orden_del_protocolo de get_publication_media). Sin medidas, o con «todas», la foto va en todas. usar_las_del_canal vuelve a las que tiene en el canal. Queda en el borrador: se sube al canal desde la app, con Subir. Mostrale a la persona cómo va a quedar y esperá que confirme.',
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg,
@@ -155,6 +167,10 @@ const setMediaTool = defineTool({
       .optional()
       .describe('Las fotos que van, en orden.'),
     usar_las_del_canal: z.boolean().optional().describe('true deja de elegir: la publicación vuelve a llevar las fotos que tiene en el canal.'),
+    ordenar_como_el_protocolo: z
+      .boolean()
+      .optional()
+      .describe('true: las fotos corregidas en el orden del protocolo, cada una en su medida. Reemplaza la lista entera, como «fotos».'),
     clips: z.array(z.string()).max(20).optional().describe('Los videos que van como clip, en orden, por su clave «video». Una lista vacía saca todos.'),
     medidas_de_los_videos: z
       .array(z.object({ video: z.string().min(1), medidas: z.array(z.string()) }))
@@ -165,15 +181,20 @@ const setMediaTool = defineTool({
   destructive: true,
   async run(ctx, args) {
     const { account, id } = await target(ctx, args);
-    if (args.fotos && args.usar_las_del_canal) throw new McpToolError('Mandá las fotos o usar_las_del_canal, no las dos.');
-    if (!args.fotos && !args.usar_las_del_canal && !args.clips && !args.medidas_de_los_videos) {
+    if ([args.fotos, args.usar_las_del_canal, args.ordenar_como_el_protocolo].filter(Boolean).length > 1) {
+      throw new McpToolError('Mandá una sola de estas: fotos, usar_las_del_canal u ordenar_como_el_protocolo.');
+    }
+    if (!args.fotos && !args.usar_las_del_canal && !args.ordenar_como_el_protocolo && !args.clips && !args.medidas_de_los_videos) {
       throw new McpToolError('No mandaste nada para cambiar.');
     }
     return asToolError(async () => {
       const sources = await loadMediaSources(ctx.db, account.id, id);
       let refs: PhotoRef[] | null | undefined;
       if (args.usar_las_del_canal) refs = null;
-      else if (args.fotos) {
+      else if (args.ordenar_como_el_protocolo) {
+        if (!sources.protocol) throw new McpToolError('Ninguna foto corregida de este producto salió de un protocolo de Registro de productos.');
+        refs = sources.protocol.map((m) => m.ref);
+      } else if (args.fotos) {
         const byKey = new Map(
           [...sources.available.channel, ...sources.available.corrected, ...sources.available.assets].map((m) => [m.key, m.ref]),
         );

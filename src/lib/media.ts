@@ -3,8 +3,10 @@ import { Prisma } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
 import type { ChannelPicture, ChannelPictureLayout } from '@/channels/publish';
 import {
+  arrangedMedia,
   asIsProblem,
   photoSizeProblem,
+  protocolUse,
   type PhotoSize,
   channelPhotos,
   cleanMedia,
@@ -22,7 +24,7 @@ import {
 import { LAST_PHOTO_STEP } from '@/domain/photo-steps';
 import { copyChannelProduct, copySkus } from '@/domain/stock';
 import { checkClip } from '@/domain/videos';
-import type { PublicationMeasures } from '@/domain/shoot';
+import { inProtocolOrder, type ProtocolPlace, type PublicationMeasures } from '@/domain/shoot';
 import { BY_BROWSER, setClips } from '@/lib/videos';
 import { photoFileHref } from '@/lib/photo-rules';
 import { readStored } from '@/lib/stored-files';
@@ -47,6 +49,8 @@ export type MediaItem = {
   note: string | null;
   // Por qué no se puede elegir para este canal, por ejemplo un original que no acepta tal cual.
   blocked?: string;
+  // Las fotos del paso Imágenes que se sacaron en Registro de productos: el paso del protocolo y la medida.
+  shot?: { step: string | null; measure: string | null };
 };
 
 /** Una medida de la ficha, como se marca en las fotos. */
@@ -157,6 +161,9 @@ type FinishedEdit = {
   thumb: string | null;
   // La foto en su tamaño más grande que el navegador puede mostrar, para la lupa.
   zoom: string;
+  // Si se sacó en Registro de productos: el paso, su lugar en multimedia y la medida.
+  step: { title: string; place: NonNullable<ProtocolPlace> } | null;
+  measure: string | null;
 };
 
 // Los originales que el navegador muestra; los demás, como las HEIC, se ven por la vista que armó la Mac.
@@ -176,6 +183,8 @@ async function finishedEdits(db: Db, productId: string): Promise<FinishedEdit[]>
       height: true,
       previewUrl: true,
       asIs: true,
+      variantKey: true,
+      shootStep: { select: { title: true, mediaPosition: true, protocol: { select: { position: true } } } },
       runs: {
         where: { step: LAST_PHOTO_STEP, status: 'APPROVED', jpgUrl: { not: null } },
         orderBy: { createdAt: 'desc' },
@@ -185,6 +194,10 @@ async function finishedEdits(db: Db, productId: string): Promise<FinishedEdit[]>
     },
   });
   return edits.flatMap((e): FinishedEdit[] => {
+    const shot = {
+      step: e.shootStep ? { title: e.shootStep.title, place: { protocol: e.shootStep.protocol.position, step: e.shootStep.mediaPosition } } : null,
+      measure: e.variantKey,
+    };
     if (e.asIs) {
       return [
         {
@@ -195,6 +208,7 @@ async function finishedEdits(db: Db, productId: string): Promise<FinishedEdit[]>
           size: e.width && e.height ? { width: e.width, height: e.height } : null,
           thumb: photoFileHref(e.previewUrl ? 'antes' : 'original', { foto: e.id }),
           zoom: photoFileHref(SHOWABLE.includes(e.originalType) || !e.previewUrl ? 'original' : 'antes', { foto: e.id }),
+          ...shot,
         },
       ];
     }
@@ -209,6 +223,7 @@ async function finishedEdits(db: Db, productId: string): Promise<FinishedEdit[]>
         size: e.width && e.height ? { width: e.width, height: e.height } : null,
         thumb: run.previewUrl ? viewUrl(run.id) : null,
         zoom: photoFileHref('jpg', { paso: run.id }),
+        ...shot,
       },
     ];
   });
@@ -311,7 +326,7 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
     };
   });
   const inChannel = new Set(channel.map((c) => (c.ref.kind === 'channel' ? origins[c.ref.id] : undefined)).filter(Boolean));
-  const corrected: MediaItem[] = edits.map((e, i) => {
+  const placed = edits.map((e, i): MediaItem & { place: ProtocolPlace } => {
     // La que se usa tal cual tiene que poder ir al canal como está.
     // La que se usa tal cual tiene que poder ir al canal como está; una corregida de un original chico sale chica.
     const blocked =
@@ -326,6 +341,8 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
       label: editLabel(e, i + 1),
       note: blocked ?? (inChannel.has(e.id) ? `Ya está en ${channelName}` : null),
       ...(blocked ? { blocked } : {}),
+      ...(e.step || e.measure ? { shot: { step: e.step?.title ?? null, measure: e.measure } } : {}),
+      place: e.step?.place ?? null,
     };
   });
   const channelUrls = new Set(channel.map((c) => c.thumb));
@@ -333,6 +350,12 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
     .filter((a) => !channelUrls.has(a.url) && /^https?:\/\//.test(a.url))
     .map((a, i) => ({ ref: { kind: 'asset', url: a.url }, key: photoKey({ kind: 'asset', url: a.url }), thumb: a.url, label: `Del producto ${i + 1}`, note: null }));
 
+  // En el orden de su protocolo, como van a quedar en la publicación.
+  const corrected: MediaItem[] = inProtocolOrder(placed, (m) => m.place).map((m) => {
+    const out: MediaItem & { place?: ProtocolPlace } = { ...m };
+    delete out.place;
+    return out;
+  });
   const all = new Map([...channel, ...corrected, ...assets].map((m) => [m.key, m]));
   const saved = parseMedia(p.media);
   const media = saved && sole ? soleMeasurePhotos(saved, allMeasures, sole) : saved;
@@ -361,6 +384,8 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
     family: false,
     // Sin elegir: usa las del canal.
     following: media === null,
+    // Las corregidas armadas en el orden del protocolo, cada una en su medida. Null si ninguna salió de un protocolo.
+    protocol: protocolMedia(corrected, sole ? [sole.key] : allMeasures.map((m) => m.key), allMeasures),
     current,
     available: { channel: plain(channel), corrected, assets },
     // Las medidas que se pueden marcar: con menos de dos, no hay nada que elegir.
@@ -395,6 +420,27 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
 }
 
 export type MediaSources = Awaited<ReturnType<typeof loadMediaSources>>;
+
+/**
+ * Las fotos corregidas armadas como dice el protocolo: en su orden, cada una
+ * en su medida, sin las de medidas que la publicación no vende ni las que el
+ * canal no acepta. sells son las medidas que vende. Null si ninguna salió de un
+ * protocolo, o si no queda ninguna.
+ */
+export function protocolMedia(corrected: MediaItem[], sells: string[], measures: Measure[]): MediaItem[] | null {
+  if (!corrected.some((m) => m.shot?.step)) return null;
+  const known = measures.map((m) => m.key);
+  const items = corrected.flatMap((m) => {
+    const use = m.blocked ? null : protocolUse(m.shot?.measure ?? null, sells, known);
+    return use === null ? [] : [{ item: m, use }];
+  });
+  if (items.length === 0) return null;
+  const refs = arrangedMedia(
+    items.map(({ item, use }) => ({ ref: item.ref, use })),
+    sells.length >= 2 ? sells : [],
+  );
+  return items.map(({ item }, i) => ({ ...item, ref: refs[i] }));
+}
 
 /**
  * Guarda las fotos elegidas, en orden. Null vuelve a usar las del canal. Solo

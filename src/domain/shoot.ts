@@ -28,6 +28,24 @@ export const stepInput = z.object({
   editorNotes: z.string().trim().max(2000, 'Las indicaciones para el editor son muy largas.').default(''),
 });
 
+// ───────────────────────────── Orden en multimedia ─────────────────────────────
+
+/** Dónde va una foto en el orden del protocolo: el lugar de su protocolo y el de su paso en multimedia. Null si no salió de un paso. */
+export type ProtocolPlace = { protocol: number; step: number } | null;
+
+/**
+ * Las fotos en el orden de su protocolo: primero las que salieron de un paso,
+ * por el lugar del paso en Organización de multimedia; las del mismo paso,
+ * como estaban. Las que no salieron de un protocolo van al final, como estaban.
+ */
+export function inProtocolOrder<T>(items: T[], placeOf: (item: T) => ProtocolPlace): T[] {
+  const rank = (p: ProtocolPlace) => (p ? [0, p.protocol, p.step] : [1, 0, 0]);
+  return items
+    .map((item, i) => ({ item, i, r: rank(placeOf(item)) }))
+    .sort((a, b) => a.r[0] - b.r[0] || a.r[1] - b.r[1] || a.r[2] - b.r[2] || a.i - b.i)
+    .map((x) => x.item);
+}
+
 // ───────────────────────────── Producto nuevo y medidas ─────────────────────────────
 
 const optText = (max: number, tooLong: string) => z.string().trim().max(max, tooLong).default('');

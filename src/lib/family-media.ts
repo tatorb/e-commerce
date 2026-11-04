@@ -1,7 +1,7 @@
 import { Prisma, type PrismaClient } from '@/generated/prisma/client';
 import { cleanMedia, parseVideoVariants, photoKey, withMarks, type PhotoRef } from '@/domain/media';
 import { familyOf } from '@/lib/families';
-import { knownMarks, knownVariants, loadMediaSources, MediaError, measuresOf, soleMeasurePhotos, type MediaItem, type MediaSources } from '@/lib/media';
+import { knownMarks, knownVariants, loadMediaSources, MediaError, measuresOf, protocolMedia, soleMeasurePhotos, type MediaItem, type MediaSources } from '@/lib/media';
 import { setClips } from '@/lib/videos';
 
 // Organización de multimedia de una familia: las fotos de todas sus medidas
@@ -55,6 +55,8 @@ export async function loadFamilyMedia(db: Db, accountId: string, publicationId: 
     ...lead,
     family: true,
     following: sources.every((s) => s.following),
+    // Armadas para las medidas de la familia, no solo para la de la principal.
+    protocol: protocolMedia(lead.available.corrected, measures.map((m) => m.key), measuresOf(product.variants)),
     current,
     available: { ...lead.available, channel: [...channel.values()] },
     measures: measures.length >= 2 ? measures : [],

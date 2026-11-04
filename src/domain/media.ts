@@ -247,3 +247,88 @@ export function cleanMedia(refs: PhotoRef[]): PhotoRef[] {
   }
   return out;
 }
+
+// ───────────────────────────── Orden del protocolo ─────────────────────────────
+
+/**
+ * Dónde va una foto sacada para una medida, al armar las fotos en el orden
+ * del protocolo: vacío en todas; con la clave, solo en esa; null no va, porque
+ * es de una medida que la publicación no vende. sells son las medidas que vende
+ * la publicación y known todas las de la ficha: una medida que ya no está en la
+ * ficha cuenta como de todas.
+ */
+export function protocolUse(measure: string | null, sells: string[], known: string[]): string[] | null {
+  if (!measure || !known.includes(measure) || sells.length === 0) return [];
+  if (!sells.includes(measure)) return null;
+  return sells.length >= 2 ? [measure] : [];
+}
+
+/**
+ * Las fotos ya en orden, con sus medidas y su lugar en cada medida. Cada
+ * medida las ve en el orden de la lista: las suyas y las de todas, mezcladas.
+ */
+export function arrangedMedia<T extends PhotoRef>(items: { ref: T; use: string[] }[], measures: string[]): T[] {
+  if (measures.length < 2) return items.map(({ ref }) => withMarks(ref, { ...ref, variants: [], positions: {} }));
+  const next: Record<string, number> = Object.fromEntries(measures.map((m) => [m, 0]));
+  return items.map(({ ref, use }) => {
+    const own = use.filter((k) => measures.includes(k));
+    const windows = own.length === 0 ? measures : own;
+    const positions = Object.fromEntries(windows.map((w) => [w, next[w]++]));
+    return withMarks(ref, { ...ref, variants: own, positions });
+  });
+}
+
+/** Dónde va una foto en un orden: se comparan los números de a uno, el primero manda. */
+export type OrderPlace = number[];
+
+const comparePlaces = (a: OrderPlace, b: OrderPlace) => {
+  for (let i = 0; i < Math.max(a.length, b.length); i++) if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) - (b[i] ?? 0);
+  return 0;
+};
+
+/** El lugar para una foto: después de la última con lugar que va antes que ella; sin ninguna, antes de la primera que va después; si no hay, al final. */
+function slotFor(list: PhotoRef[], place: OrderPlace, placeOf: (ref: PhotoRef) => OrderPlace | null): number {
+  let after = -1;
+  let before = -1;
+  list.forEach((r, i) => {
+    const p = placeOf(r);
+    if (!p) return;
+    if (comparePlaces(p, place) <= 0) after = i;
+    else if (before < 0) before = i;
+  });
+  return after >= 0 ? after + 1 : before >= 0 ? before : list.length;
+}
+
+/**
+ * Suma fotos a las que ya tiene la publicación, cada una en su lugar entre
+ * las que tienen lugar (las de un protocolo), sin mover las demás: en la lista
+ * y en el orden de cada medida. Las que no tienen lugar quedan donde estaban.
+ * measures son las medidas que se pueden marcar; con menos de dos, solo la lista.
+ */
+export function addInOrder(
+  current: PhotoRef[],
+  added: { ref: PhotoRef; place: OrderPlace }[],
+  placeOf: (ref: PhotoRef) => OrderPlace | null,
+  measures: string[],
+): PhotoRef[] {
+  let list = [...current];
+  const places = new Map(added.map((a) => [photoKey(a.ref), a.place]));
+  const place = (r: PhotoRef) => places.get(photoKey(r)) ?? placeOf(r);
+  for (const a of [...added].sort((x, y) => comparePlaces(x.place, y.place))) {
+    let ref = a.ref;
+    if (measures.length >= 2) {
+      const own = photoVariants(ref).filter((k) => measures.includes(k));
+      for (const w of own.length > 0 ? own : measures) {
+        // Lo que ve esa medida, con la foto nueva en su lugar, y todas numeradas así.
+        const shown = variantPhotos(list, w);
+        const next = [...shown];
+        next.splice(slotFor(shown, a.place, place), 0, ref);
+        const at = new Map(next.map((r, i) => [photoKey(r), i]));
+        list = list.map((r) => (at.has(photoKey(r)) ? { ...r, positions: { ...r.positions, [w]: at.get(photoKey(r))! } } : r));
+        ref = { ...ref, positions: { ...ref.positions, [w]: at.get(photoKey(ref))! } };
+      }
+    }
+    list.splice(slotFor(list, a.place, place), 0, ref);
+  }
+  return list;
+}
