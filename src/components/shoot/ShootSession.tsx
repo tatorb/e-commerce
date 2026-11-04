@@ -1,5 +1,6 @@
 'use client';
 
+import { BAND } from '@/components/ui/band';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -539,10 +540,14 @@ export function ShootSession({
         {header}
         {uploadBar}
         {noticeBar}
-        <section className="space-y-3 rounded-2xl border bg-card shadow-card p-4">
-          <h2 className="text-base font-semibold">Sacá lo que necesites</h2>
-          <p className="text-sm text-muted-foreground">Cada foto o video se sube y queda a la vista abajo, para revisarlo.</p>
-          {captureArea(capture ? [capture.kind] : ['PHOTO', 'VIDEO'])}
+        <section className="overflow-hidden rounded-2xl border bg-card shadow-card">
+          <div className={cn('border-b px-4 py-3', BAND)}>
+            <h2 className="text-base font-semibold">Sacá lo que necesites</h2>
+          </div>
+          <div className="space-y-3 p-4">
+            <p className="text-sm text-muted-foreground">Cada foto o video se sube y queda a la vista abajo, para revisarlo.</p>
+            {captureArea(capture ? [capture.kind] : ['PHOTO', 'VIDEO'])}
+          </div>
         </section>
         {mediaOf(null).length > 0 ? (
           <div className="rounded-2xl border bg-card shadow-card p-4">
@@ -660,65 +665,69 @@ export function ShootSession({
         {header}
         {uploadBar}
         {noticeBar}
-        <section className="space-y-3 rounded-2xl border bg-card shadow-card p-4">
-          <h2 className="text-lg font-semibold">Terminaste</h2>
-          <p className="text-sm text-muted-foreground">
-            {counts.done} de {steps.length} pasos hechos{counts.skipped > 0 ? `, ${counts.skipped} ${counts.skipped === 1 ? 'salteado' : 'salteados'}` : ''}. En esta tanda subiste {uploaded.length}{' '}
-            {uploaded.length === 1 ? 'archivo' : 'archivos'}.
-          </p>
-          <ul className="divide-y rounded-md border">
-            {steps.map((s, i) => {
-              const media = mediaOf(s.id);
-              return (
-                <li key={s.id}>
-                  <button type="button" className="block w-full space-y-2 px-3 py-2 text-left text-sm hover:bg-muted" onClick={() => goTo(i)}>
-                    <span className="flex items-center gap-2">
-                      {stateOf(s.id) === 'done' ? (
-                        <Check className="h-4 w-4 shrink-0 text-primary" />
-                      ) : stateOf(s.id) === 'uploading' ? (
-                        <Upload className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      ) : stateOf(s.id) === 'skipped' ? (
-                        <SkipForward className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      ) : (
-                        <CircleDashed className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      )}
-                      <span className="min-w-0 flex-1 truncate">
-                        {i + 1}. {s.title}
+        <section className="overflow-hidden rounded-2xl border bg-card shadow-card">
+          <div className={cn('border-b px-4 py-3', BAND)}>
+            <h2 className="text-lg font-semibold">Terminaste</h2>
+          </div>
+          <div className="space-y-3 p-4">
+            <p className="text-sm text-muted-foreground">
+              {counts.done} de {steps.length} pasos hechos{counts.skipped > 0 ? `, ${counts.skipped} ${counts.skipped === 1 ? 'salteado' : 'salteados'}` : ''}. En esta tanda subiste {uploaded.length}{' '}
+              {uploaded.length === 1 ? 'archivo' : 'archivos'}.
+            </p>
+            <ul className="divide-y rounded-md border">
+              {steps.map((s, i) => {
+                const media = mediaOf(s.id);
+                return (
+                  <li key={s.id}>
+                    <button type="button" className="block w-full space-y-2 px-3 py-2 text-left text-sm hover:bg-muted" onClick={() => goTo(i)}>
+                      <span className="flex items-center gap-2">
+                        {stateOf(s.id) === 'done' ? (
+                          <Check className="h-4 w-4 shrink-0 text-primary" />
+                        ) : stateOf(s.id) === 'uploading' ? (
+                          <Upload className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        ) : stateOf(s.id) === 'skipped' ? (
+                          <SkipForward className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        ) : (
+                          <CircleDashed className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        )}
+                        <span className="min-w-0 flex-1 truncate">
+                          {i + 1}. {s.title}
+                        </span>
+                        <span className="shrink-0 text-xs text-muted-foreground">{stepNote(s, media.length, stateOf(s.id))}</span>
+                        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                       </span>
-                      <span className="shrink-0 text-xs text-muted-foreground">{stepNote(s, media.length, stateOf(s.id))}</span>
-                      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    </span>
-                    {media.length > 0 ? (
-                      <span className="flex flex-wrap gap-1.5 pl-6">
-                        {media.slice(0, 6).map((m) => (
-                          <ShotThumb key={m.id} shot={m} className="h-11 w-11" />
-                        ))}
-                        {media.length > 6 ? <span className="flex h-11 items-center px-1 text-xs text-muted-foreground">y {media.length - 6} más</span> : null}
-                      </span>
-                    ) : null}
-                  </button>
-                </li>
-              );
-            })}
-            <li>
-              <button type="button" className="block w-full space-y-2 px-3 py-2 text-left text-sm hover:bg-muted" onClick={() => showExtra(true)}>
-                <span className="flex items-center gap-2">
-                  <Plus className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <span className="min-w-0 flex-1 truncate">Extra, fuera de los pasos</span>
-                  <span className="shrink-0 text-xs text-muted-foreground">{extraMedia.length > 0 ? plural(extraMedia.length, 'archivo') : 'Sacar'}</span>
-                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-                </span>
-                {extraMedia.length > 0 ? (
-                  <span className="flex flex-wrap gap-1.5 pl-6">
-                    {extraMedia.slice(0, 6).map((m) => (
-                      <ShotThumb key={m.id} shot={m} className="h-11 w-11" />
-                    ))}
-                    {extraMedia.length > 6 ? <span className="flex h-11 items-center px-1 text-xs text-muted-foreground">y {extraMedia.length - 6} más</span> : null}
+                      {media.length > 0 ? (
+                        <span className="flex flex-wrap gap-1.5 pl-6">
+                          {media.slice(0, 6).map((m) => (
+                            <ShotThumb key={m.id} shot={m} className="h-11 w-11" />
+                          ))}
+                          {media.length > 6 ? <span className="flex h-11 items-center px-1 text-xs text-muted-foreground">y {media.length - 6} más</span> : null}
+                        </span>
+                      ) : null}
+                    </button>
+                  </li>
+                );
+              })}
+              <li>
+                <button type="button" className="block w-full space-y-2 px-3 py-2 text-left text-sm hover:bg-muted" onClick={() => showExtra(true)}>
+                  <span className="flex items-center gap-2">
+                    <Plus className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate">Extra, fuera de los pasos</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">{extraMedia.length > 0 ? plural(extraMedia.length, 'archivo') : 'Sacar'}</span>
+                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                   </span>
-                ) : null}
-              </button>
-            </li>
-          </ul>
+                  {extraMedia.length > 0 ? (
+                    <span className="flex flex-wrap gap-1.5 pl-6">
+                      {extraMedia.slice(0, 6).map((m) => (
+                        <ShotThumb key={m.id} shot={m} className="h-11 w-11" />
+                      ))}
+                      {extraMedia.length > 6 ? <span className="flex h-11 items-center px-1 text-xs text-muted-foreground">y {extraMedia.length - 6} más</span> : null}
+                    </span>
+                  ) : null}
+                </button>
+              </li>
+            </ul>
+          </div>
         </section>
         <EndLinks base={base} productId={product.id} />
       </div>

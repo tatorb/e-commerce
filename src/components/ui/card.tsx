@@ -1,8 +1,10 @@
 import * as React from 'react';
 import { cn } from '@/lib/utils/cn';
+import { BAND } from './band';
 
 // Tarjeta con el mismo aspecto que <SectionCard>: blanca, redondeada, con una
-// sombra suave, y el título arriba separado del contenido por una línea fina.
+// sombra suave, y el título arriba en la franja gris, separado del contenido
+// por una línea fina.
 
 const Card = React.forwardRef<
   HTMLDivElement,
@@ -26,7 +28,8 @@ const CardHeader = React.forwardRef<
   <div
     ref={ref}
     className={cn(
-      'flex flex-col gap-0.5 border-b px-4 py-3.5',
+      'flex flex-col gap-0.5 rounded-t-2xl border-b px-4 py-3.5',
+      BAND,
       className,
     )}
     {...props}

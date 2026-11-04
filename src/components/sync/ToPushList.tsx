@@ -1,5 +1,6 @@
 'use client';
 
+import { BAND } from '@/components/ui/band';
 import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -72,7 +73,7 @@ export function ToPushList({ accountSlug, rows }: { accountSlug: string; rows: T
 
   return (
     <div className="overflow-hidden rounded-2xl border bg-card shadow-card">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-muted/50 px-4 py-3 text-sm">
+      <div className={cn('flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-3 text-sm', BAND)}>
         <input
           type="checkbox"
           aria-label="Elegir todas las que se pueden subir"

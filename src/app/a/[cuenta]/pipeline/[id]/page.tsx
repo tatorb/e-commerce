@@ -509,6 +509,7 @@ export default async function PipelineStepPage({
               timeZone={account.timezone}
               of={family && family.members.length > 1 ? 'las medidas de la familia' : 'esta publicación'}
               search={pub.externalId}
+              defaultOpen={false}
             />
           ) : null}
           </>
@@ -589,7 +590,7 @@ export default async function PipelineStepPage({
         />
 
         {pub.movements.length > 0 ? (
-          <SectionCard title="Historial del pipeline" description="Cuánto estuvo en cada paso, quién la movió y por qué salió.">
+          <SectionCard title="Historial del pipeline" description="Cuánto estuvo en cada paso, quién la movió y por qué salió." collapsible>
             <PipelineHistory movements={[...pub.movements].reverse()} timeZone={account.timezone} />
           </SectionCard>
         ) : null}

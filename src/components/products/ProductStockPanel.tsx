@@ -194,7 +194,7 @@ export function ProductStockPanel({
       </SectionCard>
 
       {!isCombo ? (
-        <SectionCard title="Movimientos" description="Lo que fue pasando con el stock, lo más nuevo primero.">
+        <SectionCard title="Movimientos" description="Lo que fue pasando con el stock, lo más nuevo primero." collapsible>
           {view.moves.length === 0 ? (
             <SectionBody>
               <p className="text-sm text-muted-foreground">Todavía no hubo movimientos.</p>

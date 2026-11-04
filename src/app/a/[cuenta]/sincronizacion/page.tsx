@@ -155,6 +155,8 @@ export default async function SyncPage({ params }: { params: Promise<{ cuenta: s
 
         <SectionCard
           title="Lo que cambió por la sincronización"
+          collapsible
+          defaultOpen
           description="Los datos que llegaron del canal, lo que se subió y lo que se eligió, lo más nuevo primero."
           action={
             <Link href={`/a/${account.slug}/registro`} className="text-xs font-medium underline-offset-4 hover:underline">

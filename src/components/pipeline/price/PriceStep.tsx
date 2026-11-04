@@ -258,7 +258,6 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
     <div className="space-y-4 md:space-y-6">
       <div className="grid gap-4 md:gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
         <SectionCard
-          banded
           title="Simulador"
           description={`${several && group.measures.length > 0 ? `Este precio vale para ${group.measures.length === 1 ? 'la medida' : 'las medidas'} ${measuresText(group.measures)}. ` : ''}El precio publicado incluye IVA.`}
         >
@@ -401,7 +400,7 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
           </SectionBody>
         </SectionCard>
 
-        <SectionCard banded title="Resultado">
+        <SectionCard title="Resultado">
           <SectionBody>
             {!cost ? (
               <p className="text-sm text-muted-foreground">
@@ -466,7 +465,7 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
 
       {/* En la computadora, la perilla y la composición del precio van una al lado de la otra. */}
       <div className="grid gap-4 md:gap-6 lg:grid-cols-2">
-        <SectionCard banded title="Perilla de ganancia" description="Arrastrala para llevar la ganancia sobre el costo adonde quieras: el precio publicado se acomoda solo.">
+        <SectionCard title="Perilla de ganancia" description="Arrastrala para llevar la ganancia sobre el costo adonde quieras: el precio publicado se acomoda solo.">
           <SectionBody>
             {ready ? (
               <>
@@ -488,7 +487,7 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
           </SectionBody>
         </SectionCard>
 
-        <SectionCard banded title="De qué se compone el precio final">
+        <SectionCard title="De qué se compone el precio final">
           <SectionBody>
             {listPrice > 0 ? <CompositionBar parts={parts} finalPrice={sim.finalPrice} /> : <p className="text-sm text-muted-foreground">Cargá el precio publicado.</p>}
           </SectionBody>
@@ -496,7 +495,6 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
       </div>
 
       <CollapsibleCard
-        banded
         title="Costos"
         description="En cada fila escribí lo que sabés: el % en los cargos e impuestos, el monto en el costo, el envío y el embalaje. Lo que cambies acá es solo para este producto."
         aside={
@@ -550,7 +548,7 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
       />
 
       <div className="grid gap-4 md:grid-cols-2 md:gap-6">
-        <SectionCard banded title="Precios de referencia" description="Sin cuotas ni descuento.">
+        <SectionCard title="Precios de referencia" description="Sin cuotas ni descuento.">
           <SectionBody>
             {refs ? (
               <dl className="space-y-2 text-sm">
@@ -580,7 +578,7 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
             )}
           </SectionBody>
         </SectionCard>
-        <SectionCard banded title="Descuento máximo" description="El más grande que aguanta este precio publicado sin bajar del margen mínimo.">
+        <SectionCard title="Descuento máximo" description="El más grande que aguanta este precio publicado sin bajar del margen mínimo.">
           <SectionBody>
             {ready ? (
               <dl className="space-y-2 text-sm">
@@ -602,7 +600,6 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
       </div>
 
       <SectionCard
-        banded
         title="Guardar el precio"
         description={`El precio, las cuotas y el descuento pasan a Por subir y se mandan a ${data.channelName} desde ahí. ${data.channelName} pone fin a los descuentos: antes de que venza, la app lo vuelve a subir sola.`}
       >

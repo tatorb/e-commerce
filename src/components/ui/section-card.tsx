@@ -1,11 +1,15 @@
 import * as React from 'react';
 import { cn } from '@/lib/utils/cn';
+import { BAND } from './band';
+import { CollapsibleCard } from './collapsible-card';
 
-// Tarjeta de sección: blanca, redondeada y con una sombra suave. Arriba, el
-// título con su ícono, la cantidad, una descripción corta y la acción
-// principal a la derecha, separados del contenido por una línea fina. Con
-// banded, el título va en una franja gris, para pantallas con muchas tarjetas
-// donde cuesta ver dónde empieza cada una.
+// Tarjeta de sección: blanca, redondeada y con una sombra suave. Arriba, en
+// una franja gris, el título con su ícono, la cantidad, una descripción corta
+// y la acción principal a la derecha. La franja va en todas las tarjetas de
+// la app, para ver dónde empieza cada una; banded={false} la saca. Con
+// collapsible, la tarjeta se pliega desde el título, con su flecha a la
+// derecha: para historiales y registros que se consultan de vez en cuando.
+// Cerrada al empezar, salvo con defaultOpen.
 
 export function SectionCard({
   title,
@@ -14,7 +18,9 @@ export function SectionCard({
   description,
   action,
   id,
-  banded,
+  banded = true,
+  collapsible,
+  defaultOpen,
   className,
   children,
 }: {
@@ -27,9 +33,18 @@ export function SectionCard({
   description?: React.ReactNode;
   action?: React.ReactNode;
   banded?: boolean;
+  collapsible?: boolean;
+  defaultOpen?: boolean;
   className?: string;
   children?: React.ReactNode;
 }) {
+  if (collapsible) {
+    return (
+      <CollapsibleCard id={id} title={title} icon={icon} count={count} description={description} aside={action} banded={banded} defaultOpen={defaultOpen} className={className}>
+        {children}
+      </CollapsibleCard>
+    );
+  }
   return (
     <section id={id} className={cn('scroll-mt-20 overflow-hidden rounded-2xl border bg-card text-card-foreground shadow-card', className)}>
       <header className={cn('flex flex-wrap items-start justify-between gap-3 border-b px-4 py-3.5 md:px-5', banded && BAND)}>
@@ -50,8 +65,7 @@ export function SectionCard({
   );
 }
 
-/** La franja gris del título: un tono más que el fondo de la página, para que se distinga de él y del contenido blanco. */
-export const BAND = 'bg-border/60';
+export { BAND };
 
 /** El cuerpo de una sección con formulario o texto. */
 export function SectionBody({ className, children }: { className?: string; children: React.ReactNode }) {

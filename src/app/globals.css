@@ -74,3 +74,38 @@
     shape-rendering: geometricPrecision;
   }
 }
+
+/* Todo lo que se pliega (<details>) lleva la misma flechita: a la derecha,
+   apuntando abajo, y se da vuelta al abrirse. Reemplaza el triángulo del
+   navegador, que casi no se ve. Las tarjetas plegables ya traen la suya:
+   llevan la clase sin-flecha. */
+@layer base {
+  details > summary {
+    list-style: none;
+  }
+  details > summary::-webkit-details-marker {
+    display: none;
+  }
+  details > summary:not(.sin-flecha)::after {
+    content: '';
+    display: inline-block;
+    flex-shrink: 0;
+    width: 1em;
+    height: 1em;
+    margin-left: 0.35em;
+    vertical-align: -0.15em;
+    background-color: currentColor;
+    opacity: 0.6;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / contain no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / contain no-repeat;
+    transition: transform 150ms;
+  }
+  /* En un título armado en fila, la flecha va al final, a la derecha. */
+  details > summary.flex:not(.sin-flecha)::after {
+    margin-left: auto;
+    align-self: center;
+  }
+  details[open] > summary:not(.sin-flecha)::after {
+    transform: rotate(180deg);
+  }
+}

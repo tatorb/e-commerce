@@ -105,7 +105,6 @@ export function ChannelPromotionsCard({
   const loading = state.kind === 'loading';
   return (
     <SectionCard
-      banded
       title="Promociones"
       description={`El descuento propio que deja poner ${channelName} hoy y sus campañas para la publicación.`}
       action={

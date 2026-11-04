@@ -1,5 +1,6 @@
 'use client';
 
+import { BAND } from '@/components/ui/band';
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -57,7 +58,7 @@ export function ChoiceList({ accountSlug, rows }: { accountSlug: string; rows: C
 
   return (
     <div>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-3 text-sm">
+      <div className={cn('flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-3 text-sm', BAND)}>
         <span className="text-muted-foreground">Seleccionar:</span>
         <button type="button" className="underline-offset-4 hover:underline" onClick={() => setSelected(new Set(rows.map((r) => r.id)))}>
           todas

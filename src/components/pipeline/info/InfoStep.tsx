@@ -157,7 +157,7 @@ export function InfoStep({
         sharedWith={ctx.sharedWith}
         initial={s(r?.clarifications)}
       />
-      <SectionCard title="Material capturado" description="Lo que se juntó en el paso Título, con su fecha.">
+      <SectionCard title="Material capturado" description="Lo que se juntó en el paso Título, con su fecha." collapsible>
         <SectionBody>
           <CapturedMaterial captures={ctx.captures} positions={ctx.positions} timeZone={timeZone} />
         </SectionBody>

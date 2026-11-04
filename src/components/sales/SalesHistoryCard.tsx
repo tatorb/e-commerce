@@ -17,12 +17,15 @@ export function SalesHistoryCard({
   of,
   // Para ver todas en Ventas, buscando por el código.
   search,
+  defaultOpen = true,
 }: {
   accountSlug: string;
   history: SalesHistory;
   timeZone: string;
   of: string;
   search: string | null;
+  // Se pliega desde el título; en el paso Precio arranca cerrada.
+  defaultOpen?: boolean;
 }) {
   const now = new Date();
   const s = history.summary;
@@ -31,6 +34,9 @@ export function SalesHistoryCard({
     <SectionCard
       title="Historial de ventas"
       icon={<Receipt />}
+      count={history.summary.count || null}
+      collapsible
+      defaultOpen={defaultOpen}
       description={`Las ventas de ${of}${history.since ? `, desde el ${history.since.toLocaleDateString('es-AR', { timeZone })}` : ''}. Sin las canceladas en el resumen.`}
       action={
         history.total > history.rows.length ? (

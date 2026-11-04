@@ -111,7 +111,7 @@ export default async function SalePage({ params }: { params: Promise<{ cuenta: s
         ) : null}
 
         <div className="grid gap-4 md:gap-6 xl:grid-cols-2">
-          <SectionCard title="Lo que se vendió" icon={<Package />} count={sale.units} banded>
+          <SectionCard title="Lo que se vendió" icon={<Package />} count={sale.units}>
             <ul className="divide-y">
               {sale.lines.map((l, i) => {
                 const pub = l.publicationId ? sale.publications.get(l.publicationId) : null;
@@ -157,7 +157,7 @@ export default async function SalePage({ params }: { params: Promise<{ cuenta: s
             </ul>
           </SectionCard>
 
-          <SectionCard title="Lo que dejó" icon={<Receipt />} banded>
+          <SectionCard title="Lo que dejó" icon={<Receipt />}>
             {m.cancelled ? (
               <SectionBody>
                 <p className="text-sm text-muted-foreground">Cancelada: no deja nada.</p>
@@ -186,7 +186,7 @@ export default async function SalePage({ params }: { params: Promise<{ cuenta: s
             )}
           </SectionCard>
 
-          <SectionCard title="El pago" icon={<CreditCard />} banded>
+          <SectionCard title="El pago" icon={<CreditCard />}>
             <SectionBody>
               {sale.payments.length === 0 ? (
                 <p className="text-sm text-muted-foreground">El canal no informó pagos.</p>
@@ -237,7 +237,7 @@ export default async function SalePage({ params }: { params: Promise<{ cuenta: s
             </SectionBody>
           </SectionCard>
 
-          <SectionCard title="El envío" icon={<Truck />} banded>
+          <SectionCard title="El envío" icon={<Truck />}>
             <SectionBody>
               {sale.shipState === 'NONE' ? (
                 <p className="text-sm text-muted-foreground">Sin envío del canal: se arregla con el comprador.</p>
@@ -289,7 +289,7 @@ export default async function SalePage({ params }: { params: Promise<{ cuenta: s
           </SectionCard>
         </div>
 
-        <SectionCard title="Stock" icon={<Boxes />} banded>
+        <SectionCard title="Stock" icon={<Boxes />}>
           <SectionBody>
             {sale.stock ? (
               <>

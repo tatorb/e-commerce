@@ -1,5 +1,7 @@
 'use client';
 
+import { cn } from '@/lib/utils/cn';
+import { BAND } from '@/components/ui/band';
 import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Archive, ArchiveRestore, ArrowDown, ArrowUp, ImagePlus, Pencil, Plus, Trash2 } from 'lucide-react';
@@ -83,8 +85,8 @@ export function ProtocolEditor({ accountSlug, protocols }: { accountSlug: string
         <ProtocolCard key={p.id} accountSlug={accountSlug} protocol={p} index={i} total={active.length} />
       ))}
       {archived.length > 0 ? (
-        <details className="rounded-2xl border bg-card shadow-card">
-          <summary className="cursor-pointer px-4 py-3 text-sm font-medium">Archivados ({archived.length})</summary>
+        <details className="overflow-hidden rounded-2xl border bg-card shadow-card">
+          <summary className={cn('flex cursor-pointer items-center px-4 py-3 text-sm font-medium', BAND)}>Archivados ({archived.length})</summary>
           <div className="space-y-4 border-t p-4">
             {archived.map((p, i) => (
               <ProtocolCard key={p.id} accountSlug={accountSlug} protocol={p} index={i} total={archived.length} />

@@ -45,7 +45,7 @@ export default async function ShipmentsPage({ params }: { params: Promise<{ cuen
       </div>
     );
   const card = (title: string, icon: React.ReactNode, rows: SaleRow[], description: string, empty: string, deadline?: boolean) => (
-    <SectionCard title={title} icon={icon} count={rows.length} description={description} banded>
+    <SectionCard title={title} icon={icon} count={rows.length} description={description}>
       {list(rows, empty, deadline)}
     </SectionCard>
   );

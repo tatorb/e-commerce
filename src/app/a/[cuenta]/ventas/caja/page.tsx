@@ -60,7 +60,7 @@ export default async function CashPage({ params, searchParams }: { params: Promi
         <PeriodPicker period={period} keep={{}} />
 
         <div className="grid gap-4 md:gap-6 xl:grid-cols-2">
-          <SectionCard title="Resultado" icon={<LineChart />} description={`Las ventas pagadas de ${label}, por la fecha de la venta.`} banded>
+          <SectionCard title="Resultado" icon={<LineChart />} description={`Las ventas pagadas de ${label}, por la fecha de la venta.`}>
             <SectionBody className="space-y-0 p-0 md:p-0">
               <dl className="divide-y">
                 {rows.map((r) => (
@@ -97,7 +97,7 @@ export default async function CashPage({ params, searchParams }: { params: Promi
           </SectionCard>
 
           <div className="flex flex-col gap-4 md:gap-6">
-            <SectionCard title="La plata" icon={<Wallet />} description="Lo que liberó el medio de pago y lo que todavía no se puede usar." banded>
+            <SectionCard title="La plata" icon={<Wallet />} description="Lo que liberó el medio de pago y lo que todavía no se puede usar.">
               <SectionBody>
                 <div className="grid grid-cols-2 gap-4">
                   <Figure label={`Liberado en ${label}`} value={money(data.cash.released.amount)} hint={plural(data.cash.released.count, 'venta', 'ventas')} tone="good" big />
@@ -135,7 +135,7 @@ export default async function CashPage({ params, searchParams }: { params: Promi
               </SectionBody>
             </SectionCard>
 
-            <SectionCard title="Cancelaciones y reclamos" icon={<Banknote />} banded>
+            <SectionCard title="Cancelaciones y reclamos" icon={<Banknote />}>
               <SectionBody className="grid grid-cols-3 gap-4">
                 <Figure label="Canceladas" value={s.cancelled.count} hint={money(s.cancelled.amount)} tone="muted" />
                 <Figure label="Sin pagar" value={s.pending.count} hint={money(s.pending.amount)} tone="muted" />
@@ -146,7 +146,7 @@ export default async function CashPage({ params, searchParams }: { params: Promi
         </div>
 
         {data.days.length > 1 ? (
-          <SectionCard title="Vendido por día" icon={<LineChart />} banded>
+          <SectionCard title="Vendido por día" icon={<LineChart />}>
             <SectionBody>
               <div className="flex h-40 items-end gap-1" role="img" aria-label="Lo vendido cada día del período">
                 {data.days.map((d) => (
@@ -163,7 +163,7 @@ export default async function CashPage({ params, searchParams }: { params: Promi
           </SectionCard>
         ) : null}
 
-        <SectionCard title="Por producto" icon={<Package />} count={data.products.length} description="Lo vendido y lo que dejó cada producto. Cada venta reparte su ganancia entre sus productos según lo que pagó el comprador por cada uno." banded>
+        <SectionCard title="Por producto" icon={<Package />} count={data.products.length} description="Lo vendido y lo que dejó cada producto. Cada venta reparte su ganancia entre sus productos según lo que pagó el comprador por cada uno.">
           {data.products.length === 0 ? (
             <SectionBody>
               <p className="text-sm text-muted-foreground">No hay ventas pagadas en {label}.</p>

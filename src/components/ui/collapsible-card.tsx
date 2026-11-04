@@ -1,13 +1,13 @@
 import { ChevronDown } from 'lucide-react';
 import type * as React from 'react';
 import { cn } from '@/lib/utils/cn';
-import { BAND } from './section-card';
+import { BAND } from './band';
 
 // Una tarjeta que se pliega: el título con su ícono y una flecha. Sirve para
 // lo largo que no hace falta ver siempre, como la descripción o los datos de
 // catálogo. Funciona sin JavaScript. Con aside, un resumen a la derecha del
-// título, para ver lo principal sin abrirla; con banded, el título va en la
-// franja gris, como en <SectionCard>.
+// título, para ver lo principal sin abrirla. El título va en la franja gris,
+// como en <SectionCard>; banded={false} la saca.
 
 export function CollapsibleCard({
   title,
@@ -15,7 +15,8 @@ export function CollapsibleCard({
   description,
   defaultOpen = false,
   aside,
-  banded,
+  banded = true,
+  count,
   id,
   className,
   children,
@@ -26,6 +27,7 @@ export function CollapsibleCard({
   defaultOpen?: boolean;
   aside?: React.ReactNode;
   banded?: boolean;
+  count?: number | null;
   id?: string;
   className?: string;
   children: React.ReactNode;
@@ -34,13 +36,16 @@ export function CollapsibleCard({
     <details id={id} open={defaultOpen} className={cn('group overflow-hidden rounded-2xl border bg-card text-card-foreground shadow-card', className)}>
       <summary
         className={cn(
-          'flex cursor-pointer list-none flex-wrap items-start gap-2.5 px-4 py-3.5 transition-colors md:px-5 [&::-webkit-details-marker]:hidden',
+          'sin-flecha flex cursor-pointer list-none flex-wrap items-start gap-2.5 px-4 py-3.5 transition-colors md:px-5 [&::-webkit-details-marker]:hidden',
           banded ? cn(BAND, 'hover:bg-border') : 'hover:bg-muted/40',
         )}
       >
         {icon ? <span className="mt-0.5 shrink-0 text-foreground/80 [&_svg]:h-5 [&_svg]:w-5" aria-hidden>{icon}</span> : null}
         <span className="min-w-0 flex-1">
-          <span className="block text-base font-semibold tracking-tight">{title}</span>
+          <span className="flex items-baseline gap-2 text-base font-semibold tracking-tight">
+            {title}
+            {count ? <span className="text-xs font-normal tabular-nums text-muted-foreground">{count}</span> : null}
+          </span>
           {description ? <span className="mt-0.5 block text-xs text-muted-foreground">{description}</span> : null}
         </span>
         {aside ? <span className="order-last w-full text-sm sm:order-none sm:w-auto sm:pt-0.5">{aside}</span> : null}

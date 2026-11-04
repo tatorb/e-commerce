@@ -1,3 +1,5 @@
+import { cn } from '@/lib/utils/cn';
+import { BAND } from '@/components/ui/band';
 import Link from 'next/link';
 import { loadProductOptions } from '@/lib/product-options';
 import { Check, ChevronRight, Search } from 'lucide-react';
@@ -84,21 +86,25 @@ export default async function ShootPage({ params, searchParams }: { params: Prom
           <div className="mx-auto w-full max-w-xl space-y-4">
             <BeforeStarting />
             {productId ? <p className="text-sm text-destructive">Ese producto no está en la cuenta. Buscalo de nuevo.</p> : null}
-            <section className="space-y-3 rounded-2xl border bg-card shadow-card p-4">
-              <h2 className="text-base font-semibold">1. Elegí el producto</h2>
-              <form action={base} className="flex gap-2">
-                <Input name="q" defaultValue={q} placeholder="Código, nombre o SKU. Por ejemplo SP-914" autoComplete="off" className="h-11 text-base" />
-                <Button type="submit" size="lg" className="h-11 px-4" access="view">
-                  <Search />
-                  Buscar
-                </Button>
-              </form>
-              {q.trim().length > 0 && q.trim().length < 2 ? <p className="text-sm text-muted-foreground">Escribí al menos 2 letras o números.</p> : null}
-              {q.trim().length >= 2 && products.length === 0 ? <p className="text-sm text-muted-foreground">No encontramos productos con «{q.trim()}».</p> : null}
-              {q.trim().length < 2 && products.length > 0 ? <p className="text-xs font-medium text-muted-foreground">Los últimos registrados</p> : null}
-              <ProductList products={products} base={base} />
-              {/* Si no está, se crea acá con lo básico, con lo buscado ya cargado. */}
-              <NewProductForm key={q} accountSlug={account.slug} base={base} search={q.trim()} startOpen={q.trim().length >= 2 && products.length === 0} options={options} />
+            <section className="overflow-hidden rounded-2xl border bg-card shadow-card">
+              <div className={cn('border-b px-4 py-3', BAND)}>
+                <h2 className="text-base font-semibold">1. Elegí el producto</h2>
+              </div>
+              <div className="space-y-3 p-4">
+                <form action={base} className="flex gap-2">
+                  <Input name="q" defaultValue={q} placeholder="Código, nombre o SKU. Por ejemplo SP-914" autoComplete="off" className="h-11 text-base" />
+                  <Button type="submit" size="lg" className="h-11 px-4" access="view">
+                    <Search />
+                    Buscar
+                  </Button>
+                </form>
+                {q.trim().length > 0 && q.trim().length < 2 ? <p className="text-sm text-muted-foreground">Escribí al menos 2 letras o números.</p> : null}
+                {q.trim().length >= 2 && products.length === 0 ? <p className="text-sm text-muted-foreground">No encontramos productos con «{q.trim()}».</p> : null}
+                {q.trim().length < 2 && products.length > 0 ? <p className="text-xs font-medium text-muted-foreground">Los últimos registrados</p> : null}
+                <ProductList products={products} base={base} />
+                {/* Si no está, se crea acá con lo básico, con lo buscado ya cargado. */}
+                <NewProductForm key={q} accountSlug={account.slug} base={base} search={q.trim()} startOpen={q.trim().length >= 2 && products.length === 0} options={options} />
+              </div>
             </section>
           </div>
         </PageBody>
@@ -139,76 +145,84 @@ export default async function ShootPage({ params, searchParams }: { params: Prom
           <div className="mx-auto w-full max-w-xl space-y-4">
             <ProductStrip product={plan.product} base={base} />
             {!measureChosen ? (
-              <section className="space-y-3 rounded-2xl border bg-card shadow-card p-4">
-                <h2 className="text-base font-semibold">2. Elegí la medida</h2>
-                <p className="text-sm text-muted-foreground">
-                  {measures.length >= 2
-                    ? 'Lo que saques queda marcado para esa medida en las publicaciones. Si sirve para todas, elegí Todas las medidas.'
-                    : measures.length === 1
-                      ? 'Lo que saques queda marcado para esa medida. Si el producto tiene otra, agregala abajo.'
-                      : 'Este producto todavía no tiene medidas cargadas. Podés seguir sin medida o agregar las que tenga.'}
-                </p>
-                <ul className={measures.length >= 2 ? 'grid gap-2 sm:grid-cols-2' : 'grid gap-2'}>
-                  {measures.map((m) => (
-                    <li key={m.key}>
-                      <PickLink
-                        href={`${withProduct}&medida=${encodeURIComponent(m.key)}`}
-                        title={m.named ? m.label : `SKU ${m.label}`}
-                        description={m.named ? null : 'Sin nombre de medida'}
-                        note={countText(plan.shots.filter((s) => s.variantKey === m.key))}
-                      />
-                    </li>
-                  ))}
-                  {measures.length !== 1 ? (
-                    <li className="sm:col-span-2">
-                      <PickLink
-                        href={`${withProduct}&medida=${ALL}`}
-                        title={measures.length === 0 ? 'Sin medida' : 'Todas las medidas'}
-                        note={countText(plan.shots.filter((s) => s.variantKey === null))}
-                      />
-                    </li>
-                  ) : null}
-                </ul>
-                <AddMeasuresForm
-                  accountSlug={account.slug}
-                  productId={plan.product.id}
-                  label="Agregar una medida"
-                  hint={measures.length === 0 ? 'Si ya vendía una medida, cargala también, por ejemplo STD.' : undefined}
-                />
+              <section className="overflow-hidden rounded-2xl border bg-card shadow-card">
+                <div className={cn('border-b px-4 py-3', BAND)}>
+                  <h2 className="text-base font-semibold">2. Elegí la medida</h2>
+                </div>
+                <div className="space-y-3 p-4">
+                  <p className="text-sm text-muted-foreground">
+                    {measures.length >= 2
+                      ? 'Lo que saques queda marcado para esa medida en las publicaciones. Si sirve para todas, elegí Todas las medidas.'
+                      : measures.length === 1
+                        ? 'Lo que saques queda marcado para esa medida. Si el producto tiene otra, agregala abajo.'
+                        : 'Este producto todavía no tiene medidas cargadas. Podés seguir sin medida o agregar las que tenga.'}
+                  </p>
+                  <ul className={measures.length >= 2 ? 'grid gap-2 sm:grid-cols-2' : 'grid gap-2'}>
+                    {measures.map((m) => (
+                      <li key={m.key}>
+                        <PickLink
+                          href={`${withProduct}&medida=${encodeURIComponent(m.key)}`}
+                          title={m.named ? m.label : `SKU ${m.label}`}
+                          description={m.named ? null : 'Sin nombre de medida'}
+                          note={countText(plan.shots.filter((s) => s.variantKey === m.key))}
+                        />
+                      </li>
+                    ))}
+                    {measures.length !== 1 ? (
+                      <li className="sm:col-span-2">
+                        <PickLink
+                          href={`${withProduct}&medida=${ALL}`}
+                          title={measures.length === 0 ? 'Sin medida' : 'Todas las medidas'}
+                          note={countText(plan.shots.filter((s) => s.variantKey === null))}
+                        />
+                      </li>
+                    ) : null}
+                  </ul>
+                  <AddMeasuresForm
+                    accountSlug={account.slug}
+                    productId={plan.product.id}
+                    label="Agregar una medida"
+                    hint={measures.length === 0 ? 'Si ya vendía una medida, cargala también, por ejemplo STD.' : undefined}
+                  />
+                </div>
               </section>
             ) : (
-              <section className="space-y-3 rounded-2xl border bg-card shadow-card p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h2 className="text-base font-semibold">3. Elegí el protocolo</h2>
-                  <span className="inline-flex items-center gap-2 text-sm">
-                    <Badge variant="secondary">{measureText ?? 'Sin medida'}</Badge>
-                    <Link href={withProduct} className="text-xs font-medium text-primary underline-offset-4 hover:underline">
-                      Cambiar
-                    </Link>
-                  </span>
+              <section className="overflow-hidden rounded-2xl border bg-card shadow-card">
+                <div className={cn('border-b px-4 py-3', BAND)}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="text-base font-semibold">3. Elegí el protocolo</h2>
+                    <span className="inline-flex items-center gap-2 text-sm">
+                      <Badge variant="secondary">{measureText ?? 'Sin medida'}</Badge>
+                      <Link href={withProduct} className="text-xs font-medium text-primary underline-offset-4 hover:underline">
+                        Cambiar
+                      </Link>
+                    </span>
+                  </div>
                 </div>
-                {plan.protocols.length === 0 ? <p className="text-sm text-muted-foreground">Todavía no hay protocolos armados. Podés seguir sin protocolo.</p> : null}
-                <ProtocolPicker
-                  accountSlug={account.slug}
-                  productId={plan.product.id}
-                  pipeline={{
-                    state: inPipeline?.state ?? 'none',
-                    href: pipelineHref,
-                    stores: stores.length > 1 ? stores.map((st) => ({ id: st.id, label: `${st.name} · ${st.channel.name}` })) : [],
-                    byMeasure: measures.length >= 2,
-                  }}
-                  options={[
-                    ...plan.protocols.map((p) => ({
-                      key: p.id,
-                      href: `${withMeasure}&protocolo=${p.id}`,
-                      title: p.name,
-                      description: p.description,
-                      note: `${plural(p.steps.length, 'paso')}${done(measure?.key ?? null)(p) > 0 ? `, ${done(measure?.key ?? null)(p)} ya hechos` : ''}`,
-                      withProtocol: true,
-                    })),
-                    { key: NONE, href: `${withMeasure}&protocolo=${NONE}`, title: 'Sin protocolo', description: 'Sacá las fotos y los videos que quieras, uno tras otro.', withProtocol: false },
-                  ]}
-                />
+                <div className="space-y-3 p-4">
+                  {plan.protocols.length === 0 ? <p className="text-sm text-muted-foreground">Todavía no hay protocolos armados. Podés seguir sin protocolo.</p> : null}
+                  <ProtocolPicker
+                    accountSlug={account.slug}
+                    productId={plan.product.id}
+                    pipeline={{
+                      state: inPipeline?.state ?? 'none',
+                      href: pipelineHref,
+                      stores: stores.length > 1 ? stores.map((st) => ({ id: st.id, label: `${st.name} · ${st.channel.name}` })) : [],
+                      byMeasure: measures.length >= 2,
+                    }}
+                    options={[
+                      ...plan.protocols.map((p) => ({
+                        key: p.id,
+                        href: `${withMeasure}&protocolo=${p.id}`,
+                        title: p.name,
+                        description: p.description,
+                        note: `${plural(p.steps.length, 'paso')}${done(measure?.key ?? null)(p) > 0 ? `, ${done(measure?.key ?? null)(p)} ya hechos` : ''}`,
+                        withProtocol: true,
+                      })),
+                      { key: NONE, href: `${withMeasure}&protocolo=${NONE}`, title: 'Sin protocolo', description: 'Sacá las fotos y los videos que quieras, uno tras otro.', withProtocol: false },
+                    ]}
+                  />
+                </div>
               </section>
             )}
             <ShotHistory plan={plan} shots={shots} />
@@ -305,8 +319,8 @@ function ProductStrip({ product, base }: { product: ShootPick; base: string }) {
 /** Cómo poner la cámara del celular en la mayor calidad. */
 function BeforeStarting({ collapsed = false }: { collapsed?: boolean }) {
   return (
-    <details open={!collapsed} className="rounded-2xl border bg-card shadow-card">
-      <summary className="cursor-pointer px-4 py-3 text-sm font-semibold">Antes de empezar: la cámara en la mayor calidad</summary>
+    <details open={!collapsed} className="overflow-hidden rounded-2xl border bg-card shadow-card">
+      <summary className={cn('flex cursor-pointer items-center px-4 py-3 text-sm font-semibold', BAND)}>Antes de empezar: la cámara en la mayor calidad</summary>
       <div className="space-y-2 border-t px-4 py-3 text-sm">
         <p>La app sube cada foto y cada video tal como sale de la cámara, sin achicarlo. La calidad la pone el celular.</p>
         <ul className="list-disc space-y-1 pl-5">
@@ -328,8 +342,8 @@ function ShotHistory({ plan, shots }: { plan: ShootPlan; shots: SessionShot[] })
   if (shots.length === 0) return null;
   const titles = new Map(plan.protocols.flatMap((p) => p.steps.map((s) => [s.id, s.title] as const)));
   return (
-    <details className="rounded-2xl border bg-card shadow-card">
-      <summary className="cursor-pointer px-4 py-3 text-sm font-semibold">Lo que ya se registró de este producto ({shots.length})</summary>
+    <details className="overflow-hidden rounded-2xl border bg-card shadow-card">
+      <summary className={cn('flex cursor-pointer items-center px-4 py-3 text-sm font-semibold', BAND)}>Lo que ya se registró de este producto ({shots.length})</summary>
       <ul className="divide-y border-t">
         {shots.map((s) => (
           <li key={s.id} className="flex items-center gap-3 px-4 py-2 text-sm">

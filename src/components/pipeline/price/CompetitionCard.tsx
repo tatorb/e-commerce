@@ -139,7 +139,7 @@ export function CompetitionCard({
 
   if (!comparison || others.length === 0) {
     return (
-      <SectionCard banded title="Comparación con la competencia" description="Con los precios que se cargan en el paso Información.">
+      <SectionCard title="Comparación con la competencia" description="Con los precios que se cargan en el paso Información.">
         <SectionBody>
           <p className="text-sm text-muted-foreground">
             {withoutPrice > 0 ? `${missing} ` : 'Todavía no hay competencia cargada. '}Cargá el precio de lista, el descuento, las cuotas y el envío de cada
@@ -169,7 +169,6 @@ export function CompetitionCard({
 
   return (
     <SectionCard
-      banded
       title="Comparación con la competencia"
       count={others.length}
       description={`Por precio efectivo: lo que paga el comprador en total. El tuyo va con envío gratis; al de un competidor sin envío gratis se le suman ${formatPrice(params.shipping)}. La rentabilidad estimada supone que les cuesta lo mismo que a vos.`}
