@@ -125,8 +125,9 @@ describe('orden en multimedia', () => {
     expect(protocolUse(null, [A, B], [A, B])).toEqual([]);
     expect(protocolUse(A, [B], [A, B])).toBeNull();
     expect(protocolUse(B, [B], [A, B])).toEqual([]);
-    // Una medida que ya no está en la ficha cuenta como de todas.
-    expect(protocolUse('sku:VIEJA', [A, B], [A, B])).toEqual([]);
+    // Una medida que ya no está en la ficha no va a ninguna: primero hay que elegirle la medida.
+    expect(protocolUse('sku:VIEJA', [A, B], [A, B])).toBeNull();
+    expect(protocolUse('sku:VIEJA', [], [A])).toEqual([]);
   });
 
   it('armadas en orden, cada medida con su lugar', () => {

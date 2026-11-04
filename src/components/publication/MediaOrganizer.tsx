@@ -172,7 +172,7 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
   /** Las fotos corregidas en el orden del protocolo, sin tocar los videos. */
   const byProtocol = (st: State) => (sources.protocol ? withPhotos(st, sources.protocol) : st);
   // Sin fotos elegidas, arranca con el orden del protocolo: queda para guardar.
-  const opening = () => (sources.following && sources.protocol ? byProtocol(initial()) : initial());
+  const opening = () => (sources.following && sources.protocol && !sources.measureIssue ? byProtocol(initial()) : initial());
 
   const [state, setState] = useState<State>(opening);
   // Después de guardar llega lo guardado: la pantalla arranca de ahí.
@@ -290,6 +290,11 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
         <PhotoThumb item={m} />
         <p className="truncate text-xs">{m.label}</p>
         {m.shot?.step ? <p className="truncate text-[11px] text-muted-foreground">Paso {m.shot.step}</p> : null}
+        {m.shot?.measureLabel ? (
+          <p className={cn('truncate text-[11px]', m.shot.unknownMeasure ? 'text-destructive' : 'text-muted-foreground')}>
+            {m.shot.unknownMeasure ? `Medida «${m.shot.measureLabel}»: ya no está en la ficha` : `Medida ${m.shot.measureLabel}`}
+          </p>
+        ) : null}
         {m.note ? <p className={cn('text-[11px]', m.blocked ? 'text-destructive' : 'truncate text-muted-foreground')}>{m.note}</p> : null}
         <UsePicker
           measures={measures}
@@ -336,6 +341,12 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
   return (
     <div className="space-y-6">
       <SharedPhotosNote sources={sources} />
+      {sources.measureIssue ? (
+        <p role="alert" className="flex items-start gap-2 rounded-md border border-alert/40 bg-alert/10 px-3 py-2 text-sm">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+          {sources.measureIssue}
+        </p>
+      ) : null}
       <section className="space-y-4">
         <div className="space-y-1">
           <h3 className="text-sm font-semibold">Fotos y videos</h3>
@@ -513,7 +524,7 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
       ) : null}
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" disabled={!dirty || busy !== null} pending={busy === 'save'} onClick={saveAll}>
+        <Button size="sm" disabled={!dirty || busy !== null || (photosDirty && sources.measureIssue !== null)} pending={busy === 'save'} onClick={saveAll}>
           Guardar
         </Button>
         {dirty ? (

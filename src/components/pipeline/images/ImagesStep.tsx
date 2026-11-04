@@ -41,6 +41,7 @@ export function ImagesStep({
   photoRules,
   sharedWith,
   drive,
+  groups = null,
 }: {
   accountSlug: string;
   publicationId: string;
@@ -58,6 +59,8 @@ export function ImagesStep({
   sharedWith: number;
   // Si el Drive del estudio está conectado, y la carpeta Fotos del producto si ya se armó.
   drive: { ready: boolean; folderUrl: string | null };
+  // Con varias medidas: las fotos separadas por medida, para que las de una no se mezclen con las de otra.
+  groups?: { title: string; ids: string[]; warn: boolean }[] | null;
 }) {
   const now = new Date();
   const photos = edits.map((e) => buildPhotoView(e, timeZone));
@@ -71,6 +74,61 @@ export function ImagesStep({
   const counts = (Object.keys(TONE) as PhotoTone[]).map((t) => ({ tone: t, n: tones.filter((x) => x === t).length })).filter((c) => c.n > 0);
   // Las que Claude no miró, por ejemplo porque la cuenta se quedó sin saldo.
   const unanswered = edits.filter(missedByClaude).length;
+
+  // Las fotos en tarjetas: tocar una la abre o la cierra.
+  const grid = (list: typeof photos) => (
+            <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {list.map((p) => {
+                const i = photos.indexOf(p);
+                const isOpen = openNow.includes(p.id);
+                const tone = TONE[tones[i]];
+                return (
+                  <li key={p.id}>
+                    <Link
+                      href={photosHref(pageHref, toggledPhotos(openNow, p.id))}
+                      scroll={false}
+                      aria-current={isOpen ? 'true' : undefined}
+                      className={cn(
+                        'relative flex gap-3 overflow-hidden rounded-lg border py-2 pl-4 pr-2 transition-colors hover:bg-muted/50',
+                        tone.card,
+                        isOpen && 'border-foreground bg-muted/50',
+                      )}
+                    >
+                      {/* El color de la izquierda dice en qué está: aprobada, falta verificar o sin procesar. */}
+                      <span aria-hidden className={cn('absolute inset-y-0 left-0 w-1.5', tone.dot)} />
+                      {/* Tocar la foto la abre o la cierra: la marca muestra cuáles están abiertas. */}
+                      <span
+                        aria-hidden
+                        className={cn(
+                          'absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded border',
+                          isOpen ? 'border-foreground bg-foreground text-background' : 'bg-background',
+                        )}
+                      >
+                        {isOpen ? <Check className="h-3.5 w-3.5" /> : null}
+                      </span>
+                      {p.thumbHref ? (
+                        // Con lupa sobre el original, para leer la etiqueta y la medida.
+                        <ZoomImage src={p.thumbHref} zoomSrc={p.originalViewHref} alt="" className="h-16 w-16 shrink-0 rounded border bg-muted object-contain" />
+                      ) : (
+                        <div className="flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-1 rounded border bg-muted text-center text-[10px] leading-tight text-muted-foreground">
+                          <BrandMark />
+                          Preparando
+                        </div>
+                      )}
+                      <div className="min-w-0 space-y-0.5 pr-7">
+                        <p className="truncate text-sm font-medium">{p.name}</p>
+                        <p className={cn('inline-flex rounded px-1.5 py-0.5 text-xs font-medium', tone.pill)}>
+                          <span className="sr-only">{tone.label}: </span>
+                          {p.progressText}
+                        </p>
+                        <p className="text-xs text-muted-foreground">{p.shot ?? (p.source === 'CHANNEL' ? `Publicada en ${channelName}` : 'Original subido')}</p>
+                      </div>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+  );
 
   return (
     <div className="space-y-6">
@@ -150,56 +208,20 @@ export function ImagesStep({
           ) : null}
 
           {photos.length > 0 ? (
-            <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {photos.map((p, i) => {
-                const isOpen = openNow.includes(p.id);
-                const tone = TONE[tones[i]];
-                return (
-                  <li key={p.id}>
-                    <Link
-                      href={photosHref(pageHref, toggledPhotos(openNow, p.id))}
-                      scroll={false}
-                      aria-current={isOpen ? 'true' : undefined}
-                      className={cn(
-                        'relative flex gap-3 overflow-hidden rounded-lg border py-2 pl-4 pr-2 transition-colors hover:bg-muted/50',
-                        tone.card,
-                        isOpen && 'border-foreground bg-muted/50',
-                      )}
-                    >
-                      {/* El color de la izquierda dice en qué está: aprobada, falta verificar o sin procesar. */}
-                      <span aria-hidden className={cn('absolute inset-y-0 left-0 w-1.5', tone.dot)} />
-                      {/* Tocar la foto la abre o la cierra: la marca muestra cuáles están abiertas. */}
-                      <span
-                        aria-hidden
-                        className={cn(
-                          'absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded border',
-                          isOpen ? 'border-foreground bg-foreground text-background' : 'bg-background',
-                        )}
-                      >
-                        {isOpen ? <Check className="h-3.5 w-3.5" /> : null}
-                      </span>
-                      {p.thumbHref ? (
-                        // Con lupa sobre el original, para leer la etiqueta y la medida.
-                        <ZoomImage src={p.thumbHref} zoomSrc={p.originalViewHref} alt="" className="h-16 w-16 shrink-0 rounded border bg-muted object-contain" />
-                      ) : (
-                        <div className="flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-1 rounded border bg-muted text-center text-[10px] leading-tight text-muted-foreground">
-                          <BrandMark />
-                          Preparando
-                        </div>
-                      )}
-                      <div className="min-w-0 space-y-0.5 pr-7">
-                        <p className="truncate text-sm font-medium">{p.name}</p>
-                        <p className={cn('inline-flex rounded px-1.5 py-0.5 text-xs font-medium', tone.pill)}>
-                          <span className="sr-only">{tone.label}: </span>
-                          {p.progressText}
-                        </p>
-                        <p className="text-xs text-muted-foreground">{p.shot ?? (p.source === 'CHANNEL' ? `Publicada en ${channelName}` : 'Original subido')}</p>
-                      </div>
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
+            groups ? (
+              <div className="space-y-4">
+                {groups.map((g) => (
+                  <section key={g.title} className="space-y-2" aria-label={g.title}>
+                    <h3 className={cn('text-sm font-semibold', g.warn && 'text-destructive')}>
+                      {g.title} <span className="font-normal text-muted-foreground">· {g.ids.length}</span>
+                    </h3>
+                    {grid(photos.filter((p) => g.ids.includes(p.id)))}
+                  </section>
+                ))}
+              </div>
+            ) : (
+              grid(photos)
+            )
           ) : (
             <p className="text-sm text-muted-foreground">Todavía no hay fotos en la línea.</p>
           )}

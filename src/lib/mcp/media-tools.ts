@@ -50,6 +50,7 @@ function mediaOut(ctx: McpContext, sources: MediaSources, lines: { id: string; o
     link: linkOf(ctx, m.thumb),
     elegida: chosen.has(m.key),
     ...(m.shot?.step ? { paso_del_protocolo: m.shot.step } : {}),
+    ...(m.shot?.measureLabel ? { medida: m.shot.unknownMeasure ? `«${m.shot.measureLabel}», que ya no está en la ficha (check_photo_measures)` : m.shot.measureLabel } : {}),
     ...(m.blocked ? { no_se_puede_usar: m.blocked } : {}),
   });
   const ready = new Set(sources.available.corrected.map((m) => m.key));

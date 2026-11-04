@@ -24,7 +24,11 @@ export async function loadFamilyMedia(db: Db, accountId: string, publicationId: 
     where: { id: lead.publication.productId },
     select: { variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } } },
   });
-  const measures = measuresOf(product.variants).filter((m) => members.some((x) => x.variantKey === m.key));
+  const all = measuresOf(product.variants);
+  // Cada publicación de la familia vende una medida. Si alguna no tiene, o tiene una que ya no está en
+  // la ficha, no se sabe qué fotos van en cada una: se muestran todas las medidas y no se guarda hasta elegirla.
+  const lost = members.filter((m) => !all.some((x) => x.key === m.variantKey));
+  const measures = lost.length > 0 ? all : all.filter((m) => members.some((x) => x.variantKey === m.key));
 
   // Cada foto con las medidas que la usan y su lugar en cada una.
   const order: string[] = [];
@@ -56,11 +60,15 @@ export async function loadFamilyMedia(db: Db, accountId: string, publicationId: 
     family: true,
     following: sources.every((s) => s.following),
     // Armadas para las medidas de la familia, no solo para la de la principal.
-    protocol: protocolMedia(lead.available.corrected, measures.map((m) => m.key), measuresOf(product.variants)),
+    protocol: lost.length > 0 ? null : protocolMedia(lead.available.corrected, measures.map((m) => m.key), all),
     current,
     available: { ...lead.available, channel: [...channel.values()] },
     measures: measures.length >= 2 ? measures : [],
     channelWithoutVariants: false,
+    measureIssue:
+      lost.length > 0
+        ? `${lost.length === 1 ? 'Una publicación de la familia no tiene' : `${lost.length} publicaciones de la familia no tienen`} su medida elegida, o tienen una que ya no está en la ficha. Elegila arriba, en Medidas de las fotos: hasta entonces no se sabe qué fotos van en cada una y no se puede guardar.`
+        : null,
     soleMeasure: null,
     sharedWith: [],
     videos: lead.videos.map((v) => ({ ...v, variants: knownVariants(videoMarks[v.id] ?? [], measures) })),
@@ -81,6 +89,7 @@ export async function saveFamilyMedia(
   if (!family) throw new MediaError('La publicación no es parte de una familia.');
   const sources = await loadFamilyMedia(db, args.accountId, args.publicationId);
   if (!sources) throw new MediaError('La publicación no es parte de una familia.');
+  if (sources.measureIssue && args.refs) throw new MediaError(sources.measureIssue);
   const product = await db.product.findUniqueOrThrow({
     where: { id: sources.publication.productId },
     select: { variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } } },

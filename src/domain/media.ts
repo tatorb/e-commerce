@@ -257,11 +257,14 @@ export function cleanMedia(refs: PhotoRef[]): PhotoRef[] {
  * Dónde va una foto sacada para una medida, al armar las fotos en el orden
  * del protocolo: vacío en todas; con la clave, solo en esa; null no va, porque
  * es de una medida que la publicación no vende. sells son las medidas que vende
- * la publicación y known todas las de la ficha: una medida que ya no está en la
- * ficha cuenta como de todas.
+ * la publicación y known todas las de la ficha. Una medida que ya no está en la
+ * ficha tampoco va: no se sabe de cuál es, y pasarla a todas mezclaría las
+ * fotos de una medida con las de otra. Primero hay que elegirle la medida.
  */
 export function protocolUse(measure: string | null, sells: string[], known: string[]): string[] | null {
-  if (!measure || !known.includes(measure) || sells.length === 0) return [];
+  if (!measure) return [];
+  if (!known.includes(measure)) return known.length >= 2 ? null : [];
+  if (sells.length === 0) return [];
   if (!sells.includes(measure)) return null;
   return sells.length >= 2 ? [measure] : [];
 }

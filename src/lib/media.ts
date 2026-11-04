@@ -28,6 +28,7 @@ import { inProtocolOrder, type ProtocolPlace, type PublicationMeasures } from '@
 import { BY_BROWSER, setClips } from '@/lib/videos';
 import { photoFileHref } from '@/lib/photo-rules';
 import { readStored } from '@/lib/stored-files';
+import { markState } from '@/domain/photo-measures';
 import { textImageHref, textImagePng } from '@/lib/text-images/files';
 
 // Las fotos de una publicación: de dónde se pueden tomar (las que ya están en
@@ -51,7 +52,14 @@ export type MediaItem = {
   // Por qué no se puede elegir para este canal, por ejemplo un original que no acepta tal cual.
   blocked?: string;
   // Las fotos del paso Fotos que se sacaron en Registro de productos: el paso del protocolo y la medida.
-  shot?: { step: string | null; measure: string | null };
+  shot?: {
+    step: string | null;
+    measure: string | null;
+    // Cómo se dice su medida: "STD", o la de antes si ya no está en la ficha.
+    measureLabel?: string | null;
+    // Su medida ya no está en la ficha: hay que elegirle una.
+    unknownMeasure?: boolean;
+  };
 };
 
 /** Una medida de la ficha, como se marca en las fotos. */
@@ -165,6 +173,7 @@ type FinishedEdit = {
   // Si se sacó en Registro de productos: el paso, su lugar en multimedia y la medida.
   step: { title: string; place: NonNullable<ProtocolPlace> } | null;
   measure: string | null;
+  measureLabel: string | null;
 };
 
 // Los originales que el navegador muestra; los demás, como las HEIC, se ven por la vista que armó la Mac.
@@ -185,6 +194,7 @@ async function finishedEdits(db: Db, productId: string): Promise<FinishedEdit[]>
       previewUrl: true,
       asIs: true,
       variantKey: true,
+      variantLabel: true,
       shootStep: { select: { title: true, mediaPosition: true, protocol: { select: { position: true } } } },
       runs: {
         where: { step: LAST_PHOTO_STEP, status: 'APPROVED', jpgUrl: { not: null } },
@@ -198,6 +208,7 @@ async function finishedEdits(db: Db, productId: string): Promise<FinishedEdit[]>
     const shot = {
       step: e.shootStep ? { title: e.shootStep.title, place: { protocol: e.shootStep.protocol.position, step: e.shootStep.mediaPosition } } : null,
       measure: e.variantKey,
+      measureLabel: e.variantLabel,
     };
     if (e.asIs) {
       return [
@@ -228,6 +239,17 @@ async function finishedEdits(db: Db, productId: string): Promise<FinishedEdit[]>
       },
     ];
   });
+}
+
+/** El paso y la medida de una foto de Registro de productos, con su medida dicha y si ya no está en la ficha. */
+function shotOf(e: Pick<FinishedEdit, 'step' | 'measure' | 'measureLabel'>, measures: Measure[]): NonNullable<MediaItem['shot']> {
+  const state = measures.length >= 2 ? markState(e.measure, e.measureLabel, measures) : ({ kind: 'all' } as const);
+  return {
+    step: e.step?.title ?? null,
+    measure: e.measure,
+    measureLabel: state.kind === 'all' ? null : state.label,
+    unknownMeasure: state.kind === 'unknown',
+  };
 }
 
 /** Cómo se nombra una foto del paso Fotos en la lista. */
@@ -343,7 +365,7 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
       label: editLabel(e, i + 1),
       note: blocked ?? (inChannel.has(e.id) ? `Ya está en ${channelName}` : null),
       ...(blocked ? { blocked } : {}),
-      ...(e.step || e.measure ? { shot: { step: e.step?.title ?? null, measure: e.measure } } : {}),
+      ...(e.step || e.measure ? { shot: shotOf(e, allMeasures) } : {}),
       place: e.step?.place ?? null,
     };
   });
@@ -406,6 +428,8 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
     available: { channel: plain(channel), corrected, text, assets },
     // Las medidas que se pueden marcar: con menos de dos, no hay nada que elegir.
     measures: measures.length >= 2 ? measures : [],
+    // Por qué no se puede guardar todavía, por ejemplo una familia con una publicación sin medida. Null si se puede.
+    measureIssue: null as string | null,
     // Leída del canal y sin variantes: allá todas las fotos se ven juntas.
     channelWithoutVariants: copy !== null && measures.length >= 2 && variations.length === 0,
     // Vende una sola medida del producto, por su SKU: todas las fotos van a ella.

@@ -28,6 +28,8 @@ import { PublicationCodeCard } from '@/components/pipeline/PublicationCodeCard';
 import { PendingChangesCard } from '@/components/publication/PendingChangesCard';
 import { campaignText, pendingCampaigns } from '@/lib/channel-campaigns';
 import { MediaOrganizer } from '@/components/publication/MediaOrganizer';
+import { MeasureCheckCard } from '@/components/pipeline/MeasureCheckCard';
+import { measureCheck } from '@/lib/photo-measures';
 import { TextImagesStep } from '@/components/text-images/TextImagesStep';
 import { loadTextImageStep } from '@/lib/text-images/step';
 import { loadMediaSources } from '@/lib/media';
@@ -197,6 +199,21 @@ export default async function PipelineStepPage({
     ]).then(([copy, covers]) => firstPhoto(copy?.photos) ?? covers.get(pub.productId) ?? null),
     viewing === 'TEXT_IMAGES' ? loadTextImageStep(prisma, { accountId: account.id, publicationId: pub.id }) : null,
   ]);
+  // Fotos y Organización de multimedia: las fotos o publicaciones de la familia con una medida que ya no está.
+  const measures = viewing === 'IMAGES' || viewing === 'MEDIA' ? await measureCheck(prisma, pub.productId) : null;
+  // Con varias medidas y fotos marcadas, Fotos las muestra separadas por medida: las de una no se mezclan con las de otra.
+  const photoGroups =
+    images && measures && measures.measures.length >= 2 && images[0].some((e) => e.variantKey)
+      ? [
+          ...measures.measures.map((m) => ({ title: `Medida ${m.label}`, ids: images[0].filter((e) => e.variantKey === m.key).map((e) => e.id), warn: false })),
+          { title: 'Para todas las medidas', ids: images[0].filter((e) => !e.variantKey).map((e) => e.id), warn: false },
+          {
+            title: 'Con una medida que ya no está en la ficha',
+            ids: images[0].filter((e) => e.variantKey && !measures.measures.some((m) => m.key === e.variantKey)).map((e) => e.id),
+            warn: true,
+          },
+        ].filter((g) => g.ids.length > 0)
+      : null;
   // Sumarse a una campaña o salir, pedido en Promociones: se sube con los demás cambios.
   const pendingCampaignTexts =
     viewing === 'PUBLISH' ? (await pendingCampaigns(prisma, [pub.id])).map((c) => ({ text: campaignText(c), rejection: c.rejection })) : [];
@@ -363,6 +380,10 @@ export default async function PipelineStepPage({
           </p>
         ) : null}
 
+        {/* Fotos o publicaciones de la familia con una medida que ya no está: antes que nada, elegirla. */}
+        {measures?.hasIssues && (viewing === 'IMAGES' || viewing === 'MEDIA') ? (
+          <MeasureCheckCard accountSlug={account.slug} publicationId={pub.id} check={measures} />
+        ) : null}
         {ctx && info && viewing === 'INFO' ? (
           <>
             <InfoStep
@@ -407,6 +428,7 @@ export default async function PipelineStepPage({
             pageHref={`${pageHref}?paso=${PIPELINE_STEP_SLUG.IMAGES}`}
             timeZone={account.timezone}
             edits={images[0]}
+            groups={photoGroups}
             openIds={openPhotoIds({ foto, fotos })}
             worker={images[1]}
             channelPhotos={images[2]}
