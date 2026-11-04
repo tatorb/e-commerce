@@ -55,6 +55,9 @@ export type MediaItem = {
   // Las fotos del paso Fotos que se sacaron en Registro de productos: el paso del protocolo y la medida.
   shot?: {
     step: string | null;
+    // El protocolo y el lugar de su paso en Organización de multimedia, desde 1.
+    protocol?: string | null;
+    stepPlace?: number | null;
     measure: string | null;
     // Cómo se dice su medida: "STD", o la de antes si ya no está en la ficha.
     measureLabel?: string | null;
@@ -172,7 +175,7 @@ type FinishedEdit = {
   // La foto en su tamaño más grande que el navegador puede mostrar, para la lupa.
   zoom: string;
   // Si se sacó en Registro de productos: el paso, su lugar en multimedia y la medida.
-  step: { title: string; place: NonNullable<ProtocolPlace> } | null;
+  step: { title: string; protocolName: string; place: NonNullable<ProtocolPlace> } | null;
   measure: string | null;
   measureLabel: string | null;
 };
@@ -196,7 +199,7 @@ async function finishedEdits(db: Db, productId: string): Promise<FinishedEdit[]>
       asIs: true,
       variantKey: true,
       variantLabel: true,
-      shootStep: { select: { title: true, mediaPosition: true, protocol: { select: { position: true } } } },
+      shootStep: { select: { title: true, mediaPosition: true, protocol: { select: { position: true, name: true } } } },
       runs: {
         where: { step: LAST_PHOTO_STEP, status: 'APPROVED', jpgUrl: { not: null } },
         orderBy: { createdAt: 'desc' },
@@ -207,7 +210,9 @@ async function finishedEdits(db: Db, productId: string): Promise<FinishedEdit[]>
   });
   return edits.flatMap((e): FinishedEdit[] => {
     const shot = {
-      step: e.shootStep ? { title: e.shootStep.title, place: { protocol: e.shootStep.protocol.position, step: e.shootStep.mediaPosition } } : null,
+      step: e.shootStep
+        ? { title: e.shootStep.title, protocolName: e.shootStep.protocol.name, place: { protocol: e.shootStep.protocol.position, step: e.shootStep.mediaPosition } }
+        : null,
       measure: e.variantKey,
       measureLabel: e.variantLabel,
     };
@@ -247,6 +252,8 @@ function shotOf(e: Pick<FinishedEdit, 'step' | 'measure' | 'measureLabel'>, meas
   const state = measures.length >= 2 ? markState(e.measure, e.measureLabel, measures) : ({ kind: 'all' } as const);
   return {
     step: e.step?.title ?? null,
+    protocol: e.step?.protocolName ?? null,
+    stepPlace: e.step ? e.step.place.step + 1 : null,
     measure: e.measure,
     measureLabel: state.kind === 'all' ? null : state.label,
     unknownMeasure: state.kind === 'unknown',

@@ -1,3 +1,6 @@
+import { can } from '@/domain/access';
+import { SalesHistoryCard } from '@/components/sales/SalesHistoryCard';
+import { salesHistory } from '@/lib/sales/queries';
 import { notFound } from 'next/navigation';
 import { loadProductOptions } from '@/lib/product-options';
 import { unitsLast90 } from '@/lib/sales/units';
@@ -75,7 +78,7 @@ function toFormValues(p: ProductDetail): ProductFormValues {
   };
 }
 
-const TAB_KEYS: ProductTabKey[] = ['publicaciones', 'stock', 'ficha', 'compatibilidades', 'investigacion', 'fotos', 'combos'];
+const TAB_KEYS: ProductTabKey[] = ['publicaciones', 'stock', 'ficha', 'compatibilidades', 'investigacion', 'fotos', 'combos', 'ventas'];
 
 // El producto: lo que es la pieza, y lo comparten todas sus publicaciones. Sus
 // partes van en pestañas: las publicaciones, la ficha, las compatibilidades,
@@ -89,7 +92,7 @@ export default async function ProductPage({
   searchParams: Promise<{ seccion?: string }>;
 }) {
   const [{ cuenta, id }, { seccion }] = await Promise.all([params, searchParams]);
-  const { account, canWrite } = await requireAccount(cuenta, 'productos');
+  const { user, account, canWrite } = await requireAccount(cuenta, 'productos');
   const [product, stores, rules, combo, research, photos, videos, stock, covers, costs] = await Promise.all([
     getProduct(account.id, id),
     listStores(account.id),
@@ -108,10 +111,13 @@ export default async function ProductPage({
   ]);
   if (!product || !combo || !stock || !costs) notFound();
   // Lo que le toca a cada publicación del stock del producto, para su cantidad.
-  const [plans, units, options] = await Promise.all([
+  // El historial de ventas, solo para quien ve Ventas.
+  const seesSales = can(user.access, 'ventas', 'read');
+  const [plans, units, options, sales] = await Promise.all([
     plansFor(prisma, product.publications.map((p) => p.id)),
     unitsLast90(prisma, product.publications.map((p) => p.id)),
     loadProductOptions(prisma, account.id),
+    seesSales ? salesHistory(prisma, account.id, product.publications.map((p) => p.id)) : null,
   ]);
 
   const base = `/a/${account.slug}/productos`;
@@ -140,6 +146,7 @@ export default async function ProductPage({
     { key: 'investigacion', label: 'Investigación' },
     { key: 'fotos', label: 'Fotos y videos', count: photos.length + videos.length + product.assets.length },
     { key: 'combos', label: isCombo ? 'Productos del combo' : 'Combos', count: comboCount },
+    ...(sales ? [{ key: 'ventas' as const, label: 'Ventas', count: sales.summary.count }] : []),
   ];
   const wanted = TAB_KEYS.find((k) => k === seccion);
   const initial: ProductTabKey = wanted ?? (pubs.length > 0 ? 'publicaciones' : 'ficha');
@@ -205,6 +212,9 @@ export default async function ProductPage({
               />
             ),
             fotos: <ProductMediaPanel photos={photos} videos={videos} timeZone={account.timezone} stepHref={stepHref} />,
+            ventas: sales ? (
+              <SalesHistoryCard accountSlug={account.slug} history={sales} timeZone={account.timezone} of="las publicaciones del producto" search={product.partNumber ?? product.name} />
+            ) : null,
             combos: isCombo ? (
               <ComboItemsCard accountSlug={account.slug} comboId={product.id} initial={combo.items} />
             ) : (

@@ -10,7 +10,7 @@ import { TAB_ROW, TabCount, tabClass } from '@/components/ui/tab-links';
 // pestaña. La ficha es un solo formulario: cada pestaña muestra sus partes y
 // un solo Guardar guarda todo. La pestaña elegida queda en el link.
 
-export type ProductTabKey = 'publicaciones' | 'stock' | 'ficha' | 'compatibilidades' | 'investigacion' | 'fotos' | 'combos';
+export type ProductTabKey = 'publicaciones' | 'stock' | 'ficha' | 'compatibilidades' | 'investigacion' | 'fotos' | 'combos' | 'ventas';
 
 const FORM_SECTIONS: Partial<Record<ProductTabKey, ProductFormSection[]>> = {
   ficha: ['general', 'variants', 'specs', 'kit', 'notes'],

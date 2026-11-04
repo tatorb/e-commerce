@@ -26,6 +26,8 @@ import { buyerKey, type BuyerFacts } from '@/lib/buyers';
 import { loadVisits } from '@/lib/visits';
 import { syncDriveTextImagesFor } from '@/lib/text-images/drive-files';
 import { VisitsCard } from '@/components/publication/VisitsCard';
+import { SalesHistoryCard } from '@/components/sales/SalesHistoryCard';
+import { salesHistory } from '@/lib/sales/queries';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Breadcrumb } from '@/components/navigation/Breadcrumb';
@@ -153,13 +155,15 @@ export default async function PublicationPage({
 }) {
   const [{ cuenta, id }, { cara }] = await Promise.all([params, searchParams]);
   const { user, account } = await requireAccount(cuenta, 'publicaciones');
-  const [data, media, visits] = await Promise.all([
+  const [data, media, visits, sales] = await Promise.all([
     loadPublicationFaces(account.id, id),
     // Antes, las imágenes subidas a mano a la carpeta Imágenes con texto del Drive.
     syncDriveTextImagesFor(prisma, { accountId: account.id, publicationId: id })
       .then(() => loadMediaSources(prisma, account.id, id))
       .catch(() => null),
     loadVisits(prisma, id).catch(() => null),
+    // El historial de ventas, solo para quien ve Ventas.
+    can(user.access, 'ventas', 'read') ? salesHistory(prisma, account.id, [id]).catch(() => null) : null,
   ]);
   // Sin publicar: lo que hace falta para crearla en el canal.
   const create = data && !data.publication.externalId ? await createChecks(prisma, { accountId: account.id, publicationId: id }) : null;
@@ -564,6 +568,7 @@ export default async function PublicationPage({
         ) : null}
 
         {p.externalId ? <VisitsCard visits={visits} channelName={channelName} timeZone={tz} /> : null}
+        {sales ? <SalesHistoryCard accountSlug={account.slug} history={sales} timeZone={tz} of="esta publicación" search={p.externalId} /> : null}
 
         <SectionCard
           title="Preguntas de los compradores"

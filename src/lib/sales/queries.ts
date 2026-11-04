@@ -543,3 +543,63 @@ export async function readerStatus(db: Db, accountId: string): Promise<ReaderSta
 }
 
 export { HISTORY_DAYS };
+
+// ───────────────────────────── El historial de una publicación o un producto ─────────────────────────────
+
+export type SalesHistory = {
+  rows: SaleRow[];
+  // Todas las que coinciden; rows trae las más nuevas.
+  total: number;
+  // Solo lo de sus líneas: en un carrito con otros productos, lo demás no cuenta.
+  summary: { count: number; units: number; sold: number; profit: number | null; withoutCost: number; cancelled: number; currency: string };
+  // Desde cuándo trae ventas la app.
+  since: Date | null;
+};
+
+/**
+ * Las ventas de esas publicaciones, las más nuevas primero, con un resumen de
+ * lo que vendieron: ventas, unidades, lo vendido y lo que ganó. Una venta
+ * cuenta por su publicación o por su código en el canal, aunque haya llegado
+ * antes que la publicación. La ganancia de un carrito con otros productos se
+ * reparte por lo que vale cada línea.
+ */
+export async function salesHistory(db: Db, accountId: string, publicationIds: string[], take = 30): Promise<SalesHistory> {
+  const empty: SalesHistory = { rows: [], total: 0, summary: { count: 0, units: 0, sold: 0, profit: null, withoutCost: 0, cancelled: 0, currency: 'ARS' }, since: null };
+  const pubs = await db.publication.findMany({ where: { id: { in: publicationIds }, product: { accountId } }, select: { id: true, externalId: true, storeId: true } });
+  if (pubs.length === 0) return empty;
+  const ids = pubs.map((p) => p.id);
+  const codes = pubs.flatMap((p) => (p.externalId ? [p.externalId] : []));
+  const stores = [...new Set(pubs.map((p) => p.storeId))];
+  const found = await db.$queryRaw<{ id: string }[]>`
+    SELECT DISTINCT s.id, s."orderedAt"
+    FROM sales s
+    CROSS JOIN LATERAL jsonb_array_elements(s.lines) l
+    WHERE s."storeId" = ANY(${stores}) AND (l->>'publicationId' = ANY(${ids}) OR l->>'listingId' = ANY(${codes}))
+    ORDER BY s."orderedAt" DESC`;
+  const reader = await db.saleReader.findFirst({ where: { storeId: { in: stores }, historyFrom: { not: null } }, orderBy: { historyFrom: 'asc' }, select: { historyFrom: true } });
+  const since = reader?.historyFrom ?? null;
+  if (found.length === 0) return { ...empty, since };
+  const raw = await db.sale.findMany({ where: { id: { in: found.map((f) => f.id) } }, orderBy: { orderedAt: 'desc' }, select: ROW_SELECT });
+  const rows = await shape(db, accountId, raw);
+  const mine = (l: SaleLineRow) => (l.publicationId !== null && ids.includes(l.publicationId)) || codes.includes(l.listingId);
+  const summary = { ...empty.summary, currency: rows[0]?.currency ?? 'ARS' };
+  let profit = 0;
+  for (const r of rows) {
+    if (r.state === 'CANCELLED') {
+      summary.cancelled++;
+      continue;
+    }
+    if (r.state === 'PENDING') continue;
+    const own = r.lines.filter(mine);
+    const value = own.reduce((s, l) => s + l.unitPrice * l.quantity, 0);
+    const all = r.lines.reduce((s, l) => s + l.unitPrice * l.quantity, 0);
+    summary.count++;
+    summary.units += own.reduce((s, l) => s + l.quantity, 0);
+    summary.sold += value;
+    if (r.money.profit === null) summary.withoutCost++;
+    else profit += all > 0 ? (r.money.profit * value) / all : r.money.profit;
+  }
+  summary.sold = Math.round(summary.sold * 100) / 100;
+  summary.profit = summary.count > summary.withoutCost ? Math.round(profit * 100) / 100 : null;
+  return { rows: rows.slice(0, take), total: rows.length, summary, since };
+}

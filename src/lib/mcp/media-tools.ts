@@ -43,20 +43,38 @@ function measureNames(keys: string[], sources: MediaSources): string[] | 'todas'
 }
 
 /** Lo que hay para elegir y lo elegido, como lo lee Claude. */
-function mediaOut(ctx: McpContext, sources: MediaSources, lines: { id: string; originalName: string; asIs: boolean }[]) {
+function mediaOut(
+  ctx: McpContext,
+  sources: MediaSources,
+  lines: { id: string; originalName: string; asIs: boolean }[],
+  product: { name: string; partNumber: string | null } | null = null,
+) {
   const chosen = new Set(sources.current.map((m) => m.key));
+  // De dónde sale cada foto: el protocolo, su paso y el lugar del paso en multimedia, y la medida para la que se sacó.
+  const known = new Map([...sources.available.corrected, ...sources.available.text].map((m) => [m.key, m]));
+  const origin = (m: MediaItem) => {
+    const shot = m.shot ?? known.get(m.key)?.shot;
+    const text = sources.textPlaces.find((t) => t.item.key === m.key);
+    return {
+      ...(shot?.step
+        ? { paso_del_protocolo: { protocolo: shot.protocol ?? null, paso: shot.step, lugar_del_paso_en_multimedia: shot.stepPlace ?? null } }
+        : {}),
+      ...(shot?.measureLabel ? { medida: shot.unknownMeasure ? `«${shot.measureLabel}», que ya no está en la ficha (check_photo_measures)` : shot.measureLabel } : shot ? { medida: 'todas' } : {}),
+      ...(text ? { lugar_fijo_en_multimedia: text.place } : {}),
+    };
+  };
   const option = (m: MediaItem) => ({
     foto: m.key,
     nombre: m.label,
     link: linkOf(ctx, m.thumb),
     elegida: chosen.has(m.key),
-    ...(m.shot?.step ? { paso_del_protocolo: m.shot.step } : {}),
-    ...(m.shot?.measureLabel ? { medida: m.shot.unknownMeasure ? `«${m.shot.measureLabel}», que ya no está en la ficha (check_photo_measures)` : m.shot.measureLabel } : {}),
+    ...origin(m),
     ...(m.blocked ? { no_se_puede_usar: m.blocked } : {}),
   });
   const ready = new Set(sources.available.corrected.map((m) => m.key));
   const clipOrder = new Map(sources.clipIds.map((id, i) => [id, i + 1]));
   return {
+    ...(product ? { producto: product.name, codigo_del_producto: product.partNumber } : {}),
     canal: sources.channelName,
     sigue_a_las_del_canal: sources.following,
     medidas: sources.measures.map((m) => ({ clave: m.key, nombre: m.label })),
@@ -69,6 +87,7 @@ function mediaOut(ctx: McpContext, sources: MediaSources, lines: { id: string; o
       nombre: m.label,
       link: linkOf(ctx, m.thumb),
       medidas: measureNames(photoVariants(m.ref), sources),
+      ...origin(m),
       ...(m.note ? { nota: m.note } : {}),
     })),
     ...(sources.protocol
@@ -77,8 +96,8 @@ function mediaOut(ctx: McpContext, sources: MediaSources, lines: { id: string; o
             orden: i + 1,
             foto: m.key,
             nombre: m.label,
-            paso: m.shot?.step ?? null,
             medidas: measureNames(photoVariants(m.ref), sources),
+            ...origin(m),
           })),
         }
       : {}),
@@ -116,7 +135,8 @@ async function loadOut(ctx: McpContext, accountId: string, publicationId: string
     orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
     select: { id: true, originalName: true, asIs: true },
   });
-  return mediaOut(ctx, sources, lines);
+  const product = await ctx.db.product.findUnique({ where: { id: sources.publication.productId }, select: { name: true, partNumber: true } });
+  return mediaOut(ctx, sources, lines, product);
 }
 
 /** Las claves de las medidas que pidió Claude: por su clave, su nombre o su SKU. "todas" es ninguna marca. */
@@ -143,7 +163,7 @@ const getMediaTool = defineTool({
   section: ['pipeline', 'publicaciones'],
   title: 'Ver las fotos y los videos de una publicación',
   description:
-    'Muestra las fotos y los videos de una publicación como en Organización de multimedia: las fotos elegidas en orden (la primera es la portada) con sus medidas, las que hay para elegir (las que tiene en el canal, las corregidas en el paso Fotos y las demás del producto), la línea del paso Fotos, las medidas que se pueden marcar, y los videos del producto con cuáles son clips. Cada foto tiene una clave en «foto» que se usa para elegirla con set_publication_media.',
+    'Muestra las fotos y los videos de una publicación como en Organización de multimedia: las fotos elegidas en orden (la primera es la portada) con sus medidas, las que hay para elegir (las que tiene en el canal, las corregidas en el paso Fotos y las demás del producto), la línea del paso Fotos, las medidas que se pueden marcar, y los videos del producto con cuáles son clips. Cada foto tiene una clave en «foto» que se usa para elegirla con set_publication_media. De cada foto dice de dónde sale: el producto, el protocolo y el paso con que se sacó y el lugar de ese paso en multimedia (paso_del_protocolo), la medida para la que se sacó (medida) y, en las imágenes con texto, su lugar fijo (lugar_fijo_en_multimedia), que le gana al orden del protocolo. Con eso se puede ordenar como pide la persona.',
   input: z.object({ cuenta: accountArg, publicacion: publicationArg }),
   readOnly: true,
   async run(ctx, args) {

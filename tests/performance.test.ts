@@ -254,4 +254,24 @@ describe.skipIf(!url)('rendimiento en la base', () => {
     expect((await loadPerformance(db, accountId, parsePerformanceSearch({ periodo: '90' }), NOW)).rows[0].visits).toBe(33);
     expect((await loadPerformance(db, accountId, parsePerformanceSearch({ periodo: '30' }), NOW)).rows[0].visits).toBeNull();
   });
+  it('el historial de ventas de una publicación y de su familia: por su código o por su id, sin las canceladas en el resumen', async () => {
+    const { salesHistory } = await import('@/lib/sales/queries');
+    const std = await db.publication.create({ data: { productId, storeId, externalId: 'MLA1000000001', title: 'Subconjunto STD', channelStatus: 'ACTIVE' } });
+    const half = await db.publication.create({ data: { productId, storeId, externalId: 'MLA1000000002', title: 'Subconjunto 0,50', channelStatus: 'ACTIVE' } });
+    await sale('O1', 10, 'PAID', 'MLA1000000001', 2);
+    await sale('O2', 5, 'PAID', 'MLA1000000002', 1);
+    await sale('O3', 3, 'CANCELLED', 'MLA1000000001', 1);
+    await sale('O4', 2, 'PAID', 'MLA9999999999', 1);
+
+    const one = await salesHistory(db, accountId, [std.id]);
+    expect(one.total).toBe(2);
+    expect(one.rows.map((r) => r.orderId)).toEqual(['O3', 'O1']);
+    expect(one.summary).toMatchObject({ count: 1, units: 2, sold: 2000, cancelled: 1 });
+
+    const family = await salesHistory(db, accountId, [std.id, half.id]);
+    expect(family.rows.map((r) => r.orderId)).toEqual(['O3', 'O2', 'O1']);
+    expect(family.summary).toMatchObject({ count: 2, units: 3, sold: 3000 });
+    // De otra cuenta, nada.
+    expect((await salesHistory(db, 'otra', [std.id])).total).toBe(0);
+  });
 });

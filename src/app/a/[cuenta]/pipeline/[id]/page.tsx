@@ -37,6 +37,8 @@ import { loadFamilyMedia } from '@/lib/family-media';
 import { CreateInChannelCard } from '@/components/publication/CreateInChannelCard';
 import { WarrantyCard } from '@/components/publication/WarrantyCard';
 import { warrantyOverview } from '@/lib/warranty';
+import { SalesHistoryCard } from '@/components/sales/SalesHistoryCard';
+import { salesHistory } from '@/lib/sales/queries';
 import { syncDriveTextImagesQuietly } from '@/lib/text-images/drive-files';
 import { createChecks } from '@/lib/channel-create';
 import { loadPublicationFaces } from '@/lib/queries/publication-faces';
@@ -210,6 +212,11 @@ export default async function PipelineStepPage({
     viewing === 'TEXT_IMAGES' ? loadTextImageStep(prisma, { accountId: account.id, publicationId: pub.id, slot: textSlot }) : null,
   ]);
   const warranty = viewing === 'PUBLISH' ? await warrantyOverview(prisma, { accountId: account.id, publicationId: pub.id }) : null;
+  // Paso Precio: las ventas de la publicación y, en una familia, de todas sus medidas, solo para quien ve Ventas.
+  const sales =
+    viewing === 'PRICE' && can(user.access, 'ventas', 'read')
+      ? await salesHistory(prisma, account.id, family ? family.members.map((m) => m.id) : [pub.id]).catch(() => null)
+      : null;
   // Fotos y Organización de multimedia: las fotos o publicaciones de la familia con una medida que ya no está.
   const measures = viewing === 'IMAGES' || viewing === 'MEDIA' ? await measureCheck(prisma, pub.productId) : null;
   // Con varias medidas y fotos marcadas, Fotos las muestra separadas por medida: las de una no se mezclan con las de otra.
@@ -486,6 +493,7 @@ export default async function PipelineStepPage({
             knowledgeHref={`${pageHref}?paso=${PIPELINE_STEP_SLUG.INFO}`}
           />
         ) : price && viewing === 'PRICE' ? (
+          <>
           <PriceStep
             accountSlug={account.slug}
             data={price}
@@ -494,6 +502,16 @@ export default async function PipelineStepPage({
             infoHref={`${pageHref}?paso=${PIPELINE_STEP_SLUG.INFO}`}
             settingsHref={`/a/${account.slug}/precios`}
           />
+          {sales ? (
+            <SalesHistoryCard
+              accountSlug={account.slug}
+              history={sales}
+              timeZone={account.timezone}
+              of={family && family.members.length > 1 ? 'las medidas de la familia' : 'esta publicación'}
+              search={pub.externalId}
+            />
+          ) : null}
+          </>
         ) : channel && viewing === 'PUBLISH' ? (
           <>
             {familyRows ? <FamilyPublishCard accountSlug={account.slug} channelName={pub.channelName} rows={familyRows} /> : null}
