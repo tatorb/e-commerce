@@ -48,6 +48,8 @@ describe('el semáforo', () => {
       dir: 'desc',
     });
     expect(parsePerformanceSearch({ periodo: '45', orden: 'publicacion' })).toMatchObject({ period: 30, sort: 'publicacion', dir: 'asc' });
+    expect(parsePerformanceSearch({ periodo: '7' }).period).toBe(7);
+    expect(parsePerformanceSearch({ periodo: '15' }).period).toBe(15);
   });
 });
 

@@ -12,7 +12,7 @@ export const LIGHT_RULES = {
   goodConversionPct: 1,
 };
 
-export const PERIODS = [30, 60, 90] as const;
+export const PERIODS = [7, 15, 30, 60, 90] as const;
 export type Period = (typeof PERIODS)[number];
 
 export type Light = 'red' | 'orange' | 'yellow' | 'green' | 'gray';
