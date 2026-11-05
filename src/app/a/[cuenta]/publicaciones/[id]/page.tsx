@@ -263,18 +263,25 @@ export default async function PublicationPage({
             label={<EntityLabel kind="publication" channelName={channelName} accent={channelOf.accent} />}
             title={title}
             meta={`${p.store.name} · ${codeOrUnpublished(p.externalId)}`}
-            facts={
-              <div className="flex flex-wrap gap-1.5">
+            // Las etiquetas van en la misma línea que la seña, así el encabezado ocupa menos.
+            badges={
+              <>
                 {facts ? <PublicationFactsRow facts={facts} hideMeasures className="contents" /> : null}
                 <PipelineBadge state={p} />
                 {copy && !data.missing && pending === 0 ? <Badge variant="outline">Al día con {channelName}</Badge> : null}
                 {summary.draft.length > 0 ? <Badge variant="secondary">Borrador</Badge> : null}
                 {summary.choose.length > 0 ? <Badge variant="destructive">Para elegir</Badge> : null}
                 {summary.rejected.length > 0 ? <Badge variant="destructive">Rechazada</Badge> : null}
-              </div>
+              </>
             }
             actions={
               <>
+                <Button size="sm" variant="outline" asChild className="max-w-full">
+                  <Link href={productHref} title={`Abrir el producto: ${p.product.name}`}>
+                    <Package />
+                    <span className="truncate">{p.product.name}</span>
+                  </Link>
+                </Button>
                 {p.url ? (
                   <Button size="sm" variant="outline" asChild>
                     <a href={p.url} target="_blank" rel="noreferrer">
@@ -294,13 +301,16 @@ export default async function PublicationPage({
                 {data.canRead ? <ReadOneButton accountSlug={account.slug} publicationId={p.id} channelName={channelName} /> : null}
               </>
             }
-          >
-            {facts && facts.measures.kind !== 'none' ? <InfoStrip icon={<Ruler />}>{measuresText(facts.measures)}</InfoStrip> : null}
-            {family ? <FamilyMembersRow members={family.members} accountSlug={account.slug} channelName={data.channelName} currentId={p.id} /> : null}
-          </EntityHero>
-          {/* De qué producto es, y sus otras publicaciones. */}
-          <nav aria-label="El producto y sus publicaciones" className="divide-y overflow-hidden rounded-2xl border bg-card shadow-card">
-            <NavRow href={productHref} icon={<Package />} label="Producto" value={p.product.name} />
+          />
+        </div>
+      </PageHeader>
+
+      <PageBody>
+        {/* Fuera del encabezado fijo: la medida que vende, su familia y las otras publicaciones del producto. */}
+        {facts && facts.measures.kind !== 'none' ? <InfoStrip icon={<Ruler />}>{measuresText(facts.measures)}</InfoStrip> : null}
+        {family ? <FamilyMembersRow members={family.members} accountSlug={account.slug} channelName={data.channelName} currentId={p.id} /> : null}
+        {others.length > 0 ? (
+          <nav aria-label="Las otras publicaciones del producto" className="divide-y overflow-hidden rounded-2xl border bg-card shadow-card">
             {others.slice(0, 3).map((o) => (
               <NavRow
                 key={o.id}
@@ -314,10 +324,7 @@ export default async function PublicationPage({
               <NavRow href={`${productHref}?seccion=publicaciones`} icon={<Info />} label="Del mismo producto" value={`${others.length - 3} publicaciones más`} />
             ) : null}
           </nav>
-        </div>
-      </PageHeader>
-
-      <PageBody>
+        ) : null}
         {p.externalId ? (
           <ChannelStatusCard accountSlug={account.slug} publicationId={p.id} status={p.channelStatus} channelName={channelName} relist={relist} />
         ) : null}
