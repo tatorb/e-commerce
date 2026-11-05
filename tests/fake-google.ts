@@ -82,6 +82,8 @@ function matches(file: FakeFile, q: string, all: Map<string, FakeFile>): boolean
       if (inTrash(file, all)) return false;
     } else if ((m = p.match(/^mimeType contains '([^']+)'$/))) {
       if (!file.mimeType.includes(m[1])) return false;
+    } else if ((m = p.match(/^name='((?:[^'\\]|\\.)*)'$/))) {
+      if (file.name !== m[1].replace(/\\(.)/g, '$1')) return false;
     } else if ((m = p.match(/^mimeType='([^']+)'$/))) {
       if (file.mimeType !== m[1]) return false;
     } else if ((m = p.match(/^mimeType != '([^']+)'$/))) {

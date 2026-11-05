@@ -13,7 +13,7 @@ import type { PiecePaint } from '@/lib/text-images/piece-html';
 import { renderPiece, type PieceRenderer } from '@/lib/text-images/render';
 import { completeTextImage, generateTextImage, loadTextImageStep, removeTextImage, saveTextImage, TextImageError } from '@/lib/text-images/step';
 import { placeShotPhotos } from '@/lib/shoot';
-import { syncDriveTextImages } from '@/lib/text-images/drive-files';
+import { mergeTextImageFolders, syncDriveTextImages } from '@/lib/text-images/drive-files';
 import type { TextImageInput, TextImageOutput } from '@/ai/text-images';
 import { startFakeGoogle, type FakeGoogle } from './fake-google';
 
@@ -326,6 +326,31 @@ describe.skipIf(!url)('el paso en la base', () => {
     expect(await order(stdId)).toEqual(['T2', 'T1', 'P1', 'P2', 'P3', 'P4']);
     await removeTextImage(db, { accountId, publicationId: stdId, slot: 1 });
     expect(await order(halfId)).toEqual(['T2', 'P1', 'P2', 'P3', 'P4']);
+  });
+
+  it('la carpeta Imágenes con texto es una sola: pedidos al mismo tiempo no la repiten, y las repetidas se juntan en la más vieja', async () => {
+    const copies = () => [...google.files.values()].filter((f) => f.name === 'Imágenes con texto' && !f.trashed);
+    // Varias lecturas a la vez, como cuando se abren la publicación, el paso y Claude juntos.
+    await Promise.all([1, 2, 3].map(() => syncDriveTextImages(db, { accountId, productId })));
+    expect(copies()).toHaveLength(1);
+    const keep = copies()[0];
+
+    // Una repetida de antes, más nueva, con una imagen subida a mano adentro.
+    const dup = google.addFile({ name: 'Imágenes con texto', parents: keep.parents, mimeType: 'application/vnd.google-apps.folder', appProperties: { mrb: `imagenes-con-texto:${productId}` }, createdTime: new Date(Date.now() + 60_000).toISOString() });
+    const lost = google.addFile({ name: 'en-la-repetida.jpg', parents: [dup.id], mimeType: 'image/jpeg', data: Buffer.from('jpg') });
+    expect(await mergeTextImageFolders(db, { accountId, dryRun: true })).toMatchObject({ next: null, fixed: [{ productId, copies: 2, moved: 0, trashed: 0 }] });
+    expect(google.files.get(dup.id)!.trashed).toBe(false);
+
+    const r = await mergeTextImageFolders(db, { accountId, dryRun: false });
+    expect(r.fixed).toEqual([expect.objectContaining({ productId, copies: 2, moved: 1, trashed: 1, leftOver: 0 })]);
+    // La imagen pasó a la más vieja, con el mismo id, y la repetida quedó en la papelera.
+    expect(google.files.get(lost.id)!.parents).toEqual([keep.id]);
+    expect(google.files.get(dup.id)!.trashed).toBe(true);
+    expect(copies()).toHaveLength(1);
+    // La app ya la ve: aparece en Organización de multimedia.
+    const media = await loadMediaSources(db, accountId, stdId);
+    expect(media.available.text.map((m) => m.label)).toContain('Imagen con texto del Drive: en-la-repetida.jpg');
+    expect((await mergeTextImageFolders(db, { accountId, dryRun: true })).fixed).toEqual([]);
   });
 
   it('las imágenes subidas a mano a la carpeta del Drive aparecen en Organización de multimedia, y se van si se borran', async () => {

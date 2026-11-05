@@ -390,34 +390,126 @@ export async function knownFolderId(db: PrismaClient, key: string, email: string
  * la movió, se sigue usando donde esté. Cada carpeta lleva una marca de la app
  * para encontrarla aunque se pierda lo guardado.
  */
-export async function ensureFolder(db: PrismaClient, token: string, email: string, spec: FolderSpec): Promise<string> {
+// Los pedidos que están armando una carpeta en este momento: si llega otro
+// para la misma, espera ese en vez de crear una segunda.
+const building = new Map<string, Promise<string>>();
+
+/**
+ * La carpeta de la app: la que ya existe, o una nueva. Busca la marcada con su
+ * clave y, si no hay, una con el mismo nombre en la misma carpeta que nadie
+ * marcó. Si hay más de una, se queda con la más vieja y le pasa lo de las otras.
+ */
+export function ensureFolder(db: PrismaClient, token: string, email: string, spec: FolderSpec): Promise<string> {
+  const k = `${email}|${spec.key}`;
+  const running = building.get(k);
+  if (running) return running;
+  const p = ensureFolderOnce(db, token, email, spec).finally(() => building.delete(k));
+  building.set(k, p);
+  return p;
+}
+
+async function ensureFolderOnce(db: PrismaClient, token: string, email: string, spec: FolderSpec): Promise<string> {
   const cached = await knownFolderId(db, spec.key, email);
   if (cached) {
     const f = await getFile(token, cached, 'id,trashed');
     if (f && !f.trashed) return f.id;
   }
-  const found = await listFiles(
-    token,
-    `appProperties has { key='mrb' and value='${driveQueryValue(spec.key)}' } and mimeType='${FOLDER_MIME}' and trashed=false`,
-    'id',
-    1,
-  );
-  let id = found[0]?.id ?? null;
-  if (!id) {
-    const parentId = spec.parent ? await ensureFolder(db, token, email, spec.parent) : 'root';
+  const parentId = spec.parent ? await ensureFolder(db, token, email, spec.parent) : 'root';
+  let found = await sameFolders(token, spec, parentId);
+  if (found.length === 0) {
     const created = await driveJson<{ id: string }>(token, '/drive/v3/files?fields=id', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: spec.name, mimeType: FOLDER_MIME, parents: [parentId], appProperties: { mrb: spec.key } }),
     });
-    id = created.id;
+    // Otro pedido pudo haber creado la suya al mismo tiempo: se vuelve a buscar.
+    found = await sameFolders(token, spec, parentId);
+    if (!found.some((f) => f.id === created.id)) found.push({ id: created.id, name: spec.name, mimeType: FOLDER_MIME, appProperties: { mrb: spec.key } });
   }
+  const [keep, ...others] = found;
+  if (others.length > 0) await mergeFolders(token, keep.id, others.map((f) => f.id));
+  if (keep.appProperties?.mrb !== spec.key) await markFolder(token, keep.id, spec.key);
   await db.driveFolder.upsert({
     where: { key: spec.key },
-    create: { key: spec.key, folderId: id, email },
-    update: { folderId: id, email },
+    create: { key: spec.key, folderId: keep.id, email },
+    update: { folderId: keep.id, email },
   });
-  return id;
+  return keep.id;
+}
+
+/** Las carpetas que son esta: las marcadas con su clave y las del mismo nombre en su carpeta sin marcar, la más vieja primero. */
+async function sameFolders(token: string, spec: FolderSpec, parentId: string): Promise<DriveFile[]> {
+  const fields = 'id,name,mimeType,createdTime,appProperties';
+  const [byKey, byName] = await Promise.all([
+    listFiles(token, `appProperties has { key='mrb' and value='${driveQueryValue(spec.key)}' } and mimeType='${FOLDER_MIME}' and trashed=false`, fields, 50),
+    listFiles(token, `'${driveQueryValue(parentId)}' in parents and name='${driveQueryValue(spec.name)}' and mimeType='${FOLDER_MIME}' and trashed=false`, fields, 50),
+  ]);
+  const all = new Map<string, DriveFile>();
+  for (const f of [...byKey, ...byName.filter((f) => !f.appProperties?.mrb || f.appProperties.mrb === spec.key)]) all.set(f.id, f);
+  return [...all.values()].sort((a, b) => (a.createdTime ?? '').localeCompare(b.createdTime ?? ''));
+}
+
+async function markFolder(token: string, folderId: string, key: string): Promise<void> {
+  await driveJson(token, `/drive/v3/files/${encodeURIComponent(folderId)}?fields=id`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ appProperties: { mrb: key } }),
+  });
+}
+
+/**
+ * Junta las copias de una carpeta que ya existe, sin crear nada: la más vieja
+ * queda, con lo de las otras adentro. Con solo contar, no cambia nada.
+ */
+export async function mergeFolderCopies(
+  db: PrismaClient,
+  token: string,
+  email: string,
+  spec: FolderSpec,
+  opts: { dryRun: boolean },
+): Promise<{ copies: number; merge: FolderMerge | null }> {
+  const parentKey = spec.parent?.key ?? null;
+  const parentId = parentKey ? await knownFolderId(db, parentKey, email) : 'root';
+  const found = parentId ? await sameFolders(token, spec, parentId) : [];
+  if (!parentId) {
+    // Sin la carpeta del producto anotada, solo por la marca.
+    const byKey = await listFiles(token, `appProperties has { key='mrb' and value='${driveQueryValue(spec.key)}' } and mimeType='${FOLDER_MIME}' and trashed=false`, 'id,name,mimeType,createdTime,appProperties', 50);
+    found.push(...byKey);
+  }
+  if (found.length < 2 || opts.dryRun) return { copies: found.length, merge: null };
+  const [keep, ...others] = found;
+  const merge = await mergeFolders(token, keep.id, others.map((f) => f.id));
+  if (keep.appProperties?.mrb !== spec.key) await markFolder(token, keep.id, spec.key);
+  await db.driveFolder.upsert({ where: { key: spec.key }, create: { key: spec.key, folderId: keep.id, email }, update: { folderId: keep.id, email } });
+  return { copies: found.length, merge };
+}
+
+export type FolderMerge = { moved: number; trashed: number; leftOver: number };
+
+/**
+ * Pasa todo lo de las carpetas repetidas a la que queda y manda a la papelera
+ * las que quedaron vacías. Los archivos conservan su id: lo que la app guardó
+ * de ellos sigue andando.
+ */
+export async function mergeFolders(token: string, keepId: string, otherIds: string[]): Promise<FolderMerge> {
+  const out: FolderMerge = { moved: 0, trashed: 0, leftOver: 0 };
+  for (const other of otherIds) {
+    const children = await listFiles(token, `'${driveQueryValue(other)}' in parents and trashed=false`, 'id', 2000);
+    for (const c of children) {
+      await driveJson(token, `/drive/v3/files/${encodeURIComponent(c.id)}?addParents=${encodeURIComponent(keepId)}&removeParents=${encodeURIComponent(other)}&fields=id`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      out.moved++;
+    }
+    const left = await listFiles(token, `'${driveQueryValue(other)}' in parents and trashed=false`, 'id', 1);
+    if (left.length === 0) {
+      await trashFile(token, other);
+      out.trashed++;
+    } else out.leftOver++;
+  }
+  return out;
 }
 
 // ───────────────────────────── Conexión ─────────────────────────────

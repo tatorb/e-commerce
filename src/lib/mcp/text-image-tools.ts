@@ -3,6 +3,7 @@ import { DEFAULT_DOUBTS_TITLE, MAX_ITEMS_A, pieceItemSchema, pieceDoubtSchema, T
 import { storageError } from '@/lib/stored-files';
 import { brandUsage, listBrands } from '@/lib/text-images/brands';
 import { RenderError } from '@/lib/text-images/render';
+import { mergeTextImageFolders } from '@/lib/text-images/drive-files';
 import { generateTextImage, loadTextImageStep, MAX_MEDIA_PLACE, MAX_TEXT_IMAGES, saveTextImage, TextImageError } from '@/lib/text-images/step';
 import { McpToolError, accountArg, appLink, defineTool, publicationArg, resolveAccount, resolvePublication, type McpContext } from './tool';
 
@@ -153,4 +154,33 @@ const brandsTool = defineTool({
   },
 });
 
-export const TEXT_IMAGE_TOOLS = [getStep, saveTool, generateTool, brandsTool];
+const mergeFoldersTool = defineTool({
+  name: 'merge_text_image_folders',
+  section: ['pipeline', 'publicaciones'],
+  title: 'Juntar las carpetas Imágenes con texto repetidas',
+  description:
+    'Busca en el Drive los productos de la cuenta que tienen más de una carpeta Imágenes con texto. Con solo_contar, solo dice cuáles y cuántas. Sin solo_contar, pasa todo lo de las repetidas a la más vieja, manda a la papelera del Drive las que quedaron vacías y vuelve a leer la carpeta que queda, así la app ve todas sus imágenes. Los archivos conservan su id: lo que ya se eligió en Organización de multimedia sigue andando. Revisa los productos de a tandas: si devuelve desde_el_siguiente, volvé a llamar con desde igual a ese número. Antes de juntar, contá primero y mostrale el resultado a la persona.',
+  input: z.object({
+    cuenta: accountArg,
+    solo_contar: z.boolean().optional().describe('true: solo cuenta, sin cambiar nada en el Drive.'),
+    desde: z.number().int().min(0).optional().describe('Desde qué producto seguir, el número que devolvió desde_el_siguiente.'),
+  }),
+  readOnly: false,
+  async run(ctx, args) {
+    const account = await resolveAccount(ctx, args.cuenta);
+    const dryRun = args.solo_contar ?? false;
+    const r = await asToolError(() => mergeTextImageFolders(ctx.db, { accountId: account.id, dryRun, from: args.desde, budgetMs: 45_000 }));
+    return {
+      productos_revisados: r.checked,
+      productos_en_la_cuenta: r.total,
+      ...(r.next !== null ? { desde_el_siguiente: r.next, aviso: 'No entraron todos en esta vuelta: volvé a llamar con desde.' } : {}),
+      con_carpetas_repetidas: r.fixed.map((f) => ({
+        producto: f.product,
+        carpetas: f.copies,
+        ...(dryRun ? {} : { archivos_pasados: f.moved, carpetas_a_la_papelera: f.trashed, ...(f.leftOver > 0 ? { no_quedaron_vacias: f.leftOver } : {}) }),
+      })),
+    };
+  },
+});
+
+export const TEXT_IMAGE_TOOLS = [getStep, saveTool, generateTool, brandsTool, mergeFoldersTool];

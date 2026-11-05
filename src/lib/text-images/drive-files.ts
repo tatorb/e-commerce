@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@/generated/prisma/client';
-import { ensureFolder, folderOwner, listFiles, textImagesFolder, withDriveToken } from '@/lib/drive';
+import { ensureFolder, folderOwner, listFiles, mergeFolderCopies, textImagesFolder, withDriveToken } from '@/lib/drive';
 import { driveRef } from '@/lib/stored-files';
 import { placeTextImages } from './place';
 
@@ -83,4 +83,39 @@ export async function syncDriveTextImagesQuietly(db: Db, args: { accountId: stri
 export async function syncDriveTextImagesFor(db: Db, args: { accountId: string; publicationId: string }): Promise<void> {
   const p = await db.publication.findFirst({ where: { id: args.publicationId, product: { accountId: args.accountId } }, select: { productId: true } });
   if (p) await syncDriveTextImagesQuietly(db, { accountId: args.accountId, productId: p.productId });
+}
+
+export type FolderFix = { productId: string; product: string; copies: number; moved: number; trashed: number; leftOver: number };
+
+/**
+ * Las carpetas Imágenes con texto repetidas en los productos de la cuenta: las
+ * cuenta o, sin solo contar, junta todo en la más vieja, manda las vacías a la
+ * papelera y vuelve a leer la carpeta que queda.
+ */
+export async function mergeTextImageFolders(
+  db: Db,
+  // from: desde qué producto seguir, en orden por nombre; budgetMs: hasta cuándo, para no cortar a la mitad.
+  args: { accountId: string; dryRun: boolean; productIds?: string[]; from?: number; budgetMs?: number },
+): Promise<{ checked: number; total: number; next: number | null; fixed: FolderFix[] }> {
+  const started = Date.now();
+  const account = await db.account.findUniqueOrThrow({ where: { id: args.accountId }, select: { id: true, name: true } });
+  const products = await db.product.findMany({
+    where: { accountId: account.id, ...(args.productIds ? { id: { in: args.productIds } } : {}) },
+    select: { id: true, name: true },
+    orderBy: { name: 'asc' },
+  });
+  const fixed: FolderFix[] = [];
+  const from = args.from ?? 0;
+  let i = from;
+  await withDriveToken(db, async (token, email) => {
+    for (; i < products.length; i++) {
+      if (args.budgetMs !== undefined && Date.now() - started > args.budgetMs) break;
+      const p = products[i];
+      const r = await mergeFolderCopies(db, token, email, textImagesFolder(account, p), { dryRun: args.dryRun });
+      if (r.copies < 2) continue;
+      fixed.push({ productId: p.id, product: p.name, copies: r.copies, moved: r.merge?.moved ?? 0, trashed: r.merge?.trashed ?? 0, leftOver: r.merge?.leftOver ?? 0 });
+    }
+  });
+  if (!args.dryRun) for (const f of fixed) await syncDriveTextImagesQuietly(db, { accountId: account.id, productId: f.productId });
+  return { checked: i - from, total: products.length, next: i < products.length ? i : null, fixed };
 }
