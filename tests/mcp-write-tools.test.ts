@@ -41,7 +41,8 @@ describe('herramientas de escritura en la lista', () => {
     expect(tools.get('push_warranties')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('push_media')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('read_visits')).toMatchObject({ readOnlyHint: false, destructiveHint: false });
-    expect(tools.size).toBe(72);
+    expect(tools.get('set_auto_answer')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+    expect(tools.size).toBe(73);
   });
 });
 
@@ -386,6 +387,30 @@ describe.skipIf(!url)('herramientas de escritura', () => {
       dolores: ['No sabe si le sirve', 'Teme que no sea la medida'],
       objeciones: ['Duda de la calidad'],
     });
+  });
+
+  it('set_auto_answer: prende y apaga Responder solo en varias publicaciones', async () => {
+    const r = await call('set_auto_answer', { publicaciones: ['MLA1110001', 'MLA1110002', 'MLA9999999'], prendido: true });
+    expect(r.data).toMatchObject({
+      listo: true,
+      claude_responde_solo: true,
+      cambiadas: [
+        { publicacion: 'MLA1110001', codigo: 'MLA1110001', medidas_de_la_familia: 1 },
+        { publicacion: 'MLA1110002', codigo: 'MLA1110002', medidas_de_la_familia: 1 },
+      ],
+      no_encontradas: [{ publicacion: 'MLA9999999' }],
+    });
+    const on = await db.publication.findMany({ where: { externalId: { in: ['MLA1110001', 'MLA1110002'] } }, select: { autoAnswer: true } });
+    expect(on.map((p) => p.autoAnswer)).toEqual([true, true]);
+    await call('set_auto_answer', { publicaciones: ['MLA1110002'], prendido: false });
+    expect((await db.publication.findFirstOrThrow({ where: { externalId: 'MLA1110002' } })).autoAnswer).toBe(false);
+    expect((await db.publication.findFirstOrThrow({ where: { externalId: 'MLA1110001' } })).autoAnswer).toBe(true);
+    // Sin publicar en el canal: queda prendido, con el aviso de cuándo empieza.
+    const draft = await db.publication.create({ data: { productId: (await db.publication.findFirstOrThrow({ where: { externalId: 'MLA1110001' } })).productId, storeId: (await db.store.findFirstOrThrow()).id, title: 'Borrador' } });
+    expect((await call('set_auto_answer', { publicaciones: [draft.id], prendido: true })).data.cambiadas[0].aviso).toBe('Empieza cuando la publicación esté en Mercado Libre.');
+    const none = await call('set_auto_answer', { publicaciones: ['MLA9999999'], prendido: true });
+    expect(none).toMatchObject({ isError: true });
+    expect(none.text).toContain('No se cambió ninguna.');
   });
 
   it('preguntas y respuestas: son de la publicación y el interruptor no se toca desde acá', async () => {

@@ -53,7 +53,9 @@ import { resolveExternalIds } from '@/lib/catalog';
 import { createPipelinePublication } from '@/domain/pipeline-publications';
 import { addFamilyMeasures, familyByMeasure, FamilyMeasureError } from '@/lib/families';
 import { savePublicationCode } from '@/lib/publication-code';
-import { QaError, saveQaTexts } from '@/lib/publication-qa';
+import { QaError, saveQaTexts, setAutoAnswer } from '@/lib/publication-qa';
+import { familyMemberIds } from '@/domain/family-members';
+import { getChannelQuestions } from '@/channels/questions';
 import { loadCatalogData, saveCatalogData } from '@/lib/catalog-data';
 import { loadTitleContext } from '@/lib/queries/title-step';
 import { loadTitleRules } from '@/lib/title-rules';
@@ -709,7 +711,7 @@ const savePublicationQaTool = defineTool({
   section: TRAIN_BOT,
   title: 'Guardar las preguntas frecuentes y las reglas de la publicación',
   description:
-    'Guarda el paso Preguntas y respuestas de la publicación: las preguntas frecuentes con la respuesta de la tienda, y las reglas de cuándo responde Claude y cuándo una persona. Son de esta publicación, no del producto, y las lee la IA que responde a los compradores. Lo que no se manda queda como está; vacío lo borra. Reemplaza cada texto entero: si querés sumar algo, leé antes lo que hay con get_publication. Se escribe en Markdown simple: **negrita**, _cursiva_, listas con "- " o "1. ". Usá solo lo que te dijo la persona. Si Claude responde solo se prende y se apaga desde la app.',
+    'Guarda el paso Preguntas y respuestas de la publicación: las preguntas frecuentes con la respuesta de la tienda, y las reglas de cuándo responde Claude y cuándo una persona. Son de esta publicación, no del producto, y las lee la IA que responde a los compradores. Lo que no se manda queda como está; vacío lo borra. Reemplaza cada texto entero: si querés sumar algo, leé antes lo que hay con get_publication. Se escribe en Markdown simple: **negrita**, _cursiva_, listas con "- " o "1. ". Usá solo lo que te dijo la persona. Si Claude responde solo se prende y se apaga con set_auto_answer.',
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg,
@@ -729,6 +731,61 @@ const savePublicationQaTool = defineTool({
       throw e;
     }
     return { listo: true, link_app: appLink(ctx, account, id) };
+  },
+});
+
+const setAutoAnswerTool = defineTool({
+  name: 'set_auto_answer',
+  section: ['pipeline', 'publicaciones'],
+  title: 'Prender o apagar que Claude responda solo',
+  description:
+    'Prende o apaga "Responder solo" en una o varias publicaciones: con eso prendido, Claude manda sola la respuesta a las preguntas de los compradores cuando está seguro, después de la espera mínima de la cuenta, y deja para una persona las que no. Es lo mismo que el interruptor del paso Preguntas y respuestas. En una familia, vale para todas sus medidas. No sube nada al canal. Antes de prenderlo, mostrale a la persona en qué publicaciones y esperá que confirme.',
+  input: z.object({
+    cuenta: accountArg,
+    publicaciones: z.array(z.string().min(1)).min(1).max(100).describe('Código del canal (MLA...), SKU o id de cada publicación. Hasta 100.'),
+    prendido: z.boolean().describe('true = Claude responde solo; false = las respuestas las manda una persona.'),
+  }),
+  readOnly: false,
+  destructive: true,
+  async run(ctx, args) {
+    const account = await resolveAccount(ctx, args.cuenta);
+    const listas: { publicacion: string; codigo: string | null; titulo: string | null; medidas_de_la_familia: number; aviso?: string }[] = [];
+    const no_encontradas: { publicacion: string; motivo: string }[] = [];
+    const seen = new Set<string>();
+    for (const ref of args.publicaciones) {
+      let id: string;
+      try {
+        id = await resolvePublication(ctx, account.id, ref);
+      } catch (e) {
+        if (!(e instanceof McpToolError)) throw e;
+        no_encontradas.push({ publicacion: ref, motivo: e.message });
+        continue;
+      }
+      if (seen.has(id)) continue;
+      const members = await familyMemberIds(ctx.db, id);
+      members.forEach((m) => seen.add(m));
+      await setAutoAnswer(ctx.db, { accountId: account.id, publicationId: id, on: args.prendido });
+      const p = await ctx.db.publication.findUniqueOrThrow({
+        where: { id },
+        select: { externalId: true, title: true, store: { select: { channel: { select: { kind: true, name: true } } } } },
+      });
+      // Por qué todavía no responde, aunque esté prendido: lo mismo que avisa la pantalla.
+      const aviso = !args.prendido
+        ? undefined
+        : !getChannelQuestions(p.store.channel.kind)
+          ? `Todavía no se pueden responder preguntas de ${p.store.channel.name} desde la app.`
+          : !p.externalId
+            ? `Empieza cuando la publicación esté en ${p.store.channel.name}.`
+            : undefined;
+      listas.push({ publicacion: ref, codigo: p.externalId, titulo: p.title, medidas_de_la_familia: members.length, ...(aviso ? { aviso } : {}) });
+    }
+    if (listas.length === 0) throw new McpToolError(`No se cambió ninguna. ${no_encontradas.map((n) => `${n.publicacion}: ${n.motivo}`).join(' ')}`);
+    return {
+      listo: true,
+      claude_responde_solo: args.prendido,
+      cambiadas: listas,
+      ...(no_encontradas.length > 0 ? { no_encontradas } : {}),
+    };
   },
 });
 
@@ -1346,6 +1403,7 @@ export const WRITE_TOOLS = [
   saveClarificationsTool,
   saveKnowledgeTool,
   savePublicationQaTool,
+  setAutoAnswerTool,
   saveQuestionsTool,
   saveInsightsTool,
   saveCatalogTool,
