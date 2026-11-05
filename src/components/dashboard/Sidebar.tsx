@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { cookies } from 'next/headers';
-import { AlignLeft, BellRing, Camera, CarFront, ClipboardList, DollarSign, History, Image as ImageIcon, KanbanSquare, ListChecks, ListTodo, MessageCircleQuestion, MessageSquareText, Package, PlugZap, Receipt, RefreshCw, Shapes, ShieldCheck, SlidersHorizontal, TrendingUp, Type, Upload, Users } from 'lucide-react';
+import { AlignLeft, BellRing, Calculator, Camera, CarFront, ClipboardList, DollarSign, History, Image as ImageIcon, KanbanSquare, ListChecks, ListTodo, MessageCircleQuestion, MessageSquareText, Package, PlugZap, Receipt, RefreshCw, Shapes, ShieldCheck, SlidersHorizontal, TrendingUp, Type, Upload, Users } from 'lucide-react';
 import { NavLink } from '@/components/dashboard/NavLink';
 import { SidebarShell } from '@/components/dashboard/SidebarShell';
 import { SidebarToggle } from '@/components/dashboard/SidebarToggle';
@@ -48,7 +48,7 @@ export async function Sidebar({
   const sees = (section: Section) => accountHome !== null && (isOwnSection(section) || can(user.access, section, 'read'));
   const settings = SETTINGS_SECTIONS.some(sees);
   // Lo de todos los días: registrar productos, responder preguntas, las tareas y las alarmas de stock.
-  const daily = (['captura', 'preguntas', 'tareas', 'alarmas'] as const).some(sees);
+  const daily = (['captura', 'pipeline', 'preguntas', 'tareas', 'alarmas'] as const).some(sees);
   const collapsed = (await cookies()).get('sidebar_collapsed')?.value === '1';
 
   return (
@@ -129,6 +129,11 @@ export async function Sidebar({
           {sees('captura') ? (
             <NavLink href={`${accountHome}/registro-productos`} label="Registro de productos">
               <Camera className="h-4 w-4" />
+            </NavLink>
+          ) : null}
+          {sees('pipeline') ? (
+            <NavLink href={`${accountHome}/simulador-precio`} label="Simulador de precio">
+              <Calculator className="h-4 w-4" />
             </NavLink>
           ) : null}
           {sees('preguntas') ? (

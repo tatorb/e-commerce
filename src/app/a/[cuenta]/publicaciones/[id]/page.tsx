@@ -15,6 +15,7 @@ import {
   Type,
   Boxes,
   Info,
+  Calculator,
 } from 'lucide-react';
 import { Fragment, type ReactNode } from 'react';
 import { EntityHero } from '@/components/navigation/EntityHero';
@@ -197,6 +198,8 @@ export default async function PublicationPage({
   const productHref = `/a/${account.slug}/productos/${p.product.id}`;
   // Las otras publicaciones del mismo producto, para pasar de una a otra.
   const canTask = can(user.access, 'tareas', 'write');
+  // El simulador de precio usa el permiso del Pipeline.
+  const canSimulate = can(user.access, 'pipeline', 'read');
   // Para Promociones, abajo del precio en las dos caras: el margen de las campañas sale del paso Precio.
   const priceStep = face !== 'historial' && p.externalId && copy ? await loadPriceStep(prisma, account.id, p.id).catch(() => null) : null;
   const { margin: campaignMargin } = campaignMarginFor(priceStep, p.id);
@@ -421,6 +424,14 @@ export default async function PublicationPage({
                       <FollowStockSwitch accountSlug={account.slug} publicationId={p.id} on={followsStockOf(stockPlan)} />
                     ) : null}
                     {field === 'photos' && media ? <SharedPhotosNote sources={media} /> : null}
+                    {field === 'price' && canSimulate ? (
+                      <Button size="sm" variant="outline" asChild>
+                        <a href={`/a/${account.slug}/simulador-precio?publicacion=${p.id}`} target="_blank" rel="noreferrer">
+                          <Calculator />
+                          Abrir en el simulador
+                        </a>
+                      </Button>
+                    ) : null}
                     {field === 'attributes' && data.categoryMismatch ? (
                       <p className="text-sm text-muted-foreground">
                         En la app la categoría es {data.categoryMismatch.app} y en {channelName} es {data.categoryMismatch.channel}. Los datos se

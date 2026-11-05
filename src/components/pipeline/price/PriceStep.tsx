@@ -40,6 +40,7 @@ import {
 } from '@/domain/pricing';
 import type { PriceGroupData, PriceStepData } from '@/lib/pricing';
 import { queueFamilyCampaignAction, savePriceDecisionAction } from '@/app/a/[cuenta]/pipeline/price-actions';
+import { pushPriceAction } from '@/app/a/[cuenta]/simulador-precio/actions';
 import { formatDateTime } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
 import type { CampaignDraft } from './CampaignList';
@@ -101,6 +102,8 @@ type StepProps = {
   timeZone: string;
   infoHref: string;
   settingsHref: string;
+  // Con push, además de guardar se puede subir al canal en el momento, como en el simulador de precio.
+  push?: boolean;
 };
 
 /** El nombre de una pestaña: sus medidas y su costo. */
@@ -191,7 +194,7 @@ export function PriceStep(props: StepProps) {
   );
 }
 
-function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, settingsHref }: StepProps & { group: PriceGroupData }) {
+function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, settingsHref, push = false }: StepProps & { group: PriceGroupData }) {
   const router = useRouter();
   const account = data.account;
   const costHref = `/a/${accountSlug}/productos/${data.productId}?seccion=stock`;
@@ -256,11 +259,11 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
     setNote(null);
   };
 
-  async function save() {
+  async function save(andPush = false) {
     setPending(true);
     setMessage(null);
     const texts: string[] = [];
-    if (dirty) {
+    if (dirty && canSave) {
       const r = await savePriceDecisionAction(accountSlug, group.anchorId, {
         listPrice: Math.round(listPrice),
         discountPct: discount,
@@ -305,6 +308,30 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
         texts.push(`No quedó en Por subir ${draftText(campaign)}: ${why}`);
       }
     }
+    // Guardar y subir: lo que quedó en Por subir del precio va al canal en el momento.
+    if (andPush && !failed) {
+      const r = await pushPriceAction(accountSlug, group.publicationIds).catch(() => null);
+      if (!r || !r.ok) {
+        failed = true;
+        texts.push(`No se subió a ${data.channelName}: ${r ? r.error : 'se cortó la conexión con la app. Probá de nuevo.'}`);
+      } else {
+        texts.length = 0;
+        for (const x of r.results) {
+          const who = r.results.length > 1 ? `${x.code}: ` : '';
+          if (x.error) {
+            failed = true;
+            texts.push(`${who}no se subió. ${x.error}`);
+            continue;
+          }
+          if (x.sent.length > 0) texts.push(`${who}subido a ${data.channelName}: ${x.sent.join(', ')}.${x.confirmed ? '' : ' Todavía no se pudo volver a leer para confirmarlo.'}`);
+          else if (x.rejected.length === 0) texts.push(`${who}no había nada del precio por subir.`);
+          if (x.rejected.length > 0) {
+            failed = true;
+            texts.push(`${who}no aceptó ${x.rejected.join(' ')}`);
+          }
+        }
+      }
+    }
     setPending(false);
     setMessage({ kind: failed ? 'error' : 'ok', text: texts.join(' ') });
     router.refresh();
@@ -312,6 +339,9 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
   // Con el precio cambiado, se guarda si el precio se puede guardar; si no, la campaña abierta, si entra.
   const canSave = !pending && (dirty ? ready && !(below && !confirm) && !outOfRange : campaign !== null && !campaign.problem);
   const saveLabel = dirty && campaign ? 'Guardar precio y campaña' : campaign ? 'Guardar campaña' : 'Guardar precio';
+  // Subir en el momento, solo si ya está publicada: sin cambios, sube lo que quedó guardado en Por subir.
+  const canPush = push && group.channelPrice !== null;
+  const pushLabel = dirty || campaign ? 'Guardar y subir' : `Subir a ${data.channelName}`;
 
   const levelBox = ready ? LEVEL[sim.level] : null;
   const totals = costRows({ params, plan, finalPrice: sim.finalPrice, cost }).totals;
@@ -711,9 +741,14 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
             </label>
           ) : null}
           <div className="hidden flex-wrap items-center gap-3 md:flex">
-            <Button onClick={save} pending={pending} disabled={!canSave}>
+            <Button onClick={() => save()} pending={pending} disabled={!canSave}>
               {saveLabel}
             </Button>
+            {canPush ? (
+              <Button variant="outline" onClick={() => save(true)} pending={pending} disabled={pending || (dirty && !canSave)}>
+                {pushLabel}
+              </Button>
+            ) : null}
             {message ? (
               <p className={cn('text-sm', message.kind === 'error' ? 'text-destructive' : 'text-foreground')} role="status">
                 {message.text}
@@ -739,9 +774,16 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
               <p className="text-xs text-muted-foreground">Falta el costo</p>
             )}
           </div>
-          <Button size="sm" onClick={save} pending={pending} disabled={!canSave}>
-            {saveLabel}
-          </Button>
+          <div className="flex gap-2">
+            {canPush ? (
+              <Button size="sm" variant="outline" onClick={() => save(true)} pending={pending} disabled={pending || (dirty && !canSave)}>
+                {pushLabel}
+              </Button>
+            ) : null}
+            <Button size="sm" onClick={() => save()} pending={pending} disabled={!canSave}>
+              {saveLabel}
+            </Button>
+          </div>
         </div>
         {message ? (
           <p className={cn('mt-1 text-xs', message.kind === 'error' ? 'text-destructive' : 'text-foreground')} role="status">
