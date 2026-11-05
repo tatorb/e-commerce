@@ -34,6 +34,18 @@ describe('comparación con la competencia', () => {
     expect(c.withDiscount).toBe(2);
   });
 
+  it('con una promoción, mi fila compara lo que paga el comprador con la promoción, y la rentabilidad sale de lo que recibe la tienda', () => {
+    const promo = { name: 'Cyber Monday inventado', price: 200_000, revenue: 210_000 };
+    const c = compare({ mine: { listPrice: 240_000, discountPct: 0, plan: 0, promo }, competitors, cost: COST, params: P });
+    expect(c.rows[0]).toMatchObject({ mine: true, finalPrice: 200_000, effectivePrice: 200_000, promo: 'Cyber Monday inventado' });
+    expect(c.rows[0].discountPct).toBeCloseTo((1 - 200_000 / 240_000) * 100, 9);
+    // Más barata que Uno: la diferencia sale del precio con la promoción.
+    expect(c.rows[1].diffPct).toBeCloseTo((200_000 / 225_000 - 1) * 100, 9);
+    expect(c.rank).toBe(1);
+    const plain = compare({ mine: { listPrice: 210_000, discountPct: 0, plan: 0 }, competitors, cost: COST, params: P });
+    expect(c.rows[0].estimate).toEqual(plain.rows[0].estimate);
+  });
+
   it('igualar al más barato: el descuento y el margen que queda', () => {
     const c = compare({ mine: { listPrice: 260_000, discountPct: 0, plan: 0 }, competitors, cost: COST, params: P });
     expect(c.match!.discountPct).toBeCloseTo((1 - 221_000 / 260_000) * 100, 9);

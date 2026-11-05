@@ -301,6 +301,7 @@ export function CompetitionCard({
                   <td className="whitespace-nowrap py-2 pr-2 text-right tabular-nums">
                     {formatPrice(Math.round(r.listPrice))}
                     {r.discountPct > 0 ? <span className="block text-[11px] font-normal text-muted-foreground">{formatPercent(r.discountPct)} off</span> : null}
+                    {r.promo ? <span className="block max-w-40 truncate text-[11px] font-normal text-muted-foreground" title={r.promo}>con {r.promo}</span> : null}
                   </td>
                   <td className="py-2 pr-2">
                     {cuotas(r)}
@@ -363,6 +364,7 @@ export function CompetitionCard({
               <p className="mt-1 flex flex-wrap gap-x-3 text-xs text-muted-foreground">
                 <span>Lista {formatPrice(Math.round(r.listPrice))}</span>
                 {r.discountPct > 0 ? <span>{formatPercent(r.discountPct)} off</span> : null}
+                {r.promo ? <span>con {r.promo}</span> : null}
                 <span>
                   {cuotas(r)}
                   {r.installmentValue !== null ? ` de ${formatPrice(Math.round(r.installmentValue))}` : ''}

@@ -225,8 +225,6 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
   const sim = simulate({ listPrice, discountPct: discount, plan, cost: cost ?? 0, params });
   const parts = breakdown(sim.finalPrice, cost ?? 0, params, plan);
   const refs = cost ? references(listPrice, cost, params) : null;
-  const comparison =
-    data.competitors.length > 0 && listPrice > 0 ? compare({ mine: { listPrice, discountPct: discount, plan, brand: data.brand }, competitors: data.competitors, cost: cost ?? 0, params }) : null;
   const ready = cost !== null && listPrice > 0;
   const below = ready && sim.level === 'below';
   const range = data.discountRange;
@@ -243,6 +241,11 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
   const promo = promoForSimulation(reads, group.publicationIds, campaign);
   const promoMargin = promo && cost ? marginOf(promo.revenue, cost, params, plan) : null;
   const promoLevel = promoMargin !== null ? marginLevel(promoMargin, params) : null;
+  // En la competencia, mi fila con lo que paga el comprador: con promoción, el precio de la promoción.
+  const comparison =
+    data.competitors.length > 0 && listPrice > 0
+      ? compare({ mine: { listPrice, discountPct: discount, plan, brand: data.brand, promo }, competitors: data.competitors, cost: cost ?? 0, params })
+      : null;
   const own = ownValues(account, overrides);
   const saved = start ? start.listPrice === Math.round(listPrice) && start.discountPct === discount && start.installments === plan : false;
   const dirty = !saved || JSON.stringify(own) !== JSON.stringify(ownValues(account, initialOverrides));

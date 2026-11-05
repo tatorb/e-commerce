@@ -32,6 +32,8 @@ export type ComparedRow = {
   finalPrice: number;
   effectivePrice: number;
   installmentValue: number | null;
+  // En mi fila, la promoción con que vendo: su nombre. Null sin promoción y en los competidores.
+  promo: string | null;
   // Cuánto más caro (positivo) o más barato (negativo) estoy yo, en %. Null en mi fila.
   diffPct: number | null;
   // El margen sobre el costo que me quedaría vendiendo a su precio y en sus
@@ -77,13 +79,16 @@ export type Comparison = {
 export const sellerOf = (c: { sellerName: string | null; title: string }) => c.sellerName?.trim() || c.title;
 
 export function compare(args: {
-  mine: { listPrice: number; discountPct: number; plan: InstallmentPlan; brand?: string | null };
+  // promo: la promoción con que vendo; el comprador paga su precio y la tienda recibe revenue.
+  mine: { listPrice: number; discountPct: number; plan: InstallmentPlan; brand?: string | null; promo?: { name: string; price: number; revenue: number } | null };
   competitors: CompetitorPrice[];
   cost: number;
   params: PricingParams;
 }): Comparison {
   const { mine, cost, params } = args;
-  const myFinal = finalPriceOf(mine.listPrice, mine.discountPct);
+  // Con una promoción, lo que paga el comprador es su precio: así se compara con lo que pagan en los demás.
+  const promo = mine.promo && mine.promo.price > 0 ? mine.promo : null;
+  const myFinal = promo ? promo.price : finalPriceOf(mine.listPrice, mine.discountPct);
   const me: ComparedRow = {
     mine: true,
     name: 'Mi publicación',
@@ -92,14 +97,16 @@ export function compare(args: {
     url: null,
     surveyedAt: null,
     listPrice: mine.listPrice,
-    discountPct: mine.discountPct,
+    discountPct: promo && mine.listPrice > 0 ? Math.max(0, (1 - promo.price / mine.listPrice) * 100) : mine.discountPct,
     installments: mine.plan,
     freeShipping: true,
     finalPrice: myFinal,
     effectivePrice: myFinal,
     installmentValue: fixedInstallments(mine.plan) ? myFinal / mine.plan : null,
+    promo: promo?.name ?? null,
     diffPct: null,
-    estimate: estimateAt({ finalPrice: myFinal, plan: mine.plan, freeShipping: true, cost, params }),
+    // Con promoción, con lo que recibe la tienda, que suma lo que pone el canal.
+    estimate: estimateAt({ finalPrice: promo ? promo.revenue : myFinal, plan: mine.plan, freeShipping: true, cost, params }),
   };
   const others: ComparedRow[] = args.competitors.map((c) => {
     const prices = offerPrices(c.offer, params.shipping);
@@ -117,6 +124,7 @@ export function compare(args: {
       finalPrice: prices.finalPrice,
       effectivePrice: prices.effectivePrice,
       installmentValue: prices.installmentValue,
+      promo: null,
       diffPct: prices.effectivePrice > 0 ? (myFinal / prices.effectivePrice - 1) * 100 : null,
       estimate: estimateAt({ finalPrice: prices.finalPrice, plan: c.offer.installments, freeShipping: c.offer.freeShipping, cost, params }),
     };
