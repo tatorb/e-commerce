@@ -1,10 +1,24 @@
 import { Prisma, type PrismaClient } from '@/generated/prisma/client';
 import type { ChannelKind } from '@/generated/prisma/enums';
-import { requestAnswer, type AnswerInput, type AnswerOutput, type AnswerResult } from '@/ai/answers';
+import { requestAnswer, type AnswerInput, type AnswerOutput, type AnswerResult, type Listed } from '@/ai/answers';
 import { ProposalError } from '@/ai/request';
 import { ConnectError } from '@/channels/connect';
 import { AnswerError, getChannelQuestions } from '@/channels/questions';
-import { AUTO_ANSWERED, checkAnswer, sentOutcome } from '@/domain/answers';
+import {
+  ANSWER_DELAY_DEFAULT,
+  ANSWER_DELAY_MAX,
+  AUTO_ANSWERED,
+  checkAnswer,
+  PERSON_KIND_REASON,
+  PERSON_KINDS,
+  publishedPrice,
+  REPEAT_LIMIT,
+  REPEAT_REASON,
+  sentOutcome,
+  stockState,
+  waitBeforeSending,
+  type AnswerKind,
+} from '@/domain/answers';
 import { comboParts } from '@/domain/combos';
 import { loadContent } from '@/domain/content';
 import { parseNameValueList } from '@/domain/name-value';
@@ -29,6 +43,8 @@ const AUTO_DRAFT_DAYS = 30;
 const PREVIOUS = 20;
 const EXAMPLES = 8;
 const EARLIER = 5;
+// Las publicaciones relacionadas que recibe Claude, para pasar su link.
+const RELATED = 20;
 
 // El motivo cuando Claude no está seguro y no dijo por qué.
 const NOT_SURE = 'Claude no está seguro de la respuesta.';
@@ -108,7 +124,7 @@ export async function answerInput(db: Db, q: LoadedQuestion): Promise<AnswerInpu
 
 async function inputFor(db: Db, q: Asked): Promise<AnswerInput> {
   const answered = { storeId: q.storeId, status: 'ANSWERED' as const, answer: { not: null }, text: { not: '' } };
-  const [settings, previous, examples, earlier, content, combo, knowledge] = await Promise.all([
+  const [settings, previous, examples, earlier, content, combo, knowledge, inChannel] = await Promise.all([
     db.questionSettings.findUnique({ where: { accountId: q.accountId } }),
     db.buyerQuestion.findMany({
       where: {
@@ -137,6 +153,7 @@ async function inputFor(db: Db, q: Asked): Promise<AnswerInput> {
     q.publication ? loadContent(db, q.publication.productId, q.publication.id) : null,
     q.publication ? loadCombo(db, q.publication.productId).then(comboParts) : null,
     q.publication ? loadKnowledge(db, q.publication.productId) : null,
+    q.publication ? channelView(db, q.storeId, q.publication) : { listing: null, related: [] },
   ]);
   return {
     channelName: q.channelName,
@@ -159,6 +176,58 @@ async function inputFor(db: Db, q: Asked): Promise<AnswerInput> {
     rules: richTextToMarkdown(q.publication?.answerRules ?? null) || null,
     previous: withoutPriceAnswers(previous),
     examples: withoutPriceAnswers(examples).slice(0, EXAMPLES),
+    ...inChannel,
+  };
+}
+
+const listed = (p: { channelStatus: string; channelCopy: { price: Prisma.Decimal | null; discount: Prisma.Decimal | null; quantity: number | null } | null }): Listed => ({
+  price: publishedPrice(p.channelCopy?.price != null ? Number(p.channelCopy.price) : null, p.channelCopy?.discount != null ? Number(p.channelCopy.discount) : null),
+  stock: p.channelCopy ? stockState(p.channelStatus, p.channelCopy.quantity) : null,
+});
+
+const CHANNEL_SELECT = { channelStatus: true, channelCopy: { select: { price: true, discount: true, quantity: true } } } as const;
+
+/**
+ * Lo que ve el comprador en el canal: el precio y si hay stock de esta
+ * publicación, y las otras de la tienda que le pueden servir, con su link:
+ * otras medidas o publicaciones del mismo producto, los combos que lo llevan
+ * y, si es un combo, sus productos. Solo las publicadas y a la venta en la misma tienda.
+ */
+async function channelView(db: Db, storeId: string, pub: { id: string; productId: string }): Promise<Pick<AnswerInput, 'listing' | 'related'>> {
+  const [own, product] = await Promise.all([
+    db.publication.findUnique({ where: { id: pub.id }, select: { familyId: true, ...CHANNEL_SELECT } }),
+    db.product.findUnique({
+      where: { id: pub.productId },
+      select: { comboItems: { select: { productId: true } }, inCombos: { select: { comboId: true } } },
+    }),
+  ]);
+  const parts = new Set(product?.comboItems.map((i) => i.productId) ?? []);
+  const combos = new Set(product?.inCombos.map((c) => c.comboId) ?? []);
+  const others = await db.publication.findMany({
+    where: {
+      storeId,
+      id: { not: pub.id },
+      productId: { in: [pub.productId, ...parts, ...combos] },
+      externalId: { not: null },
+      url: { not: null },
+      channelStatus: { in: ['ACTIVE', 'PAUSED'] },
+    },
+    orderBy: [{ variantKey: 'asc' }, { title: 'asc' }],
+    take: RELATED,
+    select: { productId: true, familyId: true, title: true, variantKey: true, url: true, ...CHANNEL_SELECT },
+  });
+  const family = own?.familyId ?? null;
+  const relation = (o: (typeof others)[number]) =>
+    o.productId === pub.productId
+      ? family && o.familyId === family
+        ? 'otra medida de esta misma publicación'
+        : 'otra publicación del mismo producto'
+      : combos.has(o.productId)
+        ? 'combo que lleva este producto'
+        : 'producto que forma parte de este combo';
+  return {
+    listing: own ? listed(own) : null,
+    related: others.map((o) => ({ title: o.title, measure: o.variantKey, url: o.url!, relation: relation(o), ...listed(o) })),
   };
 }
 
@@ -166,13 +235,14 @@ const cleanList = (list: string[]) => [...new Set(list.map((s) => s.trim()).filt
 
 /** La respuesta de Claude, y si tiene que mirarla una persona: también cuando no está seguro. */
 function decided(o: AnswerOutput) {
+  const forPerson = PERSON_KINDS.includes(o.kind as AnswerKind);
   return {
     text: o.answer.trim(),
     kind: o.kind,
     usedData: cleanList(o.usedData),
     missing: cleanList(o.missing),
-    needsPerson: o.needsPerson || !o.sure,
-    reason: o.reason.trim() || (o.sure ? null : NOT_SURE),
+    needsPerson: o.needsPerson || !o.sure || forPerson,
+    reason: o.reason.trim() || (forPerson ? PERSON_KIND_REASON : o.sure ? null : NOT_SURE),
   };
 }
 
@@ -185,7 +255,7 @@ export type DraftOutcomeResult = { ok: true; costUsd: number; sent: boolean } | 
  */
 export async function draftAnswer(
   db: Db,
-  args: { accountId: string; questionId: string; auto?: boolean; now?: Date },
+  args: { accountId: string; questionId: string; auto?: boolean; now?: Date; wait?: (ms: number) => Promise<void> },
   request: Requester = requestAnswer,
 ): Promise<DraftOutcomeResult> {
   const q = await loadQuestion(db, args.accountId, args.questionId);
@@ -203,6 +273,11 @@ export async function draftAnswer(
     throw e;
   }
   const data = { ...decided(r.output), model: r.model, usage: json(r.usage) };
+  // Desde la tercera pregunta del mismo comprador en esta publicación, responde una persona.
+  if (q.buyerId && (await buyerAskedBefore(db, q)) >= REPEAT_LIMIT) {
+    data.needsPerson = true;
+    data.reason = data.reason ? `${REPEAT_REASON} ${data.reason}` : REPEAT_REASON;
+  }
   const update = () =>
     db.questionDraft.update({
       where: { questionId: q.id },
@@ -219,8 +294,24 @@ export async function draftAnswer(
     }
   }
   // Lo que no se puede mandar, como un [COMPLETAR], también queda para una persona.
-  const sent = args.auto && q.publication?.autoAnswer && !data.needsPerson ? await sendAlone(db, args, data.text) : false;
+  const alone = args.auto && q.publication?.autoAnswer && !data.needsPerson;
+  if (alone) {
+    // Lo mínimo que espera la cuenta desde que llegó la pregunta. Antes de mandar se vuelve a fijar en el canal.
+    const settings = await db.questionSettings.findUnique({ where: { accountId: args.accountId }, select: { answerDelaySeconds: true } });
+    const ms = waitBeforeSending(q.askedAt, settings?.answerDelaySeconds ?? ANSWER_DELAY_DEFAULT, args.now ?? new Date());
+    if (ms > 0) await (args.wait ?? sleep)(ms);
+  }
+  const sent = alone ? await sendAlone(db, args, data.text) : false;
   return { ok: true, costUsd: r.usage.costUsd, sent };
+}
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** Cuántas preguntas hizo antes el mismo comprador en la misma publicación. */
+function buyerAskedBefore(db: Db, q: LoadedQuestion): Promise<number> {
+  return db.buyerQuestion.count({
+    where: { storeId: q.storeId, listingId: q.listingId, buyerId: q.buyerId, id: { not: q.id }, askedAt: { lt: q.askedAt } },
+  });
 }
 
 export type TryResult = {
@@ -307,7 +398,8 @@ async function sendAlone(db: Db, args: { accountId: string; questionId: string; 
  */
 export async function questionsToDraft(
   db: Db,
-  args: { accountId?: string; externalId?: string; autoAnswer?: boolean; max: number; now?: Date },
+  // askedBefore: solo las que llegaron antes, para no mandar ninguna antes de la espera de la cuenta.
+  args: { accountId?: string; externalId?: string; autoAnswer?: boolean; askedBefore?: Date; max: number; now?: Date },
 ) {
   const since = new Date((args.now ?? new Date()).getTime() - AUTO_DRAFT_DAYS * 24 * 60 * 60 * 1000);
   return db.buyerQuestion.findMany({
@@ -316,7 +408,7 @@ export async function questionsToDraft(
       ...(args.externalId ? { externalId: args.externalId } : {}),
       draft: { is: null },
       text: { not: '' },
-      askedAt: { gte: since },
+      askedAt: { gte: since, ...(args.askedBefore ? { lte: args.askedBefore } : {}) },
       ...(args.accountId ? { store: { accountId: args.accountId } } : {}),
       OR: [
         ...(args.autoAnswer
@@ -339,7 +431,7 @@ export async function handleNotice(
   db: Db,
   kind: ChannelKind,
   body: unknown,
-  opts: { aiReady: boolean; request?: Requester; now?: Date },
+  opts: { aiReady: boolean; request?: Requester; now?: Date; wait?: (ms: number) => Promise<void> },
 ): Promise<{ saved: number; drafted: number }> {
   const saved = await receiveNotice(db, kind, body, opts.now);
   const notice = getChannelQuestions(kind)?.parseNotice(body);
@@ -347,7 +439,7 @@ export async function handleNotice(
   const pending = await questionsToDraft(db, { externalId: notice.questionId, max: 5, now: opts.now });
   let drafted = 0;
   for (const q of pending) {
-    const r = await draftAnswer(db, { accountId: q.store.accountId, questionId: q.id, auto: true, now: opts.now }, opts.request);
+    const r = await draftAnswer(db, { accountId: q.store.accountId, questionId: q.id, auto: true, now: opts.now, wait: opts.wait }, opts.request);
     if (r.ok) drafted++;
     else console.error('No se pudo proponer la respuesta', r.error);
   }
@@ -361,7 +453,9 @@ export async function handleNotice(
  */
 export async function answerAlone(db: Db, opts: { aiReady: boolean; request?: Requester; now?: Date }): Promise<{ sent: number; pending: boolean }> {
   if (!opts.aiReady) return { sent: 0, pending: false };
-  const list = await questionsToDraft(db, { autoAnswer: true, max: 2, now: opts.now });
+  // Sin esperar en este pedido: solo las que ya pasaron la espera más larga que se puede poner.
+  const now = opts.now ?? new Date();
+  const list = await questionsToDraft(db, { autoAnswer: true, askedBefore: new Date(now.getTime() - ANSWER_DELAY_MAX * 1000), max: 2, now });
   const q = list[0];
   if (!q) return { sent: 0, pending: false };
   const r = await draftAnswer(db, { accountId: q.store.accountId, questionId: q.id, auto: true, now: opts.now }, opts.request).catch((e: unknown) => ({
@@ -467,11 +561,18 @@ export async function discardDraft(db: Db, args: { accountId: string; questionId
   if (done.count === 0) throw new ReplyError('No hay una propuesta para descartar.');
 }
 
-export type AnswerSettingsInput = { greeting: string; signature: string; tone: string; notes: string; autoDraft: boolean };
+export type AnswerSettingsInput = { greeting: string; signature: string; tone: string; notes: string; autoDraft: boolean; answerDelaySeconds?: number };
 
 /** Cómo responde la cuenta. Lo vacío queda sin dato. */
 export async function saveAnswerSettings(db: Db, accountId: string, input: AnswerSettingsInput) {
   const text = (v: string) => v.replace(/\r\n?/g, '\n').trim() || null;
-  const data = { greeting: text(input.greeting), signature: text(input.signature), tone: text(input.tone), notes: text(input.notes), autoDraft: input.autoDraft };
+  const data = {
+    greeting: text(input.greeting),
+    signature: text(input.signature),
+    tone: text(input.tone),
+    notes: text(input.notes),
+    autoDraft: input.autoDraft,
+    ...(input.answerDelaySeconds !== undefined ? { answerDelaySeconds: Math.min(ANSWER_DELAY_MAX, Math.max(0, Math.round(input.answerDelaySeconds))) } : {}),
+  };
   await db.questionSettings.upsert({ where: { accountId }, create: { accountId, ...data }, update: data });
 }

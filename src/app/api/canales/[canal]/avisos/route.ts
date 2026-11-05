@@ -17,7 +17,8 @@ import { handleSaleNotice } from '@/lib/sales/read';
 // si es una venta, se descuenta del stock y se sube la cantidad nueva.
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+// Antes de mandar sola una respuesta se espera lo que pide la cuenta, hasta 4 minutos.
+export const maxDuration = 300;
 
 // Un aviso es chico: lo que pase de esto no es un aviso.
 const MAX_CHARS = 16_000;

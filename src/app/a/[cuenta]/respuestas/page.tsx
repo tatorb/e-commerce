@@ -3,6 +3,7 @@ import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { AnswerSettingsForm } from '@/components/settings/AnswerSettingsForm';
+import { ANSWER_DELAY_DEFAULT } from '@/domain/answers';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { formatDateTime } from '@/lib/format';
 import { loadAnswerSettings } from '@/lib/queries/questions';
@@ -51,6 +52,7 @@ export default async function AnswerSettingsPage({ params }: { params: Promise<{
                 tone: row?.tone ?? '',
                 notes: row?.notes ?? '',
                 autoDraft: row?.autoDraft ?? true,
+                answerDelaySeconds: row?.answerDelaySeconds ?? ANSWER_DELAY_DEFAULT,
               }}
             />
           </CardContent>

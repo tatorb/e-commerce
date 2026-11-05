@@ -1730,6 +1730,8 @@ model QuestionSettings {
   notes     String?
   // Proponer respuestas solas cuando llega una pregunta.
   autoDraft Boolean  @default(true)
+  // Lo mínimo que espera Claude, desde que llega la pregunta, para mandar sola la respuesta.
+  answerDelaySeconds Int @default(40)
   updatedAt DateTime @updatedAt
 
   @@map("question_settings")

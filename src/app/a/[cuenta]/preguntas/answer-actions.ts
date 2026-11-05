@@ -7,7 +7,7 @@ import { prisma } from '@/lib/db';
 import { requireUser } from '@/lib/auth/session';
 import { getAccountBySlug } from '@/lib/queries/accounts';
 import { AI_NOT_CONFIGURED, isAiConfigured } from '@/ai/claude';
-import { ANSWER_MAX } from '@/domain/answers';
+import { ANSWER_DELAY_MAX, ANSWER_MAX } from '@/domain/answers';
 import { discardDraft, draftAnswer, questionsToDraft, ReplyError, saveAnswerSettings, sendAnswer } from '@/lib/answers';
 
 // Responder desde la pantalla Preguntas: pedir la propuesta a Claude,
@@ -110,6 +110,11 @@ const settingsSchema = z.object({
   tone: z.string().max(500, 'El tono puede tener hasta 500 caracteres.'),
   notes: z.string().max(4000, 'Lo que Claude tiene que saber puede tener hasta 4.000 caracteres.'),
   autoDraft: z.boolean(),
+  answerDelaySeconds: z
+    .number({ message: 'Escribí la espera en segundos.' })
+    .int('La espera va en segundos enteros.')
+    .min(0, 'La espera no puede ser negativa.')
+    .max(ANSWER_DELAY_MAX, `La espera puede ser de hasta ${ANSWER_DELAY_MAX} segundos.`),
 });
 
 /** Guarda cómo responde la cuenta. */
