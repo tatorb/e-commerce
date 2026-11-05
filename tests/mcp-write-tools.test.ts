@@ -212,6 +212,16 @@ describe.skipIf(!url)('herramientas de escritura', () => {
     expect(bad.text).toContain('año desde');
   });
 
+  it('update_product_info: carga y borra la garantía de la ficha', async () => {
+    const r = await call('update_product_info', { publicacion: 'MLA1110001', garantia: '  15 días de garantía de fábrica ' });
+    expect(r.data).toMatchObject({ listo: true });
+    expect((await db.product.findUniqueOrThrow({ where: { id: productId } })).warranty).toBe('15 días de garantía de fábrica');
+    await call('update_product_info', { publicacion: 'MLA1110001', marca: 'Marca Tres' });
+    expect((await db.product.findUniqueOrThrow({ where: { id: productId } })).warranty).toBe('15 días de garantía de fábrica');
+    await call('update_product_info', { publicacion: 'MLA1110001', garantia: '' });
+    expect((await db.product.findUniqueOrThrow({ where: { id: productId } })).warranty).toBeNull();
+  });
+
   it('save_competitors: reemplaza la lista, también con más de 5', async () => {
     const r = await call('save_competitors', {
       publicacion: 'MLA1110001',

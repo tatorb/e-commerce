@@ -404,7 +404,7 @@ const updateProductInfoTool = defineTool({
   section: ['productos', 'pipeline'],
   title: 'Corregir la ficha',
   description:
-    'Corrige la ficha del producto de una publicación: tipo, marca, número de pieza, línea, origen, medidas y compatibilidades. También si es individual o combo, y los productos del combo: un combo se arma solo con productos individuales, y un producto que está dentro de un combo no puede ser combo. La ficha es la fuente de verdad y la comparten todas las publicaciones del producto. Lo que no se manda queda como está; las listas reemplazan la lista entera. El tipo y la marca son de listas fijas de la cuenta (Ajustes, Tipos y marcas): tienen que ser uno de la lista; si no está, devuelve las que hay y no se guarda nada. Usá solo datos que te dio la persona o que están en la ficha, nunca supuestos.',
+    'Corrige la ficha del producto de una publicación: tipo, marca, número de pieza, línea, origen, garantía, medidas y compatibilidades. También si es individual o combo, y los productos del combo: un combo se arma solo con productos individuales, y un producto que está dentro de un combo no puede ser combo. La ficha es la fuente de verdad y la comparten todas las publicaciones del producto. Lo que no se manda queda como está; las listas reemplazan la lista entera. El tipo y la marca son de listas fijas de la cuenta (Ajustes, Tipos y marcas): tienen que ser uno de la lista; si no está, devuelve las que hay y no se guarda nada. Usá solo datos que te dio la persona o que están en la ficha, nunca supuestos.',
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg,
@@ -413,6 +413,13 @@ const updateProductInfoTool = defineTool({
     numero_de_pieza: optionalText('Número de pieza u OEM'),
     linea: optionalText('Línea, por ejemplo "Liviano nafta"'),
     origen: optionalText('País de origen, por ejemplo "Argentina"'),
+    garantia: z
+      .string()
+      .max(500)
+      .optional()
+      .describe(
+        'La garantía del producto, en texto, por ejemplo "15 días de garantía de fábrica". Es de la ficha: se usa al crear una publicación que no tiene garantía propia ni de la cuenta. La garantía de cada publicación en el canal (tipo y tiempo) se carga con set_warranty. Vacío la borra; sin mandar, queda como está.',
+      ),
     medidas: z
       .array(z.object({ medida: z.string().optional(), sku: z.string().optional() }))
       .max(100)
@@ -536,6 +543,7 @@ const updateProductInfoTool = defineTool({
     if (!parsed.success) throw new McpToolError(parsed.error.issues[0]?.message ?? 'Revisá los datos.');
     await ctx.db.$transaction(async (tx) => {
       await updateProductInfo(tx, { accountId: account.id, productId: pub.productId, data: parsed.data });
+      if (args.garantia !== undefined) await tx.product.update({ where: { id: pub.productId }, data: { warranty: args.garantia.trim() || null } });
       if (args.individual_o_combo) {
         await setProductKind(tx, { accountId: account.id, productId: pub.productId, kind: args.individual_o_combo === 'combo' ? 'COMBO' : 'INDIVIDUAL' });
       }
