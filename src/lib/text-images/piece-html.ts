@@ -168,7 +168,7 @@ const SCRIPT = `
     pieza.classList.toggle('version-b', version === 'B');
     document.getElementById('foto').innerHTML = d.photoUrl
       ? '<img class="foto" src="' + esc(d.photoUrl) + '" alt="">'
-      : (d.preview ? '<div class="foto-vacia">Elegí la foto del producto</div>' : '');
+      : (d.preview ? '<div class="foto-vacia">Sin foto: en el PNG queda vacío</div>' : '');
     document.getElementById('lista-si').innerHTML = c.compatible.map(function(x){ return itemHTML(x, marcas); }).join('');
     document.getElementById('lista-no').innerHTML = c.no_compatible.map(function(x){ return itemHTML(x, marcas); }).join('');
     // Si un logo no carga, va el nombre de la marca en chico.

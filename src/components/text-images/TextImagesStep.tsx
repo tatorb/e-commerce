@@ -68,7 +68,6 @@ export function TextImagesStep({
   const version = pieceVersion(content);
   const filled = Boolean(content.TIPO_PRODUCTO || content.MOTOR || content.compatible.length || content.no_compatible.length || content.dudas.length);
   const missingNow = [
-    ...(!photo ? ['Elegí la foto del producto.'] : []),
     ...(!content.TIPO_PRODUCTO ? ['Falta el tipo de producto.'] : []),
     ...(!content.MOTOR ? ['Falta el motor.'] : []),
     ...(content.compatible.length === 0 ? ['Falta al menos un ítem en Compatible con.'] : []),
@@ -110,6 +109,7 @@ export function TextImagesStep({
   const notes = [
     ...data.unknownBrands.map((k) => `La marca ${k} ya no está en la base de marcas.`),
     ...(data.withoutLogo.length > 0 ? [`Sin logo todavía: ${data.withoutLogo.join(', ')}. Va su nombre en chico hasta que se suba el logo en Marcas de vehículos.`] : []),
+    ...(!photo ? ['Sin foto: el PNG sale sin la foto de arriba a la derecha y ese lugar queda vacío.'] : []),
     ...(photo && !photo.transparent ? ['La foto elegida tiene fondo: la pieza necesita un PNG sin fondo. Elegí una corregida en el paso Fotos.'] : []),
   ];
 

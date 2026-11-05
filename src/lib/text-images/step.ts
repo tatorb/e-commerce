@@ -178,7 +178,7 @@ export async function loadTextImageStep(db: Db, args: { accountId: string; publi
     photos: photos.map(({ editId, label, href, transparent }) => ({ editId, label, href, transparent })),
     brands: brands.map((b) => ({ key: b.key, name: b.name, aliases: b.aliases, logo: brandLogoHref(b.key, b.logoUpdatedAt) })),
     version: pieceVersion(content),
-    missing: pieceMissing(content, photo !== null),
+    missing: pieceMissing(content),
     lengthNotes: pieceLengthNotes(content),
     // Las marcas que usa y que todavía no tienen logo, y las que ya no están en la base.
     withoutLogo: used.filter((k) => known.has(k) && !known.get(k)!.hasLogo).map((k) => known.get(k)!.name),
@@ -276,13 +276,17 @@ function problemOf(e: { issues: { path: PropertyKey[]; message: string }[] }): s
 export type GenerateResult = { fit: PieceFit; at: Date; version: PieceVersion };
 
 /** Lo que el servidor le pasa a la pieza para armar el PNG: todo adentro, como data:. */
-async function paintFor(db: Db, content: PieceContent, file: { url: string; type: string; viaPreview: boolean; preview: string | null }) {
-  const res = await readStored(db, file.viaPreview && file.preview ? file.preview : file.url);
-  if (!res) throw new TextImageError('La foto ya no está guardada en el Drive. Elegí otra.');
-  const bytes = Buffer.from(await res.arrayBuffer());
+async function paintFor(db: Db, content: PieceContent, file: { url: string; type: string; viaPreview: boolean; preview: string | null } | null) {
+  // Sin foto, ese lugar queda vacío en el PNG.
+  let photoUrl: string | null = null;
+  if (file) {
+    const res = await readStored(db, file.viaPreview && file.preview ? file.preview : file.url);
+    if (!res) throw new TextImageError('La foto ya no está guardada en el Drive. Elegí otra o sacala.');
+    photoUrl = `data:${file.type};base64,${Buffer.from(await res.arrayBuffer()).toString('base64')}`;
+  }
   return {
     content,
-    photoUrl: `data:${file.type};base64,${bytes.toString('base64')}`,
+    photoUrl,
     brands: await brandsForPiece(db, usedBrands(content)),
     preview: false,
   };
@@ -305,11 +309,11 @@ export async function generateTextImage(
   if (!row) throw new TextImageError('Todavía no hay nada cargado en la imagen con texto.');
   const content = parsePiece(row.content);
   const photo = (await photoOptions(db, pub.productId)).find((p) => p.editId === row.photoEditId) ?? null;
-  const missing = pieceMissing(content, photo !== null);
+  const missing = pieceMissing(content);
   if (missing.length > 0) throw new TextImageError(missing.join(' '));
-  const { png, fit } = await render(await paintFor(db, content, photo!.file));
+  const { png, fit } = await render(await paintFor(db, content, photo?.file ?? null));
   if (!fit.fits) throw new TextImageError('No entra todo ni achicando los ítems al 55 %. Juntá ítems de la misma marca y el mismo motor, o acortá los textos.');
-  const hash = await pieceHash(db, content, photo!.version);
+  const hash = await pieceHash(db, content, photo?.version ?? null);
   const at = args.now ?? new Date();
   const owner = await folderOwner(db, pub.productId);
   const name = `${pub.product.name} · imagen con texto ${slot} · ${at.toISOString().slice(0, 16).replace('T', ' ').replace(':', '.')}.png`;

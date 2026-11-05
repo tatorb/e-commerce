@@ -84,10 +84,9 @@ export function usedBrands(c: Pick<PieceContent, 'compatible' | 'no_compatible'>
   return [...new Set([...c.compatible, ...c.no_compatible].flatMap((x) => (x.tipo === 'vehiculo' && x.marca ? [x.marca] : [])))].sort();
 }
 
-/** Lo que falta para poder generar el PNG. Vacío si está todo. */
-export function pieceMissing(c: PieceContent, hasPhoto: boolean): string[] {
+/** Lo que falta para poder generar el PNG. Vacío si está todo. La foto no hace falta: sin foto, ese lugar queda vacío. */
+export function pieceMissing(c: PieceContent): string[] {
   return [
-    ...(!hasPhoto ? ['Elegí la foto del producto.'] : []),
     ...(!c.TIPO_PRODUCTO ? ['Falta el tipo de producto.'] : []),
     ...(!c.MOTOR ? ['Falta el motor.'] : []),
     ...(c.compatible.length === 0 ? ['Falta al menos un ítem en Compatible con.'] : []),

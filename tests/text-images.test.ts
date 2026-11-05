@@ -76,8 +76,8 @@ describe('la pieza, sin la base', () => {
     expect(c.compatible).toEqual([{ tipo: 'motor', titulo: 'Perkins 4.203', detalle: '' }]);
     expect(c.dudas).toEqual([]);
     expect(usedBrands(VERSION_B)).toEqual(['fiat']);
-    expect(pieceMissing(emptyPiece(), false)).toHaveLength(4);
-    expect(pieceMissing(VERSION_A, true)).toEqual([]);
+    expect(pieceMissing(emptyPiece())).toHaveLength(3);
+    expect(pieceMissing(VERSION_A)).toEqual([]);
   });
 
   it('las marcas se reconocen por clave, nombre o alias, sin tildes ni mayúsculas', () => {
@@ -360,7 +360,11 @@ describe.skipIf(!url)('el paso en la base', () => {
 
   it('no arma el PNG si falta algo o si no entra', async () => {
     await saveTextImage(db, { accountId, publicationId: stdId, content: { ...VERSION_A, MOTOR: '' }, userId });
-    await expect(generateTextImage(db, { accountId, publicationId: stdId, userId }, fakeRender)).rejects.toThrow('Elegí la foto del producto. Falta el motor.');
+    await expect(generateTextImage(db, { accountId, publicationId: stdId, userId }, fakeRender)).rejects.toThrow(/^Falta el motor\.$/);
+    // Sin foto se arma igual, con ese lugar vacío y sin el aviso de la vista previa.
+    await saveTextImage(db, { accountId, publicationId: stdId, content: VERSION_A, photoEditId: null, userId });
+    await generateTextImage(db, { accountId, publicationId: stdId, userId }, fakeRender);
+    expect(renders.at(-1)).toMatchObject({ photoUrl: null, preview: false });
     await saveTextImage(db, { accountId, publicationId: stdId, content: VERSION_A, photoEditId: editId, userId });
     const tooBig: PieceRenderer = async () => ({ png: new Uint8Array(), fit: { version: 'A', doubts: 2, scale: 0.55, fits: false } });
     await expect(generateTextImage(db, { accountId, publicationId: stdId, userId }, tooBig)).rejects.toThrow('Juntá ítems');
