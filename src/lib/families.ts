@@ -4,7 +4,7 @@ import { getChannelAdapter } from '@/channels';
 import { fingerprint } from '@/domain/channel-sync';
 import { channelFamilyNameOf, comparableText, distinctTexts, familyRead, pipelineRank } from '@/domain/families';
 import { lockFamily } from '@/domain/family-members';
-import { parseMedia, parseVariantListings, variantKey, type PhotoRef } from '@/domain/media';
+import { channelPhotos, parseMedia, parseVariantListings, variantKey, type PhotoRef } from '@/domain/media';
 import { PIPELINE_STEP_LABEL, PIPELINE_STEPS, pipelineLabel } from '@/domain/pipeline';
 import { measuresOf, soleMeasureOf, soleMeasurePhotos, type Measure } from '@/lib/media';
 import { productCode } from '@/lib/publication-facts';
@@ -660,6 +660,74 @@ export async function familyByMeasure(tx: Tx, args: { publicationId: string; use
     created.push(await copyMember(tx, head, { familyId, variantKey: m.key, externalId: null, media: mediaFor(m), at, userId: args.userId }));
   }
   return created;
+}
+
+export class FamilyMeasureError extends Error {}
+
+const sameText = (a: string | null | undefined, b: string) => (a ?? '').trim().replace(/,/g, '.').toLowerCase() === b.trim().replace(/,/g, '.').toLowerCase();
+
+/**
+ * Suma a una familia, aunque ya esté publicada en el canal, la publicación de
+ * una o varias medidas del producto que todavía no la tienen: con lo de la
+ * familia (título, descripción, datos de catálogo, preguntas, precio y paso del
+ * pipeline) y las fotos de la familia. Queda sin publicar, para crearla en el
+ * canal con el mismo nombre de familia. medidas: la medida o el SKU de cada
+ * una; sin decir, todas las que faltan. Devuelve las publicaciones creadas.
+ */
+export async function addFamilyMeasures(
+  tx: Tx,
+  args: { publicationId: string; measures?: string[]; userId: string | null; now?: Date },
+): Promise<{ id: string; label: string; sku: string | null }[]> {
+  const at = args.now ?? new Date();
+  const ids = await lockFamily(tx, args.publicationId);
+  const rows = await tx.publication.findMany({
+    where: { id: { in: ids } },
+    include: {
+      family: { select: { leadId: true } },
+      channelCopy: { select: { photos: true, photoIds: true, missingSince: true, variations: true, details: true } },
+      product: { select: { variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } } } },
+    },
+  });
+  if (rows.length === 0) throw new FamilyMeasureError('No encontré la publicación.');
+  if (rows.some((r) => parseVariantListings(r.variantListings).length >= 2)) {
+    throw new FamilyMeasureError('Es una familia vieja, con varios códigos en una sola publicación: primero hay que separarla en la pantalla Familias.');
+  }
+  const measures = measuresOf(rows[0].product.variants);
+  const head = rows.find((r) => r.id === rows[0].family?.leadId) ?? rows.find((r) => r.id === args.publicationId)!;
+  const covered = new Set(rows.map((r) => r.variantKey).filter(Boolean));
+  // Las que no tienen la medida marcada venden la que se deduce de su SKU en el canal.
+  for (const r of rows) {
+    if (r.variantKey) continue;
+    const own = soleMeasureOf(measures, r.channelCopy);
+    if (own) covered.add(own.key);
+  }
+  const missing = measures.filter((m) => !covered.has(m.key));
+  let wanted = missing;
+  if (args.measures && args.measures.length > 0) {
+    wanted = [];
+    for (const asked of args.measures) {
+      const m = measures.find((x) => sameText(x.measure, asked) || sameText(x.sku, asked) || sameText(x.label, asked) || x.key === asked);
+      if (!m) throw new FamilyMeasureError(`El producto no tiene la medida «${asked}». Sus medidas: ${measures.map((x) => x.label).join(', ') || 'ninguna'}. Primero agregala en la ficha.`);
+      if (covered.has(m.key)) throw new FamilyMeasureError(`La medida ${m.label} ya tiene su publicación en la familia.`);
+      if (!wanted.includes(m)) wanted.push(m);
+    }
+  }
+  if (wanted.length === 0) throw new FamilyMeasureError('Todas las medidas del producto ya tienen su publicación en la familia.');
+
+  let familyId = head.familyId;
+  if (!familyId) {
+    familyId = (await tx.listingFamily.create({ data: { storeId: head.storeId, productId: head.productId, leadId: head.id }, select: { id: true } })).id;
+    await tx.publication.update({ where: { id: head.id }, data: { familyId } });
+  }
+  // Las fotos de la familia: las elegidas en la app y, si sigue a las del canal, las que tiene en el canal.
+  const media = parseMedia(head.media) ?? (head.channelCopy && !head.channelCopy.missingSince ? channelPhotos(head.channelCopy.photos, head.channelCopy.photoIds) : []);
+  const out: { id: string; label: string; sku: string | null }[] = [];
+  for (const m of wanted) {
+    const photos = media.length > 0 ? soleMeasurePhotos(media, measures, m) : null;
+    const id = await copyMember(tx, head, { familyId, variantKey: m.key, externalId: null, media: photos && photos.length > 0 ? photos : null, at, userId: args.userId });
+    out.push({ id, label: m.label, sku: m.sku });
+  }
+  return out;
 }
 
 /**

@@ -51,7 +51,7 @@ import {
 import { checkTitle, parsePastedSuggestions, wordKey } from '@/domain/titles';
 import { resolveExternalIds } from '@/lib/catalog';
 import { createPipelinePublication } from '@/domain/pipeline-publications';
-import { familyByMeasure } from '@/lib/families';
+import { addFamilyMeasures, familyByMeasure, FamilyMeasureError } from '@/lib/families';
 import { savePublicationCode } from '@/lib/publication-code';
 import { QaError, saveQaTexts } from '@/lib/publication-qa';
 import { loadCatalogData, saveCatalogData } from '@/lib/catalog-data';
@@ -208,7 +208,7 @@ const createPublicationTool = defineTool({
   section: ['pipeline', 'publicaciones'],
   title: 'Crear una publicación nueva',
   description:
-    'Crea una publicación nueva, todavía sin publicar en el canal, y la deja en el pipeline en Información. Es de un producto que ya está (producto) o de uno nuevo con ficha corta (producto_nuevo), uno de los dos. Si el producto tiene varias medidas, crea una publicación por medida, juntas en su familia. Antes de crearla, mostrale a la persona qué vas a crear y esperá que confirme. Cuando ya esté publicada, su código se carga con update_publication.',
+    'Crea una publicación nueva, todavía sin publicar en el canal, y la deja en el pipeline en Información. Es de un producto que ya está (producto) o de uno nuevo con ficha corta (producto_nuevo), uno de los dos. Si el producto tiene varias medidas, crea una publicación por medida, juntas en su familia. Para sumar una medida nueva a una familia que ya existe, también si ya está publicada en el canal, usá add_family_measure. Antes de crearla, mostrale a la persona qué vas a crear y esperá que confirme. Cuando ya esté publicada, su código se carga con update_publication.',
   input: z.object({
     cuenta: accountArg,
     producto: z
@@ -284,6 +284,45 @@ const createPublicationTool = defineTool({
       ...(r.related.length > 0
         ? { aviso: `El producto ya tiene ${r.related.length === 1 ? 'otra publicación' : `${r.related.length} publicaciones`} en el pipeline.` }
         : {}),
+    };
+  },
+});
+
+const addFamilyMeasureTool = defineTool({
+  name: 'add_family_measure',
+  section: ['pipeline', 'publicaciones'],
+  title: 'Sumar una medida nueva a una familia',
+  description:
+    'Crea la publicación de una medida del producto que todavía no tiene la suya, dentro de la familia de esa publicación, aunque la familia ya esté publicada en el canal. Sirve cuando se agregó una medida nueva a la ficha (por ejemplo 0,60 con su SKU) y hay que publicarla junto a las que ya están. La nueva lleva lo de la familia: título (en el canal, el nombre de la familia), descripción, datos de catálogo, preguntas frecuentes, reglas del bot, precio y el paso del pipeline. Las fotos son las de la familia: las elegidas en la app o, si sigue a las del canal, las que tiene en el canal; se revisan con get_publication_media. Queda sin publicar: después se crea en el canal con create_in_channel pasando la publicación nueva, que crea solo las medidas sin publicar, con el mismo nombre de familia, así el canal las junta en la misma familia. Si la publicación no tenía familia, se arma una con ella. publicacion: cualquiera de la familia. medidas: la medida o el SKU de cada una (por ejemplo "0,60" o "SP-368-60"); sin la lista, todas las que faltan. La medida tiene que estar en la ficha del producto: si no está, primero se agrega en la ficha. Antes de crearla, mostrale a la persona qué medida se suma y a qué familia, y esperá que confirme.',
+  input: z.object({
+    cuenta: accountArg,
+    publicacion: publicationArg,
+    medidas: z.array(z.string().min(1)).max(10).optional().describe('La medida o el SKU de cada medida a sumar. Sin la lista, todas las que faltan.'),
+  }),
+  readOnly: false,
+  destructive: false,
+  async run(ctx, args) {
+    const { account, id } = await target(ctx, args);
+    let made: { id: string; label: string; sku: string | null }[];
+    try {
+      made = await ctx.db.$transaction((tx) => addFamilyMeasures(tx, { publicationId: id, measures: args.medidas, userId: ctx.userId }));
+    } catch (e) {
+      if (e instanceof FamilyMeasureError) throw new McpToolError(e.message);
+      throw e;
+    }
+    const members = await ctx.db.publication.findMany({
+      where: { family: { members: { some: { id } } } },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, externalId: true, variantKey: true },
+    });
+    return {
+      listo: true,
+      creadas: await Promise.all(
+        made.map(async (m) => ({ medida: m.label, sku: m.sku, publicacion: m.id, ...(await stateOf(ctx, account, m.id)) })),
+      ),
+      familia: members.map((m) => ({ publicacion: m.id, codigo: m.externalId ?? 'sin publicar' })),
+      siguiente:
+        'Revisá las fotos con get_publication_media y la cantidad y el precio con get_create_step. Para publicarla, create_in_channel con la publicación nueva: crea solo las medidas sin publicar, con el nombre de la familia.',
     };
   },
 });
@@ -1289,6 +1328,7 @@ const updateTitleRulesTool = defineTool({
 export const WRITE_TOOLS = [
   addToPipelineTool,
   createPublicationTool,
+  addFamilyMeasureTool,
   updatePublicationTool,
   moveStepTool,
   removeTool,

@@ -41,7 +41,7 @@ describe('herramientas de escritura en la lista', () => {
     expect(tools.get('push_warranties')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('push_media')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('read_visits')).toMatchObject({ readOnlyHint: false, destructiveHint: false });
-    expect(tools.size).toBe(71);
+    expect(tools.size).toBe(72);
   });
 });
 

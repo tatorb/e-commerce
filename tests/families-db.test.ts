@@ -6,7 +6,7 @@ import { writeContentField } from '@/domain/content';
 import { familyDetails } from '@/domain/families';
 import { addToPipeline, advanceStep, removeFromPipeline } from '@/domain/pipeline';
 import { applyFamilies } from '@/lib/family-apply';
-import { familyByMeasure, fillFamilyCode, joinKnownFamilies, planFamilies } from '@/lib/families';
+import { addFamilyMeasures, familyByMeasure, FamilyMeasureError, fillFamilyCode, joinKnownFamilies, planFamilies } from '@/lib/families';
 import { setProductCosts } from '@/lib/costs';
 import { loadPriceStep, priceGroups, savePriceDecision } from '@/lib/pricing';
 import { saveQaTexts } from '@/lib/publication-qa';
@@ -414,6 +414,51 @@ describe.skipIf(!url)('juntar y separar familias', () => {
     const lone = await db.publication.create({ data: { productId: single.id, storeId, channelStatus: 'UNPUBLISHED' } });
     expect(await db.$transaction((tx) => familyByMeasure(tx, { publicationId: lone.id, userId: null }))).toEqual([]);
     expect((await db.publication.findUniqueOrThrow({ where: { id: lone.id } })).familyId).toBeNull();
+  });
+
+  it('suma una medida nueva a una familia ya publicada, con lo de la familia y sus fotos del canal', async () => {
+    const p = await product([
+      { sku: 'SP-9-00', measure: 'STD' },
+      { sku: 'SP-9-100', measure: '1,00' },
+    ]);
+    const std = await listing(p.id, 'MLA91', 'SP-9-00', null, {
+      description: 'La descripción de la familia',
+      price: 150000,
+      faq: 'Preguntas de la familia',
+      pipelineStatus: 'IN_PIPELINE',
+      pipelineStep: 'PRICE',
+      variantKey: 'sku:SP-9-00 medida:std',
+    });
+    await db.channelCopy.update({ where: { publicationId: std.id }, data: { photos: ['https://ml/a.jpg', 'https://ml/b.jpg'], photoIds: ['FOTO-A', 'FOTO-B'] } });
+    const fam = await db.listingFamily.create({ data: { storeId, productId: p.id, leadId: std.id, channelFamilyId: 'FAM-9' } });
+    const one = await listing(p.id, 'MLA92', 'SP-9-100', null, { variantKey: 'sku:SP-9-100 medida:1.00' });
+    await db.publication.updateMany({ where: { id: { in: [std.id, one.id] } }, data: { familyId: fam.id } });
+
+    // La medida tiene que estar en la ficha.
+    await expect(db.$transaction((tx) => addFamilyMeasures(tx, { publicationId: one.id, measures: ['0,60'], userId: null }))).rejects.toThrow(FamilyMeasureError);
+    await db.productVariant.create({ data: { productId: p.id, sku: 'SP-9-60', measure: '0,60', position: 2 } });
+    // La que ya tiene su publicación no se repite.
+    await expect(db.$transaction((tx) => addFamilyMeasures(tx, { publicationId: one.id, measures: ['STD'], userId: null }))).rejects.toThrow('ya tiene su publicación');
+
+    const made = await db.$transaction((tx) => addFamilyMeasures(tx, { publicationId: one.id, measures: ['SP-9-60'], userId: null, now }));
+    expect(made).toEqual([{ id: expect.any(String), label: '0,60', sku: 'SP-9-60' }]);
+    const added = await db.publication.findUniqueOrThrow({ where: { id: made[0].id } });
+    expect(added).toMatchObject({
+      familyId: fam.id,
+      variantKey: 'sku:SP-9-60 medida:0.60',
+      externalId: null,
+      channelStatus: 'UNPUBLISHED',
+      title: std.title,
+      description: 'La descripción de la familia',
+      faq: 'Preguntas de la familia',
+      pipelineStatus: 'IN_PIPELINE',
+      pipelineStep: 'PRICE',
+    });
+    expect(Number(added.price)).toBe(150000);
+    // Las fotos de la familia: las que tiene en el canal, que se reusan por su código.
+    expect((added.media as { kind: string; id: string }[]).map((m) => `${m.kind}:${m.id}`)).toEqual(['channel:FOTO-A', 'channel:FOTO-B']);
+    // Ya están todas.
+    await expect(db.$transaction((tx) => addFamilyMeasures(tx, { publicationId: std.id, userId: null }))).rejects.toThrow('Todas las medidas');
   });
 
   it('la familia que creó la app toma el código que le dio el canal, si no lo tiene otra', async () => {
