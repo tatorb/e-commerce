@@ -93,20 +93,37 @@ async function statusNow(e: unknown, id: string, token: string): Promise<string 
 }
 
 /**
- * El rechazo de la descripción, siempre con la respuesta completa de Mercado
- * Libre: el pedido que se hizo, el código HTTP y el cuerpo (message, error y
- * cause). Hay rechazos que solo se entienden con todo eso.
+ * Un rechazo con la respuesta completa de Mercado Libre: el pedido que se
+ * hizo, el código HTTP y el cuerpo (message, error y cause). Hay rechazos que
+ * solo se entienden con todo eso. what: "la descripción", "las fotos".
  */
-export function descriptionRejected(method: 'PUT' | 'POST', path: string, e: unknown, before?: string): unknown {
+function fullRejection(what: 'description' | 'pictures', method: 'PUT' | 'POST', path: string, e: unknown, before?: string): unknown {
   if (!(e instanceof MercadoLibreRequestError) || e.status === 401 || e.status === 429) return e;
   const body = e.body === null || e.body === undefined ? 'sin cuerpo' : typeof e.body === 'string' ? e.body.slice(0, 1500) : JSON.stringify(e.body).slice(0, 1500);
   const detail = detailOf(e.body);
+  const it = what === 'description' ? 'la descripción' : 'las fotos';
+  const generic = `Mercado Libre no aceptó ${it}.`;
   // Un motivo conocido va explicado en castellano; si no, el genérico.
   const causes = isObj(e.body) && Array.isArray(e.body.cause) ? e.body.cause.filter(isObj) : [];
   const codes = [...causes.map((c) => `${c.code ?? ''} ${c.message ?? ''}`), isObj(e.body) ? `${e.body.error ?? ''} ${e.body.message ?? ''}` : ''].join(' ');
-  const known = KNOWN.find(([pattern]) => /description|under_review|closed/.test(pattern.source) && pattern.test(codes));
-  const reason = known && known[1] !== 'Mercado Libre no aceptó la descripción.' ? known[1].slice(0, -1) : e.status === 403 ? 'Mercado Libre no dejó cambiar la descripción' : 'Mercado Libre no aceptó la descripción';
+  const own = what === 'description' ? /description/ : /picture/;
+  const known = KNOWN.find(([pattern]) => (own.test(pattern.source) || /under_review|closed/.test(pattern.source)) && pattern.test(codes));
+  const reason = known && known[1] !== generic ? known[1].slice(0, -1) : e.status === 403 ? `Mercado Libre no dejó cambiar ${it}` : generic.slice(0, -1);
   return new PublishError(`${reason}${detail ? `: ${detail}` : ''}. Pedido: ${method} ${path}. Código HTTP ${e.status}. Respuesta: ${body}${before ? ` ${before}` : ''}`);
+}
+
+/** El rechazo de la descripción, con la respuesta completa. */
+export function descriptionRejected(method: 'PUT' | 'POST', path: string, e: unknown, before?: string): unknown {
+  return fullRejection('description', method, path, e, before);
+}
+
+/** Manda un cambio de fotos: si Mercado Libre no lo acepta, el rechazo va con la respuesta completa. */
+async function sendPictures(method: 'PUT' | 'POST', path: string, token: string, body: unknown): Promise<unknown> {
+  try {
+    return await mlSend(method, path, token, body);
+  } catch (e) {
+    throw fullRejection('pictures', method, path, e);
+  }
 }
 
 /**
@@ -196,7 +213,7 @@ async function picturesBody(token: string, pictures: ChannelPicture[]): Promise<
     else {
       const form = new FormData();
       form.append('file', new Blob([p.data as BlobPart], { type: p.type }), p.name);
-      const body = await send('POST', '/pictures/items/upload', token, form);
+      const body = await sendPictures('POST', '/pictures/items/upload', token, form);
       const id = isObj(body) && typeof body.id === 'string' ? body.id : null;
       if (!id) throw new PublishError('Mercado Libre no devolvió el código de una foto subida.');
       out.push({ id });
@@ -462,7 +479,7 @@ export const mercadolibrePublisher: ChannelPublisher = {
     const body = await picturesBody(accessToken, pictures);
     const ref = (p: { id: string } | { source: string }) => ('id' in p ? p.id : p.source);
     const everything = body.map((_, i) => i);
-    const res = await send('PUT', `/items/${id}`, accessToken, {
+    const res = await sendPictures('PUT', `/items/${id}`, accessToken, {
       pictures: body,
       ...(variations.length > 0
         ? {
@@ -481,7 +498,7 @@ export const mercadolibrePublisher: ChannelPublisher = {
     const keeper = pictureKeeper(await picturesBody(accessToken, pictures));
     const out: (string[] | null)[] = [];
     for (const l of listings) {
-      const res = await send('PUT', `/items/${encodeURIComponent(l.externalId)}`, accessToken, { pictures: keeper.of(l.pictures) });
+      const res = await sendPictures('PUT', `/items/${encodeURIComponent(l.externalId)}`, accessToken, { pictures: keeper.of(l.pictures) });
       out.push(keeper.learn(l.pictures, pictureIdsOf(res)));
     }
     return out;

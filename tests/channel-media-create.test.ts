@@ -456,6 +456,33 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     expect(sources.current[0].note).toBe('Es la corregida 1');
   });
 
+  it('push_media: Claude sube las fotos elegidas en ese orden, saltea las que no tienen cambios y confirma el orden releído', async () => {
+    process.env.DATABASE_URL ??= url;
+    const { PUSH_TOOLS } = await import('@/lib/mcp/push-tools');
+    const tool = PUSH_TOOLS.find((t) => t.name === 'push_media')!;
+    expect(tool).toMatchObject({ section: 'subir', readOnly: false, destructive: true });
+    expect(tool.description).toContain('Cambia la publicación en el canal de verdad');
+    await db.user.create({ data: { id: 'u-fotos', name: 'Persona', email: 'fotos@example.com' } });
+    const ctx: McpContext = { db, userId: 'u-fotos', access: { isAdmin: true, permissions: {}, accountIds: [] }, baseUrl: 'https://app.ejemplo.com' };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const run = async (args: Record<string, unknown>): Promise<any> => tool.run(ctx, tool.input.parse(args));
+
+    const pub = await db.publication.create({ data: { productId, storeId, externalId: 'MLA1', title: 'Kit Embrague Ford Ka' } });
+    await readAll();
+    // Sin cambios de fotos: la saltea y dice por qué.
+    expect(await run({ cuenta: 'prueba', publicaciones: [pub.id] })).toEqual({ subidas: [], salteadas: [{ publicacion: 'MLA1', motivo: 'No tiene las fotos por subir.' }] });
+    expect(calls).toEqual([]);
+
+    // Elegidas en otro orden: la del canal P2 primero, como portada, y P1 después.
+    await saveMedia(db, { accountId, publicationId: pub.id, refs: [{ kind: 'channel', id: 'P2', url: '' }, { kind: 'channel', id: 'P1', url: '' }] });
+    const r = await run({ cuenta: 'prueba' });
+    expect(r).toEqual({ subidas: [{ publicacion: 'MLA1', titulo: 'Kit Embrague Ford Ka', resultado: 'subida', confirmado_en_el_canal: true }] });
+    // Las que ya están en el canal van por su código, sin volver a subirlas.
+    expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual(['PUT /items/MLA1']);
+    expect(calls[0].body).toEqual({ pictures: [{ id: 'P2' }, { id: 'P1' }] });
+    expect(await state(pub.id)).toEqual({ draft: [], choose: [], rejected: [] });
+  });
+
   it('traída del canal: lo que se cambió en la app antes de la primera lectura queda para subir, no para elegir', async () => {
     const run = await db.importRun.create({
       data: { accountId, storeId, origin: 'CHANNEL_API', fileName: 'Mercado Libre', sheetName: 'Mercado Libre', dataDate: new Date(), rowsTotal: 1 },

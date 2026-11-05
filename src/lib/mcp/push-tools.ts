@@ -9,14 +9,14 @@ import { parseWarranty, warrantyLabel } from '@/domain/warranty';
 import { McpToolError, accountArg, defineTool, findPublication, resolveAccount } from './tool';
 
 // Subir al canal un solo dato que quedó en Por subir, el título, la
-// descripción o la garantía, como el botón de subir de Por subir pero solo eso. Son de la
+// descripción, la garantía o las fotos, como el botón de subir de Por subir pero solo eso. Son de la
 // familia: con una medida van todas. Por cada publicación dice si quedó bien o
 // el motivo exacto del rechazo del canal; lo que no entra en una vuelta vuelve
 // en quedan.
 
-type Field = 'title' | 'description' | 'warranty';
+type Field = 'title' | 'description' | 'warranty' | 'photos';
 
-const TEXTS: Record<Field, { name: string; title: string; the: string; it: string; done: string; none: string; from: string; show: string }> = {
+const TEXTS: Record<Field, { name: string; title: string; the: string; it: string; done: string; none: string; from: string; show: string; more?: string }> = {
   title: {
     name: 'push_titles',
     title: 'Subir títulos al canal',
@@ -37,6 +37,18 @@ const TEXTS: Record<Field, { name: string; title: string; the: string; it: strin
     from: 'save_description o el paso Descripción',
     show: 'qué descripción se va a mandar y a cuáles',
   },
+  photos: {
+    name: 'push_media',
+    title: 'Subir las fotos al canal',
+    the: 'las fotos',
+    it: 'subida',
+    done: 'Subió las fotos',
+    none: 'No hay fotos por subir en la cuenta.',
+    from: 'set_publication_media u Organización de multimedia',
+    show: 'qué fotos se van a mandar, en qué orden y a cuáles',
+    more:
+      'Sube exactamente las elegidas de get_publication_media, en ese orden: la primera es la portada. Van también las imágenes con texto, las generadas y las del Drive. En una familia, cada medida lleva sus fotos según las medidas marcadas. Las fotos que ya están en el canal se reusan por su código, sin volver a subirlas. Los clips no se tocan: se suben a mano desde el paso Videos. Después de subir vuelve a leer las fotos del canal: confirmado_en_el_canal es true solo si quedaron las mismas y en el mismo orden.',
+  },
   warranty: {
     name: 'push_warranties',
     title: 'Subir garantías al canal',
@@ -56,7 +68,7 @@ function pushFieldTool(field: Field) {
     name: t.name,
     section: 'subir',
     title: t.title,
-    description: `Manda al canal ${t.the} que quedó en Por subir (${t.from}), como el botón de subir de Por subir, pero solo ${t.the}: lo demás que esté por subir queda donde está. En publicaciones pasá ids de la app o códigos del canal (por ejemplo MLA123456789), hasta 100; sin la lista, van todas las de la cuenta con ${t.the} por subir. En una familia sube ${t.the} de todas sus medidas, aunque pases una sola. Saltea las que todavía no están publicadas en el canal, las que no tienen ${t.the} por subir y las que cambiaron también en el canal, y dice por qué. Por cada una devuelve si quedó bien o el motivo exacto del rechazo del canal${field === 'title' ? '; un título bloqueado por ventas no se sube: eso se decide en el paso Título' : ''}. Si son muchas, sube las que entran en una vuelta y devuelve en quedan las que faltan: volvé a llamar con esa lista. Cambia la publicación en el canal de verdad: antes de subir, mostrale a la persona ${t.show}, y esperá que confirme.`,
+    description: `Manda al canal ${t.the} que quedó en Por subir (${t.from}), como el botón de subir de Por subir, pero solo ${t.the}: lo demás que esté por subir queda donde está.${t.more ? ` ${t.more}` : ''} En publicaciones pasá ids de la app o códigos del canal (por ejemplo MLA123456789), hasta 100; sin la lista, van todas las de la cuenta con ${t.the} por subir. ${field === 'photos' ? 'En una familia van todas sus medidas que tengan fotos por subir, aunque pases una sola.' : `En una familia sube ${t.the} de todas sus medidas, aunque pases una sola.`} Saltea las que todavía no están publicadas en el canal, las que no tienen ${t.the} por subir y las que cambiaron también en el canal, y dice por qué. Por cada una devuelve si quedó bien o el motivo exacto del rechazo del canal${field === 'title' ? '; un título bloqueado por ventas no se sube: eso se decide en el paso Título' : ''}. Si son muchas, sube las que entran en una vuelta y devuelve en quedan las que faltan: volvé a llamar con esa lista. Cambia la publicación en el canal de verdad: antes de subir, mostrale a la persona ${t.show}, y esperá que confirme.`,
     input: z.object({
       cuenta: accountArg,
       publicaciones: z
@@ -107,7 +119,7 @@ function pushFieldTool(field: Field) {
         ).map((p) => [p.id, p]),
       );
 
-      const subidas: unknown[] = [];
+      const subidas: Record<string, unknown>[] = [];
       const quedan: string[] = [];
       for (const id of ids) {
         const p = pubs.get(id)!;
@@ -147,6 +159,7 @@ function pushFieldTool(field: Field) {
             resultado: sent ? t.it : 'rechazado',
             ...(rejected ? { motivo: rejected.message } : {}),
             confirmado_en_el_canal: r.confirmed,
+            ...(field === 'photos' && sent ? { _id: id } : {}),
           });
           // Como el botón de Por subir: queda en la actividad de la persona, hecho por Claude.
           await logActivity(ctx.db, {
@@ -169,6 +182,20 @@ function pushFieldTool(field: Field) {
           });
         }
       }
+      // Las fotos: confirmadas solo si, releídas del canal, son las mismas y en el mismo orden que las elegidas.
+      if (field === 'photos' && subidas.some((x) => x._id)) {
+        const after = new Map((await listToPush(account.id, ctx.db)).map((r) => [r.id, r]));
+        for (const x of subidas) {
+          if (!x._id) continue;
+          const row = after.get(x._id as string);
+          const same = !row || (!row.draft.includes('photos') && !row.choose.includes('photos'));
+          if (x.confirmado_en_el_canal && !same) {
+            x.confirmado_en_el_canal = false;
+            x.aviso = 'Releídas del canal, las fotos no quedaron iguales o en el mismo orden que las elegidas: mirá la publicación.';
+          }
+          delete x._id;
+        }
+      }
       return {
         subidas,
         ...(salteadas.length > 0 ? { salteadas } : {}),
@@ -179,4 +206,4 @@ function pushFieldTool(field: Field) {
   });
 }
 
-export const PUSH_TOOLS = [pushFieldTool('title'), pushFieldTool('description'), pushFieldTool('warranty')];
+export const PUSH_TOOLS = [pushFieldTool('title'), pushFieldTool('description'), pushFieldTool('warranty'), pushFieldTool('photos')];
