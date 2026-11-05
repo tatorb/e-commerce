@@ -5,6 +5,7 @@ import { AppWindow, ExternalLink, Lock, Package, Tag } from 'lucide-react';
 import { EntityHero } from '@/components/navigation/EntityHero';
 import { HeroMenu } from '@/components/navigation/HeroMenu';
 import { PageHeader } from '@/components/dashboard/PageHeader';
+import { RefreshArea, RefreshButton, RefreshScope } from '@/components/dashboard/RefreshButton';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Breadcrumb } from '@/components/navigation/Breadcrumb';
 import { EntityLabel } from '@/components/navigation/EntityLabel';
@@ -279,10 +280,13 @@ export default async function PipelineStepPage({
       : null;
 
   return (
-    <>
+    <RefreshScope>
       <PageHeader staticOnMobile>
         <div className="space-y-3">
-          <Breadcrumb items={[{ label: account.name, href: boardHref }, { label: 'Pipeline', href: boardHref }, { label: titleOrUntitled(pub.title) }]} />
+          <div className="flex items-center justify-between gap-3">
+            <Breadcrumb items={[{ label: account.name, href: boardHref }, { label: 'Pipeline', href: boardHref }, { label: titleOrUntitled(pub.title) }]} />
+            <RefreshButton label="Actualizar esta publicación" />
+          </div>
           <EntityHero
             photo={{ src: cover, alt: titleOrUntitled(pub.title) }}
             label={<EntityLabel kind="publication" channelName={pub.channelName} accent={pub.channelAccent} />}
@@ -352,6 +356,7 @@ export default async function PipelineStepPage({
         />
       </PageHeader>
       <PageBody>
+        <RefreshArea>
         {!inPipeline ? (
           <Card>
             <CardContent className="flex flex-wrap items-center justify-between gap-3 p-6">
@@ -594,7 +599,8 @@ export default async function PipelineStepPage({
             <PipelineHistory movements={[...pub.movements].reverse()} timeZone={account.timezone} />
           </SectionCard>
         ) : null}
+        </RefreshArea>
       </PageBody>
-    </>
+    </RefreshScope>
   );
 }

@@ -4,6 +4,7 @@ import { ListChecks } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TabLinks } from '@/components/ui/tab-links';
 import { PageHeader } from '@/components/dashboard/PageHeader';
+import { RefreshButton } from '@/components/dashboard/RefreshButton';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { NewPipelinePublicationDialog } from '@/components/pipeline/NewPipelinePublicationDialog';
 import { PipelineBoard } from '@/components/pipeline/PipelineBoard';
@@ -65,6 +66,7 @@ export default async function PipelinePage({
             </p>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
+            <RefreshButton label="Actualizar el pipeline" />
             <Button size="sm" variant="outline" asChild>
               <Link href={catalogHref}>
                 <ListChecks className="h-4 w-4" />
