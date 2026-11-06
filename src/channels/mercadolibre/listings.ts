@@ -91,6 +91,7 @@ const SUB_STATUS_TEXT: Record<string, string> = {
   picture_download_pending: 'Mercado Libre todavía está bajando las fotos.',
   warning: 'Mercado Libre la marcó con una advertencia.',
   under_review: 'Mercado Libre la está revisando.',
+  paused_by_seller: 'La pausó la tienda.',
   moderation_penalty: 'Mercado Libre la penalizó en una moderación.',
 };
 
@@ -394,6 +395,18 @@ async function listingsOfProducts(accessToken: string, userId: string, productId
   return out;
 }
 
+/** Las publicaciones activas o pausadas de cada producto: sus opciones de venta. */
+async function listOptions(accessToken: string, userId: string, productIds: string[]): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  const unique = [...new Set(productIds)];
+  const tasks = unique.map((productId) => async () => {
+    const ids = await optional(() => listingsOfProducts(accessToken, userId, [productId]));
+    if (ids) out.set(productId, ids);
+  });
+  await inParallel(tasks);
+  return out;
+}
+
 /** La familia de cada producto, leyendo cada familia una sola vez. */
 async function readFamilies(accessToken: string, userId: string, productIds: string[]): Promise<Map<string, ChannelFamily | null>> {
   const out = new Map<string, ChannelFamily | null>();
@@ -492,4 +505,5 @@ export const mercadolibreListings: ChannelListings = {
   },
 
   readFamilies,
+  listOptions,
 };

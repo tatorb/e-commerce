@@ -115,6 +115,7 @@ async function loadForPush(db: Db, accountId: string, publicationId: string) {
           agreed: true,
           rejections: true,
           missingSince: true,
+          status: true,
           categoryId: true,
           attributeIds: true,
           photos: true,
@@ -290,6 +291,9 @@ export async function pushDrafts(
   const copy = p.channelCopy;
   if (!copy) throw new PushError(`Primero hay que leerla de ${channelName}.`);
   if (copy.missingSince) throw new PushError(`${channelName} no la devuelve: puede estar borrada o ser de otra cuenta.`);
+  // A una finalizada, eliminada o en revisión no se le sube nada: el canal la rechaza o la cambia sin avisar.
+  if (copy.status === 'CLOSED' || copy.status === 'DELETED') throw new PushError(`Está finalizada en ${channelName}: no se le sube nada. Si la medida tiene otra opción de venta viva, hacé esa la principal.`);
+  if (copy.status === 'UNDER_REVIEW') throw new PushError(`${channelName} la está revisando: no se le sube nada hasta que termine.`);
 
   const app = faceValues(p);
   const channel = channelFaceValues(copy);

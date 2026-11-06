@@ -467,7 +467,11 @@ const getPublication = defineTool({
     const r = research.research;
     const manufacturerText = withoutPrices(r?.manufacturerText ?? null);
     const measurement = pub.measurements[0] ?? null;
-    const [family, saleOptions] = await Promise.all([familyOf(ctx.db, id), loadSaleOptions(ctx.db, id)]);
+    const [family, saleOptions, copyState] = await Promise.all([
+      familyOf(ctx.db, id),
+      loadSaleOptions(ctx.db, id),
+      ctx.db.channelCopy.findUnique({ where: { publicationId: id }, select: { status: true, statusReason: true, readAt: true } }),
+    ]);
     // Las otras opciones de venta de cada medida de la familia, sin repetir la medida.
     const familyOptions = family
       ? await Promise.all(familyMeasures(family.members).map(async (m) => [m.id, m.options.length > 0 ? await loadSaleOptions(ctx.db, m.id) : null] as const))
@@ -475,6 +479,16 @@ const getPublication = defineTool({
     const optionsOf = new Map(familyOptions);
     return {
       ...summary(ctx, account, scored),
+      // El estado tal como lo leyó del canal, con el motivo que informa.
+      ...(copyState
+        ? {
+            estado_leido_del_canal: {
+              estado: CHANNEL_STATUS_LABEL[copyState.status],
+              motivo: copyState.statusReason ?? 'el canal no informa ninguno',
+              leido: when(copyState.readAt, account),
+            },
+          }
+        : {}),
       // La misma medida en otras publicaciones del canal, cada una con su forma de cobro y su precio.
       ...(saleOptions && !family ? { opciones_de_venta: saleOptionsForClaude(saleOptions, id) } : {}),
       // Las medidas de su familia: lo que es de la familia se guarda en todas.

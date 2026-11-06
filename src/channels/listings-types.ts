@@ -93,6 +93,12 @@ export interface ChannelListings {
    */
   readFamilies?(accessToken: string, userId: string, channelProductIds: string[]): Promise<Map<string, ChannelFamily | null>>;
   /**
+   * Las publicaciones vivas (activas o pausadas) de cada producto del canal
+   * (channelProductId): las opciones de venta de esa medida. Un producto que no
+   * se pudo leer no está.
+   */
+  listOptions?(accessToken: string, userId: string, channelProductIds: string[]): Promise<Map<string, string[]>>;
+  /**
    * Las visitas de cada uno de los últimos días de una publicación, del más
    * viejo al de hoy, con la fecha como AAAA-MM-DD. Null si el canal no la tiene.
    */

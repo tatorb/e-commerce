@@ -43,7 +43,8 @@ describe('herramientas de escritura en la lista', () => {
     expect(tools.get('read_visits')).toMatchObject({ readOnlyHint: false, destructiveHint: false });
     expect(tools.get('set_auto_answer')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('set_main_sale_option')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
-    expect(tools.size).toBe(74);
+    expect(tools.get('reconcile_publications')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+    expect(tools.size).toBe(75);
   });
 });
 
