@@ -1,12 +1,13 @@
 import Link from 'next/link';
 import { ExternalLink, Layers } from 'lucide-react';
 import { ChannelStatusBadge } from '@/components/stages/StageBadge';
-import type { FamilyMember } from '@/lib/families';
+import { familyMeasures, type FamilyMember } from '@/lib/families';
 import { plural } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
 
 // Las medidas de una familia, en una línea: cada una con su código, que lleva
 // a su publicación en la app, su link al canal y su estado si no está activa.
+// Una medida con varias opciones de venta aparece una vez, con cuántas tiene.
 
 export function FamilyMembersRow({
   members,
@@ -22,13 +23,14 @@ export function FamilyMembersRow({
   currentId?: string;
   linkToApp?: boolean;
 }) {
+  const measures = familyMeasures(members);
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm">
       <span className="inline-flex items-center gap-1 font-medium">
         <Layers className="h-3.5 w-3.5 text-muted-foreground" />
-        Familia de {plural(members.length, 'medida', 'medidas')}:
+        Familia de {plural(measures.length, 'medida', 'medidas')}:
       </span>
-      {members.map((m) => (
+      {measures.map((m) => (
         <span
           key={m.id}
           className={cn('inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5', m.id === currentId && 'border-primary/40 bg-primary/5')}
@@ -47,6 +49,11 @@ export function FamilyMembersRow({
             </a>
           ) : null}
           {m.channelStatus !== 'ACTIVE' ? <ChannelStatusBadge status={m.channelStatus} /> : null}
+          {m.options.length > 0 ? (
+            <span className="text-xs text-muted-foreground" title={m.options.map((o) => o.externalId ?? 'Sin publicar').join(', ')}>
+              +{plural(m.options.length, 'opción de venta', 'opciones de venta')}
+            </span>
+          ) : null}
         </span>
       ))}
     </div>

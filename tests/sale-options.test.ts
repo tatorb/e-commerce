@@ -3,7 +3,8 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@/generated/prisma/client';
 import { chooseMain, planMainOptions, samePlanOptions, type OptionRow } from '@/domain/sale-options';
 import { statusReasonOf } from '@/channels/mercadolibre/listings';
-import { assignSaleOptions } from '@/lib/sale-options';
+import { familyMeasures, type FamilyMember } from '@/lib/families';
+import { assignSaleOptions, loadSaleOptions, SaleOptionError, setMainOption } from '@/lib/sale-options';
 
 // Opciones de venta: varias publicaciones del canal para la misma medida.
 // Datos inventados.
@@ -55,6 +56,14 @@ describe('la opción principal de cada medida', () => {
     expect(samePlanOptions(options)).toEqual([{ plan: 3, label: '3 cuotas', options: [options[0], options[1]] }]);
   });
 
+  it('la familia muestra cada medida una vez, con sus otras opciones adentro', () => {
+    const m = (id: string, mainOptionId: string | null = null): FamilyMember => ({
+      id, externalId: id, url: null, title: null, variantKey: null, measure: null, channelStatus: 'ACTIVE', price: null, ownPrice: false, lead: false, mainOptionId,
+    });
+    const measures = familyMeasures([m('std'), m('050'), m('050-b', '050'), m('suelta', 'de-otra-familia')]);
+    expect(measures.map((x) => [x.id, x.options.map((o) => o.id)])).toEqual([['std', []], ['050', ['050-b']], ['suelta', []]]);
+  });
+
   it('el motivo del estado, en palabras, sin perder los que no conoce', () => {
     expect(statusReasonOf({ sub_status: [] })).toBeNull();
     expect(statusReasonOf({})).toBeNull();
@@ -74,10 +83,15 @@ describe.skipIf(!url)('agrupar las opciones de venta en la base', () => {
     await db.$disconnect();
   });
 
+  let accountId = '';
+  let userId = '';
+
   beforeEach(async () => {
-    await db.$executeRawUnsafe('TRUNCATE listing_families, channel_copies, publications, products, stores, channels, accounts CASCADE');
+    await db.$executeRawUnsafe('TRUNCATE listing_families, channel_copies, channel_sync_changes, title_works, description_drafts, price_decisions, pipeline_movements, publications, products, stores, channels, accounts, users CASCADE');
     const channel = await db.channel.create({ data: { kind: 'MERCADOLIBRE', name: 'Mercado Libre' } });
     const account = await db.account.create({ data: { slug: 'prueba', name: 'Cuenta de prueba' } });
+    accountId = account.id;
+    userId = (await db.user.create({ data: { id: 'u-juani', name: 'Juani', email: 'juani@prueba.com' } })).id;
     storeId = (await db.store.create({ data: { accountId: account.id, channelId: channel.id, name: 'TIENDA' } })).id;
     productId = (await db.product.create({ data: { accountId: account.id, name: 'Subconjunto SP-1' } })).id;
   });
@@ -109,5 +123,74 @@ describe.skipIf(!url)('agrupar las opciones de venta en la base', () => {
     await db.channelCopy.update({ where: { publicationId: live.id }, data: { channelProductId: 'UP-OTRA' } });
     expect(await assignSaleOptions(db, storeId)).toBe(1);
     expect(await byId(live.id)).toBeNull();
+  });
+
+  it('muestra las opciones de la medida con su forma de cobro y avisa las repetidas', async () => {
+    const main = await listing('MLA1', 'UP-050', { installments: 3 });
+    const other = await listing('MLA2', 'UP-050', { installments: 1, status: 'PAUSED' });
+    await listing('MLA3', 'UP-050', { installments: 3, status: 'PAUSED' });
+    await assignSaleOptions(db, storeId);
+    await db.channelCopy.update({ where: { publicationId: other.id }, data: { statusReason: 'Mercado Libre la pausó.', price: 286281 } });
+    const data = await loadSaleOptions(db, other.id);
+    expect(data?.mainId).toBe(main.id);
+    expect(data?.options.map((o) => [o.externalId, o.planLabel, o.main])).toEqual([
+      ['MLA1', '3 cuotas', true],
+      ['MLA2', 'Cuota promocionada', false],
+      ['MLA3', '3 cuotas', false],
+    ]);
+    expect(data?.options[1]).toMatchObject({ price: 286281, status: 'PAUSED', statusReason: 'Mercado Libre la pausó.' });
+    expect(data?.samePlan).toEqual([{ plan: 3, label: '3 cuotas', codes: ['MLA1', 'MLA3'] }]);
+    expect(await loadSaleOptions(db, (await listing('MLA9', 'UP-SOLA')).id)).toBeNull();
+  });
+
+  it('cambiar la principal pasa el trabajo del pipeline a la nueva, deja el de ella en la vieja y queda en el registro', async () => {
+    const old = await listing('MLA1', 'UP-050', { status: 'CLOSED', inPipeline: true });
+    const live = await listing('MLA2', 'UP-050');
+    const third = await listing('MLA3', 'UP-050', { installments: 1 });
+    await assignSaleOptions(db, storeId);
+    await db.publication.update({ where: { id: old.id }, data: { pipelineStep: 'PRICE', title: 'Título trabajado', faq: '<p>Trae juntas.</p>' } });
+    await db.titleWork.create({ data: { publicationId: old.id, words: { motor: 'use' } } });
+    await db.titleWork.create({ data: { publicationId: live.id, words: { viejo: 'discard' } } });
+    await db.descriptionDraft.create({ data: { publicationId: old.id, text: 'Descripción propuesta', model: 'x', usage: {}, costUsd: 0.1 } });
+    await db.priceDecision.create({
+      data: { publicationId: old.id, listPrice: 1000, finalPrice: 1000, cost: 500, marginPct: 30, minMarginPct: 15, params: {} },
+    });
+    await db.pipelineMovement.create({ data: { publicationId: old.id, step: 'PRICE' } });
+
+    const r = await setMainOption(db, { accountId, publicationId: third.id, mainId: live.id, userId, reason: 'Se finalizó MLA1.' });
+    expect(r).toEqual({ changed: true, from: 'MLA1', to: 'MLA2' });
+    const after = await db.publication.findUniqueOrThrow({ where: { id: live.id }, include: { titleWork: true, descriptionDraft: true, priceDecisions: true, pipelineMovements: true } });
+    expect(after).toMatchObject({ mainOptionId: null, pipelineStatus: 'IN_PIPELINE', pipelineStep: 'PRICE', title: 'Título trabajado', faq: '<p>Trae juntas.</p>' });
+    expect(after.titleWork?.words).toEqual({ motor: 'use' });
+    expect(after.descriptionDraft?.text).toBe('Descripción propuesta');
+    expect(after.priceDecisions).toHaveLength(1);
+    expect(after.pipelineMovements).toHaveLength(1);
+    const before = await db.publication.findUniqueOrThrow({ where: { id: old.id }, include: { titleWork: true, descriptionDraft: true } });
+    expect(before).toMatchObject({ mainOptionId: live.id, pipelineStatus: 'UNTOUCHED' });
+    // Lo que tenía la nueva queda en la vieja: no se pierde.
+    expect(before.titleWork?.words).toEqual({ viejo: 'discard' });
+    expect(before.descriptionDraft).toBeNull();
+    expect((await db.publication.findUniqueOrThrow({ where: { id: third.id } })).mainOptionId).toBe(live.id);
+    const log = await db.channelSyncChange.findMany({ where: { kind: 'MAIN_OPTION_CHANGED' }, orderBy: { publicationId: 'asc' } });
+    expect(log).toHaveLength(2);
+    expect(log[0]).toMatchObject({ before: { externalId: 'MLA1' }, after: { externalId: 'MLA2' }, message: 'Se finalizó MLA1.', userId });
+    // La lectura siguiente respeta la elección.
+    expect(await assignSaleOptions(db, storeId)).toBe(0);
+
+    // Elegir la que ya es principal no cambia nada; una de otra medida no se puede.
+    expect((await setMainOption(db, { accountId, publicationId: old.id, mainId: live.id, userId, reason: 'x' })).changed).toBe(false);
+    const elsewhere = await listing('MLA8', 'UP-STD');
+    await expect(setMainOption(db, { accountId, publicationId: live.id, mainId: elsewhere.id, userId, reason: 'x' })).rejects.toThrow(SaleOptionError);
+  });
+
+  it('en una familia, si la vieja era la principal de la familia, la familia pasa a la nueva', async () => {
+    const old = await listing('MLA1', 'UP-050', { inPipeline: true, status: 'CLOSED' });
+    const live = await listing('MLA2', 'UP-050', { inPipeline: true });
+    const std = await listing('MLA5', 'UP-STD', { inPipeline: true });
+    const family = await db.listingFamily.create({ data: { storeId, productId, leadId: old.id, members: { connect: [{ id: old.id }, { id: live.id }, { id: std.id }] } } });
+    await assignSaleOptions(db, storeId);
+    expect((await db.publication.findUniqueOrThrow({ where: { id: live.id } })).mainOptionId).toBe(old.id);
+    await setMainOption(db, { accountId, publicationId: old.id, mainId: live.id, userId, reason: 'x' });
+    expect((await db.listingFamily.findUniqueOrThrow({ where: { id: family.id } })).leadId).toBe(live.id);
   });
 });

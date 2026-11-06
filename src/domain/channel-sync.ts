@@ -41,6 +41,7 @@ export const SYNC_CHANGE_LABEL = {
   STATUS_FAILED: 'no se pudo cambiar el estado',
   RELISTED: 'se republicó',
   RENEWED: 'se renovó el descuento',
+  MAIN_OPTION_CHANGED: 'cambió la opción principal',
 } as const;
 
 export function isFaceField(value: string): value is FaceField {

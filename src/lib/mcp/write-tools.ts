@@ -54,6 +54,7 @@ import { createPipelinePublication } from '@/domain/pipeline-publications';
 import { addFamilyMeasures, familyByMeasure, FamilyMeasureError } from '@/lib/families';
 import { savePublicationCode } from '@/lib/publication-code';
 import { QaError, saveQaTexts, setAutoAnswer } from '@/lib/publication-qa';
+import { loadSaleOptions, SaleOptionError, setMainOption } from '@/lib/sale-options';
 import { familyMemberIds } from '@/domain/family-members';
 import { getChannelQuestions } from '@/channels/questions';
 import { loadCatalogData, saveCatalogData } from '@/lib/catalog-data';
@@ -789,6 +790,39 @@ const setAutoAnswerTool = defineTool({
   },
 });
 
+const setMainSaleOptionTool = defineTool({
+  name: 'set_main_sale_option',
+  section: ['pipeline', 'publicaciones'],
+  title: 'Elegir la opción de venta principal de una medida',
+  description:
+    'Cuando el canal vende la misma medida en varias publicaciones, cada una con su forma de cobro y su precio (opciones de venta), una es la principal: la que se trabaja en el pipeline. Esta herramienta elige otra. Si la principal vieja tenía el trabajo del pipeline, pasa a la nueva con su contenido: el paso, el título, la descripción, los precios decididos y la competencia; lo que tenía la nueva queda en la vieja. Queda en el registro de las dos. No sube nada al canal. get_publication muestra las opciones de cada medida. Antes de cambiarla, mostrale a la persona cuál queda como principal y esperá que confirme.',
+  input: z.object({
+    cuenta: accountArg,
+    publicacion: publicationArg.describe('Cualquier opción de venta de la medida: su código del canal, su link o su id.'),
+    principal: z.string().min(1).describe('La opción que queda como principal: su código del canal, su link o su id.'),
+  }),
+  readOnly: false,
+  destructive: true,
+  async run(ctx, args) {
+    const { account, id } = await target(ctx, args);
+    const mainId = await resolvePublication(ctx, account.id, args.principal);
+    try {
+      const r = await setMainOption(ctx.db, { accountId: account.id, publicationId: id, mainId, userId: ctx.userId, reason: 'Se eligió desde Claude.' });
+      const options = await loadSaleOptions(ctx.db, mainId);
+      return {
+        listo: true,
+        cambio: r.changed,
+        ...(r.changed ? { principal_anterior: r.from, principal_nueva: r.to } : { aviso: 'Ya era la principal.' }),
+        opciones: options?.options.map((o) => ({ codigo: o.externalId, forma_de_cobro: o.planLabel, principal: o.main })) ?? [],
+        link_app: appLink(ctx, account, mainId),
+      };
+    } catch (e) {
+      if (e instanceof SaleOptionError) throw new McpToolError(e.message);
+      throw e;
+    }
+  },
+});
+
 const saveQuestionsTool = defineTool({
   name: 'save_buyer_questions',
   section: ['pipeline', 'productos'],
@@ -1404,6 +1438,7 @@ export const WRITE_TOOLS = [
   saveKnowledgeTool,
   savePublicationQaTool,
   setAutoAnswerTool,
+  setMainSaleOptionTool,
   saveQuestionsTool,
   saveInsightsTool,
   saveCatalogTool,

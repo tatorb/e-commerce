@@ -21,6 +21,8 @@ import { PublicationFactsRow } from '@/components/publication/PublicationFactsRo
 import { FamilyPublishCard, type FamilyPublishRow } from '@/components/families/FamilyPublishCard';
 import { listScoredPublications } from '@/lib/queries/scoring';
 import { familyLeadId, familyOf } from '@/lib/families';
+import { loadSaleOptions } from '@/lib/sale-options';
+import { SaleOptionsCard } from '@/components/sale-options/SaleOptionsCard';
 import { familyMeasuresText, loadPublicationFacts } from '@/lib/publication-facts';
 import { firstPhoto, productCovers } from '@/lib/queries/products';
 import { PipelineHistory } from '@/components/pipeline/PipelineHistory';
@@ -213,6 +215,8 @@ export default async function PipelineStepPage({
     viewing === 'TEXT_IMAGES' ? loadTextImageStep(prisma, { accountId: account.id, publicationId: pub.id, slot: textSlot }) : null,
   ]);
   const warranty = viewing === 'PUBLISH' ? await warrantyOverview(prisma, { accountId: account.id, publicationId: pub.id }) : null;
+  // La misma medida en otras publicaciones del canal, con otra forma de cobro: se ven en el paso Publicación.
+  const saleOptions = viewing === 'PUBLISH' ? await loadSaleOptions(prisma, pub.id) : null;
   // Paso Precio: las ventas de la publicación y, en una familia, de todas sus medidas, solo para quien ve Ventas.
   const sales =
     viewing === 'PRICE' && can(user.access, 'ventas', 'read')
@@ -336,7 +340,7 @@ export default async function PipelineStepPage({
                     title: `Ver cada medida en ${pub.channelName}`,
                     items: (family?.members ?? []).map((m) => ({
                       href: m.url,
-                      label: m.measure ?? 'Medida sin elegir',
+                      label: `${m.measure ?? 'Medida sin elegir'}${m.mainOptionId ? ' · otra opción de venta' : ''}`,
                       icon: <ExternalLink />,
                       external: true,
                       note: `${m.externalId ?? 'Sin publicar'}${m.channelStatus !== 'ACTIVE' ? ` · ${CHANNEL_STATUS_LABEL[m.channelStatus]}` : ''}`,
@@ -521,6 +525,7 @@ export default async function PipelineStepPage({
         ) : channel && viewing === 'PUBLISH' ? (
           <>
             {familyRows ? <FamilyPublishCard accountSlug={account.slug} channelName={pub.channelName} rows={familyRows} /> : null}
+            {saleOptions ? <SaleOptionsCard accountSlug={account.slug} publicationId={pub.id} channelName={pub.channelName} data={saleOptions} /> : null}
             <PriceDecisionCard
               campaigns={priceCampaigns}
               decision={decision}

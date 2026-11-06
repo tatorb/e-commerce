@@ -1564,6 +1564,8 @@ enum SyncChangeKind {
   RELISTED
   // El descuento que había subido la app estaba por vencer y se volvió a subir solo.
   RENEWED
+  // Cambió la opción de venta principal de la medida: el trabajo del pipeline pasó a otro código.
+  MAIN_OPTION_CHANGED
 }
 
 // Un dato que cambió por la sincronización: lo que llegó del canal, lo que se

@@ -78,6 +78,8 @@ import { formatDateTime, plural } from '@/lib/format';
 import { loadPublicationFaces, type PublicationFaces } from '@/lib/queries/publication-faces';
 import { FamilyMembersRow } from '@/components/families/FamilyMembersRow';
 import { familyOf } from '@/lib/families';
+import { loadSaleOptions } from '@/lib/sale-options';
+import { SaleOptionsCard } from '@/components/sale-options/SaleOptionsCard';
 import { PublicationPromotions } from '@/components/publication/PublicationPromotions';
 import { campaignMarginFor, loadPriceStep } from '@/lib/pricing';
 
@@ -247,6 +249,8 @@ export default async function PublicationPage({
   ]);
   const facts = factsOf.get(p.id) ?? null;
   const stockPlan = stockPlans.get(p.id) ?? null;
+  // La misma medida en otras publicaciones del canal, con otra forma de cobro.
+  const saleOptions = await loadSaleOptions(prisma, p.id);
   const pushable = summary.draft.filter((f) => data.publishable.includes(f));
 
   return (
@@ -312,6 +316,7 @@ export default async function PublicationPage({
         {/* Fuera del encabezado fijo: la medida que vende, su familia y las otras publicaciones del producto. */}
         {facts && facts.measures.kind !== 'none' ? <InfoStrip icon={<Ruler />}>{measuresText(facts.measures)}</InfoStrip> : null}
         {family ? <FamilyMembersRow members={family.members} accountSlug={account.slug} channelName={data.channelName} currentId={p.id} /> : null}
+        {saleOptions ? <SaleOptionsCard accountSlug={account.slug} publicationId={p.id} channelName={data.channelName} data={saleOptions} /> : null}
         {others.length > 0 ? (
           <nav aria-label="Las otras publicaciones del producto" className="divide-y overflow-hidden rounded-2xl border bg-card shadow-card">
             {others.slice(0, 3).map((o) => (

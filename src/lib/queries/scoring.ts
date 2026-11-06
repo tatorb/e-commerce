@@ -61,6 +61,8 @@ export async function listScoredPublications(
         pipelineStatus: true,
         pipelineStep: true,
         variantKey: true,
+        mainOptionId: true,
+        mainOption: { select: { externalId: true } },
         pipelineRemoval: true,
         titleLockedManual: true,
         updatedAt: true,
@@ -71,7 +73,7 @@ export async function listScoredPublications(
           select: {
             leadId: true,
             ...FAMILY_LOCK_SELECT.select,
-            members: { select: { ...FAMILY_LOCK_SELECT.select.members.select, variantKey: true, externalId: true } },
+            members: { select: { ...FAMILY_LOCK_SELECT.select.members.select, variantKey: true, externalId: true, mainOptionId: true } },
           },
         },
         channelCopy: {
@@ -146,7 +148,11 @@ export async function listScoredPublications(
       titleLock: resolveTitleLock(titleLockFromData(channel, p), p.titleLockedManual, Boolean(p.externalId)),
       // La familia de medidas: la principal, que la representa en el tablero, y cuántas medidas tiene.
       familyLeadId: p.family?.leadId ?? null,
-      familySize: p.family?.members.length ?? 0,
+      // Si es otra opción de venta de una medida: el código de la principal. Null: es la principal o la única.
+      mainOptionId: p.mainOptionId,
+      mainOptionCode: p.mainOption ? (p.mainOption.externalId ?? 'sin publicar') : null,
+      // Las otras opciones de venta de una medida no cuentan como otra medida.
+      familySize: p.family?.members.filter((m) => !m.mainOptionId).length ?? 0,
       // Los códigos de las otras medidas de su familia: la tarjeta del tablero se encuentra por cualquiera.
       familyCodes: p.family?.members.map((m) => m.externalId).filter((c): c is string => Boolean(c)) ?? [],
       measures,

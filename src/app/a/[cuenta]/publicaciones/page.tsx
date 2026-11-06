@@ -106,6 +106,7 @@ export default async function PublicationsPage({
     sync: p.sync,
     quantity: p.quantity,
     familySize: p.familySize,
+    mainOptionCode: p.mainOptionCode,
   }));
   const ready = items.filter((p) => needsProposal(p.stage));
   const toReview = all.filter((p) => p.stage === 'PROPOSAL_GENERATED' || p.stage === 'IN_REVIEW').length;

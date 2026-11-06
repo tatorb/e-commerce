@@ -43,7 +43,7 @@ describe('los filtros del Registro', () => {
     expect(logKinds(reads)).toEqual([]);
     expect(logReads(reads)).toBe('all');
     expect(logKinds(parseLogSearch({ tipo: 'fallidas,elecciones' }))).toEqual(['REJECTED', 'CREATE_FAILED', 'ANSWER_FAILED', 'STATUS_FAILED', 'CHOSE_CHANNEL', 'CHOSE_APP']);
-    expect(logKinds(parseLogSearch({ tipo: 'estados' }))).toEqual(['STATUS_CHANGED', 'RELISTED']);
+    expect(logKinds(parseLogSearch({ tipo: 'estados' }))).toEqual(['STATUS_CHANGED', 'RELISTED', 'MAIN_OPTION_CHANGED']);
     expect(logReads(parseLogSearch({ tipo: 'subidas' }))).toBe('none');
     // Las lecturas son de la tienda: al buscar una publicación no aparecen.
     expect(logReads(parseLogSearch({ q: 'kit' }))).toBe('none');

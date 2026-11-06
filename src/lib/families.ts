@@ -335,7 +335,19 @@ export type FamilyMember = {
   price: number | null;
   ownPrice: boolean;
   lead: boolean;
+  // La opción de venta principal de su medida, si esta es otra opción. Null: es la principal o la única.
+  mainOptionId: string | null;
 };
+
+/** Una medida de la familia con sus otras opciones de venta, para mostrarla una sola vez. */
+export type FamilyMeasure = FamilyMember & { options: FamilyMember[] };
+
+/** Las medidas de la familia, cada una una sola vez: la opción principal con las demás opciones adentro. */
+export function familyMeasures(members: FamilyMember[]): FamilyMeasure[] {
+  const ids = new Set(members.map((m) => m.id));
+  const isOption = (m: FamilyMember) => m.mainOptionId !== null && ids.has(m.mainOptionId);
+  return members.filter((m) => !isOption(m)).map((m) => ({ ...m, options: members.filter((o) => isOption(o) && o.mainOptionId === m.id) }));
+}
 
 export type FamilyInfo = { id: string; leadId: string | null; members: FamilyMember[] };
 
@@ -350,7 +362,7 @@ export async function familyOf(db: Db, publicationId: string): Promise<FamilyInf
           leadId: true,
           product: { select: { variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } } } },
           members: {
-            select: { id: true, externalId: true, url: true, title: true, variantKey: true, channelStatus: true, price: true, ownPrice: true },
+            select: { id: true, externalId: true, url: true, title: true, variantKey: true, channelStatus: true, price: true, ownPrice: true, mainOptionId: true },
           },
         },
       },
@@ -375,6 +387,7 @@ export async function familyOf(db: Db, publicationId: string): Promise<FamilyInf
       price: m.price === null ? null : Number(m.price),
       ownPrice: m.ownPrice,
       lead: m.id === f.leadId,
+      mainOptionId: m.mainOptionId,
     }))
     .sort((a, b) => index(a.variantKey) - index(b.variantKey) || Number(b.lead) - Number(a.lead) || (a.externalId ?? '').localeCompare(b.externalId ?? ''));
   return { id: f.id, leadId: f.leadId, members };

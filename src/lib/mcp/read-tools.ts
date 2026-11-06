@@ -46,11 +46,12 @@ import { owedText } from '@/domain/stock-cushion';
 import { fieldLabel, kindLabel } from '@/domain/sync-log';
 import { catalogForClaude } from './catalog';
 import { loadTitleContext, RECEIVED_QUESTIONS } from '@/lib/queries/title-step';
-import { familyOf } from '@/lib/families';
+import { familyMeasures, familyOf } from '@/lib/families';
 import { buyerForClaude, buyerKey, loadBuyerFacts } from '@/lib/buyers';
 import { loadVisits } from '@/lib/visits';
 import { unitsLast90 } from '@/lib/sales/units';
 import { visitsForClaude } from '@/domain/visits';
+import { loadSaleOptions, type SaleOptions } from '@/lib/sale-options';
 import {
   McpToolError,
   accountArg,
@@ -348,6 +349,26 @@ const getPipelineBoard = defineTool({
 
 // ───────────────────────────── Publicación ─────────────────────────────
 
+/** Las opciones de venta de una medida, como las ve Claude. */
+function saleOptionsForClaude(data: SaleOptions, currentId: string) {
+  return {
+    opciones: data.options.map((o) => ({
+      codigo: o.externalId,
+      forma_de_cobro: o.planLabel,
+      precio: o.price,
+      descuento_pct: o.discount,
+      estado: CHANNEL_STATUS_LABEL[o.status],
+      ...(o.statusReason ? { motivo_del_estado: o.statusReason } : {}),
+      principal: o.main,
+      es_esta: o.id === currentId,
+    })),
+    ...(data.samePlan.length > 0
+      ? { aviso: data.samePlan.map((d) => `${d.codes.join(' y ')} tienen la misma forma de cobro (${d.label}): el canal apaga una.`).join(' ') }
+      : {}),
+    que_es: 'La misma medida en varias publicaciones del canal, cada una con su forma de cobro y su precio. La principal es la que se trabaja en el pipeline; se cambia con set_main_sale_option.',
+  };
+}
+
 const getPublication = defineTool({
   name: 'get_publication',
   section: ['publicaciones', 'pipeline', 'productos'],
@@ -446,20 +467,31 @@ const getPublication = defineTool({
     const r = research.research;
     const manufacturerText = withoutPrices(r?.manufacturerText ?? null);
     const measurement = pub.measurements[0] ?? null;
-    const family = await familyOf(ctx.db, id);
+    const [family, saleOptions] = await Promise.all([familyOf(ctx.db, id), loadSaleOptions(ctx.db, id)]);
+    // Las otras opciones de venta de cada medida de la familia, sin repetir la medida.
+    const familyOptions = family
+      ? await Promise.all(familyMeasures(family.members).map(async (m) => [m.id, m.options.length > 0 ? await loadSaleOptions(ctx.db, m.id) : null] as const))
+      : [];
+    const optionsOf = new Map(familyOptions);
     return {
       ...summary(ctx, account, scored),
+      // La misma medida en otras publicaciones del canal, cada una con su forma de cobro y su precio.
+      ...(saleOptions && !family ? { opciones_de_venta: saleOptionsForClaude(saleOptions, id) } : {}),
       // Las medidas de su familia: lo que es de la familia se guarda en todas.
       ...(family
         ? {
             familia: {
-              medidas: family.members.map((m) => ({
-                medida: m.measure ?? 'sin elegir',
-                codigo: m.externalId,
-                principal: m.lead,
-                precio_propio: m.ownPrice,
-                es_esta: m.id === id,
-              })),
+              medidas: familyMeasures(family.members).map((m) => {
+                const options = optionsOf.get(m.id) ?? null;
+                return {
+                  medida: m.measure ?? 'sin elegir',
+                  codigo: m.externalId,
+                  principal: m.lead,
+                  precio_propio: m.ownPrice,
+                  es_esta: m.id === id || m.options.some((o) => o.id === id),
+                  ...(options ? { opciones_de_venta: saleOptionsForClaude(options, id) } : {}),
+                };
+              }),
               que_es_de_la_familia:
                 'El paso del pipeline, el título, la descripción, los datos de catálogo, las preguntas frecuentes, las reglas del bot, responder solo y el precio, salvo las medidas que cuestan distinto, que llevan su propio precio, cuotas y descuento. Se guardan en todas las medidas a la vez.',
             },

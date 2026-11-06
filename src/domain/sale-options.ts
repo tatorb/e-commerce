@@ -23,8 +23,6 @@ export type OptionRow = {
 // Para elegir la principal cuando no hay una: primero la que se vende, después la pausada.
 const STATUS_RANK: Record<ChannelStatus, number> = { ACTIVE: 0, PAUSED: 1, UNDER_REVIEW: 2, INACTIVE: 3, UNPUBLISHED: 4, CLOSED: 5, DELETED: 6 };
 
-/** Si la publicación tiene trabajo de pipeline que no se puede perder. */
-const hasWork = (r: OptionRow) => r.familyLead || r.pipelineStatus !== 'UNTOUCHED';
 
 /**
  * La principal de un grupo de opciones de la misma medida. Se queda la que ya
@@ -40,7 +38,8 @@ export function chooseMain(group: OptionRow[]): OptionRow {
   if (current) return group.find((r) => r.id === current)!;
   return [...group].sort(
     (a, b) =>
-      Number(hasWork(b)) - Number(hasWork(a)) ||
+      Number(b.familyLead) - Number(a.familyLead) ||
+      Number(b.pipelineStatus !== 'UNTOUCHED') - Number(a.pipelineStatus !== 'UNTOUCHED') ||
       (a.status ? STATUS_RANK[a.status] : 9) - (b.status ? STATUS_RANK[b.status] : 9) ||
       a.createdAt.getTime() - b.createdAt.getTime() ||
       a.id.localeCompare(b.id),

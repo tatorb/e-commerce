@@ -95,8 +95,11 @@ export function measuresText(m: MeasuresFact): string {
 }
 
 /** Las medidas de toda la familia, que el Pipeline trabaja junta: "Familia de 3 medidas: STD, 0.50 y 0.75". */
-export function familyMeasuresText(members: { measure: string | null }[]): string {
-  return `Familia de ${plural(members.length, 'medida')}: ${listText(members.map((m) => m.measure ?? 'medida sin elegir'))}`;
+export function familyMeasuresText(members: { id: string; measure: string | null; mainOptionId?: string | null }[]): string {
+  // Las otras opciones de venta de una medida no son otra medida.
+  const ids = new Set(members.map((m) => m.id));
+  const measures = members.filter((m) => !m.mainOptionId || !ids.has(m.mainOptionId));
+  return `Familia de ${plural(measures.length, 'medida')}: ${listText(measures.map((m) => m.measure ?? 'medida sin elegir'))}`;
 }
 
 const listText = (labels: string[]) => (labels.length > 1 ? `${labels.slice(0, -1).join(', ')} y ${labels[labels.length - 1]}` : (labels[0] ?? ''));

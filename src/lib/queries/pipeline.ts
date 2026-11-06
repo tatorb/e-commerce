@@ -12,7 +12,7 @@ export type BoardItem = Awaited<ReturnType<typeof listBoard>>[number];
 /**
  * Las publicaciones que están en el pipeline, con desde cuándo están en su
  * paso. Las que esperan hace más, primero. Una familia es una sola tarjeta: la
- * de su principal.
+ * de su principal. Una medida con varias opciones de venta, también.
  */
 export async function listBoard(accountId: string, db: PrismaClient = prisma) {
   const [items, open] = await Promise.all([
@@ -24,7 +24,8 @@ export async function listBoard(accountId: string, db: PrismaClient = prisma) {
   ]);
   const since = new Map(open.map((m) => [m.publicationId, m.enteredAt]));
   return items
-    .filter((i) => !i.familyLeadId || i.familyLeadId === i.id)
+    // Las otras opciones de venta de una medida van con su principal.
+    .filter((i) => (!i.familyLeadId || i.familyLeadId === i.id) && !i.mainOptionId)
     .map((i) => ({ ...i, stepSince: since.get(i.id) ?? null }))
     .sort((a, b) => (a.stepSince?.getTime() ?? 0) - (b.stepSince?.getTime() ?? 0));
 }

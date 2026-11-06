@@ -28,7 +28,7 @@ export const LOG_TYPES = [
   { value: 'subidas', label: 'Se subió', kinds: ['SENT', 'RENEWED'] },
   { value: 'creadas', label: 'Se creó en el canal', kinds: ['CREATED'] },
   { value: 'respuestas', label: 'Respuestas a preguntas', kinds: ['ANSWERED'] },
-  { value: 'estados', label: 'Cambios de estado', kinds: ['STATUS_CHANGED', 'RELISTED'] },
+  { value: 'estados', label: 'Cambios de estado', kinds: ['STATUS_CHANGED', 'RELISTED', 'MAIN_OPTION_CHANGED'] },
   { value: 'fallidas', label: 'No se pudo', kinds: ['REJECTED', 'CREATE_FAILED', 'ANSWER_FAILED', 'STATUS_FAILED'] },
   { value: 'elecciones', label: 'Se eligió', kinds: ['CHOSE_CHANNEL', 'CHOSE_APP'] },
   { value: 'descartes', label: 'Se descartó', kinds: ['DISCARDED'] },
@@ -169,6 +169,7 @@ export const SIDE_LABELS: Record<SyncChangeKind, [string, string]> = {
   STATUS_FAILED: ['Estaba', 'Se quiso'],
   RELISTED: ['Código anterior', 'Código nuevo'],
   RENEWED: ['Estaba en el canal', 'Se volvió a subir'],
+  MAIN_OPTION_CHANGED: ['Principal anterior', 'Principal nueva'],
 };
 
 function photoSummary(refs: PhotoRef[]): string {

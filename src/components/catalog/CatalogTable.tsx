@@ -45,9 +45,21 @@ export type CatalogRow = PipelineState & {
   quantity: { channel: number | null; draft: number | null; measures: number; inChannel: boolean };
   // Cuántas medidas tiene su familia; 0 si no es de una familia.
   familySize: number;
+  // Si es otra opción de venta de una medida: el código de la principal.
+  mainOptionCode?: string | null;
 };
 
 /** La marca de una medida de una familia: se trabaja junta con las demás. */
+/** La marca de otra opción de venta: la misma medida que otra publicación, con otra forma de cobro. */
+function OptionChip({ main }: { main: string | null | undefined }) {
+  if (!main) return null;
+  return (
+    <Badge variant="outline" title="La misma medida que otra publicación, con otra forma de cobro y su propio precio">
+      Opción de venta de {main}
+    </Badge>
+  );
+}
+
 function FamilyChip({ size }: { size: number }) {
   if (size < 2) return null;
   return (
@@ -515,6 +527,7 @@ export function CatalogTable({ accountSlug, rows, channelName }: { accountSlug: 
                   <ChannelStatusBadge status={p.channelStatus} />
                   <SyncBadges sync={p.sync} />
                   <FamilyChip size={p.familySize} />
+                  <OptionChip main={p.mainOptionCode} />
                 </div>
                 <div className="text-xs text-muted-foreground truncate">
                   {[codeOrUnpublished(p.externalId), p.skus.join(' / ')].filter(Boolean).join(' · ')}
@@ -580,6 +593,11 @@ export function CatalogTable({ accountSlug, rows, channelName }: { accountSlug: 
                     <div className="text-xs text-muted-foreground truncate">
                       {[codeOrUnpublished(p.externalId), p.skus.join(' / ')].filter(Boolean).join(' · ')}
                     </div>
+                    {p.mainOptionCode ? (
+                      <div className="text-xs text-muted-foreground" title="La misma medida que otra publicación, con otra forma de cobro y su propio precio">
+                        Opción de venta de {p.mainOptionCode}
+                      </div>
+                    ) : null}
                     {p.missing.length > 0 ? (
                       <div className="text-xs truncate">
                         <span className="text-muted-foreground">Le falta: </span>
