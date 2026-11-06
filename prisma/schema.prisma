@@ -546,6 +546,12 @@ model Publication {
   variantKey        String?
   // En una familia: la medida tiene su propio precio y no sigue al de la familia.
   ownPrice          Boolean               @default(false)
+  // Opciones de venta: cuando el canal vende la misma medida en varias
+  // publicaciones, cada una con su forma de cobro y su precio, una es la
+  // principal y las demás apuntan a ella. Null: es la principal o la única.
+  mainOptionId      String?
+  mainOption        Publication?          @relation("SaleOptions", fields: [mainOptionId], references: [id], onDelete: SetNull)
+  saleOptions       Publication[]         @relation("SaleOptions")
   source            RecordSource          @default(MANUAL)
   // Importación que la creó, para poder deshacerla.
   importRunId       String?
@@ -580,6 +586,7 @@ model Publication {
   @@index([productId])
   @@index([importRunId])
   @@index([familyId])
+  @@index([mainOptionId])
   @@map("publications")
 }
 
@@ -1450,6 +1457,11 @@ model ChannelCopy {
   // La garantía como la informa el canal: { type, amount, unit }. Null: no se leyó.
   warranty          Json?
   status            ChannelStatus
+  // Por qué está en ese estado, en palabras, como lo informa el canal. Null: sin motivo.
+  statusReason      String?
+  // La medida del canal a la que pertenece: las publicaciones con el mismo
+  // código son opciones de venta de la misma medida. La app no lo interpreta.
+  channelProductId  String?
   url               String?
   photos            Json          @default("[]")
   // El código de cada foto en el canal, en el mismo orden, y de qué foto
@@ -1476,6 +1488,7 @@ model ChannelCopy {
   rejections        Json          @default("{}")
   updatedAt         DateTime      @updatedAt
 
+  @@index([channelProductId])
   @@map("channel_copies")
 }
 

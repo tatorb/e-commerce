@@ -75,6 +75,32 @@ function statusOf(raw: unknown, sub: unknown): ChannelStatus {
   return 'INACTIVE';
 }
 
+// Los motivos de estado que informa Mercado Libre (sub_status), en palabras.
+// Un motivo que no está acá se muestra con su código, para no perderlo.
+const SUB_STATUS_TEXT: Record<string, string> = {
+  deleted: 'Eliminada.',
+  forbidden: 'Mercado Libre la prohibió por no cumplir sus políticas.',
+  freezed: 'Mercado Libre la congeló.',
+  held: 'Mercado Libre la retuvo.',
+  suspended: 'Mercado Libre la suspendió.',
+  banned: 'Mercado Libre la bloqueó.',
+  expired: 'Venció.',
+  out_of_stock: 'Sin stock.',
+  waiting_for_patch: 'Mercado Libre pide corregir datos para volver a activarla.',
+  pending_documentation: 'Mercado Libre pide documentación.',
+  picture_download_pending: 'Mercado Libre todavía está bajando las fotos.',
+  warning: 'Mercado Libre la marcó con una advertencia.',
+  under_review: 'Mercado Libre la está revisando.',
+  moderation_penalty: 'Mercado Libre la penalizó en una moderación.',
+};
+
+/** El motivo del estado, en palabras. Null: Mercado Libre no informa ninguno. */
+export function statusReasonOf(item: Obj): string | null {
+  const codes = arr(item.sub_status).filter((c): c is string => typeof c === 'string' && c.length > 0);
+  if (codes.length === 0) return null;
+  return codes.map((c) => SUB_STATUS_TEXT[c] ?? `Motivo de Mercado Libre: ${c}.`).join(' ');
+}
+
 /** Las variantes de una publicación: su código, su SKU, su medida y el código de sus fotos. */
 export function variationsOf(item: Obj): { id: number | string; sku: string | null; measure: string | null; photoIds: string[]; quantity: number | null }[] {
   return arr(item.variations).flatMap((v) => {
@@ -182,6 +208,7 @@ export function parseItem(item: Obj): ChannelListing {
     installments: installmentsOf(item),
     discount: discountOf(item),
     status: statusOf(item.status, item.sub_status),
+    statusReason: statusReasonOf(item),
     sold: num(item.sold_quantity),
     quantity: num(item.available_quantity),
     stockInChannel: inFull(item),

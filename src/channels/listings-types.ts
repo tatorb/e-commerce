@@ -29,6 +29,8 @@ export type ChannelListing = {
   // El descuento sobre el precio público, en %. 0 sin descuento; null si no se sabe.
   discount: number | null;
   status: ChannelStatus;
+  // Por qué está en ese estado, en palabras. Null: sin motivo informado.
+  statusReason?: string | null;
   // Vendidos desde que se publicó.
   sold: number | null;
   // La cantidad disponible, en total; la de cada medida va en variations.

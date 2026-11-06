@@ -1,3 +1,4 @@
+import { assignSaleOptions } from '@/lib/sale-options';
 import { Prisma, type PrismaClient } from '@/generated/prisma/client';
 import type { SyncTrigger } from '@/generated/prisma/enums';
 import { getChannelAdapter } from '@/channels';
@@ -312,6 +313,8 @@ async function applyListing(
     // Un descuento que llegó del canal no es de la app: no se renueva.
     ...(taken.includes('discount') ? { discountUntil: null, discountSentAt: null } : {}),
     status: listing.status,
+    statusReason: listing.statusReason ?? null,
+    channelProductId: listing.channelProductId ?? null,
     url: listing.url,
     photos: listing.photos,
     photoIds: listing.photoIds ?? [],
@@ -529,6 +532,8 @@ export async function runSyncStep(
     return progress('RUNNING', position);
   }
 
+  // Con todo leído: las opciones de venta de cada medida.
+  await assignSaleOptions(db, run.store.id).catch((e) => console.error('Error al agrupar las opciones de venta', e instanceof Error ? e.message : e));
   const [toChoose, newInChannel] = await Promise.all([
     countToChoose(db, run.store.id),
     countNewInChannel(db, run.store.id, listings).catch(() => null),
