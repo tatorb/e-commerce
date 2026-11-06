@@ -37,7 +37,8 @@ import { LATEST_MEASUREMENTS } from '@/domain/measurements';
 import { resolveTitleLock } from '@/domain/title-lock';
 import { channelFamilyNameOf } from '@/domain/families';
 import { FAMILY_LOCK_SELECT, titleLockFromData } from '@/lib/family-lock';
-import { isInstallmentPlan } from '@/domain/pricing';
+import { isInstallmentPlan, planLabel } from '@/domain/pricing';
+import { LIVE_OPTION } from '@/domain/sale-options';
 import { WARRANTY_TYPE_LABEL, type Warranty } from '@/domain/warranty';
 import { checkTitle } from '@/domain/titles';
 import { readOne } from '@/lib/channel-sync';
@@ -66,6 +67,21 @@ const asJson = (v: unknown) => (v === null || v === undefined ? Prisma.JsonNull 
 const LOCKED_TITLE =
   'El título está bloqueado porque la publicación tiene ventas: el canal no deja cambiarlo. Para probar uno nuevo, decidí en el paso Título si se prueba en una copia con cuotas.';
 
+/**
+ * Por qué no se pueden subir esas cuotas, si choca con las opciones de venta
+ * de la medida: la forma de cobro de otra opción no se cambia, y dos opciones
+ * vivas con la misma forma de cobro hacen que el canal apague una. Null si se puede.
+ */
+export async function planClash(db: Db, p: { id: string; mainOptionId: string | null }, plan: number): Promise<string | null> {
+  if (p.mainOptionId) return 'Es otra opción de venta de la medida: su forma de cobro es la que la distingue y no se cambia desde la app.';
+  const others = await db.publication.findMany({
+    where: { mainOptionId: p.id },
+    select: { externalId: true, installments: true, channelStatus: true, channelCopy: { select: { installments: true, status: true } } },
+  });
+  const same = others.find((o) => (o.channelCopy?.installments ?? o.installments) === plan && LIVE_OPTION.includes(o.channelCopy?.status ?? o.channelStatus));
+  return same ? `${same.externalId ?? 'Otra opción de venta'} ya tiene ${planLabel(plan).toLowerCase()}: con dos opciones iguales, el canal apaga una.` : null;
+}
+
 async function loadForPush(db: Db, accountId: string, publicationId: string) {
   const p = await db.publication.findFirst({
     where: { id: publicationId, product: { accountId } },
@@ -75,6 +91,7 @@ async function loadForPush(db: Db, accountId: string, publicationId: string) {
       externalId: true,
       variantListings: true,
       variantKey: true,
+      mainOptionId: true,
       channelStatus: true,
       title: true,
       description: true,
@@ -395,6 +412,11 @@ export async function pushDrafts(
         const plan = Number(app.installments);
         if (app.installments === null || !isInstallmentPlan(plan)) {
           result.rejected.push({ field, message: 'Faltan las cuotas: decidilas en el paso Precio.' });
+          continue;
+        }
+        const clash = await planClash(db, p, plan);
+        if (clash) {
+          await reject(field, clash);
           continue;
         }
         value = app.installments;

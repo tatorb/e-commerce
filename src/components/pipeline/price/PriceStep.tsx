@@ -280,6 +280,9 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
           ? `Guardado. El precio, las cuotas y el descuento quedan en Por subir para mandarlos a ${data.channelName}.`
           : 'Guardado. El precio va con la publicación cuando la crees en el canal; las cuotas y el descuento, después, desde Por subir.',
       );
+      // Las otras opciones de venta de la medida, con el precio de su forma de cobro.
+      const others = r.message?.replace(/^Precio guardado\.\s*/, '');
+      if (others) texts.push(others);
       setConfirm(false);
     }
     // La campaña abierta en Promociones, como su botón Dejar en Por subir.

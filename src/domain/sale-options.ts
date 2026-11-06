@@ -1,5 +1,5 @@
 import type { ChannelStatus, PipelineStatus } from '@/generated/prisma/enums';
-import { planLabel } from './pricing';
+import { finalPriceFor, installmentCostPct, isInstallmentPlan, listPriceFor, planLabel, wholeUp, type PricingParams } from './pricing';
 
 // Opciones de venta: el canal puede vender la misma medida en varias
 // publicaciones, cada una con su forma de cobro y su precio. Se agrupan por el
@@ -70,8 +70,19 @@ export function planMainOptions(rows: OptionRow[]): Map<string, string | null> {
   return changes;
 }
 
+/**
+ * El precio de otra opción de venta de la medida: el mismo costo y el mismo
+ * margen que la principal, con lo que cuesta su forma de cobro y su descuento.
+ * En pesos enteros, para arriba. Null si su forma de cobro no tiene el costo cargado.
+ */
+export function optionListPrice(args: { cost: number; marginPct: number; params: PricingParams; plan: number; discountPct: number }): number | null {
+  if (!isInstallmentPlan(args.plan) || installmentCostPct(args.params, args.plan) === null) return null;
+  const final = finalPriceFor(args.cost, args.marginPct, args.params, args.plan);
+  return final === null ? null : wholeUp(listPriceFor(final, args.discountPct));
+}
+
 // Las que todavía cuentan en el canal: una finalizada ya no choca con otra.
-const LIVE: ChannelStatus[] = ['ACTIVE', 'PAUSED', 'UNDER_REVIEW', 'INACTIVE'];
+export const LIVE_OPTION: ChannelStatus[] = ['ACTIVE', 'PAUSED', 'UNDER_REVIEW', 'INACTIVE'];
 
 /**
  * Las opciones de una misma medida con la misma forma de cobro: el canal
@@ -82,7 +93,7 @@ export function samePlanOptions<T extends { id: string; status: ChannelStatus | 
 ): { plan: number; label: string; options: T[] }[] {
   const byPlan = new Map<number, T[]>();
   for (const o of options) {
-    if (o.installments === null || !o.status || !LIVE.includes(o.status)) continue;
+    if (o.installments === null || !o.status || !LIVE_OPTION.includes(o.status)) continue;
     byPlan.set(o.installments, [...(byPlan.get(o.installments) ?? []), o]);
   }
   return [...byPlan.entries()].filter(([, list]) => list.length > 1).map(([plan, list]) => ({ plan, label: planLabel(plan), options: list }));

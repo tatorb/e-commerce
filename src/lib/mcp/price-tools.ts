@@ -328,6 +328,16 @@ const savePrice = defineTool({
         nivel: LEVEL_TEXT[r.simulation.level],
         ganancia_por_venta: round(r.simulation.profit),
         ...(r.belowMin ? { se_confirmo_debajo_del_minimo: true } : {}),
+        ...(r.options.length > 0
+          ? {
+              otras_opciones_de_venta: r.options.map((o) => ({
+                codigo: o.externalId,
+                forma_de_cobro: o.planLabel,
+                precio_publicado: o.listPrice,
+                ...(o.reason ? { sin_precio: o.reason } : {}),
+              })),
+            }
+          : {}),
         queda: 'En Por subir: el precio, las cuotas y el descuento se mandan al canal desde la app o con push_prices.',
       };
     } catch (e) {
@@ -470,7 +480,7 @@ const pushPrices = defineTool({
   section: 'subir',
   title: 'Subir precios al canal',
   description:
-    'Manda al canal el precio publicado, el descuento y las cuotas sin interés que quedaron en Por subir, y sumarse o salir de las campañas pedidas (choose_campaign), como el botón de subir de Por subir, pero solo eso: lo demás que esté por subir (título, descripción, fotos) queda donde está; la descripción se sube con push_descriptions y el título con push_titles. Se mandan los valores del último precio guardado (save_price). En publicaciones pasá ids de la app o códigos del canal (por ejemplo MLA123456789), hasta 100; sin la lista, van todas las de la cuenta que tienen precio, cuotas o descuento por subir. Saltea las que todavía no están publicadas en el canal y las que no tienen esos cambios pendientes, y dice por qué. Si cambia el precio, el descuento se vuelve a mandar, porque el canal lo calcula sobre el precio. Por cada una devuelve qué se mandó y si quedó bien, o el motivo exacto del rechazo del canal; si el canal rechaza el descuento, lo dice y sigue con lo demás. Después de mandar una campaña vuelve a consultar al canal: confirmado_en_el_canal es true solo si ya figura programada o activa (o fuera, al salir); si el canal todavía no lo muestra, la campaña queda como pendiente, suele tardar unos minutos, y se vuelve a mirar con get_price_step. Si la publicación tiene descuento propio pendiente y la campaña lo frena, el descuento no se manda y se avisa. Si una publicación es de una familia, sube todas sus medidas, cada una con su medida en el resultado, y si después de mandar una campaña las medidas quedaron en estados distintos lo dice en familia_partida. Si son muchas, sube las que entran en una vuelta (unos 25 segundos) y devuelve en quedan las que faltan: volvé a llamar con esa lista. Cambia la publicación en el canal de verdad: antes de subir, mostrale a la persona qué se va a mandar y esperá que confirme.',
+    'Manda al canal el precio publicado, el descuento y las cuotas sin interés que quedaron en Por subir, y sumarse o salir de las campañas pedidas (choose_campaign), como el botón de subir de Por subir, pero solo eso: lo demás que esté por subir (título, descripción, fotos) queda donde está; la descripción se sube con push_descriptions y el título con push_titles. Se mandan los valores del último precio guardado (save_price). En publicaciones pasá ids de la app o códigos del canal (por ejemplo MLA123456789), hasta 100; sin la lista, van todas las de la cuenta que tienen precio, cuotas o descuento por subir. Saltea las que todavía no están publicadas en el canal y las que no tienen esos cambios pendientes, y dice por qué. Si cambia el precio, el descuento se vuelve a mandar, porque el canal lo calcula sobre el precio. Por cada una devuelve qué se mandó y si quedó bien, o el motivo exacto del rechazo del canal; si el canal rechaza el descuento, lo dice y sigue con lo demás. Después de mandar una campaña vuelve a consultar al canal: confirmado_en_el_canal es true solo si ya figura programada o activa (o fuera, al salir); si el canal todavía no lo muestra, la campaña queda como pendiente, suele tardar unos minutos, y se vuelve a mirar con get_price_step. Si la publicación tiene descuento propio pendiente y la campaña lo frena, el descuento no se manda y se avisa. Si una publicación es de una familia, sube todas sus medidas, cada una con su medida en el resultado. Si una medida se vende en varias opciones de venta, sube también las otras, cada una con el precio que le toca a su forma de cobro; su forma de cobro no se cambia. Si después de mandar una campaña las medidas quedaron en estados distintos lo dice en familia_partida. Si son muchas, sube las que entran en una vuelta (unos 25 segundos) y devuelve en quedan las que faltan: volvé a llamar con esa lista. Cambia la publicación en el canal de verdad: antes de subir, mostrale a la persona qué se va a mandar y esperá que confirme.',
   input: z.object({
     cuenta: accountArg,
     publicaciones: z
@@ -523,6 +533,13 @@ const pushPrices = defineTool({
         for (const m of fam ? [id, ...members.filter((x) => x.familyId === fam).map((x) => x.id)] : [id]) if (!expanded.includes(m)) expanded.push(m);
       }
       ids = expanded;
+    }
+    // Las otras opciones de venta de cada medida van detrás de su principal, cada una con su propio precio.
+    const options = await ctx.db.publication.findMany({ where: { mainOptionId: { in: ids } }, orderBy: { createdAt: 'asc' }, select: { id: true, mainOptionId: true } });
+    if (options.length > 0) {
+      const withOptions: string[] = [];
+      for (const id of ids) for (const m of [id, ...options.filter((o) => o.mainOptionId === id).map((o) => o.id)]) if (!withOptions.includes(m)) withOptions.push(m);
+      ids = withOptions;
     }
 
     const pubs = new Map(

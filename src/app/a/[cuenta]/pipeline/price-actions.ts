@@ -1,5 +1,6 @@
 'use server';
 
+import { formatPrice } from '@/domain/money';
 import { act } from '@/lib/auth/guard';
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@/lib/db';
@@ -49,8 +50,9 @@ export async function savePriceDecisionAction(accountSlug: string, publicationId
     if (!account) return NO_ACCOUNT;
     const overrides = pricingInputSchema.safeParse(input?.overrides ?? {});
     if (!overrides.success) return { ok: false, error: overrides.error.issues[0]?.message ?? 'Revisá los parámetros.' };
+    let options: Awaited<ReturnType<typeof savePriceDecision>>['options'] = [];
     try {
-      await savePriceDecision(prisma, {
+      ({ options } = await savePriceDecision(prisma, {
         accountId: account.id,
         publicationId,
         userId: user.id,
@@ -59,13 +61,19 @@ export async function savePriceDecisionAction(accountSlug: string, publicationId
         plan: Number(input.plan),
         overrides: overrides.data,
         confirmBelowMin: input.confirmBelowMin === true,
-      });
+      }));
     } catch (e) {
       if (e instanceof PricingError) return { ok: false, error: e.message };
       throw e;
     }
     revalidatePath(`/a/${accountSlug}`, 'layout');
-    return { ok: true, message: 'Precio guardado.' };
+    // Las otras opciones de venta de la medida, cada una con el precio de su forma de cobro.
+    const others = options.map((o) =>
+      o.listPrice === null
+        ? `${o.externalId ?? 'Otra opción'} (${o.planLabel.toLowerCase()}) queda sin precio: ${o.reason}`
+        : `${o.externalId ?? 'Otra opción'} (${o.planLabel.toLowerCase()}) queda en ${formatPrice(o.listPrice)}.`,
+    );
+    return { ok: true, message: ['Precio guardado.', ...others].join(' ') };
   });
 }
 

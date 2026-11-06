@@ -1,7 +1,11 @@
 import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@/generated/prisma/client';
-import { chooseMain, planMainOptions, samePlanOptions, type OptionRow } from '@/domain/sale-options';
+import { chooseMain, optionListPrice, planMainOptions, samePlanOptions, type OptionRow } from '@/domain/sale-options';
+import { PRICING_DEFAULTS } from '@/domain/pricing';
+import { planClash } from '@/lib/channel-push';
+import { setProductCosts } from '@/lib/costs';
+import { savePriceDecision } from '@/lib/pricing';
 import { statusReasonOf } from '@/channels/mercadolibre/listings';
 import { familyMeasures, type FamilyMember } from '@/lib/families';
 import { assignSaleOptions, loadSaleOptions, SaleOptionError, setMainOption } from '@/lib/sale-options';
@@ -62,6 +66,16 @@ describe('la opción principal de cada medida', () => {
     });
     const measures = familyMeasures([m('std'), m('050'), m('050-b', '050'), m('suelta', 'de-otra-familia')]);
     expect(measures.map((x) => [x.id, x.options.map((o) => o.id)])).toEqual([['std', []], ['050', ['050-b']], ['suelta', []]]);
+  });
+
+  it('el precio de otra opción: el mismo costo y margen, con lo que cuesta su forma de cobro', () => {
+    // (1,2 × 100.000 + 10.890) / 0,584446, con la cuota promocionada al 5 %.
+    expect(optionListPrice({ cost: 100_000, marginPct: 20, params: PRICING_DEFAULTS, plan: 1, discountPct: 0 })).toBe(223_956);
+    // Sin cuotas: divisor 0,634446.
+    expect(optionListPrice({ cost: 100_000, marginPct: 20, params: PRICING_DEFAULTS, plan: 0, discountPct: 0 })).toBe(206_306);
+    // Con descuento, el publicado sube para que el comprador pague lo mismo.
+    expect(optionListPrice({ cost: 100_000, marginPct: 20, params: PRICING_DEFAULTS, plan: 0, discountPct: 10 })).toBe(229_229);
+    expect(optionListPrice({ cost: 100_000, marginPct: 20, params: { ...PRICING_DEFAULTS, installments6Pct: null }, plan: 6, discountPct: 0 })).toBeNull();
   });
 
   it('el motivo del estado, en palabras, sin perder los que no conoce', () => {
@@ -192,5 +206,33 @@ describe.skipIf(!url)('agrupar las opciones de venta en la base', () => {
     expect((await db.publication.findUniqueOrThrow({ where: { id: live.id } })).mainOptionId).toBe(old.id);
     await setMainOption(db, { accountId, publicationId: old.id, mainId: live.id, userId, reason: 'x' });
     expect((await db.listingFamily.findUniqueOrThrow({ where: { id: family.id } })).leadId).toBe(live.id);
+  });
+
+  it('al guardar el precio, cada otra opción toma el suyo con su forma de cobro, y nunca se le cambian las cuotas', async () => {
+    const product = await db.product.create({ data: { accountId, name: 'Subconjunto SP-9', variants: { create: [{ sku: 'SP-9-00', measure: 'STD', position: 0 }] } } });
+    await setProductCosts(db, { accountId, productId: product.id, costs: { '': '100000' } });
+    const main = await db.publication.create({ data: { productId: product.id, storeId, externalId: 'MLA20', title: 'Subconjunto' } });
+    const other = await db.publication.create({ data: { productId: product.id, storeId, externalId: 'MLA21', title: 'Subconjunto' } });
+    for (const [p, installments, status] of [[main, 3, 'ACTIVE'], [other, 1, 'PAUSED']] as const) {
+      await db.channelCopy.create({ data: { publicationId: p.id, readAt: new Date(), status, installments, price: 1, discount: 0, channelProductId: 'UP-SP9' } });
+    }
+    await assignSaleOptions(db, storeId);
+
+    const r = await savePriceDecision(db, { accountId, publicationId: main.id, userId: null, listPrice: 238_224, discountPct: 0, plan: 3, overrides: {}, confirmBelowMin: true });
+    expect(r.simulation.marginPct).toBeCloseTo(20, 1);
+    expect(r.options).toEqual([expect.objectContaining({ externalId: 'MLA21', planLabel: 'Cuota promocionada', listPrice: expect.any(Number), reason: null })]);
+    const after = await db.publication.findUniqueOrThrow({ where: { id: other.id }, include: { priceDecisions: true } });
+    // Su forma de cobro sigue siendo la suya: no toma las 3 cuotas de la principal.
+    expect(after).toMatchObject({ installments: 1, ownPrice: true });
+    expect(Number(after.price)).toBe(r.options[0].listPrice);
+    expect(Number(after.priceDecisions[0].marginPct)).toBeCloseTo(20, 0);
+    expect(Number((await db.publication.findUniqueOrThrow({ where: { id: main.id } })).price)).toBe(238_224);
+
+    // Subir cuotas: a la otra opción nunca, y a la principal no si queda igual a una viva.
+    expect(await planClash(db, { id: other.id, mainOptionId: main.id }, 3)).toContain('no se cambia desde la app');
+    expect(await planClash(db, { id: main.id, mainOptionId: null }, 1)).toBe('MLA21 ya tiene cuota promocionada: con dos opciones iguales, el canal apaga una.');
+    expect(await planClash(db, { id: main.id, mainOptionId: null }, 6)).toBeNull();
+    await db.channelCopy.update({ where: { publicationId: other.id }, data: { status: 'CLOSED' } });
+    expect(await planClash(db, { id: main.id, mainOptionId: null }, 1)).toBeNull();
   });
 });

@@ -19,6 +19,7 @@ import {
 } from '@/domain/pricing';
 import { COST_SELECT, costLines } from './costs';
 import { singleMeasure } from './stock-plan';
+import { optionListPrice } from '@/domain/sale-options';
 
 // El paso Precio: los parámetros de la cuenta, el costo de cada medida y los
 // parámetros propios del producto, la competencia que se cargó en Información
@@ -84,7 +85,8 @@ export async function priceGroups(db: Db, publicationId: string): Promise<PriceG
       variantKey: true,
       price: true,
       channelCopy: { select: { details: true } },
-      family: { select: { leadId: true, members: { select: { id: true, variantKey: true, price: true } } } },
+      // Las otras opciones de venta de una medida no son otra pestaña: llevan su precio aparte.
+      family: { select: { leadId: true, members: { where: { mainOptionId: null }, select: { id: true, variantKey: true, price: true } } } },
       product: { select: COST_SELECT },
     },
   });
@@ -284,6 +286,69 @@ async function seedPriceAgreed(tx: Prisma.TransactionClient, publicationId: stri
   });
 }
 
+export type OptionPrice = {
+  id: string;
+  externalId: string | null;
+  plan: number | null;
+  planLabel: string;
+  // El precio publicado que le toca. Null si no se pudo calcular, con el motivo.
+  listPrice: number | null;
+  reason: string | null;
+};
+
+/**
+ * El precio de las otras opciones de venta de esas publicaciones: cada una con
+ * su forma de cobro, que no cambia, y su descuento leído del canal, con el
+ * mismo costo y margen que la principal. Queda en su borrador para subir.
+ */
+async function priceSaleOptions(
+  tx: Prisma.TransactionClient,
+  args: { mainIds: string[]; cost: number; marginPct: number; params: PricingParams; userId: string | null; now?: Date },
+): Promise<OptionPrice[]> {
+  const rows = await tx.publication.findMany({
+    where: { mainOptionId: { in: args.mainIds } },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true, externalId: true, installments: true, discount: true, channelCopy: { select: { installments: true, discount: true } } },
+  });
+  const out: OptionPrice[] = [];
+  for (const r of rows) {
+    const plan = r.channelCopy?.installments ?? r.installments ?? null;
+    const discountPct = Number(r.channelCopy?.discount ?? r.discount ?? 0);
+    const base = { id: r.id, externalId: r.externalId, plan, planLabel: plan === null ? 'Forma de cobro sin leer' : planLabel(plan) };
+    if (plan === null) {
+      out.push({ ...base, listPrice: null, reason: 'Todavía no se leyó su forma de cobro del canal.' });
+      continue;
+    }
+    const listPrice = optionListPrice({ cost: args.cost, marginPct: args.marginPct, params: args.params, plan, discountPct });
+    if (listPrice === null) {
+      out.push({ ...base, listPrice: null, reason: `Cargá el costo de ${planLabel(plan).toLowerCase()} en Ajustes > Precios.` });
+      continue;
+    }
+    const s = simulate({ listPrice, discountPct, plan: plan as InstallmentPlan, cost: args.cost, params: args.params });
+    await tx.priceDecision.create({
+      data: {
+        publicationId: r.id,
+        listPrice,
+        discountPct,
+        installments: plan,
+        finalPrice: Math.round(s.finalPrice * 100) / 100,
+        cost: args.cost,
+        marginPct: Math.round(s.marginPct * 100) / 100,
+        minMarginPct: args.params.minMarginPct,
+        params: args.params as unknown as Prisma.InputJsonValue,
+        belowMinConfirmed: false,
+        decidedById: args.userId,
+        ...(args.now ? { decidedAt: args.now } : {}),
+      },
+    });
+    await seedPriceAgreed(tx, r.id);
+    // Su forma de cobro y su descuento siguen como están en el canal: solo cambia el precio.
+    await tx.publication.update({ where: { id: r.id }, data: { price: listPrice, installments: plan, discount: discountPct, ownPrice: true } });
+    out.push({ ...base, listPrice, reason: null });
+  }
+  return out;
+}
+
 /**
  * Guarda el precio de una pestaña del paso Precio: la decisión con el margen
  * que deja el costo de sus medidas, y el precio, las cuotas y el descuento en
@@ -366,6 +431,8 @@ export async function savePriceDecision(
     for (const id of group.publicationIds) await seedPriceAgreed(tx, id);
     const family = found.family?.leadId ? { ownPrice: !group.publicationIds.includes(found.family.leadId) } : {};
     await tx.publication.updateMany({ where: { id: { in: group.publicationIds } }, data: { price: listPrice, installments: plan, discount: discountPct, ...family } });
-    return { id: decision!.id, decidedAt: decision!.decidedAt, simulation: s, belowMin: below };
+    // Las otras opciones de venta de esas medidas: el mismo costo y margen, con su forma de cobro.
+    const options = await priceSaleOptions(tx, { mainIds: group.publicationIds, cost, marginPct: s.marginPct, params, userId: args.userId, now: args.now });
+    return { id: decision!.id, decidedAt: decision!.decidedAt, simulation: s, belowMin: below, options };
   });
 }
