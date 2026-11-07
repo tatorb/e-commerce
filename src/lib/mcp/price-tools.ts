@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { CHANNEL_STATUS_LABEL } from '@/domain/channel-status';
+import { loadOptionTable, type OptionTable } from '@/lib/option-table';
 import { ConnectError } from '@/channels/connect';
 import type { FaceField } from '@/domain/channel-sync';
 import { measuresText } from '@/domain/costs';
@@ -247,12 +249,27 @@ const getPriceStep = defineTool({
   title: 'Ver el paso Precio',
   description:
     'Muestra el paso Precio de una publicación, como la pantalla: una pestaña por costo (si las medidas de una familia cuestan distinto, cada una tiene su precio, sus cuotas y su descuento; si no, hay una sola), con el costo de reposición sin IVA, el precio publicado, el descuento y las cuotas de hoy y el margen que dejan, lo que tiene el canal, los precios piso y objetivo y el último precio guardado. En lo_que_acepta_el_canal, lo que el canal informa hoy, consultado en el momento: si deja poner un descuento propio y entre qué precios con descuento (si queda más caro de lo que acepta, lo rechaza por parecerle chico), el sugerido, y las campañas en las que está o a las que la invitan, con cómo sumarse o salir: eso se pide con choose_campaign y se manda con push_prices. Es lo que muestra la tarjeta Promociones. Antes de proponer un descuento, mirá que entre en ese rango. También los costos del precio: los de la cuenta (Ajustes > Precios), los propios del producto y los que se usan al final. El margen es sobre el costo, sin IVA.',
-  input: z.object({ cuenta: accountArg, publicacion: publicationArg }),
+  input: z.object({
+    cuenta: accountArg,
+    publicacion: publicationArg,
+    precio_sin_cuotas: z
+      .number()
+      .positive()
+      .max(999_999_999)
+      .optional()
+      .describe('Para probar la tabla por modo de compra con este precio sin cuotas, sin guardar nada. Vale para la pestaña de la publicación pedida.'),
+  }),
   readOnly: true,
   run: async (ctx, args) => {
     const account = await resolveAccount(ctx, args.cuenta);
     const id = await resolvePublication(ctx, account.id, args.publicacion);
     const data = (await loadPriceStep(ctx.db, account.id, id))!;
+    const asked = args.precio_sin_cuotas ? data.groups.find((g) => g.publicationIds.includes(id)) : undefined;
+    const table = await loadOptionTable(ctx.db, {
+      accountId: account.id,
+      publicationId: id,
+      flatPrices: asked ? { [asked.anchorId]: args.precio_sin_cuotas! } : undefined,
+    });
     const params = resolvePricing(data.account, data.overrides);
     const codes = new Map(
       (await ctx.db.publication.findMany({ where: { id: { in: data.groups.flatMap((g) => g.publicationIds) } }, select: { id: true, externalId: true } })).map((p) => [
@@ -277,6 +294,7 @@ const getPriceStep = defineTool({
       pestanas: data.groups.map((g) => ({
         ...groupForClaude(g, params, (x) => codes.get(x) ?? x),
         lo_que_acepta_el_canal: promotionsForClaude(promotions, g.publicationIds, g.price, data.discountRange),
+        ...(table ? { tabla_por_modo_de_compra: tableForClaude(table, g.anchorId) } : {}),
       })),
       costos: {
         de_la_cuenta: pricingForClaude(data.account),
@@ -287,6 +305,64 @@ const getPriceStep = defineTool({
     };
   },
 });
+
+const SOURCE_TEXT = {
+  pedido: 'el precio sin cuotas pedido',
+  ultimo_precio_guardado: 'el margen del último precio guardado',
+  margen_objetivo: 'el margen objetivo de la cuenta, porque todavía no se guardó un precio',
+} as const;
+
+const LEVEL_SHORT = { target: 'en el objetivo o más', between: 'entre el mínimo y el objetivo', below: 'debajo del mínimo' } as const;
+
+const resultForClaude = (r: { profit: number; marginPct: number | null; level: keyof typeof LEVEL_SHORT | null }) => ({
+  ganancia: round(r.profit),
+  margen_pct: r.marginPct === null ? null : round(r.marginPct),
+  ...(r.level ? { nivel: LEVEL_SHORT[r.level] } : {}),
+});
+
+type TableOptionRow = OptionTable['groups'][number]['measures'][number]['unknownPlan'][number];
+
+function optionForClaude(o: TableOptionRow) {
+  return {
+    codigo: o.externalId,
+    estado: CHANNEL_STATUS_LABEL[o.status],
+    ...(o.statusReason ? { motivo: o.statusReason } : {}),
+    ...(o.blocked ? { frenada_por_el_canal: true } : {}),
+    ...(o.main ? { principal: true } : {}),
+    precio_hoy: o.priceNow,
+    ...(o.discountNow ? { descuento_hoy_pct: o.discountNow } : {}),
+    ...(o.now ? { hoy: resultForClaude(o.now) } : {}),
+    ...(o.campaign ? { campana: { nombre: o.campaign.name, estado: o.campaign.state, precio_comprador: o.campaign.price, ...resultForClaude(o.campaign.result) } } : {}),
+  };
+}
+
+/** La tabla por modo de compra de una pestaña, como la ve Claude. */
+function tableForClaude(table: OptionTable, anchorId: string) {
+  const g = table.groups.find((x) => x.anchorId === anchorId);
+  if (!g) return null;
+  return {
+    que_es:
+      'Se parte del precio sin cuotas y cada modo lleva el precio que deja la misma ganancia en pesos, sumando lo que cuesta ofrecer sus cuotas: todos dejan el mismo margen. Cada medida muestra qué publicaciones tiene en cada modo, con su estado, su precio de hoy, su descuento y su campaña. Solo muestra: no guarda nada.',
+    precio_sin_cuotas: g.flatPrice,
+    sale_de: g.flatSource ? SOURCE_TEXT[g.flatSource] : 'falta el costo de reposición',
+    costo_de_reposicion_sin_iva: g.cost,
+    precios_por_modo: g.rows.map((r) => ({
+      modo: r.label,
+      precio: r.price,
+      ...(r.installmentValue !== null ? { valor_de_cada_cuota: r.installmentValue } : {}),
+      ...(r.price !== null ? resultForClaude({ profit: r.profit!, marginPct: r.marginPct, level: r.level }) : { sin_precio: r.missing }),
+    })),
+    medidas: g.measures.map((m) => ({
+      medida: m.measure,
+      modos: m.modes.map((mode) => ({
+        modo: g.rows.find((r) => r.plan === mode.plan)?.label ?? String(mode.plan),
+        publicaciones: mode.options.length === 0 ? 'no existe' : mode.options.map(optionForClaude),
+      })),
+      ...(m.unknownPlan.length > 0 ? { con_forma_de_cobro_sin_leer: m.unknownPlan.map(optionForClaude) } : {}),
+    })),
+    ...(table.campaignsRead ? {} : { campanas: 'No se pudieron leer las campañas del canal.' }),
+  };
+}
 
 const savePrice = defineTool({
   name: 'save_price',
