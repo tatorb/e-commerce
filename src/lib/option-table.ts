@@ -31,6 +31,10 @@ export type TableOption = {
   now: Result | null;
   // La campaña en la que está o está anotada, con el precio para el comprador y lo que deja.
   campaign: { name: string; state: 'activa' | 'programada'; price: number; result: Result } | null;
+  // El precio que tiene guardado la app y si es distinto del que tiene el canal: queda en Por subir.
+  savedPrice: number | null;
+  savedDiscount: number | null;
+  pending: boolean;
 };
 
 export type TableMeasure = {
@@ -78,6 +82,8 @@ export async function loadOptionTable(
       mainOptionId: true,
       channelStatus: true,
       installments: true,
+      price: true,
+      discount: true,
       product: { select: { variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } } } },
       channelCopy: { select: { installments: true, status: true, statusReason: true, statusBlocked: true, price: true, discount: true, url: true } },
     },
@@ -124,6 +130,8 @@ export async function loadOptionTable(
       const discountNow = r.channelCopy?.discount != null ? Number(r.channelCopy.discount) : null;
       const campaign = campaignsOf.get(r.id);
       const valid = plan !== null && isInstallmentPlan(plan);
+      const savedPrice = r.price != null ? Number(r.price) : null;
+      const savedDiscount = r.discount != null ? Number(r.discount) : null;
       return {
         id: r.id,
         externalId: r.externalId,
@@ -136,6 +144,11 @@ export async function loadOptionTable(
         discountNow,
         now: cost !== null && valid && priceNow !== null ? resultAt(finalPriceOf(priceNow, discountNow ?? 0), cost, params, plan) : null,
         campaign: campaign && cost !== null && valid ? { ...campaign, result: resultAt(campaign.price, cost, params, plan) } : null,
+        savedPrice,
+        savedDiscount,
+        pending:
+          Boolean(r.externalId) &&
+          ((savedPrice !== null && savedPrice !== priceNow) || (savedDiscount !== null && discountNow !== null && savedDiscount !== discountNow)),
       };
     };
     const measures = g.publicationIds.map((mainId): TableMeasure => {

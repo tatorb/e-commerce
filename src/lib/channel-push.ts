@@ -133,6 +133,7 @@ async function loadForPush(db: Db, accountId: string, publicationId: string) {
           quantity: true,
           warranty: true,
           stockInChannel: true,
+          statusBlocked: true,
         },
       },
     },
@@ -297,6 +298,7 @@ export async function pushDrafts(
   // A una finalizada, eliminada o en revisión no se le sube nada: el canal la rechaza o la cambia sin avisar.
   if (copy.status === 'CLOSED' || copy.status === 'DELETED') throw new PushError(`Está finalizada en ${channelName}: no se le sube nada. Si la medida tiene otra opción de venta viva, hacé esa la principal.`);
   if (copy.status === 'UNDER_REVIEW') throw new PushError(`${channelName} la está revisando: no se le sube nada hasta que termine.`);
+  if (copy.statusBlocked) throw new PushError(`${channelName} la frenó: no se le sube nada. Si la medida tiene otra opción de venta viva, hacé esa la principal.`);
 
   const app = faceValues(p);
   const channel = channelFaceValues(copy);

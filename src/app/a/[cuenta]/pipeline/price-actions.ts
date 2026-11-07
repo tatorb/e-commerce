@@ -71,7 +71,7 @@ export async function savePriceDecisionAction(accountSlug: string, publicationId
     const others = options.map((o) =>
       o.listPrice === null
         ? `${o.externalId ?? 'Otra opción'} (${o.planLabel.toLowerCase()}) queda sin precio: ${o.reason}`
-        : `${o.externalId ?? 'Otra opción'} (${o.planLabel.toLowerCase()}) queda en ${formatPrice(o.listPrice)}.`,
+        : `${o.externalId ?? 'Otra opción'} (${o.planLabel.toLowerCase()}) queda en ${formatPrice(o.listPrice)}.${o.note ? ` ${o.note}` : ''}`,
     );
     return { ok: true, message: ['Precio guardado.', ...others].join(' ') };
   });

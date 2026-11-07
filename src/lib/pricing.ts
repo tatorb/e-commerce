@@ -19,7 +19,7 @@ import {
 } from '@/domain/pricing';
 import { COST_SELECT, costLines } from './costs';
 import { singleMeasure } from './stock-plan';
-import { optionListPrice } from '@/domain/sale-options';
+import { flatProfit, optionPriceForProfit } from '@/domain/option-table';
 
 // El paso Precio: los parámetros de la cuenta, el costo de cada medida y los
 // parámetros propios del producto, la competencia que se cargó en Información
@@ -294,32 +294,51 @@ export type OptionPrice = {
   // El precio publicado que le toca. Null si no se pudo calcular, con el motivo.
   listPrice: number | null;
   reason: string | null;
+  // Se guardó, pero hay algo que avisar: por ejemplo, que el canal la está revisando y no se puede subir todavía.
+  note: string | null;
 };
 
 /**
  * El precio de las otras opciones de venta de esas publicaciones: cada una con
- * su forma de cobro, que no cambia, y su descuento leído del canal, con el
- * mismo costo y margen que la principal. Queda en su borrador para subir.
+ * su forma de cobro, que no cambia, y su descuento leído del canal, con la
+ * misma ganancia en pesos que la principal. Queda en su borrador para subir.
+ * Las finalizadas y las que frenó el canal no se tocan.
  */
 async function priceSaleOptions(
   tx: Prisma.TransactionClient,
-  args: { mainIds: string[]; cost: number; marginPct: number; params: PricingParams; userId: string | null; now?: Date },
+  args: { mainIds: string[]; cost: number; profit: number; params: PricingParams; userId: string | null; now?: Date },
 ): Promise<OptionPrice[]> {
   const rows = await tx.publication.findMany({
     where: { mainOptionId: { in: args.mainIds } },
     orderBy: { createdAt: 'asc' },
-    select: { id: true, externalId: true, installments: true, discount: true, channelCopy: { select: { installments: true, discount: true } } },
+    select: {
+      id: true,
+      externalId: true,
+      installments: true,
+      discount: true,
+      channelStatus: true,
+      channelCopy: { select: { installments: true, discount: true, status: true, statusBlocked: true } },
+    },
   });
   const out: OptionPrice[] = [];
   for (const r of rows) {
     const plan = r.channelCopy?.installments ?? r.installments ?? null;
     const discountPct = Number(r.channelCopy?.discount ?? r.discount ?? 0);
-    const base = { id: r.id, externalId: r.externalId, plan, planLabel: plan === null ? 'Forma de cobro sin leer' : planLabel(plan) };
+    const status = r.channelCopy?.status ?? r.channelStatus;
+    const base = { id: r.id, externalId: r.externalId, plan, planLabel: plan === null ? 'Forma de cobro sin leer' : planLabel(plan), note: null };
+    if (status === 'CLOSED' || status === 'DELETED') {
+      out.push({ ...base, listPrice: null, reason: 'Está finalizada en el canal: no se toca.' });
+      continue;
+    }
+    if (r.channelCopy?.statusBlocked) {
+      out.push({ ...base, listPrice: null, reason: 'El canal la frenó: no se toca.' });
+      continue;
+    }
     if (plan === null) {
       out.push({ ...base, listPrice: null, reason: 'Todavía no se leyó su forma de cobro del canal.' });
       continue;
     }
-    const listPrice = optionListPrice({ cost: args.cost, marginPct: args.marginPct, params: args.params, plan, discountPct });
+    const listPrice = optionPriceForProfit({ profit: args.profit, cost: args.cost, params: args.params, plan, discountPct });
     if (listPrice === null) {
       out.push({ ...base, listPrice: null, reason: `Cargá el costo de ${planLabel(plan).toLowerCase()} en Ajustes > Precios.` });
       continue;
@@ -344,7 +363,7 @@ async function priceSaleOptions(
     await seedPriceAgreed(tx, r.id);
     // Su forma de cobro y su descuento siguen como están en el canal: solo cambia el precio.
     await tx.publication.update({ where: { id: r.id }, data: { price: listPrice, installments: plan, discount: discountPct, ownPrice: true } });
-    out.push({ ...base, listPrice, reason: null });
+    out.push({ ...base, listPrice, reason: null, note: status === 'UNDER_REVIEW' ? 'El canal la está revisando: queda en Por subir hasta que termine.' : null });
   }
   return out;
 }
@@ -369,6 +388,8 @@ export async function savePriceDecision(
     plan: number;
     overrides: Partial<PricingParams>;
     confirmBelowMin: boolean;
+    // La ganancia en pesos que tienen que dejar las otras opciones de venta; sin decirla, la de este precio.
+    optionProfit?: number;
     now?: Date;
   },
 ) {
@@ -431,8 +452,60 @@ export async function savePriceDecision(
     for (const id of group.publicationIds) await seedPriceAgreed(tx, id);
     const family = found.family?.leadId ? { ownPrice: !group.publicationIds.includes(found.family.leadId) } : {};
     await tx.publication.updateMany({ where: { id: { in: group.publicationIds } }, data: { price: listPrice, installments: plan, discount: discountPct, ...family } });
-    // Las otras opciones de venta de esas medidas: el mismo costo y margen, con su forma de cobro.
-    const options = await priceSaleOptions(tx, { mainIds: group.publicationIds, cost, marginPct: s.marginPct, params, userId: args.userId, now: args.now });
+    // Las otras opciones de venta de esas medidas: la misma ganancia, con su forma de cobro.
+    const options = await priceSaleOptions(tx, { mainIds: group.publicationIds, cost, profit: args.optionProfit ?? s.profit, params, userId: args.userId, now: args.now });
     return { id: decision!.id, decidedAt: decision!.decidedAt, simulation: s, belowMin: below, options };
   });
+}
+
+/**
+ * Guarda el precio de una pestaña desde el precio sin cuotas, como la tabla de
+ * precios por modo de compra: la principal y cada otra opción de venta llevan
+ * el precio que deja la misma ganancia que ese sin cuotas, con su forma de
+ * cobro y su descuento propio, que no cambian. Queda todo en Por subir.
+ */
+export async function saveFlatPrice(
+  db: PrismaClient,
+  args: {
+    accountId: string;
+    publicationId: string;
+    userId: string | null;
+    flatPrice: number;
+    confirmBelowMin: boolean;
+    // Los parámetros propios del producto; sin decirlos, los que ya tiene.
+    overrides?: Partial<PricingParams>;
+    now?: Date;
+  },
+) {
+  if (!(args.flatPrice > 0)) throw new PricingError('Cargá el precio sin cuotas.');
+  const data = await loadPriceStep(db, args.accountId, args.publicationId);
+  if (!data) throw new PricingError('La publicación no existe en esta cuenta.');
+  const group = data.groups.find((g) => g.publicationIds.includes(args.publicationId) || g.anchorId === args.publicationId) ?? data.groups[0];
+  const main = await db.publication.findUniqueOrThrow({
+    where: { id: group.anchorId },
+    select: { installments: true, discount: true, channelCopy: { select: { installments: true, discount: true } } },
+  });
+  if (group.cost === null) throw new PricingError('Cargá el costo de reposición sin IVA en la pestaña Costo y Stock del producto.');
+  const overrides = args.overrides ?? data.overrides;
+  const params = resolvePricing(data.account, overrides);
+  const flat = Math.round(args.flatPrice);
+  const profit = flatProfit(flat, group.cost, params);
+  // La principal sigue con su forma de cobro y su descuento: sin leer, sin cuotas.
+  const plan = main.channelCopy?.installments ?? main.installments ?? 0;
+  const discountPct = Number(main.channelCopy?.discount ?? main.discount ?? 0);
+  const listPrice = plan === 0 && discountPct === 0 ? flat : optionPriceForProfit({ profit, cost: group.cost, params, plan, discountPct });
+  if (listPrice === null) throw new PricingError(`Cargá el costo de ${planLabel(plan).toLowerCase()} en Ajustes > Precios.`);
+  const r = await savePriceDecision(db, {
+    accountId: args.accountId,
+    publicationId: group.anchorId,
+    userId: args.userId,
+    listPrice,
+    discountPct,
+    plan,
+    overrides,
+    confirmBelowMin: args.confirmBelowMin,
+    optionProfit: profit,
+    now: args.now,
+  });
+  return { ...r, main: { id: group.anchorId, listPrice, discountPct, plan, planLabel: planLabel(plan) }, flatPrice: flat, profit };
 }

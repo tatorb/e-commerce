@@ -3,6 +3,8 @@ import {
   fixedInstallments,
   installmentCostPct,
   INSTALLMENT_PLANS,
+  isInstallmentPlan,
+  listPriceFor,
   marginLevel,
   marginOf,
   planLabel,
@@ -48,6 +50,19 @@ export function priceForProfit(profit: number, cost: number, params: PricingPara
   const keep = 1 - s.pct - s.installments;
   if (keep <= 0) return null;
   return wholeUp((cost + s.fixed + profit) / keep);
+}
+
+/**
+ * El precio publicado de una opción de venta que deja esa ganancia, con su
+ * forma de cobro y su descuento propio: el comprador paga el precio del modo y
+ * el publicado sube lo que se lleva el descuento. Null si su forma de cobro no
+ * tiene el costo cargado.
+ */
+export function optionPriceForProfit(args: { profit: number; cost: number; params: PricingParams; plan: number; discountPct: number }): number | null {
+  if (!isInstallmentPlan(args.plan)) return null;
+  const final = priceForProfit(args.profit, args.cost, args.params, args.plan);
+  if (final === null) return null;
+  return args.discountPct > 0 ? wholeUp(listPriceFor(final, args.discountPct)) : final;
 }
 
 /** El precio sin cuotas que llega a ese margen sobre el costo, en pesos enteros para arriba. */

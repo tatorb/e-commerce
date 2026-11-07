@@ -5,7 +5,8 @@ import { chooseMain, optionListPrice, planMainOptions, samePlanOptions, type Opt
 import { PRICING_DEFAULTS } from '@/domain/pricing';
 import { planClash } from '@/lib/channel-push';
 import { setProductCosts } from '@/lib/costs';
-import { savePriceDecision } from '@/lib/pricing';
+import { saveFlatPrice, savePriceDecision } from '@/lib/pricing';
+import { flatProfit, optionPriceForProfit, resultAt } from '@/domain/option-table';
 import { statusReasonOf } from '@/channels/mercadolibre/listings';
 import { familyMeasures, type FamilyMember } from '@/lib/families';
 import { assignSaleOptions, loadSaleOptions, SaleOptionError, setMainOption } from '@/lib/sale-options';
@@ -234,5 +235,53 @@ describe.skipIf(!url)('agrupar las opciones de venta en la base', () => {
     expect(await planClash(db, { id: main.id, mainOptionId: null }, 6)).toBeNull();
     await db.channelCopy.update({ where: { publicationId: other.id }, data: { status: 'CLOSED' } });
     expect(await planClash(db, { id: main.id, mainOptionId: null }, 1)).toBeNull();
+  });
+
+  it('desde el precio sin cuotas, cada opción queda con la misma ganancia, con su descuento, y no se tocan las finalizadas ni las frenadas', async () => {
+    const product = await db.product.create({ data: { accountId, name: 'Subconjunto SP-8', variants: { create: [{ sku: 'SP-8-00', measure: 'STD', position: 0 }] } } });
+    await setProductCosts(db, { accountId, productId: product.id, costs: { '': '100000' } });
+    const pubs: Record<string, string> = {};
+    const rows = [
+      ['MLA30', 0, 'ACTIVE', 0, false],
+      ['MLA31', 1, 'ACTIVE', 10, false],
+      ['MLA32', 6, 'UNDER_REVIEW', 0, false],
+      ['MLA33', 3, 'CLOSED', 0, false],
+      ['MLA34', 12, 'ACTIVE', 0, true],
+    ] as const;
+    for (const [code, installments, status, discount, blocked] of rows) {
+      const p = await db.publication.create({ data: { productId: product.id, storeId, externalId: code, title: 'Subconjunto' } });
+      await db.channelCopy.create({
+        data: { publicationId: p.id, readAt: new Date(), status, installments, price: 1, discount, statusBlocked: blocked, channelProductId: 'UP-SP8' },
+      });
+      pubs[code] = p.id;
+    }
+    await assignSaleOptions(db, storeId);
+    expect((await db.publication.findUniqueOrThrow({ where: { id: pubs.MLA31 } })).mainOptionId).toBe(pubs.MLA30);
+
+    const r = await saveFlatPrice(db, { accountId, publicationId: pubs.MLA30, userId, flatPrice: 250_000, confirmBelowMin: false });
+    const profit = flatProfit(250_000, 100_000, PRICING_DEFAULTS);
+    expect(r.main).toMatchObject({ id: pubs.MLA30, listPrice: 250_000, plan: 0 });
+    const low = optionPriceForProfit({ profit, cost: 100_000, params: PRICING_DEFAULTS, plan: 1, discountPct: 10 })!;
+    const six = optionPriceForProfit({ profit, cost: 100_000, params: PRICING_DEFAULTS, plan: 6, discountPct: 0 })!;
+    expect(r.options).toEqual([
+      expect.objectContaining({ externalId: 'MLA31', listPrice: low, reason: null, note: null }),
+      expect.objectContaining({ externalId: 'MLA32', listPrice: six, reason: null, note: expect.stringContaining('revisando') }),
+      expect.objectContaining({ externalId: 'MLA33', listPrice: null, reason: expect.stringContaining('finalizada') }),
+      expect.objectContaining({ externalId: 'MLA34', listPrice: null, reason: expect.stringContaining('frenó') }),
+    ]);
+    // Con su descuento del 10 %, el comprador paga lo que deja la misma ganancia, unos pesos más por redondear para arriba.
+    const paid = resultAt(low * 0.9, 100_000, PRICING_DEFAULTS, 1).profit;
+    expect(paid).toBeGreaterThanOrEqual(profit - 0.01);
+    expect(paid - profit).toBeLessThan(5);
+    // Queda guardado en cada una, con su descuento y su forma de cobro, para subir.
+    const saved = await db.publication.findMany({ where: { id: { in: Object.values(pubs) } }, select: { externalId: true, price: true, discount: true, installments: true } });
+    const by = Object.fromEntries(saved.map((x) => [x.externalId, x]));
+    expect(Number(by.MLA30.price)).toBe(250_000);
+    expect(Number(by.MLA31.price)).toBe(low);
+    expect(Number(by.MLA31.discount)).toBe(10);
+    expect(by.MLA31.installments).toBe(1);
+    expect(Number(by.MLA32.price)).toBe(six);
+    expect(by.MLA33.price).toBeNull();
+    expect(by.MLA34.price).toBeNull();
   });
 });

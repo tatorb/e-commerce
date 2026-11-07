@@ -28,7 +28,7 @@ import { CampaignError, campaignText, familyCampaignAction, type CampaignOutcome
 import { familyCampaigns, membersText, splitText } from '@/domain/family-campaigns';
 import { measuresOf } from '@/lib/media';
 import { pushDrafts, PushError } from '@/lib/channel-push';
-import { loadPricingSettings, loadPriceStep, PricingError, savePriceDecision, savePricingSettings, type PriceGroupData } from '@/lib/pricing';
+import { loadPricingSettings, loadPriceStep, PricingError, saveFlatPrice, savePriceDecision, savePricingSettings, type PriceGroupData } from '@/lib/pricing';
 import { listToPush } from '@/lib/queries/sync';
 import { McpToolError, accountArg, defineTool, findPublication, publicationArg, resolveAccount, resolvePublication, type McpContext } from './tool';
 
@@ -369,11 +369,17 @@ const savePrice = defineTool({
   section: 'pipeline',
   title: 'Guardar el precio',
   description:
-    'Guarda el precio de una pestaña del paso Precio, como el botón Guardar precio: el precio publicado (con IVA), el descuento y las cuotas van a todas las publicaciones de la pestaña y quedan en Por subir; para mandarlos al canal, push_prices. Pasá en publicacion la de publicacion_para_guardar de get_price_step, o cualquiera de esa pestaña. El costo sale de Costo y Stock del producto (set_product_cost). Con costos_propios_del_producto se cambian los costos que valen solo para este producto: los que no se mandan quedan como están y null vuelve al de la cuenta. Si el margen queda debajo del mínimo, no guarda: decíselo a la persona y, si confirma, volvé a llamar con confirmar_debajo_del_minimo. Antes de guardar, mostrale a la persona qué vas a cambiar y esperá que confirme.',
+    'Guarda el precio de una pestaña del paso Precio, como el botón Guardar precio: el precio publicado (con IVA), el descuento y las cuotas van a todas las publicaciones de la pestaña y quedan en Por subir; para mandarlos al canal, push_prices. Con precio_sin_cuotas, en lugar de precio_publicado, guarda como la tabla de precios por modo de compra (tabla_por_modo_de_compra de get_price_step): la principal y cada otra opción de venta de la medida quedan con el precio que deja la misma ganancia que ese precio sin cuotas, cada una con su forma de cobro y su descuento propio, que no cambian; las finalizadas y las que frenó el canal no se tocan. Devuelve el precio de cada una. Pasá en publicacion la de publicacion_para_guardar de get_price_step, o cualquiera de esa pestaña. El costo sale de Costo y Stock del producto (set_product_cost). Con costos_propios_del_producto se cambian los costos que valen solo para este producto: los que no se mandan quedan como están y null vuelve al de la cuenta. Si el margen queda debajo del mínimo, no guarda: decíselo a la persona y, si confirma, volvé a llamar con confirmar_debajo_del_minimo. Antes de guardar, mostrale a la persona qué vas a cambiar y esperá que confirme.',
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg,
-    precio_publicado: z.number().positive().max(999_999_999).describe('El precio publicado, con IVA, en pesos.'),
+    precio_publicado: z.number().positive().max(999_999_999).optional().describe('El precio publicado, con IVA, en pesos. Mandá este o precio_sin_cuotas.'),
+    precio_sin_cuotas: z
+      .number()
+      .positive()
+      .max(999_999_999)
+      .optional()
+      .describe('El precio sin cuotas y sin descuento, con IVA, en pesos, del que sale el de cada opción de venta. Con este, descuento_pct y cuotas no se usan.'),
     descuento_pct: z.number().min(0).max(99).default(0).describe('El descuento, en %. 0 es sin descuento.'),
     cuotas: z.enum(['sin_cuotas', 'promocionada', '3', '6', '9', '12']).default('sin_cuotas').describe('Las cuotas sin interés, o la cuota promocionada.'),
     costos_propios_del_producto: pricingArgs.optional().describe('Los costos que valen solo para este producto. null vuelve al de la cuenta.'),
@@ -386,12 +392,51 @@ const savePrice = defineTool({
     const id = await resolvePublication(ctx, account.id, args.publicacion);
     const before = (await loadPriceStep(ctx.db, account.id, id))!.overrides;
     const overrides = args.costos_propios_del_producto ? merged(before, pricingFrom(args.costos_propios_del_producto), false) : before;
+    if ((args.precio_publicado === undefined) === (args.precio_sin_cuotas === undefined)) throw new McpToolError('Mandá precio_publicado o precio_sin_cuotas, uno de los dos.');
+    if (args.precio_sin_cuotas !== undefined) {
+      try {
+        const r = await saveFlatPrice(ctx.db, {
+          accountId: account.id,
+          publicationId: id,
+          userId: ctx.userId,
+          flatPrice: args.precio_sin_cuotas,
+          overrides,
+          confirmBelowMin: args.confirmar_debajo_del_minimo,
+        });
+        const main = await ctx.db.publication.findUnique({ where: { id: r.main.id }, select: { externalId: true } });
+        return {
+          guardado: true,
+          precio_sin_cuotas: r.flatPrice,
+          ganancia_por_venta: round(r.profit),
+          principal: {
+            codigo: main?.externalId ?? null,
+            forma_de_cobro: r.main.planLabel,
+            precio_publicado: r.main.listPrice,
+            descuento_pct: r.main.discountPct,
+            margen_pct: round(r.simulation.marginPct),
+            nivel: LEVEL_TEXT[r.simulation.level],
+          },
+          ...(r.belowMin ? { se_confirmo_debajo_del_minimo: true } : {}),
+          otras_opciones_de_venta: r.options.map((o) => ({
+            codigo: o.externalId,
+            forma_de_cobro: o.planLabel,
+            precio_publicado: o.listPrice,
+            ...(o.reason ? { sin_precio: o.reason } : {}),
+            ...(o.note ? { aviso: o.note } : {}),
+          })),
+          queda: 'En Por subir: cada opción se manda al canal con su precio desde la app o con push_prices.',
+        };
+      } catch (e) {
+        if (e instanceof PricingError) throw new McpToolError(e.message);
+        throw e;
+      }
+    }
     try {
       const r = await savePriceDecision(ctx.db, {
         accountId: account.id,
         publicationId: id,
         userId: ctx.userId,
-        listPrice: args.precio_publicado,
+        listPrice: args.precio_publicado!,
         discountPct: args.descuento_pct,
         plan: PLAN_ARG[args.cuotas],
         overrides,
@@ -411,6 +456,7 @@ const savePrice = defineTool({
                 forma_de_cobro: o.planLabel,
                 precio_publicado: o.listPrice,
                 ...(o.reason ? { sin_precio: o.reason } : {}),
+                ...(o.note ? { aviso: o.note } : {}),
               })),
             }
           : {}),

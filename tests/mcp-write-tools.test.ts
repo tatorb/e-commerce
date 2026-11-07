@@ -727,6 +727,11 @@ describe.skipIf(!url)('herramientas de escritura', () => {
     expect((await db.product.findUniqueOrThrow({ where: { id: productId } })).pricingOverrides).toEqual({ packaging: 500 });
     await call('save_price', { publicacion: 'MLA1110001', precio_publicado: 260000 });
     expect((await db.product.findUniqueOrThrow({ where: { id: productId } })).pricingOverrides).toEqual({ packaging: 500 });
+    // Desde el precio sin cuotas, como la tabla por modo de compra: uno de los dos precios, no los dos.
+    expect((await call('save_price', { publicacion: 'MLA1110001', precio_publicado: 260000, precio_sin_cuotas: 260000 })).text).toContain('uno de los dos');
+    const flat = await call('save_price', { publicacion: 'MLA1110001', precio_sin_cuotas: 270000 });
+    expect(flat.data).toMatchObject({ guardado: true, precio_sin_cuotas: 270000, principal: { codigo: 'MLA1110001', precio_publicado: expect.any(Number) }, otras_opciones_de_venta: [] });
+    expect(Number((await db.publication.findUniqueOrThrow({ where: { id: kitId } })).price)).toBe(flat.data.principal.precio_publicado);
 
     // Los de la cuenta: solo cambia lo que se manda; un plan de cuotas en null queda sin cargar.
     const before = await call('get_pricing_settings', {});
