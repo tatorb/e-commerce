@@ -157,6 +157,8 @@ export interface ChannelPublisher {
    * interés. Lanza PublishError si el canal no lo acepta.
    */
   setInstallments(accessToken: string, externalId: string, plan: number): Promise<void>;
+  /** El tipo de publicación con que se crea una con esa forma de cobro, para después dejarle las cuotas. Sin esto, el canal no crea opciones de venta. */
+  listingTypeFor?(plan: number): string;
   /** El descuento que acepta el canal, en %. */
   discountRange: { min: number; max: number };
   /**

@@ -533,6 +533,9 @@ export const mercadolibrePublisher: ChannelPublisher = {
     await send('PUT', `/items/${id}`, accessToken, variations.length > 0 ? { variations: variations.map((v) => ({ id: v.id, price })) } : { price });
   },
 
+  // Las cuotas sin interés son de la Premium; sin cuotas o la cuota promocionada, de la Clásica.
+  listingTypeFor: (plan) => (plan >= 3 ? 'premium' : 'clasica'),
+
   async setInstallments(accessToken, externalId, plan) {
     if (!isInstallmentPlan(plan)) throw new PublishError('Mercado Libre no ofrece ese plan de cuotas.');
     const id = encodeURIComponent(externalId);

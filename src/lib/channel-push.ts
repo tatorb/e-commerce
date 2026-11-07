@@ -144,6 +144,11 @@ async function loadForPush(db: Db, accountId: string, publicationId: string) {
 
 type Loaded = Awaited<ReturnType<typeof loadForPush>>;
 
+/** Si el título de la publicación está bloqueado, por ventas o a mano. */
+export async function isTitleLocked(db: Db, accountId: string, publicationId: string): Promise<boolean> {
+  return titleLocked(await loadForPush(db, accountId, publicationId));
+}
+
 function titleLocked(p: Loaded): boolean {
   const adapter = getChannelAdapter(p.store.channel.kind, p.store.channel.name);
   return resolveTitleLock(titleLockFromData(adapter, p), p.titleLockedManual, Boolean(p.externalId)).locked === true;

@@ -14,7 +14,7 @@ import { McpToolError, accountArg, defineTool, findPublication, resolveAccount }
 // el motivo exacto del rechazo del canal; lo que no entra en una vuelta vuelve
 // en quedan.
 
-type Field = 'title' | 'description' | 'warranty' | 'photos';
+type Field = 'title' | 'description' | 'warranty' | 'photos' | 'attributes';
 
 const TEXTS: Record<Field, { name: string; title: string; the: string; it: string; done: string; none: string; from: string; show: string; more?: string }> = {
   title: {
@@ -49,6 +49,16 @@ const TEXTS: Record<Field, { name: string; title: string; the: string; it: strin
     more:
       'Sube exactamente las elegidas de get_publication_media, en ese orden: la primera es la portada. Van también las imágenes con texto, las generadas y las del Drive. En una familia, cada medida lleva sus fotos según las medidas marcadas. Las fotos que ya están en el canal se reusan por su código, sin volver a subirlas. Los clips no se tocan: se suben a mano desde el paso Videos. Después de subir vuelve a leer las fotos del canal: confirmado_en_el_canal es true solo si quedaron las mismas y en el mismo orden.',
   },
+  attributes: {
+    name: 'push_catalog_data',
+    title: 'Subir los datos de catálogo al canal',
+    the: 'los datos de catálogo',
+    it: 'subidos',
+    done: 'Subió los datos de catálogo',
+    none: 'No hay datos de catálogo por subir en la cuenta.',
+    from: 'save_catalog_data, normalize_sale_options o el paso Información',
+    show: 'qué datos de catálogo se van a mandar y a cuáles',
+  },
   warranty: {
     name: 'push_warranties',
     title: 'Subir garantías al canal',
@@ -68,7 +78,7 @@ function pushFieldTool(field: Field) {
     name: t.name,
     section: 'subir',
     title: t.title,
-    description: `Manda al canal ${t.the} que ${field === 'photos' ? 'quedaron' : 'quedó'} en Por subir (${t.from}), como el botón de subir de Por subir, pero solo ${t.the}: lo demás que esté por subir queda donde está.${t.more ? ` ${t.more}` : ''} En publicaciones pasá ids de la app o códigos del canal (por ejemplo MLA123456789), hasta 100; sin la lista, van todas las de la cuenta con ${t.the} por subir. ${field === 'photos' ? 'En una familia van todas sus medidas que tengan fotos por subir, aunque pases una sola.' : `En una familia sube ${t.the} de todas sus medidas, aunque pases una sola.`} Saltea las que todavía no están publicadas en el canal, las que no tienen ${t.the} por subir y las que cambiaron también en el canal, y dice por qué. Por cada una devuelve si quedó bien o el motivo exacto del rechazo del canal${field === 'title' ? '; un título bloqueado por ventas no se sube: eso se decide en el paso Título' : ''}. Si son muchas, sube las que entran en una vuelta y devuelve en quedan las que faltan: volvé a llamar con esa lista. Cambia la publicación en el canal de verdad: antes de subir, mostrale a la persona ${t.show}, y esperá que confirme.`,
+    description: `Manda al canal ${t.the} que ${field === 'photos' || field === 'attributes' ? 'quedaron' : 'quedó'} en Por subir (${t.from}), como el botón de subir de Por subir, pero solo ${t.the}: lo demás que esté por subir queda donde está.${t.more ? ` ${t.more}` : ''} En publicaciones pasá ids de la app o códigos del canal (por ejemplo MLA123456789), hasta 100; sin la lista, van todas las de la cuenta con ${t.the} por subir. ${field === 'photos' || field === 'attributes' ? `En una familia van todas sus medidas que tengan ${t.the} por subir, aunque pases una sola.` : `En una familia sube ${t.the} de todas sus medidas, aunque pases una sola.`} Saltea las que todavía no están publicadas en el canal, las que no tienen ${t.the} por subir y las que cambiaron también en el canal, y dice por qué. Por cada una devuelve si quedó bien o el motivo exacto del rechazo del canal${field === 'title' ? '; un título bloqueado por ventas no se sube: eso se decide en el paso Título' : ''}. Si son muchas, sube las que entran en una vuelta y devuelve en quedan las que faltan: volvé a llamar con esa lista. Cambia la publicación en el canal de verdad: antes de subir, mostrale a la persona ${t.show}, y esperá que confirme.`,
     input: z.object({
       cuenta: accountArg,
       publicaciones: z
@@ -206,4 +216,4 @@ function pushFieldTool(field: Field) {
   });
 }
 
-export const PUSH_TOOLS = [pushFieldTool('title'), pushFieldTool('description'), pushFieldTool('warranty'), pushFieldTool('photos')];
+export const PUSH_TOOLS = [pushFieldTool('title'), pushFieldTool('description'), pushFieldTool('warranty'), pushFieldTool('photos'), pushFieldTool('attributes')];
