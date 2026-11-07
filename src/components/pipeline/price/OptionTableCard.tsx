@@ -10,7 +10,7 @@ import { SectionBody, SectionCard } from '@/components/ui/section-card';
 import { ChannelStatusBadge } from '@/components/stages/StageBadge';
 import { flatForMargin, modeRows } from '@/domain/option-table';
 import { formatPercent, formatPrice } from '@/domain/money';
-import type { MarginLevel } from '@/domain/pricing';
+import { planLabel, type MarginLevel } from '@/domain/pricing';
 import type { OptionTable, TableGroup, TableOption } from '@/lib/option-table';
 import { loadOptionTableAction, saveFlatPriceAction, type OptionTableResult } from '@/app/a/[cuenta]/pipeline/option-table-actions';
 import { pushPriceAction } from '@/app/a/[cuenta]/simulador-precio/actions';
@@ -238,7 +238,7 @@ function GroupTable({
                 const calc = rows.find((r) => r.plan === mode.plan);
                 return (
                   <tr key={mode.plan} className="align-top">
-                    <td className="px-3 py-2 font-medium">{calc?.label}</td>
+                    <td className="px-3 py-2 font-medium">{calc?.label ?? planLabel(mode.plan)}</td>
                     <td className="px-3 py-2">
                       {mode.options.length === 0 ? (
                         <span className="text-muted-foreground">No existe</span>
