@@ -80,6 +80,7 @@ import { FamilyMembersRow } from '@/components/families/FamilyMembersRow';
 import { familyOf } from '@/lib/families';
 import { loadSaleOptions } from '@/lib/sale-options';
 import { SaleOptionsCard } from '@/components/sale-options/SaleOptionsCard';
+import { OptionTableCard } from '@/components/pipeline/price/OptionTableCard';
 import { PublicationPromotions } from '@/components/publication/PublicationPromotions';
 import { campaignMarginFor, loadPriceStep } from '@/lib/pricing';
 
@@ -317,6 +318,7 @@ export default async function PublicationPage({
         {facts && facts.measures.kind !== 'none' ? <InfoStrip icon={<Ruler />}>{measuresText(facts.measures)}</InfoStrip> : null}
         {family ? <FamilyMembersRow members={family.members} accountSlug={account.slug} channelName={data.channelName} currentId={p.id} /> : null}
         {saleOptions ? <SaleOptionsCard accountSlug={account.slug} publicationId={p.id} channelName={data.channelName} data={saleOptions} /> : null}
+        {p.externalId ? <OptionTableCard accountSlug={account.slug} publicationId={p.id} /> : null}
         {others.length > 0 ? (
           <nav aria-label="Las otras publicaciones del producto" className="divide-y overflow-hidden rounded-2xl border bg-card shadow-card">
             {others.slice(0, 3).map((o) => (

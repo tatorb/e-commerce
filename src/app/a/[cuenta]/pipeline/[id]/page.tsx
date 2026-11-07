@@ -23,6 +23,7 @@ import { listScoredPublications } from '@/lib/queries/scoring';
 import { familyLeadId, familyOf } from '@/lib/families';
 import { loadSaleOptions } from '@/lib/sale-options';
 import { SaleOptionsCard } from '@/components/sale-options/SaleOptionsCard';
+import { OptionTableCard } from '@/components/pipeline/price/OptionTableCard';
 import { familyMeasuresText, loadPublicationFacts } from '@/lib/publication-facts';
 import { firstPhoto, productCovers } from '@/lib/queries/products';
 import { PipelineHistory } from '@/components/pipeline/PipelineHistory';
@@ -503,6 +504,7 @@ export default async function PipelineStepPage({
           />
         ) : price && viewing === 'PRICE' ? (
           <>
+          <OptionTableCard accountSlug={account.slug} publicationId={pub.id} />
           <PriceStep
             accountSlug={account.slug}
             data={price}

@@ -102,7 +102,7 @@ export async function loadOptionTable(
   const decisions = await db.priceDecision.findMany({
     where: { publicationId: { in: data.groups.map((g) => g.anchorId) } },
     orderBy: { decidedAt: 'desc' },
-    select: { publicationId: true, marginPct: true },
+    select: { publicationId: true, marginPct: true, installments: true, listPrice: true, discountPct: true },
   });
 
   const groups = data.groups.map((g): TableGroup => {
@@ -113,6 +113,8 @@ export async function loadOptionTable(
     let flatSource: TableGroup['flatSource'] = null;
     if (cost !== null) {
       if (asked && asked > 0) [flatPrice, flatSource] = [Math.round(asked), 'pedido'];
+      // Si lo último guardado fue sin cuotas y sin descuento, ese mismo precio; si no, el que deja su margen.
+      else if (last && last.installments === 0 && Number(last.discountPct) === 0) [flatPrice, flatSource] = [Number(last.listPrice), 'ultimo_precio_guardado'];
       else if (last) [flatPrice, flatSource] = [flatForMargin(cost, params, Number(last.marginPct)), 'ultimo_precio_guardado'];
       else [flatPrice, flatSource] = [flatForMargin(cost, params, params.targetMarginPct), 'margen_objetivo'];
     }
@@ -142,7 +144,12 @@ export async function loadOptionTable(
       const planOf = (r: (typeof rows)[number]) => r.channelCopy?.installments ?? r.installments;
       return {
         mainId,
-        measure: main?.variantKey ? (measuresOf(main.product.variants).find((m) => m.key === main.variantKey)?.label ?? null) : null,
+        // La medida que vende; un producto de una sola medida, la suya.
+        measure: main?.variantKey
+          ? (measuresOf(main.product.variants).find((m) => m.key === main.variantKey)?.label ?? null)
+          : main?.product.variants.length === 1
+            ? (main.product.variants[0].measure ?? null)
+            : null,
         modes: MODES.map((plan) => ({ plan, options: own.filter((r) => planOf(r) === plan).map(option) })),
         unknownPlan: own.filter((r) => {
           const p = planOf(r);
