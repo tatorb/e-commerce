@@ -314,6 +314,8 @@ async function applyListing(
     ...(taken.includes('discount') ? { discountUntil: null, discountSentAt: null } : {}),
     status: listing.status,
     statusReason: listing.statusReason ?? null,
+    statusNeedsFix: listing.statusNeedsFix ?? false,
+    statusBlocked: listing.statusBlocked ?? false,
     channelProductId: listing.channelProductId ?? null,
     url: listing.url,
     photos: listing.photos,

@@ -1459,6 +1459,10 @@ model ChannelCopy {
   status            ChannelStatus
   // Por qué está en ese estado, en palabras, como lo informa el canal. Null: sin motivo.
   statusReason      String?
+  // El canal pide corregirla para volver a activarla.
+  statusNeedsFix    Boolean       @default(false)
+  // El canal la frenó por sus políticas: no se vende ni cuenta como opción de venta viva.
+  statusBlocked     Boolean       @default(false)
   // La medida del canal a la que pertenece: las publicaciones con el mismo
   // código son opciones de venta de la misma medida. La app no lo interpreta.
   channelProductId  String?

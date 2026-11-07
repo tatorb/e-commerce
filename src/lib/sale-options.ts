@@ -20,7 +20,7 @@ export async function assignSaleOptions(db: Db, storeId: string): Promise<number
       pipelineStatus: true,
       createdAt: true,
       leadOf: { select: { id: true } },
-      channelCopy: { select: { channelProductId: true, status: true } },
+      channelCopy: { select: { channelProductId: true, status: true, installments: true, statusBlocked: true } },
     },
   });
   const changes = planMainOptions(
@@ -32,6 +32,8 @@ export async function assignSaleOptions(db: Db, storeId: string): Promise<number
       pipelineStatus: r.pipelineStatus,
       familyLead: r.leadOf !== null,
       createdAt: r.createdAt,
+      plan: r.channelCopy?.installments ?? null,
+      blocked: r.channelCopy?.statusBlocked ?? false,
     })),
   );
   if (changes.size === 0) return 0;
@@ -55,6 +57,8 @@ export type SaleOption = {
   discount: number | null;
   status: ChannelStatus;
   statusReason: string | null;
+  // El canal la frenó por sus políticas.
+  blocked: boolean;
   main: boolean;
 };
 
@@ -79,7 +83,7 @@ export async function loadSaleOptions(db: Db, publicationId: string): Promise<Sa
       url: true,
       channelStatus: true,
       installments: true,
-      channelCopy: { select: { installments: true, price: true, discount: true, status: true, statusReason: true, url: true } },
+      channelCopy: { select: { installments: true, price: true, discount: true, status: true, statusReason: true, statusBlocked: true, url: true } },
     },
   });
   if (rows.length < 2) return null;
@@ -96,6 +100,7 @@ export async function loadSaleOptions(db: Db, publicationId: string): Promise<Sa
         discount: r.channelCopy?.discount != null ? Number(r.channelCopy.discount) : null,
         status: r.channelCopy?.status ?? r.channelStatus,
         statusReason: r.channelCopy?.statusReason ?? null,
+        blocked: r.channelCopy?.statusBlocked ?? false,
         main: r.id === mainId,
       };
     })

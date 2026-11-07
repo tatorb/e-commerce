@@ -18,11 +18,15 @@ export type ReconcileOption = {
   plan: number | null;
   price: number | null;
   main: boolean;
+  // El canal pide corregirla para reactivarla.
+  needsFix?: boolean;
+  // El canal la frenó por sus políticas: no cuenta como viva.
+  blocked?: boolean;
 };
 
 export type FindingKind =
   | 'new_option' // el canal la tiene y la app no: se suma como opción de venta
-  | 'switch_main' // la principal no se puede usar y hay otra viva: la principal pasa a esa
+  | 'switch_main' // la principal no se puede usar, o hay una sin cuotas viva: la principal pasa a esa
   | 'no_replacement' // la principal está finalizada y no hay otra viva: tarea
   | 'duplicate_off' // el canal la apagó por repetida: se propone finalizarla
   | 'needs_fix' // la principal está inactiva para corregir: tarea y vuelve a Información
@@ -43,15 +47,18 @@ const LIVE: ChannelStatus[] = ['ACTIVE', 'PAUSED'];
 // Ya no vuelve: finalizada o eliminada.
 const GONE: ChannelStatus[] = ['CLOSED', 'DELETED'];
 
-const isLive = (o: ReconcileOption) => LIVE.includes(o.status);
+const isLive = (o: ReconcileOption) => LIVE.includes(o.status) && !o.blocked;
+// La forma de cobro que se prefiere como principal: sin cuotas, desde donde se calcula el precio.
+const FLAT = 0;
 const planText = (plan: number | null) => (plan === null ? 'forma de cobro sin leer' : planLabel(plan).toLowerCase());
 const why = (o: ReconcileOption) => (o.statusReason ? ` Motivo del canal: ${o.statusReason}` : '');
 
-/** La viva que mejor reemplaza a la principal: la misma forma de cobro, después la activa. */
+/** La viva que mejor reemplaza a la principal: la sin cuotas, después la misma forma de cobro, después la activa. */
 function bestReplacement(main: ReconcileOption, live: ReconcileOption[]): ReconcileOption | null {
   return (
     [...live].sort(
       (a, b) =>
+        Number(b.plan === FLAT) - Number(a.plan === FLAT) ||
         Number(b.plan === main.plan) - Number(a.plan === main.plan) ||
         Number(b.status === 'ACTIVE') - Number(a.status === 'ACTIVE') ||
         a.externalId.localeCompare(b.externalId),
@@ -74,7 +81,13 @@ export function reconcileMeasure(options: ReconcileOption[]): Finding[] {
   // Las apagadas que tienen la misma forma de cobro que una viva: el canal las apagó por repetidas.
   const twinOf = (o: ReconcileOption) => (o.plan === null ? null : (live.find((l) => l !== o && l.plan === o.plan) ?? null));
 
-  if (main && !isLive(main)) {
+  if (main && main.needsFix) {
+    out.push({
+      kind: 'needs_fix',
+      codes: [main.externalId],
+      text: `El canal pide corregir la principal ${main.externalId} para volver a activarla. Se mantiene el código, se crea una tarea y vuelve al paso Información.${why(main)}`,
+    });
+  } else if (main && !isLive(main)) {
     const twin = main.status === 'INACTIVE' ? twinOf(main) : null;
     const others = live.filter((l) => l !== main);
     if (twin) {
@@ -96,7 +109,7 @@ export function reconcileMeasure(options: ReconcileOption[]): Finding[] {
         kind: 'switch_main',
         codes: [main.externalId],
         to: to.externalId,
-        text: `La principal ${main.externalId} está ${GONE.includes(main.status) ? 'finalizada' : 'en revisión'} y ${to.externalId} sigue a la venta (${planText(to.plan)}). La principal pasa a ${to.externalId}.${why(main)}`,
+        text: `La principal ${main.externalId} está ${GONE.includes(main.status) ? 'finalizada' : main.blocked ? 'frenada por el canal' : 'en revisión'} y ${to.externalId} sigue a la venta (${planText(to.plan)}). La principal pasa a ${to.externalId}.${why(main)}`,
       });
     } else if (GONE.includes(main.status)) {
       out.push({
@@ -109,6 +122,19 @@ export function reconcileMeasure(options: ReconcileOption[]): Finding[] {
         kind: 'under_review',
         codes: [main.externalId],
         text: `La principal ${main.externalId} está en revisión del canal: no se le sube nada hasta que termine.${why(main)}`,
+      });
+    }
+  }
+
+  // La principal está bien pero hay una sin cuotas viva: esa pasa a ser la principal.
+  if (main && isLive(main) && main.plan !== FLAT) {
+    const flat = live.find((o) => o !== main && o.plan === FLAT);
+    if (flat) {
+      out.push({
+        kind: 'switch_main',
+        codes: [main.externalId],
+        to: flat.externalId,
+        text: `${flat.externalId} es la opción sin cuotas de esta medida: pasa a ser la principal, desde donde se calcula el precio de las demás.`,
       });
     }
   }

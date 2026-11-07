@@ -111,8 +111,20 @@ export async function reconcile(
           plan: r.plan,
           price: r.price,
           main: r.id === mainId,
+          needsFix: r.needsFix,
+          blocked: r.blocked,
         })),
-        ...fresh.map((l) => ({ id: null, externalId: l.externalId, status: l.status, statusReason: l.statusReason ?? null, plan: l.installments, price: l.price, main: false })),
+        ...fresh.map((l) => ({
+          id: null,
+          externalId: l.externalId,
+          status: l.status,
+          statusReason: l.statusReason ?? null,
+          plan: l.installments,
+          price: l.price,
+          main: false,
+          needsFix: l.statusNeedsFix ?? false,
+          blocked: l.statusBlocked ?? false,
+        })),
       ];
       const findings = reconcileMeasure(options);
       if (findings.length === 0) continue;
@@ -159,7 +171,7 @@ async function loadRows(db: Db, storeId: string) {
       price: true,
       installments: true,
       product: { select: { name: true, variants: { select: { sku: true, measure: true } } } },
-      channelCopy: { select: { channelProductId: true, status: true, statusReason: true, installments: true, price: true } },
+      channelCopy: { select: { channelProductId: true, status: true, statusReason: true, statusNeedsFix: true, statusBlocked: true, installments: true, price: true } },
     },
   });
   return rows.map((r) => ({
@@ -176,6 +188,8 @@ async function loadRows(db: Db, storeId: string) {
     channelProductId: r.channelCopy?.channelProductId ?? null,
     status: r.channelCopy?.status ?? r.channelStatus,
     statusReason: r.channelCopy?.statusReason ?? null,
+    needsFix: r.channelCopy?.statusNeedsFix ?? false,
+    blocked: r.channelCopy?.statusBlocked ?? false,
     plan: r.channelCopy?.installments ?? r.installments ?? null,
     price: r.channelCopy?.price != null ? Number(r.channelCopy.price) : r.price != null ? Number(r.price) : null,
   }));

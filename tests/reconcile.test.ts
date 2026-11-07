@@ -26,6 +26,7 @@ describe('qué encuentra en una medida', () => {
   it('la principal finalizada con otra viva: pasa a la viva, primero la de la misma forma de cobro', () => {
     const f = reconcileMeasure([opt('A', { main: true, status: 'CLOSED', statusReason: 'Categoría incorrecta.' }), opt('B', { plan: 1 }), opt('C', { status: 'PAUSED' })]);
     expect(f).toEqual([expect.objectContaining({ kind: 'switch_main', codes: ['A'], to: 'C' })]);
+    expect(f).toHaveLength(1);
     expect(f[0].text).toContain('Motivo del canal: Categoría incorrecta.');
   });
 
@@ -48,6 +49,22 @@ describe('qué encuentra en una medida', () => {
 
   it('la principal inactiva sin gemela: se corrige, tarea y vuelve a Información', () => {
     expect(reconcileMeasure([opt('A', { main: true, status: 'INACTIVE' }), opt('B', { plan: 0 })])).toEqual([expect.objectContaining({ kind: 'needs_fix', codes: ['A'] })]);
+  });
+
+  it('si el canal pide corregirla, aunque figure en revisión: tarea y vuelve a Información', () => {
+    expect(reconcileMeasure([opt('A', { main: true, status: 'UNDER_REVIEW', needsFix: true })])).toEqual([expect.objectContaining({ kind: 'needs_fix', codes: ['A'] })]);
+  });
+
+  it('una frenada por el canal no cuenta como viva: no es reemplazo ni choca por la forma de cobro', () => {
+    expect(reconcileMeasure([opt('A', { main: true, status: 'UNDER_REVIEW', blocked: true }), opt('B', { status: 'ACTIVE', blocked: true })])).toEqual([
+      expect.objectContaining({ kind: 'under_review' }),
+    ]);
+    expect(reconcileMeasure([opt('A', { main: true, plan: 1 }), opt('B', { plan: 1, status: 'ACTIVE', blocked: true })])).toEqual([]);
+  });
+
+  it('la sin cuotas viva pasa a ser la principal, y es el reemplazo preferido', () => {
+    expect(reconcileMeasure([opt('A', { main: true, plan: 3 }), opt('B', { plan: 0 })])).toEqual([expect.objectContaining({ kind: 'switch_main', codes: ['A'], to: 'B' })]);
+    expect(reconcileMeasure([opt('A', { main: true, status: 'CLOSED' }), opt('B', { plan: 3 }), opt('C', { plan: 0, status: 'PAUSED' })])[0]).toMatchObject({ kind: 'switch_main', to: 'C' });
   });
 
   it('otra opción apagada por repetida, dos vivas iguales y una que faltaba en la app', () => {

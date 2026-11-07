@@ -76,9 +76,12 @@ export async function planClash(db: Db, p: { id: string; mainOptionId: string | 
   if (p.mainOptionId) return 'Es otra opción de venta de la medida: su forma de cobro es la que la distingue y no se cambia desde la app.';
   const others = await db.publication.findMany({
     where: { mainOptionId: p.id },
-    select: { externalId: true, installments: true, channelStatus: true, channelCopy: { select: { installments: true, status: true } } },
+    select: { externalId: true, installments: true, channelStatus: true, channelCopy: { select: { installments: true, status: true, statusBlocked: true } } },
   });
-  const same = others.find((o) => (o.channelCopy?.installments ?? o.installments) === plan && LIVE_OPTION.includes(o.channelCopy?.status ?? o.channelStatus));
+  // Una frenada por el canal no cuenta: no se vende.
+  const same = others.find(
+    (o) => (o.channelCopy?.installments ?? o.installments) === plan && LIVE_OPTION.includes(o.channelCopy?.status ?? o.channelStatus) && !o.channelCopy?.statusBlocked,
+  );
   return same ? `${same.externalId ?? 'Otra opción de venta'} ya tiene ${planLabel(plan).toLowerCase()}: con dos opciones iguales, el canal apaga una.` : null;
 }
 

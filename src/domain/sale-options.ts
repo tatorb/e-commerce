@@ -18,11 +18,16 @@ export type OptionRow = {
   // Si es la principal de su familia: ahí vive el trabajo del pipeline.
   familyLead: boolean;
   createdAt: Date;
+  // La forma de cobro y si el canal la frenó: entre las que no tienen trabajo, se prefiere la sin cuotas viva.
+  plan?: number | null;
+  blocked?: boolean;
 };
 
 // Para elegir la principal cuando no hay una: primero la que se vende, después la pausada.
 const STATUS_RANK: Record<ChannelStatus, number> = { ACTIVE: 0, PAUSED: 1, UNDER_REVIEW: 2, INACTIVE: 3, UNPUBLISHED: 4, CLOSED: 5, DELETED: 6 };
 
+
+const flatLive = (r: OptionRow) => r.plan === 0 && !r.blocked && (r.status === 'ACTIVE' || r.status === 'PAUSED');
 
 /**
  * La principal de un grupo de opciones de la misma medida. Se queda la que ya
@@ -40,6 +45,7 @@ export function chooseMain(group: OptionRow[]): OptionRow {
     (a, b) =>
       Number(b.familyLead) - Number(a.familyLead) ||
       Number(b.pipelineStatus !== 'UNTOUCHED') - Number(a.pipelineStatus !== 'UNTOUCHED') ||
+      Number(flatLive(b)) - Number(flatLive(a)) ||
       (a.status ? STATUS_RANK[a.status] : 9) - (b.status ? STATUS_RANK[b.status] : 9) ||
       a.createdAt.getTime() - b.createdAt.getTime() ||
       a.id.localeCompare(b.id),
@@ -88,12 +94,13 @@ export const LIVE_OPTION: ChannelStatus[] = ['ACTIVE', 'PAUSED', 'UNDER_REVIEW',
  * Las opciones de una misma medida con la misma forma de cobro: el canal
  * apaga una de las dos. Una lista por forma de cobro repetida.
  */
-export function samePlanOptions<T extends { id: string; status: ChannelStatus | null; installments: number | null }>(
+export function samePlanOptions<T extends { id: string; status: ChannelStatus | null; installments: number | null; blocked?: boolean }>(
   options: T[],
 ): { plan: number; label: string; options: T[] }[] {
   const byPlan = new Map<number, T[]>();
   for (const o of options) {
-    if (o.installments === null || !o.status || !LIVE_OPTION.includes(o.status)) continue;
+    // Una frenada por el canal no cuenta: no se vende.
+    if (o.installments === null || !o.status || !LIVE_OPTION.includes(o.status) || o.blocked) continue;
     byPlan.set(o.installments, [...(byPlan.get(o.installments) ?? []), o]);
   }
   return [...byPlan.entries()].filter(([, list]) => list.length > 1).map(([plan, list]) => ({ plan, label: planLabel(plan), options: list }));

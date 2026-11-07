@@ -31,6 +31,10 @@ export type ChannelListing = {
   status: ChannelStatus;
   // Por qué está en ese estado, en palabras. Null: sin motivo informado.
   statusReason?: string | null;
+  // El canal pide corregirla para volver a activarla.
+  statusNeedsFix?: boolean;
+  // El canal la frenó por sus políticas.
+  statusBlocked?: boolean;
   // Vendidos desde que se publicó.
   sold: number | null;
   // La cantidad disponible, en total; la de cada medida va en variations.

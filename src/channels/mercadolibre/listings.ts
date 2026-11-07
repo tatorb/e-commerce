@@ -95,6 +95,12 @@ const SUB_STATUS_TEXT: Record<string, string> = {
   moderation_penalty: 'Mercado Libre la penalizó en una moderación.',
 };
 
+// Los motivos que dicen que hay que corregirla, y los que dicen que Mercado Libre la frenó.
+const NEEDS_FIX = ['waiting_for_patch', 'pending_documentation'];
+const BLOCKED = ['forbidden', 'banned', 'freezed', 'suspended', 'held'];
+
+const subStatus = (item: Obj) => arr(item.sub_status).filter((c): c is string => typeof c === 'string');
+
 /** El motivo del estado, en palabras. Null: Mercado Libre no informa ninguno. */
 export function statusReasonOf(item: Obj): string | null {
   const codes = arr(item.sub_status).filter((c): c is string => typeof c === 'string' && c.length > 0);
@@ -210,6 +216,8 @@ export function parseItem(item: Obj): ChannelListing {
     discount: discountOf(item),
     status: statusOf(item.status, item.sub_status),
     statusReason: statusReasonOf(item),
+    statusNeedsFix: subStatus(item).some((c) => NEEDS_FIX.includes(c)),
+    statusBlocked: subStatus(item).some((c) => BLOCKED.includes(c)),
     sold: num(item.sold_quantity),
     quantity: num(item.available_quantity),
     stockInChannel: inFull(item),
