@@ -1,7 +1,7 @@
 import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@/generated/prisma/client';
-import { flatForMargin, flatProfit, modeRows } from '@/domain/option-table';
+import { campaignPriceForMargin, flatForMargin, flatProfit, modeRows, resultAt } from '@/domain/option-table';
 import { PRICING_DEFAULTS } from '@/domain/pricing';
 import { setProductCosts } from '@/lib/costs';
 import { loadOptionTable } from '@/lib/option-table';
@@ -30,6 +30,18 @@ describe('el precio de cada modo desde el sin cuotas', () => {
     }
     expect(rows.find((r) => r.plan === 3)?.installmentValue).toBe(182_218.33);
     expect(rows.find((r) => r.plan === 1)?.installmentValue).toBeNull();
+  });
+
+  it('el precio en campaña que deja el 20 % en cada modo, más bajo que el de lista y más alto en las cuotas', () => {
+    const cost = 222_666.5;
+    const prices = ([0, 1, 3, 6, 9, 12] as const).map((plan) => campaignPriceForMargin(cost, PRICING_DEFAULTS, plan, 20)!);
+    expect(prices[0]).toBe(flatForMargin(cost, PRICING_DEFAULTS, 20));
+    for (let i = 1; i < prices.length; i++) expect(prices[i]).toBeGreaterThan(prices[i - 1]);
+    ([0, 1, 3, 6, 9, 12] as const).forEach((plan, i) => {
+      expect(resultAt(prices[i], cost, PRICING_DEFAULTS, plan).marginPct!).toBeCloseTo(20, 2);
+      expect(prices[i]).toBeLessThan(modeRows({ flatPrice: 473_416, cost, params: PRICING_DEFAULTS })[i].price!);
+    });
+    expect(campaignPriceForMargin(cost, { ...PRICING_DEFAULTS, installments9Pct: null }, 9, 20)).toBeNull();
   });
 
   it('los atajos al objetivo y al mínimo, y una cuota sin costo cargado no inventa precio', () => {

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { CHANNEL_STATUS_LABEL } from '@/domain/channel-status';
 import { loadOptionTable, type OptionTable } from '@/lib/option-table';
+import { campaignPriceForMargin, resultAt } from '@/domain/option-table';
 import { ConnectError } from '@/channels/connect';
 import type { FaceField } from '@/domain/channel-sync';
 import { measuresText } from '@/domain/costs';
@@ -258,6 +259,12 @@ const getPriceStep = defineTool({
       .max(999_999_999)
       .optional()
       .describe('Para probar la tabla por modo de compra con este precio sin cuotas, sin guardar nada. Vale para la pestaña de la publicación pedida.'),
+    margen_en_campana_pct: z
+      .number()
+      .min(0)
+      .max(200)
+      .optional()
+      .describe('Para las campañas: en la tabla por modo de compra, el precio para el comprador que deja este margen en cada modo, para sumarse con choose_campaign a ese precio. Por ejemplo 20.'),
   }),
   readOnly: true,
   run: async (ctx, args) => {
@@ -294,7 +301,7 @@ const getPriceStep = defineTool({
       pestanas: data.groups.map((g) => ({
         ...groupForClaude(g, params, (x) => codes.get(x) ?? x),
         lo_que_acepta_el_canal: promotionsForClaude(promotions, g.publicationIds, g.price, data.discountRange),
-        ...(table ? { tabla_por_modo_de_compra: tableForClaude(table, g.anchorId) } : {}),
+        ...(table ? { tabla_por_modo_de_compra: tableForClaude(table, g.anchorId, args.margen_en_campana_pct) } : {}),
       })),
       costos: {
         de_la_cuenta: pricingForClaude(data.account),
@@ -337,7 +344,7 @@ function optionForClaude(o: TableOptionRow) {
 }
 
 /** La tabla por modo de compra de una pestaña, como la ve Claude. */
-function tableForClaude(table: OptionTable, anchorId: string) {
+function tableForClaude(table: OptionTable, anchorId: string, campaignMargin?: number) {
   const g = table.groups.find((x) => x.anchorId === anchorId);
   if (!g) return null;
   return {
@@ -351,6 +358,14 @@ function tableForClaude(table: OptionTable, anchorId: string) {
       precio: r.price,
       ...(r.installmentValue !== null ? { valor_de_cada_cuota: r.installmentValue } : {}),
       ...(r.price !== null ? resultForClaude({ profit: r.profit!, marginPct: r.marginPct, level: r.level }) : { sin_precio: r.missing }),
+      ...(campaignMargin !== undefined && g.cost !== null
+        ? (() => {
+            const price = campaignPriceForMargin(g.cost, table.params, r.plan, campaignMargin);
+            return price === null
+              ? {}
+              : { en_campana: { margen_pedido_pct: campaignMargin, precio_comprador: price, ...resultForClaude(resultAt(price, g.cost, table.params, r.plan)) } };
+          })()
+        : {}),
     })),
     medidas: g.measures.map((m) => ({
       medida: m.measure,

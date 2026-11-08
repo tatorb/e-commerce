@@ -71,6 +71,17 @@ export function flatForMargin(cost: number, params: PricingParams, marginPct: nu
   return p === null ? null : wholeUp(p);
 }
 
+/**
+ * El precio para el comprador en una campaña que deja ese margen en ese modo,
+ * en pesos enteros para arriba: con lo que pone el canal, la tienda recibe un
+ * poco más. Null si el costo de sus cuotas no está cargado.
+ */
+export function campaignPriceForMargin(cost: number, params: PricingParams, plan: InstallmentPlan, marginPct: number): number | null {
+  if (installmentCostPct(params, plan) === null) return null;
+  const p = finalPriceFor(cost, marginPct, params, plan);
+  return p === null ? null : wholeUp(p);
+}
+
 /** Lo que deja vender a ese precio en ese modo: la ganancia, el margen y su color. */
 export function resultAt(price: number, cost: number, params: PricingParams, plan: InstallmentPlan) {
   const marginPct = marginOf(price, cost, params, plan);
