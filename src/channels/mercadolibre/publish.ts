@@ -538,8 +538,6 @@ export const mercadolibrePublisher: ChannelPublisher = {
     // el nombre, la categoría, los datos y las fotos ya son del producto.
     const before = await listingsOfProducts(accessToken, sellerId, [o.channelProductId]).catch(() => [] as string[]);
     const body = await send('POST', `/user-products/${encodeURIComponent(o.channelProductId)}/items`, accessToken, {
-      // La documentación lo repite en el cuerpo, además de la dirección.
-      user_product_id: o.channelProductId,
       price: o.price,
       currency_id: o.currency,
       available_quantity: o.quantity,
