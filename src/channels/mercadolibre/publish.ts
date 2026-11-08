@@ -1,5 +1,5 @@
 import { MercadoLibreRequestError, mlGet, mlSend } from './http';
-import { CAMPAIGN_TAG, CLASSIC, inFull, INSTALLMENT_TAGS, LOW_INTEREST_TAG, PREMIUM, tagsOf, variationsOf } from './listings';
+import { CAMPAIGN_TAG, CLASSIC, inFull, INSTALLMENT_TAGS, listingsOfProducts, LOW_INTEREST_TAG, PREMIUM, tagsOf, variationsOf } from './listings';
 import { measureText, variantKey, type VariantLike } from '@/domain/media';
 import { formatPrice } from '@/domain/money';
 import { isInstallmentPlan, LOW_INTEREST_PLAN } from '@/domain/pricing';
@@ -404,8 +404,6 @@ async function createMembers(accessToken: string, l: ChannelNewListing, family: 
     try {
       body = await send('POST', '/items', accessToken, {
         ...(family ? { family_name: l.title } : { title: l.title }),
-        // Otra opción de venta de un producto que ya está: se suma a ese producto y no arma uno nuevo.
-        ...(m.channelProductId ? { user_product_id: m.channelProductId } : {}),
         category_id: l.categoryId,
         price: m.price,
         currency_id: l.currency,
@@ -533,6 +531,39 @@ export const mercadolibrePublisher: ChannelPublisher = {
     const item = await get(`/items/${id}?attributes=variations`, accessToken);
     const variations = isObj(item) ? variationsOf(item) : [];
     await send('PUT', `/items/${id}`, accessToken, variations.length > 0 ? { variations: variations.map((v) => ({ id: v.id, price })) } : { price });
+  },
+
+  async addOption(accessToken, sellerId, o) {
+    // En el modelo de producto de usuario, otra condición de venta se suma al producto por su propio pedido:
+    // el nombre, la categoría, los datos y las fotos ya son del producto.
+    const before = await listingsOfProducts(accessToken, sellerId, [o.channelProductId]).catch(() => [] as string[]);
+    const body = await send('POST', `/user-products/${encodeURIComponent(o.channelProductId)}/items`, accessToken, {
+      price: o.price,
+      currency_id: o.currency,
+      available_quantity: o.quantity,
+      buying_mode: 'buy_it_now',
+      condition: 'new',
+      listing_type_id: LISTING_TYPE_ID[o.listingType] ?? CLASSIC,
+      ...(o.warranty ? { sale_terms: warrantyTerms(o.warranty) } : {}),
+    });
+    const itemId = (v: unknown) => (typeof v === 'string' && /^MLA\d+$/.test(v) ? v : null);
+    let id = isObj(body) ? (itemId(body.id) ?? itemId(body.item_id)) : null;
+    // Si la respuesta no trae el código, es la publicación del producto que antes no estaba.
+    if (!id) id = (await listingsOfProducts(accessToken, sellerId, [o.channelProductId]).catch(() => [] as string[])).find((x) => !before.includes(x)) ?? null;
+    if (!id) throw new PublishError('Mercado Libre no devolvió el código de la publicación nueva: revisá el producto en Mercado Libre antes de volver a probar.');
+    const warnings: string[] = [];
+    if (o.description) {
+      const path = `/items/${encodeURIComponent(id)}/description`;
+      try {
+        await mlSend('POST', path, accessToken, { plain_text: o.description }).catch((e) => {
+          throw descriptionRejected('POST', path, e);
+        });
+      } catch (e) {
+        if (!(e instanceof PublishError)) throw e;
+        warnings.push(`Se creó, pero la descripción no: ${e.message} Queda en el borrador para subirla.`);
+      }
+    }
+    return { externalId: id, url: isObj(body) && typeof body.permalink === 'string' ? body.permalink : null, pictureIds: null, warnings };
   },
 
   // Las cuotas sin interés son de la Premium; sin cuotas o la cuota promocionada, de la Clásica.

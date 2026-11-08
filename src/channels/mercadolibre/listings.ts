@@ -389,7 +389,7 @@ const FAMILY_STATUSES: ListingStatus[] = ['active', 'paused'];
 const idText = (v: unknown): string | null => (typeof v === 'number' && Number.isFinite(v) ? String(v) : str(v));
 
 /** Las publicaciones de esos productos del vendedor, activas o pausadas. */
-async function listingsOfProducts(accessToken: string, userId: string, productIds: string[]): Promise<string[]> {
+export async function listingsOfProducts(accessToken: string, userId: string, productIds: string[]): Promise<string[]> {
   const out: string[] = [];
   for (const status of FAMILY_STATUSES) {
     for (let offset = 0; offset < OFFSET_MAX; offset += PAGE) {

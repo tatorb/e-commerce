@@ -40,8 +40,21 @@ export type ChannelNewMember = VariantLike & {
   price: number;
   quantity: number;
   pictures: number[];
-  // La medida del canal a la que se suma, como otra opción de venta; sin esto, el canal arma una nueva.
-  channelProductId?: string | null;
+};
+
+/**
+ * Otra opción de venta de un producto que ya está en el canal: solo lo que es
+ * de la opción. El nombre, la categoría, los datos y las fotos son del producto.
+ */
+export type ChannelNewOption = {
+  // El producto del canal al que se suma (la medida).
+  channelProductId: string;
+  price: number;
+  currency: string;
+  quantity: number;
+  listingType: string;
+  description: string | null;
+  warranty: Warranty | null;
 };
 
 /** Lo que hace falta para crear publicaciones en el canal. */
@@ -163,6 +176,11 @@ export interface ChannelPublisher {
    * interés. Lanza PublishError si el canal no lo acepta.
    */
   setInstallments(accessToken: string, externalId: string, plan: number): Promise<void>;
+  /**
+   * Suma otra opción de venta a un producto que ya está en el canal. Devuelve
+   * su código y lo que quedó a medias. Lanza PublishError si el canal no la acepta.
+   */
+  addOption?(accessToken: string, sellerId: string, option: ChannelNewOption): Promise<ChannelCreatedMember & { warnings: string[] }>;
   /** El tipo de publicación con que se crea una con esa forma de cobro, para después dejarle las cuotas. Sin esto, el canal no crea opciones de venta. */
   listingTypeFor?(plan: number): string;
   /** El descuento que acepta el canal, en %. */

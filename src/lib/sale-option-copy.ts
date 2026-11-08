@@ -1,16 +1,13 @@
 import { Prisma, type PrismaClient } from '@/generated/prisma/client';
 import type { ChannelStatus } from '@/generated/prisma/enums';
 import { getChannelAdapter } from '@/channels';
-import { getChannelPublisher, PublishError, type ChannelAttributeUpdate, type ChannelPicture } from '@/channels/publish';
-import { parseMedia } from '@/domain/media';
+import { getChannelPublisher, PublishError } from '@/channels/publish';
 import { isInstallmentPlan, planLabel, INSTALLMENT_PLANS } from '@/domain/pricing';
 import { parseWarranty } from '@/domain/warranty';
 import { LIVE_OPTION } from '@/domain/sale-options';
-import { loadCatalogData } from '@/lib/catalog-data';
 import { isTitleLocked } from '@/lib/channel-push';
 import { readOne } from '@/lib/channel-sync';
 import { withAccessToken } from '@/lib/connections';
-import { measuresOf, picturesFor } from '@/lib/media';
 import { loadOptionTable } from '@/lib/option-table';
 
 // Igualar las opciones de venta de una medida con la buena y crear las formas
@@ -223,7 +220,7 @@ export async function createSaleOption(
   const store = await db.store.findUniqueOrThrow({ where: { id: source.storeId }, select: { id: true, channel: { select: { kind: true, name: true } } } });
   const channelName = getChannelAdapter(store.channel.kind, store.channel.name).name;
   const publisher = getChannelPublisher(store.channel.kind);
-  if (!publisher?.listingTypeFor) throw new SaleOptionCopyError(`Todavía no se pueden crear opciones de venta en ${channelName}.`);
+  if (!publisher?.listingTypeFor || !publisher.addOption) throw new SaleOptionCopyError(`Todavía no se pueden crear opciones de venta en ${channelName}.`);
 
   // El precio de esa forma de cobro, con la misma ganancia que el sin cuotas guardado.
   let price = args.price ? Math.round(args.price) : null;
@@ -235,31 +232,8 @@ export async function createSaleOption(
   }
   const quantity = args.quantity ?? Math.max(1, main.channelCopy?.quantity ?? source.channelCopy?.quantity ?? 1);
 
-  // Lo mismo que la buena: la categoría, los datos de catálogo, las fotos y la garantía.
-  const catalog = await loadCatalogData(db, source.id);
-  if (!catalog?.category) throw new SaleOptionCopyError('La buena no tiene categoría: elegila en Datos de catálogo.');
-  const attributes: ChannelAttributeUpdate[] = [
-    ...catalog.fromProduct.filter((f) => f.value).map((f) => ({ id: f.field.id, value: f.value!, multiple: false })),
-    ...catalog.fields.filter((f) => catalog.values[f.id]).map((f) => ({ id: f.id, value: catalog.values[f.id], multiple: Boolean(f.multiple) })),
-  ];
-  const variants = await db.productVariant.findMany({ where: { productId: source.productId }, orderBy: { position: 'asc' }, select: { sku: true, measure: true } });
-  const measures = measuresOf(variants);
-  const measure = measures.find((m) => m.key === source.variantKey) ?? (measures.length === 1 ? measures[0] : null);
-  if (measures.length > 1 && !measure) throw new SaleOptionCopyError('No se sabe qué medida vende la buena: elegila antes.');
-  const refs = parseMedia(source.media) ?? [];
-  let pictures: ChannelPicture[];
-  if (refs.length > 0) {
-    const sent = await picturesFor(db, source.productId, refs, source.channelCopy ? { variations: source.channelCopy.variations, details: source.channelCopy.details } : null, source.variantKey);
-    if (sent.problems.length > 0) throw new SaleOptionCopyError(sent.problems.join(' '));
-    pictures = sent.pictures;
-  } else {
-    const ids = Array.isArray(source.channelCopy?.photoIds) ? (source.channelCopy.photoIds as unknown[]).filter((x): x is string => typeof x === 'string') : [];
-    pictures = ids.map((id) => ({ kind: 'existing' as const, id }));
-  }
-  if (pictures.length === 0) throw new SaleOptionCopyError('La buena no tiene fotos para copiar.');
-  const details = (source.channelCopy?.details ?? {}) as Record<string, unknown>;
-  const name = (typeof details.channelFamilyName === 'string' && details.channelFamilyName.trim()) || source.title?.trim();
-  if (!name) throw new SaleOptionCopyError('La buena no tiene título.');
+  // Lo que es de la opción y no del producto: el precio, la cantidad, la descripción y la garantía.
+  // El nombre, la categoría, los datos de catálogo y las fotos son del producto del canal: los toma de ahí.
   const description = source.description?.trim() || source.channelCopy?.description?.trim() || null;
   const warranty = parseWarranty(source.warranty) ?? parseWarranty(source.channelCopy?.warranty);
 
@@ -268,29 +242,23 @@ export async function createSaleOption(
   if (!channelProductId) throw new SaleOptionCopyError('Todavía no se leyó la medida de la buena en el canal: leela de nuevo antes de crear.');
 
   const warnings: string[] = [];
-  const made = await withAccessToken(db, store.id, async (token) => {
-    let created;
+  const made = await withAccessToken(db, store.id, async (token, sellerId) => {
+    let member;
     try {
-      created = await publisher.create(token, {
-        title: name,
-        categoryId: catalog.category!.id,
+      member = await publisher.addOption!(token, sellerId, {
+        channelProductId,
+        price: price!,
         currency: source.currency,
+        quantity,
         listingType: publisher.listingTypeFor!(plan),
         description,
-        attributes,
-        pictures,
         warranty,
-        members: [
-          { sku: measure?.sku ?? null, measure: measures.length > 1 ? (measure?.measure ?? null) : null, price: price!, quantity, pictures: pictures.map((_, i) => i), channelProductId },
-        ],
       });
     } catch (e) {
       if (e instanceof PublishError) throw new SaleOptionCopyError(`${channelName} no la creó: ${e.message}`);
       throw e;
     }
-    const member = created.members[0];
-    if (!member) throw new SaleOptionCopyError(created.warnings.join(' ') || `${channelName} no la creó.`);
-    warnings.push(...created.warnings);
+    warnings.push(...member.warnings);
     try {
       await publisher.setInstallments(token, member.externalId, plan);
     } catch (e) {
