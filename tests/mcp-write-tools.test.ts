@@ -727,6 +727,11 @@ describe.skipIf(!url)('herramientas de escritura', () => {
     expect((await db.product.findUniqueOrThrow({ where: { id: productId } })).pricingOverrides).toEqual({ packaging: 500 });
     await call('save_price', { publicacion: 'MLA1110001', precio_publicado: 260000 });
     expect((await db.product.findUniqueOrThrow({ where: { id: productId } })).pricingOverrides).toEqual({ packaging: 500 });
+    // Finalizar pide repetir el código: sin él no toca nada.
+    const close = await call('set_publication_status', { publicacion: 'MLA1110001', accion: 'finalizar' });
+    expect(close.isError).toBe(true);
+    expect(close.text).toContain('confirmar_codigo (MLA1110001)');
+    expect((await call('set_publication_status', { publicacion: 'MLA1110001', accion: 'finalizar', confirmar_codigo: 'MLA999' })).text).toContain('confirmar_codigo');
     // Desde el precio sin cuotas, como la tabla por modo de compra: uno de los dos precios, no los dos.
     expect((await call('save_price', { publicacion: 'MLA1110001', precio_publicado: 260000, precio_sin_cuotas: 260000 })).text).toContain('uno de los dos');
     const flat = await call('save_price', { publicacion: 'MLA1110001', precio_sin_cuotas: 270000 });
