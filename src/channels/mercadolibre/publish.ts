@@ -542,7 +542,7 @@ export const mercadolibrePublisher: ChannelPublisher = {
       currency_id: o.currency,
       available_quantity: o.quantity,
       buying_mode: 'buy_it_now',
-      condition: 'new',
+      // La condición (nuevo o usado) es del producto: Mercado Libre la rechaza acá.
       listing_type_id: LISTING_TYPE_ID[o.listingType] ?? CLASSIC,
       ...(o.warranty ? { sale_terms: warrantyTerms(o.warranty) } : {}),
     });
