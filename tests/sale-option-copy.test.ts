@@ -7,7 +7,7 @@ import { PrismaClient } from '@/generated/prisma/client';
 
 const url = process.env.TEST_DATABASE_URL;
 
-const created: { channelProductId: string; listingType: string; price: number; quantity: number; description: string | null }[] = [];
+const created: { channelProductId: string; categoryId: string; plan: number; price: number; description: string | null }[] = [];
 const installments: [string, number][] = [];
 const locked = new Set<string>();
 let nextCode = 900;
@@ -19,9 +19,8 @@ vi.mock('@/channels/publish', async (orig) => {
   return {
     ...real,
     getChannelPublisher: () => ({
-      listingTypeFor: (plan: number) => (plan >= 3 ? 'premium' : 'clasica'),
-      addOption: async (_t: string, _seller: string, o: { channelProductId: string; listingType: string; price: number; quantity: number; description: string | null }) => {
-        created.push({ channelProductId: o.channelProductId, listingType: o.listingType, price: o.price, quantity: o.quantity, description: o.description });
+      addOption: async (_t: string, _seller: string, o: { channelProductId: string; categoryId: string; plan: number; price: number; description: string | null }) => {
+        created.push({ channelProductId: o.channelProductId, categoryId: o.categoryId, plan: o.plan, price: o.price, description: o.description });
         return { externalId: `MLA${nextCode++}`, url: 'https://canal/nueva', pictureIds: null, warnings: [] };
       },
       setInstallments: async (_t: string, id: string, plan: number) => {
@@ -68,7 +67,7 @@ describe.skipIf(!url)('igualar y crear opciones de venta', () => {
 
   const listing = async (code: string, plan: number, extra: Record<string, unknown> = {}, copy: Record<string, unknown> = {}) => {
     const p = await db.publication.create({ data: { productId, storeId, externalId: code, title: `Subconjunto ${code}`, installments: plan, ...extra } });
-    await db.channelCopy.create({ data: { publicationId: p.id, readAt: new Date(), status: 'ACTIVE', installments: plan, channelProductId: 'UP-1', photoIds: ['F1', 'F2'], quantity: 4, ...copy } });
+    await db.channelCopy.create({ data: { publicationId: p.id, readAt: new Date(), status: 'ACTIVE', installments: plan, channelProductId: 'UP-1', photoIds: ['F1', 'F2'], quantity: 4, categoryId: 'CAT-1', ...copy } });
     return p;
   };
 
@@ -129,7 +128,7 @@ describe.skipIf(!url)('igualar y crear opciones de venta', () => {
     const r = await createSaleOption(db, { accountId, publicationId: main.id, plan: 3, price: 500_000, userId: null });
     expect(r).toMatchObject({ externalId: 'MLA900', plan: '3 cuotas', price: 500_000, joined: true, warnings: [] });
     // Se suma al producto del canal de la buena, con lo que es de la opción.
-    expect(created[0]).toEqual({ channelProductId: 'UP-1', listingType: 'premium', price: 500_000, quantity: 4, description: 'La descripción buena.' });
+    expect(created[0]).toEqual({ channelProductId: 'UP-1', categoryId: 'CAT-1', plan: 3, price: 500_000, description: 'La descripción buena.' });
     expect(installments).toEqual([['MLA900', 3]]);
     const row = await db.publication.findUniqueOrThrow({ where: { id: r.id } });
     expect(row).toMatchObject({ mainOptionId: main.id, installments: 3, description: 'La descripción buena.', faq: '<p>Preguntas</p>' });

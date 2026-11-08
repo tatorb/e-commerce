@@ -47,6 +47,7 @@ const ROW_SELECT = {
       statusBlocked: true,
       installments: true,
       channelProductId: true,
+      categoryId: true,
       quantity: true,
       photoIds: true,
       description: true,
@@ -205,7 +206,7 @@ export type CreatedOption = { id: string; externalId: string; url: string | null
  */
 export async function createSaleOption(
   db: Db,
-  args: { accountId: string; publicationId: string; sourceId?: string; plan: number; price?: number; quantity?: number; userId: string | null; now?: Date },
+  args: { accountId: string; publicationId: string; sourceId?: string; plan: number; price?: number; userId: string | null; now?: Date },
 ): Promise<CreatedOption> {
   if (!isInstallmentPlan(args.plan)) throw new SaleOptionCopyError('La forma de cobro es sin cuotas, cuota promocionada, 3, 6, 9 o 12 cuotas.');
   const plan = args.plan;
@@ -220,7 +221,7 @@ export async function createSaleOption(
   const store = await db.store.findUniqueOrThrow({ where: { id: source.storeId }, select: { id: true, channel: { select: { kind: true, name: true } } } });
   const channelName = getChannelAdapter(store.channel.kind, store.channel.name).name;
   const publisher = getChannelPublisher(store.channel.kind);
-  if (!publisher?.listingTypeFor || !publisher.addOption) throw new SaleOptionCopyError(`Todavía no se pueden crear opciones de venta en ${channelName}.`);
+  if (!publisher?.addOption) throw new SaleOptionCopyError(`Todavía no se pueden crear opciones de venta en ${channelName}.`);
 
   // El precio de esa forma de cobro, con la misma ganancia que el sin cuotas guardado.
   let price = args.price ? Math.round(args.price) : null;
@@ -230,12 +231,15 @@ export async function createSaleOption(
     price = tab?.rows.find((r) => r.plan === plan)?.price ?? null;
     if (!price) throw new SaleOptionCopyError('No se pudo calcular el precio: falta el costo o el precio sin cuotas. Pasá el precio.');
   }
-  const quantity = args.quantity ?? Math.max(1, main.channelCopy?.quantity ?? source.channelCopy?.quantity ?? 1);
 
   // Lo que es de la opción y no del producto: el precio, la cantidad, la descripción y la garantía.
   // El nombre, la categoría, los datos de catálogo y las fotos son del producto del canal: los toma de ahí.
   const description = source.description?.trim() || source.channelCopy?.description?.trim() || null;
   const warranty = parseWarranty(source.warranty) ?? parseWarranty(source.channelCopy?.warranty);
+
+  // La categoría es la de la buena: la pide el canal aunque el producto ya la tenga.
+  const categoryId = source.channelCopy?.categoryId ?? main.channelCopy?.categoryId ?? null;
+  if (!categoryId) throw new SaleOptionCopyError('Todavía no se leyó la categoría de la buena en el canal: leela de nuevo antes de crear.');
 
   // La medida en el canal: la nueva se suma a ella. Sin leerla, el canal armaría un producto aparte.
   const channelProductId = main.channelCopy?.channelProductId ?? source.channelCopy?.channelProductId ?? null;
@@ -247,10 +251,10 @@ export async function createSaleOption(
     try {
       member = await publisher.addOption!(token, sellerId, {
         channelProductId,
+        categoryId,
+        plan,
         price: price!,
         currency: source.currency,
-        quantity,
-        listingType: publisher.listingTypeFor!(plan),
         description,
         warranty,
       });

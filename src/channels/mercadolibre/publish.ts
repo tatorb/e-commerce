@@ -534,16 +534,19 @@ export const mercadolibrePublisher: ChannelPublisher = {
   },
 
   async addOption(accessToken, sellerId, o) {
-    // En el modelo de producto de usuario, otra condición de venta se suma al producto por su propio pedido:
-    // el nombre, la categoría, los datos y las fotos ya son del producto.
+    // En el modelo de producto de usuario, otra condición de venta se suma al producto con su propio pedido.
+    // Solo van los campos de la condición de venta: la cantidad, los datos, las fotos, el nombre y la
+    // condición (nuevo o usado) son del producto y Mercado Libre rechaza el pedido si llegan.
     const before = await listingsOfProducts(accessToken, sellerId, [o.channelProductId]).catch(() => [] as string[]);
+    const tag = o.plan >= 3 ? CAMPAIGN_TAG[o.plan] : o.plan === LOW_INTEREST_PLAN ? LOW_INTEREST_TAG : undefined;
     const body = await send('POST', `/user-products/${encodeURIComponent(o.channelProductId)}/items`, accessToken, {
       price: o.price,
+      category_id: o.categoryId,
       currency_id: o.currency,
-      available_quantity: o.quantity,
       buying_mode: 'buy_it_now',
-      // La condición (nuevo o usado) es del producto: Mercado Libre la rechaza acá.
-      listing_type_id: LISTING_TYPE_ID[o.listingType] ?? CLASSIC,
+      listing_type_id: o.plan >= 3 ? PREMIUM : CLASSIC,
+      // Las cuotas van como etiqueta desde la creación: la cuota promocionada o la campaña de cuotas.
+      ...(tag ? { tags: [tag] } : {}),
       ...(o.warranty ? { sale_terms: warrantyTerms(o.warranty) } : {}),
     });
     const itemId = (v: unknown) => (typeof v === 'string' && /^MLA\d+$/.test(v) ? v : null);
@@ -565,9 +568,6 @@ export const mercadolibrePublisher: ChannelPublisher = {
     }
     return { externalId: id, url: isObj(body) && typeof body.permalink === 'string' ? body.permalink : null, pictureIds: null, warnings };
   },
-
-  // Las cuotas sin interés son de la Premium; sin cuotas o la cuota promocionada, de la Clásica.
-  listingTypeFor: (plan) => (plan >= 3 ? 'premium' : 'clasica'),
 
   async setInstallments(accessToken, externalId, plan) {
     if (!isInstallmentPlan(plan)) throw new PublishError('Mercado Libre no ofrece ese plan de cuotas.');

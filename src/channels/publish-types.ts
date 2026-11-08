@@ -49,10 +49,11 @@ export type ChannelNewMember = VariantLike & {
 export type ChannelNewOption = {
   // El producto del canal al que se suma (la medida).
   channelProductId: string;
+  categoryId: string;
+  // La forma de cobro: 0 sin cuotas, 1 la cuota promocionada, o 3, 6, 9 o 12 sin interés.
+  plan: number;
   price: number;
   currency: string;
-  quantity: number;
-  listingType: string;
   description: string | null;
   warranty: Warranty | null;
 };
@@ -181,8 +182,6 @@ export interface ChannelPublisher {
    * su código y lo que quedó a medias. Lanza PublishError si el canal no la acepta.
    */
   addOption?(accessToken: string, sellerId: string, option: ChannelNewOption): Promise<ChannelCreatedMember & { warnings: string[] }>;
-  /** El tipo de publicación con que se crea una con esa forma de cobro, para después dejarle las cuotas. Sin esto, el canal no crea opciones de venta. */
-  listingTypeFor?(plan: number): string;
   /** El descuento que acepta el canal, en %. */
   discountRange: { min: number; max: number };
   /**
