@@ -7,7 +7,7 @@ import { PrismaClient } from '@/generated/prisma/client';
 
 const url = process.env.TEST_DATABASE_URL;
 
-const created: { listingType: string; title: string; price: number; sku: string | null; pictures: unknown[] }[] = [];
+const created: { listingType: string; title: string; price: number; sku: string | null; pictures: unknown[]; channelProductId?: string | null }[] = [];
 const installments: [string, number][] = [];
 const locked = new Set<string>();
 let nextCode = 900;
@@ -20,8 +20,8 @@ vi.mock('@/channels/publish', async (orig) => {
     ...real,
     getChannelPublisher: () => ({
       listingTypeFor: (plan: number) => (plan >= 3 ? 'premium' : 'clasica'),
-      create: async (_t: string, l: { listingType: string; title: string; pictures: unknown[]; members: { price: number; sku: string | null }[] }) => {
-        created.push({ listingType: l.listingType, title: l.title, price: l.members[0].price, sku: l.members[0].sku, pictures: l.pictures });
+      create: async (_t: string, l: { listingType: string; title: string; pictures: unknown[]; members: { price: number; sku: string | null; channelProductId?: string | null }[] }) => {
+        created.push({ listingType: l.listingType, title: l.title, price: l.members[0].price, sku: l.members[0].sku, pictures: l.pictures, channelProductId: l.members[0].channelProductId });
         return { members: [{ externalId: `MLA${nextCode++}`, url: 'https://canal/nueva', pictureIds: null }], warnings: [] };
       },
       setInstallments: async (_t: string, id: string, plan: number) => {
@@ -131,7 +131,7 @@ describe.skipIf(!url)('igualar y crear opciones de venta', () => {
 
     const r = await createSaleOption(db, { accountId, publicationId: main.id, plan: 3, price: 500_000, userId: null });
     expect(r).toMatchObject({ externalId: 'MLA900', plan: '3 cuotas', price: 500_000, joined: true, warnings: [] });
-    expect(created[0]).toMatchObject({ listingType: 'premium', title: 'Subconjunto Persan SP-1 STD', price: 500_000, sku: 'SP-1-00' });
+    expect(created[0]).toMatchObject({ listingType: 'premium', title: 'Subconjunto Persan SP-1 STD', price: 500_000, sku: 'SP-1-00', channelProductId: 'UP-1' });
     expect(created[0].pictures).toEqual([{ kind: 'existing', id: 'F1' }, { kind: 'existing', id: 'F2' }]);
     expect(installments).toEqual([['MLA900', 3]]);
     const row = await db.publication.findUniqueOrThrow({ where: { id: r.id } });

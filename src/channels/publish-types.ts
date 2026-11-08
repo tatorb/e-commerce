@@ -36,7 +36,13 @@ export type ChannelPictureLayout = {
  * lleva su SKU, lo que elige el comprador, su precio, su cantidad y sus fotos,
  * por su posición en la lista y en el orden en que las ve.
  */
-export type ChannelNewMember = VariantLike & { price: number; quantity: number; pictures: number[] };
+export type ChannelNewMember = VariantLike & {
+  price: number;
+  quantity: number;
+  pictures: number[];
+  // La medida del canal a la que se suma, como otra opción de venta; sin esto, el canal arma una nueva.
+  channelProductId?: string | null;
+};
 
 /** Lo que hace falta para crear publicaciones en el canal. */
 export type ChannelNewListing = {

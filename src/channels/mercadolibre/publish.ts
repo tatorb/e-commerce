@@ -404,6 +404,8 @@ async function createMembers(accessToken: string, l: ChannelNewListing, family: 
     try {
       body = await send('POST', '/items', accessToken, {
         ...(family ? { family_name: l.title } : { title: l.title }),
+        // Otra opción de venta de un producto que ya está: se suma a ese producto y no arma uno nuevo.
+        ...(m.channelProductId ? { user_product_id: m.channelProductId } : {}),
         category_id: l.categoryId,
         price: m.price,
         currency_id: l.currency,

@@ -263,6 +263,10 @@ export async function createSaleOption(
   const description = source.description?.trim() || source.channelCopy?.description?.trim() || null;
   const warranty = parseWarranty(source.warranty) ?? parseWarranty(source.channelCopy?.warranty);
 
+  // La medida en el canal: la nueva se suma a ella. Sin leerla, el canal armaría un producto aparte.
+  const channelProductId = main.channelCopy?.channelProductId ?? source.channelCopy?.channelProductId ?? null;
+  if (!channelProductId) throw new SaleOptionCopyError('Todavía no se leyó la medida de la buena en el canal: leela de nuevo antes de crear.');
+
   const warnings: string[] = [];
   const made = await withAccessToken(db, store.id, async (token) => {
     let created;
@@ -276,7 +280,9 @@ export async function createSaleOption(
         attributes,
         pictures,
         warranty,
-        members: [{ sku: measure?.sku ?? null, measure: measures.length > 1 ? (measure?.measure ?? null) : null, price: price!, quantity, pictures: pictures.map((_, i) => i) }],
+        members: [
+          { sku: measure?.sku ?? null, measure: measures.length > 1 ? (measure?.measure ?? null) : null, price: price!, quantity, pictures: pictures.map((_, i) => i), channelProductId },
+        ],
       });
     } catch (e) {
       if (e instanceof PublishError) throw new SaleOptionCopyError(`${channelName} no la creó: ${e.message}`);
@@ -328,8 +334,7 @@ export async function createSaleOption(
   try {
     await readOne(db, { accountId: args.accountId, publicationId: row.id, now: args.now });
     const copy = await db.channelCopy.findUnique({ where: { publicationId: row.id }, select: { channelProductId: true } });
-    const want = main.channelCopy?.channelProductId ?? source.channelCopy?.channelProductId ?? null;
-    joined = Boolean(copy?.channelProductId && want && copy.channelProductId === want);
+    joined = copy?.channelProductId === channelProductId;
     if (!joined) warnings.push(`${channelName} no la juntó con las otras opciones de la medida: quedó como un producto aparte. Revisala antes de crear las demás.`);
   } catch (e) {
     warnings.push('Se creó, pero todavía no se pudo leer del canal para confirmar que quedó junto a las otras opciones.');
