@@ -154,6 +154,16 @@ describe('lo cargado contra lo que sale de la ficha', () => {
     expect(a).toMatchObject({ covered: 2, missing: [], extra: [] });
   });
 
+  it('con el número del catálogo, un grupo con menos vehículos cargados queda incompleto', () => {
+    // La ficha da 2014 y 2015: del 2014 hay uno de 3, del 2015 los dos que tiene el catálogo.
+    const loadedOnes = [v('Volkswagen Amarok 2014 2.0 TDI 180cv Highline'), v('Volkswagen Amarok 2015 2.0 TDI 180cv Highline'), v('Volkswagen Amarok 2015 2.0 TDI 140cv Trendline')];
+    const a = auditCompatibilities([amarok], loadedOnes, new Map([['0|2014|2.0', 3], ['0|2015|2.0', 2]]));
+    expect(a.missing).toEqual([]);
+    expect(a.incomplete).toEqual([expect.objectContaining({ loaded: 1, expected: 3, label: 'Volkswagen Amarok 2014 2.0 diésel: hay 1 de 3' })]);
+    // Sin el número, no se juzga.
+    expect(auditCompatibilities([amarok], loadedOnes).incomplete).toEqual([]);
+  });
+
   it('dice qué grupos faltan y qué sobra', () => {
     const a = auditCompatibilities([amarok], [v('Volkswagen Amarok 2015 2.0 TDI 180cv Highline'), v('Ford Mustang 2024 5.0 V8 GT'), v('Toyota', { byChannel: true, total: 2 })]);
     expect(a.covered).toBe(1);
@@ -240,6 +250,9 @@ const CATALOG: Vehicle[] = [
     car(PEUGEOT, ['M2', '308'], y, NAFTA, ['E3', '1.6'], ['P3', '115 hp'], ['V4', '1.6 VTi 115cv Active']),
     car(PEUGEOT, ['M2', '308'], y, NAFTA, ['E3', '1.6'], ['P4', '165 hp'], ['V5', '1.6 THP 165cv GT']),
   ]),
+  // Un grupo con dos versiones, para probar los grupos incompletos.
+  car(VW, ['M6', 'Saveiro'], 2015, NAFTA, ['E6', '1.6'], ['P8', '101 hp'], ['V10', '1.6 Cross']),
+  car(VW, ['M6', 'Saveiro'], 2015, NAFTA, ['E6', '1.6'], ['P8', '101 hp'], ['V11', '1.6 Trendline']),
   // Un modelo que parece un año.
   ...[2019, 2020].map((y) => car(PEUGEOT, ['M5', '2008'], y, NAFTA, ['E3', '1.6'], ['P3', '115 hp'], ['V8', '1.6 Allure'])),
   car(FORD, ['M3', 'Mustang'], 2024, NAFTA, ['E4', '5.0'], ['P5', '450 hp'], ['V6', '5.0 V8 GT']),
@@ -289,6 +302,10 @@ describe.skipIf(!url)('auditar contra Mercado Libre simulado', () => {
           for (const v of CATALOG) if (known.every((k) => v[k.id]?.[0] === k.value_id)) values.set(v[top[1]][0], v[top[1]][1]);
           const body = [...values].map(([id, name]) => ({ id, name, metric: 1 }));
           return catalogDelay > 0 ? void setTimeout(() => send(200, body), catalogDelay) : send(200, body);
+        }
+        if (u.pathname === '/catalog_compatibilities/products_search/count_family_products' && req.method === 'POST') {
+          const attrs = (JSON.parse(raw) as { attributes: { id: string; value_id?: string; value_ids?: string[] }[] }).attributes;
+          return send(200, { count: CATALOG.filter((v) => attrs.every((a) => (a.value_ids ?? [a.value_id]).includes(v[a.id]?.[0]))).length });
         }
         const item = u.pathname.match(/^\/items\/(\w+)$/);
         if (item && item[1] === 'MLA9000099') return res.writeHead(429, { 'Retry-After': '0' }).end('{}');
@@ -601,7 +618,7 @@ describe.skipIf(!url)('auditar contra Mercado Libre simulado', () => {
         agregados: { grupos: 2, ejemplos: ['Volkswagen Amarok 2010 2.0 diésel', 'Volkswagen Amarok 2012 2.0 diésel'] },
         borrados: { cantidad: 1, ejemplos: ['Ford Mustang 2024 5.0 V8 GT'] },
         // Lo que cargó el canal no se puede borrar desde la app: sigue sobrando.
-        despues: { faltan: 0, sobran: 1, a_revisar: 0 },
+        despues: { faltan: 0, incompletos: 0, sobran: 1, a_revisar: 0 },
       }),
     ]);
     // Se mandó una vez, al producto de usuario que comparten: primero el borrado, después los grupos, con el origen que pide el canal.
@@ -659,6 +676,25 @@ describe.skipIf(!url)('auditar contra Mercado Libre simulado', () => {
       [['MLA9000302'], 'subido', 3],
     ]);
     expect(new Set(writes.map((w) => w.item))).toEqual(new Set(['MLAU31', 'MLAU32']));
+  });
+
+  it('un grupo con algún vehículo cargado pero no todos queda incompleto, y la subida lo completa', async () => {
+    const kit = await product('Kit de prueba Saveiro', [{ vehicleBrand: 'Volkswagen', model: 'Saveiro', engine: '1.6', fuel: 'Nafta' }]);
+    const p = await pub(kit.id, 'MLA9000601', { up: 'MLAU6' });
+    upOf.MLA9000601 = 'MLAU6';
+    // Cargado a mano: una de las dos versiones del catálogo.
+    loaded.MLAU6 = [{ id: 'c-60', catalog_product_id: 'MLA710', catalog_product_name: 'Volkswagen Saveiro 2015 1.6 Cross', source: 'SELLER' }];
+    const r = await auditAccountCompatibilities(db, { accountId, publicationIds: [p.id] });
+    expect(r.publicaciones[0]).toMatchObject({ faltan: { cantidad: 0 }, incompletos: { cantidad: 1, ejemplos: ['Volkswagen Saveiro 2015 1.6 nafta: hay 1 de 2'] } });
+    expect(await db.publicationCompatibility.findUniqueOrThrow({ where: { publicationId: p.id } })).toMatchObject({ missing: 1 });
+    const rows = await listCompatibilitiesToPush(db, accountId);
+    expect(rows[0]).toMatchObject({ add: { count: 0 }, complete: { count: 1, examples: ['Volkswagen Saveiro 2015 1.6 nafta: hay 1 de 2'] } });
+
+    const pushed = await pushCompatibilities(db, { accountId });
+    expect(pushed.subidas[0]).toMatchObject({ resultado: 'subido', agregados: { grupos: 1 }, despues: { faltan: 0, incompletos: 0 } });
+    expect(loaded.MLAU6).toHaveLength(2);
+    // Los números del catálogo quedan guardados: la próxima auditoría no los vuelve a pedir.
+    expect(await db.channelCatalogValue.count({ where: { key: { contains: ':cantidad:' } } })).toBeGreaterThan(0);
   });
 
   it('sin producto de usuario, se manda a la publicación', async () => {

@@ -323,11 +323,28 @@ export function judgeVehicle(v: LoadedVehicle, lines: TranslatedLine[]): Vehicle
   return { kind: 'extra', reason: firstReason ? `No sale de la ficha: ${firstReason}.` : 'No sale de la ficha: esa marca y ese modelo no están.' };
 }
 
+/** Los grupos que se cuentan juntos: la misma línea de la ficha, el mismo año y la misma cilindrada. */
+export const groupKey = (g: Pick<TargetGroup, 'line' | 'year' | 'displacement'>) => `${g.line}|${g.year}|${g.displacement ?? ''}`;
+
+/** Lo que salen de un grupo, sin las versiones, para mostrarlo corto. */
+const shortLabel = (g: TargetGroup) => groupLabel({ ...g, versions: null });
+
+/** Un grupo con algunos vehículos cargados pero no todos los del catálogo. */
+export type IncompleteGroup = {
+  // Los grupos del catálogo que forman la clave: se mandan todos para completarla.
+  groups: TargetGroup[];
+  loaded: number;
+  expected: number;
+  label: string;
+};
+
 export type CompatibilityAudit = {
   // Los vehículos cargados que salen de la ficha.
   covered: number;
   // Los grupos de vehículos que salen de la ficha y el canal no tiene.
   missing: TargetGroup[];
+  // Los grupos con algún vehículo cargado, pero menos de los que tiene el catálogo.
+  incomplete: IncompleteGroup[];
   // Lo cargado que no sale de la ficha: se puede borrar desde la app.
   extra: { vehicle: LoadedVehicle; reason: string }[];
   // Lo que cargó el canal y no sale de la ficha: se borra a mano en el canal.
@@ -336,9 +353,13 @@ export type CompatibilityAudit = {
   review: { vehicle: LoadedVehicle; reason: string }[];
 };
 
-/** Compara lo cargado en el canal con lo que sale de la ficha. */
-export function auditCompatibilities(lines: TranslatedLine[], loaded: LoadedVehicle[]): CompatibilityAudit {
-  const out: CompatibilityAudit = { covered: 0, missing: [], extra: [], extraByChannel: [], review: [] };
+/**
+ * Compara lo cargado en el canal con lo que sale de la ficha. counts: cuántos
+ * vehículos tiene el catálogo en cada grupo (por groupKey), para saber si a un
+ * grupo con algo cargado le falta alguno. Sin el número, el grupo no se juzga.
+ */
+export function auditCompatibilities(lines: TranslatedLine[], loaded: LoadedVehicle[], counts?: Map<string, number>): CompatibilityAudit {
+  const out: CompatibilityAudit = { covered: 0, missing: [], incomplete: [], extra: [], extraByChannel: [], review: [] };
   const present: { line: number; year: number | null; displacement: string | null }[] = [];
   for (const v of loaded) {
     const verdict = judgeVehicle(v, lines);
@@ -350,15 +371,25 @@ export function auditCompatibilities(lines: TranslatedLine[], loaded: LoadedVehi
     else out.extra.push({ vehicle: v, reason: verdict.reason });
   }
   const seen = new Set<string>();
+  const byKey = new Map<string, TargetGroup[]>();
   for (const l of lines) {
     if (l.status !== 'ok') continue;
     for (const g of l.groups) {
       const key = norm(g.label);
       if (seen.has(key)) continue;
       seen.add(key);
-      const has = present.some((p) => p.line === g.line && p.year === g.year && (!g.displacement || !p.displacement || p.displacement === g.displacement));
-      if (!has) out.missing.push(g);
+      byKey.set(groupKey(g), [...(byKey.get(groupKey(g)) ?? []), g]);
     }
+  }
+  for (const [key, groups] of byKey) {
+    const g = groups[0];
+    const have = present.filter((p) => p.line === g.line && p.year === g.year && (!g.displacement || !p.displacement || p.displacement === g.displacement)).length;
+    if (have === 0) {
+      out.missing.push(...groups);
+      continue;
+    }
+    const expected = counts?.get(key);
+    if (expected !== undefined && have < expected) out.incomplete.push({ groups, loaded: have, expected, label: `${shortLabel(g)}: hay ${have} de ${expected}` });
   }
   return out;
 }

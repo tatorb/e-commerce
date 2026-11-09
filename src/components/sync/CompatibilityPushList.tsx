@@ -39,7 +39,9 @@ function outcomeText(r: Awaited<ReturnType<typeof pushCompatibilitiesAction>> | 
   ]
     .filter(Boolean)
     .join(' y ');
-  const after = o.despues ? ` Ahora faltan ${o.despues.faltan} y sobran ${o.despues.sobran}.` : '';
+  const after = o.despues
+    ? ` Ahora faltan ${o.despues.faltan}${o.despues.incompletos > 0 ? `, quedan ${o.despues.incompletos} incompletos` : ''} y sobran ${o.despues.sobran}.`
+    : '';
   const extra = [o.motivo, ...(o.rechazos ?? []), o.aviso].filter(Boolean).join(' ');
   if (o.resultado === 'subido') return { kind: 'ok', text: `Subido: ${sent}.${after}${extra ? ` ${extra}` : ''}` };
   if (o.resultado === 'sin cambios') return { kind: 'ok', text: `${o.motivo ?? 'Ya estaba al día en el canal.'}${after}` };
@@ -80,7 +82,7 @@ export function CompatibilityPushList({ accountSlug, rows }: { accountSlug: stri
       return next;
     });
   const chosen = pushable.filter((r) => selected.has(key(r)));
-  const totalAdd = (asking ?? []).reduce((n, r) => n + r.add.count, 0);
+  const totalAdd = (asking ?? []).reduce((n, r) => n + r.add.count + r.complete.count, 0);
   const totalRemove = (asking ?? []).reduce((n, r) => n + r.remove.count, 0);
 
   return (
@@ -143,6 +145,7 @@ export function CompatibilityPushList({ accountSlug, rows }: { accountSlug: stri
                 <div className="flex flex-wrap gap-1.5 text-xs">
                   {row.needed ? <Badge variant="destructive">{row.channelName} pide completarlas</Badge> : null}
                   {row.add.count > 0 ? <Badge variant="secondary">Agregar {groups(row.add.count)}</Badge> : null}
+                  {row.complete.count > 0 ? <Badge variant="secondary">Completar {groups(row.complete.count)}</Badge> : null}
                   {row.remove.count > 0 ? <Badge variant="secondary">Borrar {vehicles(row.remove.count)}</Badge> : null}
                   {row.review > 0 ? <Badge variant="outline">{row.review} a revisar, no se tocan</Badge> : null}
                 </div>
@@ -176,8 +179,8 @@ export function CompatibilityPushList({ accountSlug, rows }: { accountSlug: stri
           <DialogHeader>
             <DialogTitle>¿Subir las compatibilidades a {asking?.[0]?.channelName ?? 'el canal'}?</DialogTitle>
             <DialogDescription>
-              Se agregan {groups(totalAdd)} y se borran {vehicles(totalRemove)} en {plural(asking?.length ?? 0, 'publicación', 'publicaciones')}. Antes de
-              mandar se vuelve a leer el canal: va solo lo que sigue faltando o sobrando. Si la ficha cambió desde la auditoría, esa no se sube.
+              Se agregan o completan {groups(totalAdd)} y se borran {vehicles(totalRemove)} en {plural(asking?.length ?? 0, 'publicación', 'publicaciones')}.
+              Antes de mandar se vuelve a leer el canal: va solo lo que sigue faltando o sobrando. Si la ficha cambió desde la auditoría, esa no se sube.
             </DialogDescription>
           </DialogHeader>
           {asking && asking.length === 1 ? <Detail row={asking[0]} /> : null}
@@ -208,6 +211,19 @@ function Detail({ row }: { row: CompatibilityPushRow }) {
             ))}
           </ul>
           {row.add.count > row.add.examples.length ? <p className="text-muted-foreground">Y {groups(row.add.count - row.add.examples.length)} más.</p> : null}
+        </div>
+      ) : null}
+      {row.complete.count > 0 ? (
+        <div>
+          <p className="font-medium">Se completan, porque tienen algún vehículo cargado pero no todos los del catálogo:</p>
+          <ul className="mt-0.5 list-disc space-y-0.5 pl-4">
+            {row.complete.examples.map((g) => (
+              <li key={g}>{g}</li>
+            ))}
+          </ul>
+          {row.complete.count > row.complete.examples.length ? (
+            <p className="text-muted-foreground">Y {groups(row.complete.count - row.complete.examples.length)} más.</p>
+          ) : null}
         </div>
       ) : null}
       {row.remove.count > 0 ? (

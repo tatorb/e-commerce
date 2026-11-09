@@ -42,6 +42,8 @@ export type CompatibilityPushRow = {
   // El canal avisa que faltan vehículos.
   needed: boolean;
   add: { count: number; examples: string[] };
+  // Grupos con algo cargado pero no todo lo del catálogo: se mandan para completarlos.
+  complete: { count: number; examples: string[] };
   remove: { count: number; examples: { vehicle: string; reason: string }[] };
   // Lo que cargó el canal y no sale de la ficha: se borra a mano en el canal.
   byChannel: { brand: string; count: number | null }[];
@@ -51,6 +53,9 @@ export type CompatibilityPushRow = {
 };
 
 const removable = (a: StoredAudit) => a.extra.filter((x) => x.vehicle.vehicleId);
+const incompleteOf = (a: StoredAudit) => a.incomplete ?? [];
+// Lo que se manda para agregar: los grupos que faltan y los de los incompletos.
+const toAdd = (a: StoredAudit) => [...a.missing, ...incompleteOf(a).flatMap((x) => x.groups)];
 
 /**
  * Lo que hay por subir según la última auditoría, agrupado por producto del
@@ -111,7 +116,7 @@ export async function listCompatibilitiesToPush(
     const audit = first.audit as StoredAudit | null;
     if (!audit) continue;
     const remove = removable(audit);
-    if (audit.missing.length === 0 && remove.length === 0) continue;
+    if (audit.missing.length === 0 && incompleteOf(audit).length === 0 && remove.length === 0) continue;
     const p = first.publication;
     const channelName = p.store.channel.name;
     const channel = getChannelCompatibilities(p.store.channel.kind);
@@ -124,6 +129,12 @@ export async function listCompatibilitiesToPush(
       readAt: first.readAt,
       needed: members.some((m) => m.needed),
       add: { count: audit.missing.length, examples: audit.missing.slice(0, EXAMPLES).map((g) => g.label) },
+      complete: {
+        count: incompleteOf(audit).length,
+        examples: incompleteOf(audit)
+          .slice(0, EXAMPLES)
+          .map((x) => x.label),
+      },
       remove: { count: remove.length, examples: remove.slice(0, EXAMPLES).map((x) => ({ vehicle: x.vehicle.name, reason: x.reason })) },
       byChannel: audit.extraByChannel.map((x) => ({ brand: x.vehicle.name, count: x.vehicle.total })),
       review: audit.review.length,
@@ -147,7 +158,7 @@ export type CompatibilityPushOutcome = {
   motivo?: string;
   rechazos?: string[];
   // Cómo quedó al volver a auditar después de mandar.
-  despues?: { faltan: number; sobran: number; a_revisar: number };
+  despues?: { faltan: number; incompletos: number; sobran: number; a_revisar: number };
   aviso?: string;
   // Los ids en la app, para anotarlo en la actividad.
   publicationIds: string[];
@@ -194,7 +205,9 @@ export async function pushCompatibilities(
       continue;
     }
     // La primera siempre va; las demás, si se calcula que entran.
-    const calls = Math.ceil(Math.min(row.add.count, MAX_GROUPS) / GROUPS_PER_CALL) + Math.ceil(Math.min(row.remove.count, MAX_REMOVE) / REMOVE_PER_CALL);
+    const calls =
+      Math.ceil(Math.min(row.add.count + row.complete.count, MAX_GROUPS) / GROUPS_PER_CALL) +
+      Math.ceil(Math.min(row.remove.count, MAX_REMOVE) / REMOVE_PER_CALL);
     const cost = 2 * AUDIT_MS + calls * CALL_MS;
     if (report.busy || (report.subidas.length > 0 && Date.now() - started + cost > budget)) {
       report.quedan.push(...row.codes);
@@ -258,9 +271,9 @@ async function pushRow(db: Db, accountId: string, row: CompatibilityPushRow): Pr
   }
 
   // Solo lo que se mostró y sigue haciendo falta.
-  const shownGroups = new Set(shown.missing.map((g) => norm(g.label)));
+  const shownGroups = new Set(toAdd(shown).map((g) => norm(g.label)));
   const shownExtra = new Set(removable(shown).map((x) => x.vehicle.vehicleId));
-  const addAll = now.missing.filter((g) => shownGroups.has(norm(g.label)));
+  const addAll = toAdd(now).filter((g) => shownGroups.has(norm(g.label)));
   const removeAll = removable(now).filter((x) => shownExtra.has(x.vehicle.vehicleId));
   const add = addAll.slice(0, MAX_GROUPS);
   const remove = removeAll.slice(0, MAX_REMOVE);
@@ -310,7 +323,7 @@ async function pushRow(db: Db, accountId: string, row: CompatibilityPushRow): Pr
   const despues = done ? counts(done) : undefined;
   const notes = [
     failure ? null : more ? 'Había más de lo que entra en una subida: lo que falta queda en Por subir para la siguiente.' : null,
-    despues && despues.faltan > 0 && resultado !== 'rechazado' && !failure
+    despues && despues.faltan + despues.incompletos > 0 && resultado !== 'rechazado' && !failure
       ? 'Mercado Libre guarda al momento hasta 200 vehículos y el resto unos minutos después: si siguen faltando, volvé a auditar en un rato.'
       : null,
     done ? null : 'No se pudo volver a leer el canal después de mandar: auditala de nuevo para ver cómo quedó.',
@@ -327,4 +340,9 @@ async function pushRow(db: Db, accountId: string, row: CompatibilityPushRow): Pr
   };
 }
 
-const counts = (a: StoredAudit) => ({ faltan: a.missing.length, sobran: a.extra.length + a.extraByChannel.length, a_revisar: a.review.length });
+const counts = (a: StoredAudit) => ({
+  faltan: a.missing.length,
+  incompletos: incompleteOf(a).length,
+  sobran: a.extra.length + a.extraByChannel.length,
+  a_revisar: a.review.length,
+});

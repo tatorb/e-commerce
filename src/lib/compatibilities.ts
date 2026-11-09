@@ -14,6 +14,7 @@ import {
   displacementOf,
   FUEL_LABEL,
   fuelOf,
+  groupKey,
   groupLabel,
   isExcluded,
   lineRule,
@@ -27,6 +28,7 @@ import {
   similar,
   type CompatibilityAudit,
   type FichaCompatibility,
+  type IncompleteGroup,
   type LineRule,
   type LoadedVehicle,
   type TargetGroup,
@@ -58,7 +60,8 @@ class OutOfTime extends Error {}
 
 /** Un paso del recorrido del catálogo, para revisar cómo responde el canal. */
 export type CatalogStep = {
-  lista: CatalogField;
+  // La lista recorrida, o "cantidad" cuando se contaron los vehículos de un grupo.
+  lista: CatalogField | 'cantidad';
   filtros: string;
   cantidad: number | null;
   valores: string[];
@@ -66,6 +69,8 @@ export type CatalogStep = {
 
 type Catalog = {
   values(field: CatalogField, known: CatalogFilter[]): Promise<CatalogValue[] | null>;
+  // Cuántos vehículos tiene el catálogo con esos filtros. Null si el canal no lo dice.
+  count(filters: CatalogFilter[]): Promise<number | null>;
 };
 
 function catalogFor(
@@ -112,6 +117,23 @@ function catalogFor(
     return values;
   }
 
+  // Los números de cada grupo, guardados igual que las listas.
+  const counted = new Map<string, Promise<number | null>>();
+  async function loadCount(key: string, filters: CatalogFilter[], text: string): Promise<number | null> {
+    const row = await db.channelCatalogValue.findUnique({ where: { key } });
+    let count: number | null;
+    if (row && typeof row.values === 'number' && args.now.getTime() - row.fetchedAt.getTime() < CATALOG_DAYS * 86_400_000) count = row.values;
+    else {
+      count = await args.ask(() => args.channel.count(args.token, { site: args.site, filters }));
+      if (count !== null) {
+        const data = { values: count, fetchedAt: args.now };
+        await db.channelCatalogValue.upsert({ where: { key }, create: { key, ...data }, update: data });
+      }
+    }
+    args.trace?.push({ lista: 'cantidad', filtros: text, cantidad: count, valores: [] });
+    return count;
+  }
+
   return {
     values(field, known) {
       const filters = known.map((k) => `${k.field}=${k.id}`).join('&');
@@ -122,6 +144,17 @@ function catalogFor(
         memory.set(key, pending);
         // Lo que no se terminó (por tiempo o por un error) no queda en memoria.
         pending.catch(() => memory.delete(key));
+      }
+      return pending;
+    },
+    count(filters) {
+      const text = filters.map((k) => `${k.field}=${k.id}`).join('&');
+      const key = `${args.kind}:${args.site}:cantidad:${text}`;
+      let pending = counted.get(key);
+      if (!pending) {
+        pending = loadCount(key, filters, text);
+        counted.set(key, pending);
+        pending.catch(() => counted.delete(key));
       }
       return pending;
     },
@@ -410,6 +443,8 @@ export type StoredAudit = {
   lines: (LineReport & { groups: TargetGroup[] })[];
   // Los grupos de vehículos que salen de la ficha y faltan en el canal.
   missing: TargetGroup[];
+  // Los grupos con algo cargado pero no todo lo del catálogo. Falta en las auditorías viejas.
+  incomplete?: IncompleteGroup[];
   // Lo que cargó la tienda y no sale de la ficha: se puede borrar.
   extra: { vehicle: LoadedVehicle; reason: string }[];
   // Lo que cargó el canal y no sale de la ficha: se borra a mano en el canal.
@@ -443,6 +478,8 @@ export type PublicationAuditReport = {
   ficha_sin_compatibilidades?: true;
   salen_de_la_ficha: number;
   faltan: { cantidad: number; ejemplos: string[] };
+  // Grupos con algún vehículo cargado, pero no todos los del catálogo.
+  incompletos: { cantidad: number; ejemplos: string[] };
   sobran: {
     cantidad: number;
     ejemplos: { vehiculo: string; motivo: string }[];
@@ -634,7 +671,7 @@ export async function auditAccountCompatibilities(
         const code = t.externalId!;
         entry?.publicaciones.push(code);
         try {
-          await auditOne(t, code, token, channel, lines);
+          await auditOne(t, code, token, channel, cat, lines);
         } catch (e) {
           failed([code], e);
         }
@@ -642,7 +679,7 @@ export async function auditAccountCompatibilities(
     );
   }
 
-  async function auditOne(t: Target, code: string, token: string, channel: ChannelCompatibilities, lines: TranslatedLine[]) {
+  async function auditOne(t: Target, code: string, token: string, channel: ChannelCompatibilities, cat: Catalog, lines: TranslatedLine[]) {
     const fichaLines = t.product.compatibilities as FichaCompatibility[];
     const read = await ask(() =>
       channel.read(
@@ -655,16 +692,38 @@ export async function auditAccountCompatibilities(
       ),
     );
     const loaded = mergeLoaded(read.listing, read.product);
-    const audit: CompatibilityAudit =
+    let audit: CompatibilityAudit =
       fichaLines.length > 0
         ? auditCompatibilities(lines, loaded)
         : {
             covered: 0,
             missing: [],
+            incomplete: [],
             extra: [],
             extraByChannel: [],
             review: [],
           };
+    // A los grupos con algo cargado se les cuenta cuántos vehículos tiene el catálogo, para ver si están completos.
+    if (fichaLines.length > 0 && audit.covered > 0) {
+      const missingKeys = new Set(audit.missing.map(groupKey));
+      const byKey = new Map<string, TargetGroup[]>();
+      for (const l of lines) {
+        if (l.status !== 'ok') continue;
+        for (const g of l.groups) if (!missingKeys.has(groupKey(g))) byKey.set(groupKey(g), [...(byKey.get(groupKey(g)) ?? []), g]);
+      }
+      const counts = new Map<string, number>();
+      await Promise.all(
+        [...byKey].map(async ([key, groups]) => {
+          const each = await Promise.all(groups.map((g) => cat.count(g.filters as CatalogFilter[])));
+          if (each.every((n) => n !== null))
+            counts.set(
+              key,
+              each.reduce((a, b) => a + (b ?? 0), 0),
+            );
+        }),
+      );
+      audit = auditCompatibilities(lines, loaded, counts);
+    }
     const status = t.channelCopy?.status ?? t.channelStatus;
     const byChannel = loaded.filter((v) => v.byChannel);
     const pub: PublicationAuditReport = {
@@ -688,6 +747,10 @@ export async function auditAccountCompatibilities(
         cantidad: audit.missing.length,
         ejemplos: audit.missing.slice(0, EXAMPLES).map((g) => g.label),
       },
+      incompletos: {
+        cantidad: audit.incomplete.length,
+        ejemplos: audit.incomplete.slice(0, EXAMPLES).map((x) => x.label),
+      },
       sobran: {
         cantidad: audit.extra.length,
         ejemplos: audit.extra.slice(0, EXAMPLES).map((x) => ({ vehiculo: x.vehicle.name, motivo: x.reason })),
@@ -708,6 +771,7 @@ export async function auditAccountCompatibilities(
     const detail: StoredAudit = {
       lines: lines.map((l) => ({ ...lineReport(l), groups: l.groups })),
       missing: audit.missing,
+      incomplete: audit.incomplete,
       extra: audit.extra,
       extraByChannel: audit.extraByChannel,
       review: audit.review,
@@ -721,7 +785,8 @@ export async function auditAccountCompatibilities(
         listing: read.listing,
         product: read.product,
       } as unknown as Prisma.InputJsonValue,
-      missing: audit.missing.length,
+      // Faltan: los grupos sin nada y los incompletos.
+      missing: audit.missing.length + audit.incomplete.length,
       extra: audit.extra.length + audit.extraByChannel.length,
       review: audit.review.length,
       noData: fichaLines.length === 0,

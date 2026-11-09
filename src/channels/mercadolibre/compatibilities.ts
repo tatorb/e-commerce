@@ -203,9 +203,10 @@ export const mercadolibreCompatibilities: ChannelCompatibilities = {
 
   async count(accessToken, { site, filters }) {
     try {
+      // Con los mismos datos con que se crea el grupo: varias versiones van juntas en value_ids.
       const body = await mlQuery('/catalog_compatibilities/products_search/count_family_products', accessToken, {
         domain_id: vehicleDomain(site),
-        attributes: knownBody(site, filters),
+        attributes: familyBody(site, filters).attributes,
       });
       return isObj(body) && typeof body.count === 'number' ? body.count : null;
     } catch (e) {
