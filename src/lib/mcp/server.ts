@@ -125,7 +125,9 @@ async function callTool(ctx: McpContext, name: string, rawArgs: unknown) {
     ) {
       return text(e.message.replace(/Recargá la página\./g, 'Volvé a consultarla antes de seguir.'), true);
     }
-    console.error(`[mcp] ${name} falló: ${e instanceof Error ? e.name : 'error'}`);
+    // Solo el tipo y el código del error (por ejemplo P2028, la transacción se cerró por tiempo), nunca los datos.
+    const code = e && typeof e === 'object' && 'code' in e && typeof e.code === 'string' ? ` ${e.code}` : '';
+    console.error(`[mcp] ${name} falló: ${e instanceof Error ? e.name : 'error'}${code}`);
     return text('Algo falló en la app al hacer esto. Probá de nuevo en un rato.', true);
   }
 }

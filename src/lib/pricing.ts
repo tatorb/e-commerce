@@ -35,6 +35,11 @@ type Db = PrismaClient | Prisma.TransactionClient;
 
 export class PricingError extends Error {}
 
+// Una familia con varias medidas y cada una en varias opciones de venta guarda
+// decenas de filas en una sola transacción: los 5 segundos de partida de Prisma
+// no alcanzan y la transacción se cierra a mitad de camino.
+const PRICE_TX = { maxWait: 10_000, timeout: 45_000 };
+
 export async function loadPricingSettings(db: Db, accountId: string) {
   const row = await db.pricingSettings.findUnique({ where: { accountId }, include: { updatedBy: { select: { name: true } } } });
   const values = parsePricingValues(row?.values);
@@ -312,11 +317,11 @@ export type LatestPriceDecision = Awaited<ReturnType<typeof latestPriceDecision>
  * tenía su huella, se guarda la de lo leído. Así lo que cambia la app queda
  * como un cambio para subir, y no como algo para elegir.
  */
-async function seedPriceAgreed(tx: Prisma.TransactionClient, publicationId: string) {
-  const c = await tx.channelCopy.findUnique({
-    where: { publicationId },
-    select: { fingerprints: true, agreed: true, price: true, installments: true, discount: true },
-  });
+const AGREED_SELECT = { fingerprints: true, agreed: true, price: true, installments: true, discount: true } as const;
+type AgreedCopy = Prisma.ChannelCopyGetPayload<{ select: typeof AGREED_SELECT }>;
+
+async function seedPriceAgreed(tx: Prisma.TransactionClient, publicationId: string, copy?: AgreedCopy | null) {
+  const c = copy !== undefined ? copy : await tx.channelCopy.findUnique({ where: { publicationId }, select: AGREED_SELECT });
   if (!c) return;
   const { channel, agreed } = storedPrints(c);
   await tx.channelCopy.update({
@@ -365,7 +370,8 @@ async function priceSaleOptions(
       discount: true,
       customPrice: true,
       channelStatus: true,
-      channelCopy: { select: { installments: true, discount: true, status: true, statusNeedsFix: true, statusBlocked: true } },
+      // Lo de la cara del canal que hace falta para el borrador, así no se vuelve a leer una por una.
+      channelCopy: { select: { ...AGREED_SELECT, status: true, statusNeedsFix: true, statusBlocked: true } },
     },
   });
   const out: OptionPrice[] = [];
@@ -412,7 +418,7 @@ async function priceSaleOptions(
         ...(args.now ? { decidedAt: args.now } : {}),
       },
     });
-    await seedPriceAgreed(tx, r.id);
+    await seedPriceAgreed(tx, r.id, r.channelCopy);
     // Su forma de cobro y su descuento siguen como están en el canal: solo cambia el precio.
     await tx.publication.update({ where: { id: r.id }, data: { price: listPrice, installments: plan, discount: discountPct, ownPrice: true, customPrice: false } });
     const reviewing = status === 'UNDER_REVIEW' && !r.channelCopy?.statusNeedsFix;
@@ -510,7 +516,7 @@ export async function savePriceDecision(
     // Las otras opciones de venta de esas medidas: la misma ganancia, con su forma de cobro.
     const options = await priceSaleOptions(tx, { mainIds: group.publicationIds, cost, profit: args.optionProfit ?? s.profit, params, userId: args.userId, resetCustom: args.resetCustom, now: args.now });
     return { id: decision!.id, decidedAt: decision!.decidedAt, simulation: s, belowMin: below, options };
-  });
+  }, PRICE_TX);
 }
 
 /**
@@ -631,7 +637,7 @@ export async function saveOptionPrice(
     await seedPriceAgreed(tx, c.pub.id);
     await tx.publication.update({ where: { id: c.pub.id }, data: { price: listPrice, discount: discountPct, installments: c.plan, ownPrice: true, customPrice: true } });
     return { id: d.id, decidedAt: d.decidedAt, simulation: s, belowMin: below };
-  });
+  }, PRICE_TX);
 }
 
 /**
