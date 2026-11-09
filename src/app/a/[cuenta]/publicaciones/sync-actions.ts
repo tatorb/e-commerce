@@ -27,6 +27,7 @@ import { CampaignError, familyCampaignAction, sendCampaignNow, type CampaignChoi
 import { WarrantyError, warrantyFromInput } from '@/domain/warranty';
 import { clearWarranty, setWarranties } from '@/lib/warranty';
 import { familyCampaignInput, type FamilyCampaignActionResult, type FamilyCampaignInput } from '@/lib/family-campaign-input';
+import { pushCompatibilities, type CompatibilityPushOutcome } from '@/lib/compatibility-push';
 
 // Lo que se hace desde la página de una publicación y desde Por subir: cambiar
 // el borrador, subirlo al canal, descartarlo y volver a leer del canal.
@@ -139,6 +140,37 @@ export async function pushDraftsAction(accountSlug: string, publicationId: strin
       return { ok: true, ...result };
     } catch (e) {
       refresh(accountSlug, parsed.data.id);
+      return failure(e);
+    }
+  });
+}
+
+/**
+ * Sube las compatibilidades de una fila de Por subir: las publicaciones que
+ * comparten lo cargado en el canal. Agrega lo que falta y borra lo que sobra,
+ * solo lo que mostró la auditoría.
+ */
+export async function pushCompatibilitiesAction(
+  accountSlug: string,
+  publicationIds: string[],
+): Promise<Result<{ outcome: Omit<CompatibilityPushOutcome, 'publicationIds'> | null; later: boolean; busy: boolean }>> {
+  const parsed = z.array(idSchema).min(1).max(50).safeParse(publicationIds);
+  const first = parsed.success ? parsed.data[0] : undefined;
+  return act(accountSlug, { section: 'subir', does: 'Subió las compatibilidades al canal', publicationId: first }, async () => {
+    await requireUser();
+    const account = await getAccountBySlug(accountSlug);
+    if (!account) return { ok: false, error: 'La cuenta no existe.' };
+    if (!parsed.success) return { ok: false, error: 'Elegí qué subir.' };
+    try {
+      // Una fila por vez: la pantalla sigue con la siguiente.
+      const r = await pushCompatibilities(prisma, { accountId: account.id, publicationIds: parsed.data, exact: true, budgetMs: 0 });
+      for (const id of parsed.data) refresh(accountSlug, id);
+      const found = r.subidas[0];
+      if (!found) return { ok: true, outcome: null, later: r.quedan.length > 0, busy: Boolean(r.busy) };
+      const { publicationIds: _ids, ...outcome } = found;
+      void _ids;
+      return { ok: true, outcome, later: false, busy: false };
+    } catch (e) {
       return failure(e);
     }
   });

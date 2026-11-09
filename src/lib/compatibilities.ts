@@ -308,7 +308,7 @@ const LIVE = {
 };
 
 /** Las publicaciones pedidas, con las otras medidas de su familia y las otras opciones de venta de cada medida. */
-async function withRelated(db: Db, accountId: string, ids: string[]): Promise<string[]> {
+export async function withRelated(db: Db, accountId: string, ids: string[]): Promise<string[]> {
   const rows = await db.publication.findMany({
     where: { id: { in: ids }, product: { accountId } },
     select: { id: true, mainOptionId: true, familyId: true },
@@ -331,8 +331,8 @@ async function withRelated(db: Db, accountId: string, ids: string[]): Promise<st
   return [...new Set([...ids, ...all.map((p) => p.id)])];
 }
 
-async function loadTargets(db: Db, accountId: string, ids: string[] | null, opts: { brand?: string | null; freshSince?: Date | null } = {}) {
-  const asked = ids ? await withRelated(db, accountId, ids) : null;
+async function loadTargets(db: Db, accountId: string, ids: string[] | null, opts: { brand?: string | null; freshSince?: Date | null; exact?: boolean } = {}) {
+  const asked = ids ? (opts.exact ? ids : await withRelated(db, accountId, ids)) : null;
   const brand = opts.brand?.trim();
   return db.publication.findMany({
     where: {
@@ -404,6 +404,20 @@ export function mergeLoaded(listing: ChannelVehicle[], product: ChannelVehicle[]
   }
   return out;
 }
+
+/** Lo que se guarda de cada auditoría: de acá sale lo que se sube, y lo que se mostró antes de subir. */
+export type StoredAudit = {
+  lines: (LineReport & { groups: TargetGroup[] })[];
+  // Los grupos de vehículos que salen de la ficha y faltan en el canal.
+  missing: TargetGroup[];
+  // Lo que cargó la tienda y no sale de la ficha: se puede borrar.
+  extra: { vehicle: LoadedVehicle; reason: string }[];
+  // Lo que cargó el canal y no sale de la ficha: se borra a mano en el canal.
+  extraByChannel: { vehicle: LoadedVehicle; reason: string }[];
+  review: { vehicle: LoadedVehicle; reason: string }[];
+  // El producto del canal que comparten las opciones de venta: lo cargado ahí vale para todas.
+  productId?: string | null;
+};
 
 export type LineReport = {
   linea: string;
@@ -484,6 +498,8 @@ export async function auditAccountCompatibilities(
     brand?: string | null;
     // Sin lista: se saltean las auditadas desde ese momento, para seguir donde quedó la vuelta anterior.
     freshSince?: Date | null;
+    // Solo las de la lista, sin sumar las otras medidas y opciones de venta.
+    exact?: boolean;
     raw?: boolean;
     budgetMs?: number;
     now?: Date;
@@ -492,7 +508,7 @@ export async function auditAccountCompatibilities(
   const started = Date.now();
   const now = args.now ?? new Date();
   const budget = args.budgetMs ?? 30_000;
-  const targets = await loadTargets(db, args.accountId, args.publicationIds ?? null, { brand: args.brand, freshSince: args.freshSince });
+  const targets = await loadTargets(db, args.accountId, args.publicationIds ?? null, { brand: args.brand, freshSince: args.freshSince, exact: args.exact });
   const report: CompatibilityAuditReport = {
     publicaciones: [],
     fichas: [],
@@ -689,12 +705,13 @@ export async function auditAccountCompatibilities(
     };
     report.publicaciones.push(pub);
 
-    const detail = {
+    const detail: StoredAudit = {
       lines: lines.map((l) => ({ ...lineReport(l), groups: l.groups })),
       missing: audit.missing,
       extra: audit.extra,
       extraByChannel: audit.extraByChannel,
       review: audit.review,
+      productId: read.productId,
     };
     const data = {
       readAt: now,

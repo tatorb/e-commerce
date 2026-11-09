@@ -9,6 +9,7 @@ import { PageBody } from '@/components/dashboard/PageBody';
 import { NewPipelinePublicationDialog } from '@/components/pipeline/NewPipelinePublicationDialog';
 import { PipelineBoard } from '@/components/pipeline/PipelineBoard';
 import { ToPushList } from '@/components/sync/ToPushList';
+import { CompatibilityPushList } from '@/components/sync/CompatibilityPushList';
 import { QuestionsNotice } from '@/components/questions/QuestionsNotice';
 import { UrlFilterDropdown } from '@/components/filters/UrlFilterDropdown';
 import { KIND_OPTIONS, parseKinds } from '@/lib/queries/catalog-filters';
@@ -16,12 +17,15 @@ import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { listBoard } from '@/lib/queries/pipeline';
 import { listStores } from '@/lib/queries/products';
 import { listToPush } from '@/lib/queries/sync';
+import { listCompatibilitiesToPush } from '@/lib/compatibility-push';
 import { unansweredSummary } from '@/lib/queries/questions';
 import { plural } from '@/lib/format';
 import { prisma } from '@/lib/db';
 import { openTasksByPublication } from '@/lib/tasks';
 
 export const dynamic = 'force-dynamic';
+// Subir desde Por subir relee el canal antes y después de mandar.
+export const maxDuration = 60;
 
 export async function generateMetadata({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
@@ -42,10 +46,11 @@ export default async function PipelinePage({
   const kinds = parseKinds(tipo);
   const toPushView = vista === 'por-subir';
   // Por subir mira todas las publicaciones de la cuenta: se carga solo en su pestaña.
-  const [all, stores, toPush, questions, options] = await Promise.all([
+  const [all, stores, toPush, compatibilities, questions, options] = await Promise.all([
     toPushView ? Promise.resolve([]) : listBoard(account.id),
     listStores(account.id),
     toPushView ? listToPush(account.id) : Promise.resolve([]),
+    toPushView ? listCompatibilitiesToPush(prisma, account.id) : Promise.resolve([]),
     unansweredSummary(account.id),
     loadProductOptions(prisma, account.id),
   ]);
@@ -95,7 +100,7 @@ export default async function PipelinePage({
             href: key ? `?vista=${key}` : '?',
             label,
             active: (key === 'por-subir') === toPushView,
-            count: key === 'por-subir' && toPushView ? toPush.length : null,
+            count: key === 'por-subir' && toPushView ? toPush.length + compatibilities.length : null,
           }))}
         />
         {toPushView ? (
@@ -106,11 +111,23 @@ export default async function PipelinePage({
             </p>
             {toPush.length > 0 ? (
               <ToPushList accountSlug={account.slug} rows={toPush} />
-            ) : (
+            ) : compatibilities.length === 0 ? (
               <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">
                 No hay cambios para subir: todo lo de la app ya está en el canal.
               </div>
-            )}
+            ) : null}
+            {compatibilities.length > 0 ? (
+              <>
+                <div className="space-y-1 pt-2">
+                  <h2 className="text-base font-semibold">Compatibilidades con vehículos</h2>
+                  <p className="text-sm text-muted-foreground">
+                    Lo que mostró la última auditoría: los vehículos que salen de la ficha y faltan en el canal, y los que cargó la tienda y no
+                    salen de la ficha. Las fichas sin compatibilidades no aparecen: sin datos no se puede corregir.
+                  </p>
+                </div>
+                <CompatibilityPushList accountSlug={account.slug} rows={compatibilities} />
+              </>
+            ) : null}
           </>
         ) : all.length === 0 ? (
           <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">

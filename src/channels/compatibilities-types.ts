@@ -29,6 +29,9 @@ export type ChannelCompatibilityRead = {
   needed: boolean;
   // El canal tiene sugerencias de vehículos esperando que se acepten.
   suggested: boolean;
+  // El producto del canal que comparten las opciones de venta de la medida: lo
+  // cargado ahí vale para todas. Null si no tiene.
+  productId: string | null;
   // Lo que respondió el canal, recortado, para revisar cómo responde.
   raw?: Record<string, unknown>;
 };
@@ -40,6 +43,22 @@ export type CatalogValue = { id: string; name: string };
 
 /** Un valor ya elegido, para filtrar la lista siguiente. */
 export type CatalogFilter = { field: CatalogField; id: string };
+
+/** Lo que se manda en una subida: grupos de vehículos para agregar y vehículos para borrar. */
+export type CompatibilityChange = {
+  // Cada grupo, con los valores del catálogo que lo definen (marca, modelo, año, motor...).
+  add: CatalogFilter[][];
+  // Los vehículos que cargó la tienda y se borran, por su código en el catálogo del canal.
+  remove: string[];
+};
+
+/** Lo que el canal no aceptó de una subida, con el motivo. Lo demás entró. */
+export type CompatibilityWriteResult = {
+  // Los grupos rechazados, por su posición en add.
+  rejectedGroups: { index: number; message: string }[];
+  // Si no aceptó los borrados, por qué.
+  removeRejected: string | null;
+};
 
 export interface ChannelCompatibilities {
   /** Las compatibilidades de una publicación y de su producto del canal. */
@@ -61,4 +80,10 @@ export interface ChannelCompatibilities {
    * para saber si deja buscarlos uno por uno.
    */
   probeSearch?(accessToken: string, args: { site: string; filters: CatalogFilter[] }): Promise<unknown>;
+  /**
+   * Agrega y borra compatibilidades de la publicación, en los pedidos que
+   * hagan falta. Lo que el canal rechaza vuelve con el motivo; si se corta la
+   * conexión o el canal falla, tira el error y no se sabe qué entró.
+   */
+  write?(accessToken: string, ref: { externalId: string }, change: CompatibilityChange): Promise<CompatibilityWriteResult>;
 }

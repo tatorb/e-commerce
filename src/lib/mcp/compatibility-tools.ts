@@ -1,8 +1,11 @@
 import { z } from 'zod';
+import { logActivity } from '@/lib/activity';
 import { auditAccountCompatibilities } from '@/lib/compatibilities';
+import { pushCompatibilities } from '@/lib/compatibility-push';
 import { accountArg, defineTool, findPublication, McpToolError, resolveAccount } from './tool';
 
-// Las compatibilidades con vehículos, para Claude: auditar contra la ficha sin subir nada.
+// Las compatibilidades con vehículos, para Claude: auditar contra la ficha sin
+// subir nada, y subir lo que mostró la auditoría.
 
 // Hasta cuándo se empiezan pedidos al canal: lo que ya salió termina, y la respuesta llega antes del minuto.
 const AUDIT_BUDGET_MS = 30_000;
@@ -87,4 +90,80 @@ const auditTool = defineTool({
   },
 });
 
-export const COMPATIBILITY_TOOLS = [auditTool];
+// Hasta cuándo se empieza a subir otra publicación: cada una relee el canal antes y después de mandar.
+const PUSH_BUDGET_MS = 30_000;
+
+const pushTool = defineTool({
+  name: 'push_compatibilities',
+  section: 'subir',
+  title: 'Subir las compatibilidades con vehículos al canal',
+  description:
+    'Manda al canal lo que mostró audit_compatibilities, en la misma subida: agrega los grupos de vehículos que salen de la ficha y faltan, y borra los que cargó la tienda y no salen de la ficha. Manda solo lo que mostró la última auditoría y que, al releer el canal justo antes, sigue faltando o sobrando; si la ficha cambió después de esa auditoría, no manda nada y pide mirarla de nuevo. Lo que cargó el canal no se puede borrar desde la app: queda para borrarlo a mano en el canal. Las fichas sin compatibilidades no se tocan, y lo que está a revisar tampoco. Va una vez por producto del canal, porque las opciones de venta de una medida comparten lo cargado, y en una familia va a todas sus medidas aunque pases una sola. En publicaciones pasá ids o códigos del canal, hasta 100; sin la lista, todo lo que hay por subir en la cuenta, o solo lo de una marca del repuesto con marca. Por cada una devuelve lo agregado y lo borrado, el motivo exacto si el canal rechaza algo y cómo quedó al volver a auditar. Si son muchas, sube las que entran y devuelve en quedan las que faltan: volvé a llamar con esa lista. Cambia la publicación en el canal de verdad: antes de subir, mostrale a la persona qué se va a agregar y qué se va a borrar, y esperá que confirme.',
+  input: z.object({
+    cuenta: accountArg,
+    publicaciones: z
+      .array(z.string().min(1))
+      .min(1)
+      .max(100)
+      .optional()
+      .describe('Las publicaciones: su id en la app o su código en el canal, hasta 100. Sin la lista, todas las que tienen compatibilidades por subir.'),
+    marca: z.string().min(1).max(80).optional().describe('Solo las publicaciones de productos con esa marca del repuesto en la ficha, por ejemplo Persan.'),
+  }),
+  readOnly: false,
+  destructive: true,
+  logsItself: true,
+  async run(ctx, args) {
+    const account = await resolveAccount(ctx, args.cuenta);
+    const ids: string[] = [];
+    const salteadas: { publicacion: string; motivo: string }[] = [];
+    for (const ref of args.publicaciones ?? []) {
+      try {
+        ids.push(await findPublication(ctx.db, account.id, ref));
+      } catch (e) {
+        if (!(e instanceof McpToolError)) throw e;
+        salteadas.push({ publicacion: ref, motivo: e.message });
+      }
+    }
+    if (args.publicaciones && ids.length === 0) throw new McpToolError(salteadas[0]?.motivo ?? 'No se encontró ninguna publicación.');
+    const r = await pushCompatibilities(ctx.db, {
+      accountId: account.id,
+      publicationIds: args.publicaciones ? ids : undefined,
+      brand: args.marca ?? null,
+      budgetMs: PUSH_BUDGET_MS,
+    });
+    // Como el botón de Por subir: queda en la actividad de la persona, hecho por Claude.
+    for (const x of r.subidas) {
+      if (x.resultado === 'salteada' || x.resultado === 'sin cambios') continue;
+      await logActivity(ctx.db, {
+        userId: ctx.userId,
+        accountId: account.id,
+        section: 'subir',
+        summary: 'Subió cambios al canal',
+        publicationId: x.publicationIds[0],
+        detail:
+          x.resultado === 'error'
+            ? (x.motivo ?? null)
+            : `Compatibilidades: agregó ${x.agregados.grupos} grupos de vehículos y borró ${x.borrados.cantidad} vehículos.${x.rechazos ? ` ${x.rechazos.join(' ')}` : ''}`,
+        via: 'CLAUDE',
+      });
+    }
+    return {
+      // Los ids de la app son para la actividad: se muestran los códigos del canal.
+      subidas: r.subidas.map((x) => Object.fromEntries(Object.entries(x).filter(([k]) => k !== 'publicationIds'))),
+      ...(salteadas.length > 0 ? { salteadas } : {}),
+      ...(r.quedan.length > 0
+        ? {
+            quedan: r.quedan,
+            aviso: r.busy
+              ? 'El canal pidió esperar porque hubo demasiados pedidos: volvé a llamar en unos minutos con la lista de quedan.'
+              : 'No entraron todas en esta vuelta: volvé a llamar con la lista de quedan.',
+          }
+        : {}),
+      ...(r.subidas.length === 0 && r.quedan.length === 0
+        ? { aviso: 'No hay compatibilidades por subir: o ya está todo al día, o falta auditar con audit_compatibilities.' }
+        : {}),
+    };
+  },
+});
+
+export const COMPATIBILITY_TOOLS = [auditTool, pushTool];

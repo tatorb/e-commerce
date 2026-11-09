@@ -5,8 +5,9 @@ import type {
   ChannelCompatibilities,
   ChannelCompatibilityRead,
   ChannelVehicle,
+  CompatibilityWriteResult,
 } from '../compatibilities-types';
-import { MercadoLibreRequestError, mlGet, mlQuery } from './http';
+import { MercadoLibreRequestError, mlGet, mlQuery, mlSend } from './http';
 
 // Las compatibilidades de autopartes en Mercado Libre, según su documentación
 // (docs/ml-docs/guia-para-productos/categorizacion/051 y 052):
@@ -17,6 +18,11 @@ import { MercadoLibreRequestError, mlGet, mlQuery } from './http';
 // - El catálogo de vehículos se recorre con top_values, como los filtros de la
 //   pantalla: marca, modelo, año, versión, motor, combustible y potencia. La
 //   búsqueda de vehículos uno por uno (products_search/chunks) ya no existe.
+// - Se agregan y se borran con PUT /items/{id}/compatibilities: create con
+//   grupos de vehículos (products_families, con creation_source) y delete con
+//   los vehículos (products). Hasta 10 grupos y 200 vehículos por pedido, y
+//   100 pedidos por minuto. Las opciones de venta de un mismo producto de
+//   usuario comparten lo cargado: alcanza con mandarlo a una.
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -59,6 +65,44 @@ export function attributeOf(site: string, field: CatalogField): string {
 }
 
 const knownBody = (site: string, known: CatalogFilter[]) => known.map((k) => ({ id: attributeOf(site, k.field), value_id: k.id }));
+
+// Cuántos grupos de vehículos van por pedido: Mercado Libre acepta 10 grupos y
+// 200 vehículos, y un grupo (un modelo, un año, un motor) suele tener hasta 20.
+const GROUPS_PER_CALL = 5;
+// Cuántos vehículos se borran por pedido.
+const REMOVE_PER_CALL = 200;
+
+const chunks = <T>(list: T[], size: number): T[][] => Array.from({ length: Math.ceil(list.length / size) }, (_, i) => list.slice(i * size, (i + 1) * size));
+
+/** Un grupo de vehículos como lo pide Mercado Libre para crearlo: varias versiones van juntas en value_ids. */
+export function familyBody(site: string, filters: CatalogFilter[]) {
+  const byField = new Map<CatalogField, string[]>();
+  for (const f of filters) byField.set(f.field, [...(byField.get(f.field) ?? []), f.id]);
+  return {
+    domain_id: vehicleDomain(site),
+    creation_source: 'DEFAULT',
+    attributes: [...byField].map(([field, ids]) =>
+      ids.length === 1 ? { id: attributeOf(site, field), value_id: ids[0] } : { id: attributeOf(site, field), value_ids: ids },
+    ),
+  };
+}
+
+/** Un rechazo que dice qué no aceptó: los demás errores (llave, demasiados pedidos, falla del canal) siguen como están. */
+const rejected = (e: unknown): e is MercadoLibreRequestError =>
+  e instanceof MercadoLibreRequestError && e.status !== 401 && e.status !== 429 && !e.changeUnknown;
+
+/** Por qué Mercado Libre no aceptó las compatibilidades, con lo que respondió. */
+export function writeRejection(e: MercadoLibreRequestError): string {
+  if (e.status === 403) return 'Mercado Libre no deja cambiar las compatibilidades de esta publicación con esta cuenta.';
+  if (e.status === 404) return 'Mercado Libre no encontró la publicación o alguno de los vehículos.';
+  const body = e.body;
+  const causes = isObj(body) && Array.isArray(body.cause) ? body.cause.filter(isObj).filter((c) => c.type !== 'warning') : [];
+  const detail = causes.map((c) => str(c.message)).find(Boolean) ?? (isObj(body) ? str(body.message) : null);
+  const raw = body !== null && body !== undefined && JSON.stringify(body) !== '{}' ? ` Respuesta completa: ${JSON.stringify(body).slice(0, 600)}` : '';
+  return detail
+    ? `Mercado Libre no aceptó las compatibilidades: ${detail.replace(/\.+$/, '')}.${raw}`
+    : `Mercado Libre no aceptó las compatibilidades (código ${e.status}).${raw}`;
+}
 
 /** Una compatibilidad como la manda Mercado Libre. */
 export function parseVehicle(raw: unknown): ChannelVehicle | null {
@@ -131,6 +175,7 @@ export const mercadolibreCompatibilities: ChannelCompatibilities = {
       product: product?.list ?? null,
       needed: tags.includes('incomplete_compatibilities'),
       suggested: tags.includes('pending_compatibilities'),
+      productId,
     };
     if (opts?.raw) {
       out.raw = {
@@ -165,6 +210,44 @@ export const mercadolibreCompatibilities: ChannelCompatibilities = {
       if (e instanceof MercadoLibreRequestError && e.status !== 401 && e.status !== 429) return null;
       throw e;
     }
+  },
+
+  async write(accessToken, { externalId }, change) {
+    const site = externalId.slice(0, 3).toUpperCase();
+    const path = `/items/${encodeURIComponent(externalId)}/compatibilities`;
+    const put = (body: unknown) => mlSend('PUT', path, accessToken, body);
+    const out: CompatibilityWriteResult = { rejectedGroups: [], removeRejected: null };
+
+    for (const ids of chunks(change.remove, REMOVE_PER_CALL)) {
+      try {
+        await put({ delete: { products: ids.map((id) => ({ id })) } });
+      } catch (e) {
+        if (!rejected(e)) throw e;
+        out.removeRejected ??= writeRejection(e);
+      }
+    }
+    const groups = change.add.map((filters, index) => ({ index, body: familyBody(site, filters) }));
+    for (const part of chunks(groups, GROUPS_PER_CALL)) {
+      try {
+        await put({ create: { products_families: part.map((g) => g.body) } });
+      } catch (e) {
+        if (!rejected(e)) throw e;
+        // Mercado Libre rechaza el pedido entero: se prueba cada grupo solo, para saber cuál no acepta.
+        if (part.length === 1) {
+          out.rejectedGroups.push({ index: part[0].index, message: writeRejection(e) });
+          continue;
+        }
+        for (const g of part) {
+          try {
+            await put({ create: { products_families: [g.body] } });
+          } catch (e2) {
+            if (!rejected(e2)) throw e2;
+            out.rejectedGroups.push({ index: g.index, message: writeRejection(e2) });
+          }
+        }
+      }
+    }
+    return out;
   },
 
   async probeSearch(accessToken, { site, filters }) {

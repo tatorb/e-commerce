@@ -3,7 +3,8 @@ import type { AddressInfo } from 'node:net';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@/generated/prisma/client';
-import { parseVehicles, parseValues } from '@/channels/mercadolibre/compatibilities';
+import { familyBody, parseVehicles, parseValues, writeRejection } from '@/channels/mercadolibre/compatibilities';
+import { MercadoLibreRequestError } from '@/channels/mercadolibre/http';
 import {
   auditCompatibilities,
   excludedOf,
@@ -20,6 +21,7 @@ import {
   type TranslatedLine,
 } from '@/domain/compatibilities';
 import { auditAccountCompatibilities } from '@/lib/compatibilities';
+import { listCompatibilitiesToPush, pushCompatibilities } from '@/lib/compatibility-push';
 import { encrypt } from '@/lib/crypto';
 
 // Las compatibilidades con vehículos: las reglas para traducir la ficha, la
@@ -178,6 +180,37 @@ describe('cómo responde Mercado Libre', () => {
   });
 });
 
+describe('lo que se manda a Mercado Libre', () => {
+  it('un grupo con varias versiones las manda juntas, con el origen que pide el canal', () => {
+    expect(
+      familyBody('MLA', [
+        { field: 'brand', id: '60279' },
+        { field: 'model', id: '9301' },
+        { field: 'year', id: '436662' },
+        { field: 'version', id: 'V1' },
+        { field: 'version', id: 'V2' },
+      ]),
+    ).toEqual({
+      domain_id: 'MLA-CARS_AND_VANS',
+      creation_source: 'DEFAULT',
+      attributes: [
+        { id: 'BRAND', value_id: '60279' },
+        { id: 'MODEL', value_id: '9301' },
+        { id: 'VEHICLE_YEAR', value_id: '436662' },
+        { id: 'SHORT_VERSION', value_ids: ['V1', 'V2'] },
+      ],
+    });
+  });
+
+  it('el rechazo dice el motivo de Mercado Libre y su respuesta', () => {
+    const body = { message: 'Invalid', cause: [{ type: 'warning', message: 'Solo un aviso' }, { type: 'error', message: 'Se especificaron más de 10 dominios.' }] };
+    expect(writeRejection(new MercadoLibreRequestError('x', 400, body))).toBe(
+      `Mercado Libre no aceptó las compatibilidades: Se especificaron más de 10 dominios. Respuesta completa: ${JSON.stringify(body)}`,
+    );
+    expect(writeRejection(new MercadoLibreRequestError('x', 403, null))).toContain('no deja cambiar');
+  });
+});
+
 // ───────────────────────────── La auditoría contra un Mercado Libre simulado ─────────────────────────────
 
 const url = process.env.TEST_DATABASE_URL;
@@ -224,6 +257,12 @@ describe.skipIf(!url)('auditar contra Mercado Libre simulado', () => {
   // Lo cargado en cada publicación y en cada producto del canal, tal cual lo devuelve Mercado Libre.
   const loaded: Record<string, unknown[]> = {};
   const tags: Record<string, string[]> = {};
+  // El producto de usuario de cada publicación: lo cargado ahí lo comparten sus opciones de venta.
+  const upOf: Record<string, string> = {};
+  // Lo que se mandó a cada publicación, en orden.
+  const writes: { item: string; body: { create?: { products_families: { attributes: { id: string; value_id?: string; value_ids?: string[] }[] }[] }; delete?: { products: { id: string }[] } } }[] = [];
+  // Un grupo que el canal no acepta: el año que tenga este código.
+  let rejectYear: string | null = null;
 
   beforeAll(async () => {
     process.env.CHANNEL_TOKEN_KEY = 'clave-de-prueba-para-cifrar';
@@ -244,9 +283,37 @@ describe.skipIf(!url)('auditar contra Mercado Libre simulado', () => {
         }
         const item = u.pathname.match(/^\/items\/(\w+)$/);
         if (item && item[1] === 'MLA9000099') return res.writeHead(429, { 'Retry-After': '0' }).end('{}');
-        if (item) return send(200, { id: item[1], tags: tags[item[1]] ?? [], domain_id: 'MLA-ENGINE_PARTS', user_product_id: null });
+        if (item) return send(200, { id: item[1], tags: tags[item[1]] ?? [], domain_id: 'MLA-ENGINE_PARTS', user_product_id: upOf[item[1]] ?? null });
         const compat = u.pathname.match(/^\/(items|user-products)\/(\w+)\/compatibilities$/);
-        if (compat) return loaded[compat[2]] ? send(200, { products: loaded[compat[2]] }) : send(404, { message: 'not found' });
+        // Lo de una publicación con producto de usuario vive en el producto.
+        const listOf = (id: string) => (compat?.[1] === 'items' && upOf[id] ? upOf[id] : id);
+        if (compat && req.method === 'PUT') {
+          const body = JSON.parse(raw) as (typeof writes)[number]['body'];
+          const families = body.create?.products_families ?? [];
+          const year = (f: (typeof families)[number]) => f.attributes.find((a) => a.id === 'VEHICLE_YEAR')?.value_id;
+          if (rejectYear && families.some((f) => year(f) === rejectYear)) {
+            return send(400, { message: 'Invalid compatibilities', error: 'bad_request', cause: [{ type: 'error', code: 'invalid.family', message: 'El grupo no tiene vehículos para esta categoría.' }] });
+          }
+          writes.push({ item: compat[2], body });
+          const key = listOf(compat[2]);
+          const gone = new Set((body.delete?.products ?? []).map((p) => p.id));
+          const list = (loaded[key] ?? []).filter((v) => !gone.has((v as { catalog_product_id?: string }).catalog_product_id ?? ''));
+          for (const f of families) {
+            for (const [i, v] of CATALOG.entries()) {
+              const fits = f.attributes.every((a) => (a.value_ids ?? [a.value_id]).includes(v[a.id]?.[0]));
+              const id = `MLA7${i}`;
+              if (fits && !list.some((x) => (x as { catalog_product_id?: string }).catalog_product_id === id)) {
+                list.push({ id: `c-new-${i}`, catalog_product_id: id, catalog_product_name: `${v.BRAND[1]} ${v.MODEL[1]} ${v.VEHICLE_YEAR[1]} ${v.SHORT_VERSION[1]}`, source: 'SELLER' });
+              }
+            }
+          }
+          loaded[key] = list;
+          return send(200, { create: body.create ?? null, delete: body.delete ?? null });
+        }
+        if (compat) {
+          const key = listOf(compat[2]);
+          return loaded[key] ? send(200, { products: loaded[key] }) : send(404, { message: 'not found' });
+        }
         if (u.pathname === '/products/search') return send(200, { paging: { total: 0 }, results: [] });
         send(404, {});
       });
@@ -266,6 +333,9 @@ describe.skipIf(!url)('auditar contra Mercado Libre simulado', () => {
     catalogDelay = 0;
     for (const k of Object.keys(loaded)) delete loaded[k];
     for (const k of Object.keys(tags)) delete tags[k];
+    for (const k of Object.keys(upOf)) delete upOf[k];
+    writes.length = 0;
+    rejectYear = null;
     await db.$executeRawUnsafe('TRUNCATE channel_catalog_values, publication_compatibilities, channel_copies, publications, products, channel_connections, stores, channels, accounts, users CASCADE');
     const channel = await db.channel.create({ data: { kind: 'MERCADOLIBRE', name: 'Mercado Libre' } });
     accountId = (await db.account.create({ data: { slug: 'prueba', name: 'Cuenta de prueba' } })).id;
@@ -474,5 +544,113 @@ describe.skipIf(!url)('auditar contra Mercado Libre simulado', () => {
     expect(r.catalogo?.busqueda_de_vehiculos).toEqual({ paging: { total: 0 }, results: [] });
     // Desde 2012: el 2012 y el 2018.
     expect(r.fichas[0].lineas[0]).toMatchObject({ estado: 'traducida', grupos: 2 });
+  });
+  // ───────────────────────────── La subida ─────────────────────────────
+
+  // La Amarok de la ficha, con dos opciones de venta que comparten el producto de usuario MLAU1.
+  async function amarokWithExtras() {
+    const amarok = await product('Subconjunto de prueba Amarok', [{ vehicleBrand: 'Volkswagen', model: 'Amarok', engine: '2.0 TDI', yearFrom: 2010, yearTo: 2016 }]);
+    const main = await pub(amarok.id, 'MLA9000201', { up: 'MLAU1' });
+    const option = await pub(amarok.id, 'MLA9000202', { main: main.id, up: 'MLAU1' });
+    upOf.MLA9000201 = 'MLAU1';
+    upOf.MLA9000202 = 'MLAU1';
+    loaded.MLAU1 = [
+      { id: 'c-1', catalog_product_id: 'MLA71', catalog_product_name: 'Volkswagen Amarok 2011 2.0 TDI 180cv Highline', source: 'SELLER' },
+      { id: 'c-2', catalog_product_id: 'MLA801', catalog_product_name: 'Ford Mustang 2024 5.0 V8 GT', source: 'SELLER' },
+      { id: null, catalog_product_id: null, catalog_product_name: 'Toyota', source: 'CATALOGO', total: 2 },
+    ];
+    await auditAccountCompatibilities(db, { accountId, publicationIds: [main.id] });
+    return { amarok, main, option };
+  }
+
+  it('Por subir muestra lo que falta y lo que sobra una vez por producto de usuario, y la subida agrega y borra en la misma subida', async () => {
+    const { main, option } = await amarokWithExtras();
+    const rows = await listCompatibilitiesToPush(db, accountId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      codes: ['MLA9000201', 'MLA9000202'],
+      add: { count: 2, examples: ['Volkswagen Amarok 2010 2.0 diésel', 'Volkswagen Amarok 2012 2.0 diésel'] },
+      remove: { count: 1, examples: [{ vehicle: 'Ford Mustang 2024 5.0 V8 GT' }] },
+      byChannel: [{ brand: 'Toyota', count: 2 }],
+      blocked: null,
+    });
+
+    const r = await pushCompatibilities(db, { accountId, publicationIds: [option.id] });
+    expect(r.quedan).toEqual([]);
+    expect(r.subidas).toEqual([
+      expect.objectContaining({
+        publicaciones: ['MLA9000201', 'MLA9000202'],
+        resultado: 'subido',
+        agregados: { grupos: 2, ejemplos: ['Volkswagen Amarok 2010 2.0 diésel', 'Volkswagen Amarok 2012 2.0 diésel'] },
+        borrados: { cantidad: 1, ejemplos: ['Ford Mustang 2024 5.0 V8 GT'] },
+        // Lo que cargó el canal no se puede borrar desde la app: sigue sobrando.
+        despues: { faltan: 0, sobran: 1, a_revisar: 0 },
+      }),
+    ]);
+    // Se mandó una vez, a la principal: primero el borrado, después los grupos, con el origen que pide el canal.
+    expect(writes.map((w) => w.item)).toEqual(['MLA9000201', 'MLA9000201']);
+    expect(writes[0].body).toEqual({ delete: { products: [{ id: 'MLA801' }] } });
+    expect(writes[1].body.create?.products_families).toHaveLength(2);
+    expect(writes[1].body.create?.products_families[0]).toMatchObject({ domain_id: 'MLA-CARS_AND_VANS', creation_source: 'DEFAULT' });
+    // Queda guardado cómo quedó, en las dos opciones, y ya no hay nada por subir.
+    expect(await db.publicationCompatibility.findUniqueOrThrow({ where: { publicationId: main.id } })).toMatchObject({ missing: 0, extra: 1 });
+    expect(await listCompatibilitiesToPush(db, accountId)).toEqual([]);
+  });
+
+  it('manda solo lo que se mostró y sigue haciendo falta', async () => {
+    const { amarok } = await amarokWithExtras();
+    // Después de la auditoría, alguien cargó el 2010 a mano en el canal.
+    loaded.MLAU1.push({ id: 'c-3', catalog_product_id: 'MLA70', catalog_product_name: 'Volkswagen Amarok 2010 2.0 TDI 180cv Highline', source: 'SELLER' });
+    const r = await pushCompatibilities(db, { accountId });
+    expect(r.subidas[0]).toMatchObject({ resultado: 'subido', agregados: { grupos: 1, ejemplos: ['Volkswagen Amarok 2012 2.0 diésel'] }, borrados: { cantidad: 1 } });
+
+    // Si la ficha cambió después de la auditoría, no se manda nada: hay que mirar lo nuevo antes.
+    await auditAccountCompatibilities(db, { accountId });
+    loaded.MLAU1.push({ id: 'c-4', catalog_product_id: 'MLA802', catalog_product_name: 'Ford Mustang 2024 5.0 V8 GT Convertible', source: 'SELLER' });
+    await auditAccountCompatibilities(db, { accountId });
+    await db.compatibility.create({ data: { productId: amarok.id, position: 1, vehicleBrand: 'Peugeot', model: '308', engine: '1.6 HDi' } });
+    const sent = writes.length;
+    const again = await pushCompatibilities(db, { accountId });
+    expect(again.subidas[0]).toMatchObject({ resultado: 'salteada', motivo: expect.stringContaining('La ficha cambió') });
+    expect(writes.length).toBe(sent);
+  });
+
+  it('si el canal no acepta un grupo, dice cuál y por qué, y sube los demás', async () => {
+    await amarokWithExtras();
+    rejectYear = 'Y2012';
+    const r = await pushCompatibilities(db, { accountId });
+    expect(r.subidas[0]).toMatchObject({
+      resultado: 'en parte',
+      agregados: { grupos: 1, ejemplos: ['Volkswagen Amarok 2010 2.0 diésel'] },
+      borrados: { cantidad: 1 },
+      rechazos: [expect.stringContaining('Mercado Libre no aceptó las compatibilidades: El grupo no tiene vehículos para esta categoría.')],
+      despues: { faltan: 1 },
+    });
+  });
+
+  it('en una familia sube cada medida por su lado, aunque se pida una sola', async () => {
+    const kit = await product('Subconjunto de prueba Amarok en familia', [{ vehicleBrand: 'Volkswagen', model: 'Amarok', engine: '2.0 TDI', yearFrom: 2010, yearTo: 2012 }]);
+    const std = await pub(kit.id, 'MLA9000301', { up: 'MLAU31' });
+    const half = await pub(kit.id, 'MLA9000302', { up: 'MLAU32' });
+    upOf.MLA9000301 = 'MLAU31';
+    upOf.MLA9000302 = 'MLAU32';
+    await db.listingFamily.create({ data: { storeId, productId: kit.id, channelFamilyId: 'FAM-1', leadId: std.id, members: { connect: [{ id: std.id }, { id: half.id }] } } });
+    await auditAccountCompatibilities(db, { accountId, publicationIds: [std.id] });
+    const r = await pushCompatibilities(db, { accountId, publicationIds: [half.id] });
+    expect(r.subidas.map((x) => [x.publicaciones, x.resultado, x.agregados.grupos])).toEqual([
+      [['MLA9000301'], 'subido', 3],
+      [['MLA9000302'], 'subido', 3],
+    ]);
+    expect(new Set(writes.map((w) => w.item))).toEqual(new Set(['MLA9000301', 'MLA9000302']));
+  });
+
+  it('sin ficha no se sube nada, ni se borra lo cargado', async () => {
+    const empty = await product('Producto de prueba sin ficha', []);
+    const p = await pub(empty.id, 'MLA9000401');
+    loaded.MLA9000401 = [{ id: 'c-9', catalog_product_id: 'MLA820', catalog_product_name: 'Volkswagen Amarok 2011 2.0', source: 'SELLER' }];
+    await auditAccountCompatibilities(db, { accountId, publicationIds: [p.id] });
+    expect(await listCompatibilitiesToPush(db, accountId)).toEqual([]);
+    expect(await pushCompatibilities(db, { accountId })).toEqual({ subidas: [], quedan: [] });
+    expect(writes).toEqual([]);
   });
 });

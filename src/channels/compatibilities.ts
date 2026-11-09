@@ -12,6 +12,8 @@ export type {
   ChannelCompatibilities,
   ChannelCompatibilityRead,
   ChannelVehicle,
+  CompatibilityChange,
+  CompatibilityWriteResult,
 } from './compatibilities-types';
 
 const COMPATIBILITIES: Partial<Record<ChannelKind, ChannelCompatibilities>> = {
