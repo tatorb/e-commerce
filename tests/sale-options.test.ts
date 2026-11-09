@@ -5,7 +5,7 @@ import { chooseMain, optionListPrice, planMainOptions, samePlanOptions, type Opt
 import { PRICING_DEFAULTS } from '@/domain/pricing';
 import { planClash } from '@/lib/channel-push';
 import { setProductCosts } from '@/lib/costs';
-import { saveFlatPrice, savePriceDecision } from '@/lib/pricing';
+import { loadPriceStep, saveFlatPrice, savePriceDecision } from '@/lib/pricing';
 import { flatProfit, optionPriceForProfit, resultAt } from '@/domain/option-table';
 import { statusReasonOf } from '@/channels/mercadolibre/listings';
 import { familyMeasures, type FamilyMember } from '@/lib/families';
@@ -283,5 +283,22 @@ describe.skipIf(!url)('agrupar las opciones de venta en la base', () => {
     expect(Number(by.MLA32.price)).toBe(six);
     expect(by.MLA33.price).toBeNull();
     expect(by.MLA34.price).toBeNull();
+  });
+
+  it('el paso Precio trae cada publicación de la pestaña, la principal y sus otras formas de cobro, con su precio', async () => {
+    const product = await db.product.create({ data: { accountId, name: 'Subconjunto SP-7', variants: { create: [{ sku: 'SP-7-00', measure: 'STD', position: 0 }] } } });
+    await setProductCosts(db, { accountId, productId: product.id, costs: { '': '100000' } });
+    const main = await db.publication.create({ data: { productId: product.id, storeId, externalId: 'MLA40', title: 'Subconjunto', price: 250_000 } });
+    const low = await db.publication.create({ data: { productId: product.id, storeId, externalId: 'MLA41', title: 'Subconjunto', price: 270_000 } });
+    for (const [p, installments, price] of [[main, 0, 250_000], [low, 1, 270_000]] as const) {
+      await db.channelCopy.create({ data: { publicationId: p.id, readAt: new Date(), status: 'ACTIVE', installments, price, discount: 0, channelProductId: 'UP-SP7' } });
+    }
+    await assignSaleOptions(db, storeId);
+    const step = (await loadPriceStep(db, accountId, main.id))!;
+    expect(step.groups).toHaveLength(1);
+    expect(step.groups[0].options).toEqual([
+      expect.objectContaining({ id: main.id, externalId: 'MLA40', main: true, mainId: main.id, channelInstallments: 0, channelPrice: 250_000 }),
+      expect.objectContaining({ id: low.id, externalId: 'MLA41', main: false, mainId: main.id, channelInstallments: 1, channelPrice: 270_000 }),
+    ]);
   });
 });

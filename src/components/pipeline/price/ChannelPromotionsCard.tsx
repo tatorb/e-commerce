@@ -20,6 +20,8 @@ import { CampaignList, type CampaignDraft, type MarginContext } from './Campaign
 export type PromotionsState = { kind: 'loading' } | { kind: 'done'; result: PromotionsResult };
 
 /** Pregunta al canal al abrir y cada vez que se pide, por esas publicaciones y las demás medidas de sus familias. */
+const NOT_IN_CHANNEL: PromotionsState = { kind: 'done', result: { ok: false, error: 'Esta forma de cobro todavía no está en el canal: no tiene promociones.' } };
+
 export function usePromotions(accountSlug: string, publicationIds: string[]) {
   const [state, setState] = useState<PromotionsState>({ kind: 'loading' });
   const key = publicationIds.join(',');
@@ -27,6 +29,8 @@ export function usePromotions(accountSlug: string, publicationIds: string[]) {
   const asked = useRef(0);
   const ask = useCallback(() => {
     const n = ++asked.current;
+    // Una forma de cobro que todavía no existe no tiene nada que preguntarle al canal.
+    if (!key) return;
     readPromotionsAction(accountSlug, key.split(','), { family: true })
       .catch((): PromotionsResult => ({ ok: false, error: 'Se cortó la conexión con la app. Probá de nuevo.' }))
       .then((result) => n === asked.current && setState({ kind: 'done', result }));
@@ -37,6 +41,7 @@ export function usePromotions(accountSlug: string, publicationIds: string[]) {
     ask();
   };
   // Después de sumarse o salir: se vuelve a preguntar sin borrar lo que se ve.
+  if (!key) return { state: NOT_IN_CHANNEL, reload, refresh: ask };
   return { state, reload, refresh: ask };
 }
 

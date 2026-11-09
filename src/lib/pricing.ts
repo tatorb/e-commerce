@@ -19,6 +19,7 @@ import {
 } from '@/domain/pricing';
 import { COST_SELECT, costLines } from './costs';
 import { singleMeasure } from './stock-plan';
+import { measuresOf } from './media';
 import { flatProfit, optionPriceForProfit } from '@/domain/option-table';
 
 // El paso Precio: los parámetros de la cuenta, el costo de cada medida y los
@@ -151,7 +152,7 @@ export async function loadPriceStep(db: Db, accountId: string, publicationId: st
         orderBy: { position: 'asc' },
         select: { title: true, sellerName: true, brand: true, url: true, surveyedAt: true, listPrice: true, discountPct: true, installments: true, freeShipping: true },
       },
-      product: { select: { id: true, name: true, brand: true, pricingOverrides: true } },
+      product: { select: { id: true, name: true, brand: true, pricingOverrides: true, variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } } } },
     },
   });
   if (!p) return null;
@@ -162,18 +163,25 @@ export async function loadPriceStep(db: Db, accountId: string, publicationId: st
     return offer ? [{ title: c.title, sellerName: c.sellerName, brand: c.brand, url: c.url, surveyedAt: dayOf(c.surveyedAt), offer }] : [];
   });
   const groups = await priceGroups(db, p.id);
-  const anchors = await db.publication.findMany({
-    where: { id: { in: groups.map((g) => g.anchorId) } },
+  // Cada publicación de las pestañas, la principal de cada medida y sus otras opciones de venta: el simulador muestra la que se elige.
+  const mainIds = groups.flatMap((g) => g.publicationIds);
+  const rows = await db.publication.findMany({
+    where: { OR: [{ id: { in: mainIds } }, { mainOptionId: { in: mainIds } }] },
+    orderBy: { createdAt: 'asc' },
     select: {
       id: true,
+      externalId: true,
+      mainOptionId: true,
+      variantKey: true,
+      channelStatus: true,
       price: true,
       installments: true,
       discount: true,
-      channelCopy: { select: { price: true, installments: true, discount: true, discountUntil: true, missingSince: true } },
+      channelCopy: { select: { price: true, installments: true, discount: true, discountUntil: true, missingSince: true, status: true } },
       priceDecisions: { orderBy: { decidedAt: 'desc' }, take: 1, include: { decidedBy: { select: { name: true } } } },
     },
   });
-  const anchorOf = new Map(anchors.map((a) => [a.id, a]));
+  const rowOf = new Map(rows.map((r) => [r.id, r]));
   return {
     publicationId: p.id,
     productId: p.product.id,
@@ -187,42 +195,79 @@ export async function loadPriceStep(db: Db, accountId: string, publicationId: st
     overrides,
     competitors,
     competitorsWithoutPrice: p.competitors.length - competitors.length,
-    groups: groups.map((g) => {
-      const a = anchorOf.get(g.anchorId)!;
-      const decision = a.priceDecisions[0] ?? null;
-      const copy = a.channelCopy && !a.channelCopy.missingSince ? a.channelCopy : null;
-      return {
-        ...g,
-        // El precio publicado: el de la app y el que se leyó del canal.
-        price: a.price === null ? null : Number(a.price),
-        channelPrice: copy && copy.price !== null ? Number(copy.price) : null,
-        // Las cuotas y el descuento de la app, y los que se leyeron del canal.
-        installments: a.installments,
-        discount: a.discount === null ? null : Number(a.discount),
-        channelInstallments: copy?.installments ?? null,
-        channelDiscount: copy && copy.discount !== null ? Number(copy.discount) : null,
-        // Hasta cuándo dura el descuento que subió la app. Se renueva solo antes de que venza.
-        discountUntil: copy?.discountUntil ?? null,
-        decision: decision
-          ? {
-              listPrice: Number(decision.listPrice),
-              discountPct: Number(decision.discountPct),
-              installments: decision.installments,
-              finalPrice: Number(decision.finalPrice),
-              marginPct: Number(decision.marginPct),
-              minMarginPct: Number(decision.minMarginPct),
-              belowMinConfirmed: decision.belowMinConfirmed,
-              decidedAt: decision.decidedAt,
-              decidedBy: decision.decidedBy?.name ?? null,
-            }
-          : null,
-      };
-    }),
+    groups: groups.map((g) => ({
+      ...g,
+      ...priceFace(rowOf.get(g.anchorId)!),
+      // Las publicaciones de la pestaña, una por medida y forma de cobro, cada una con lo suyo.
+      options: rows
+        .filter((r) => g.publicationIds.includes(r.id) || (r.mainOptionId !== null && g.publicationIds.includes(r.mainOptionId)))
+        .map((r) => ({
+          id: r.id,
+          externalId: r.externalId,
+          // La principal de su medida: la que se trabaja en el pipeline.
+          mainId: r.mainOptionId ?? r.id,
+          main: r.mainOptionId === null,
+          // La medida que vende, si se sabe.
+          measure: r.variantKey ? (measuresOf(p.product.variants).find((m) => m.key === r.variantKey)?.label ?? null) : null,
+          status: r.channelCopy?.status ?? r.channelStatus,
+          ...priceFace(r),
+        })),
+    })),
+  };
+}
+
+type FaceRow = {
+  price: Prisma.Decimal | null;
+  installments: number | null;
+  discount: Prisma.Decimal | null;
+  channelCopy: { price: Prisma.Decimal | null; installments: number | null; discount: Prisma.Decimal | null; discountUntil: Date | null; missingSince: Date | null } | null;
+  priceDecisions: {
+    listPrice: Prisma.Decimal;
+    discountPct: Prisma.Decimal;
+    installments: number;
+    finalPrice: Prisma.Decimal;
+    marginPct: Prisma.Decimal;
+    minMarginPct: Prisma.Decimal;
+    belowMinConfirmed: boolean;
+    decidedAt: Date;
+    decidedBy: { name: string } | null;
+  }[];
+};
+
+/** El precio de una publicación: el de la app, el del canal y el último guardado. */
+function priceFace(a: FaceRow) {
+  const decision = a.priceDecisions[0] ?? null;
+  const copy = a.channelCopy && !a.channelCopy.missingSince ? a.channelCopy : null;
+  return {
+    // El precio publicado: el de la app y el que se leyó del canal.
+    price: a.price === null ? null : Number(a.price),
+    channelPrice: copy && copy.price !== null ? Number(copy.price) : null,
+    // Las cuotas y el descuento de la app, y los que se leyeron del canal.
+    installments: a.installments,
+    discount: a.discount === null ? null : Number(a.discount),
+    channelInstallments: copy?.installments ?? null,
+    channelDiscount: copy && copy.discount !== null ? Number(copy.discount) : null,
+    // Hasta cuándo dura el descuento que subió la app. Se renueva solo antes de que venza.
+    discountUntil: copy?.discountUntil ?? null,
+    decision: decision
+      ? {
+          listPrice: Number(decision.listPrice),
+          discountPct: Number(decision.discountPct),
+          installments: decision.installments,
+          finalPrice: Number(decision.finalPrice),
+          marginPct: Number(decision.marginPct),
+          minMarginPct: Number(decision.minMarginPct),
+          belowMinConfirmed: decision.belowMinConfirmed,
+          decidedAt: decision.decidedAt,
+          decidedBy: decision.decidedBy?.name ?? null,
+        }
+      : null,
   };
 }
 
 export type PriceStepData = NonNullable<Awaited<ReturnType<typeof loadPriceStep>>>;
 export type PriceGroupData = PriceStepData['groups'][number];
+export type PriceOptionData = PriceGroupData['options'][number];
 
 /**
  * La pestaña del paso Precio de la publicación, con las que comparten su

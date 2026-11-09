@@ -38,7 +38,8 @@ import {
   type PricingKey,
   type PricingParams,
 } from '@/domain/pricing';
-import type { PriceGroupData, PriceStepData } from '@/lib/pricing';
+import type { PriceGroupData, PriceOptionData, PriceStepData } from '@/lib/pricing';
+import { selectionKey, type PriceSelection } from './PriceWorkspace';
 import { queueFamilyCampaignAction, savePriceDecisionAction } from '@/app/a/[cuenta]/pipeline/price-actions';
 import { pushPriceAction } from '@/app/a/[cuenta]/simulador-precio/actions';
 import { formatDateTime } from '@/lib/format';
@@ -104,7 +105,53 @@ type StepProps = {
   settingsHref: string;
   // Con push, además de guardar se puede subir al canal en el momento, como en el simulador de precio.
   push?: boolean;
+  // La publicación elegida en la tabla por modo de compra; sin elegir, la principal de la primera pestaña.
+  selected?: PriceSelection | null;
+  onSelect?: (s: PriceSelection) => void;
 };
+
+/** Qué se muestra abajo: la principal de la medida (con su pestaña), otra opción de venta o una forma de cobro que no existe. */
+type View = { mode: 'main' | 'option' | 'missing'; key: string; plan: InstallmentPlan; option: PriceOptionData | null; group: PriceGroupData };
+
+const planOf = (o: { channelInstallments: number | null; installments: number | null }): InstallmentPlan => {
+  const p = o.channelInstallments ?? o.installments ?? 0;
+  return isInstallmentPlan(p) ? p : 0;
+};
+
+/** La pestaña y lo que se ve de la publicación elegida. */
+function viewOf(groups: PriceGroupData[], selected: PriceSelection | null | undefined): View {
+  if (selected && 'missing' in selected) {
+    const g = groups.find((x) => x.options.some((o) => o.id === selected.missing.mainId));
+    if (g && isInstallmentPlan(selected.missing.plan)) {
+      const plan = selected.missing.plan;
+      // Una forma de cobro que la medida no tiene: se simula sin nada guardado ni del canal.
+      const empty = { price: null, channelPrice: null, installments: plan, discount: 0, channelInstallments: null, channelDiscount: null, discountUntil: null, decision: null };
+      const measure = g.options.find((o) => o.id === selected.missing.mainId)?.measure;
+      return { mode: 'missing', key: selectionKey(selected), plan, option: null, group: { ...g, ...empty, publicationIds: [], pricesDiffer: false, measures: measure ? [measure] : g.measures } };
+    }
+  }
+  if (selected && 'id' in selected) {
+    for (const g of groups) {
+      const o = g.options.find((x) => x.id === selected.id);
+      if (!o) continue;
+      // La principal de la medida muestra la pestaña entera: en una familia, el precio vale para las medidas que cuestan igual.
+      if (o.main && g.publicationIds.includes(o.id)) return { mode: 'main', key: selectionKey(selected), plan: planOf(g), option: o, group: g };
+      const face = {
+        price: o.price,
+        channelPrice: o.channelPrice,
+        installments: o.installments,
+        discount: o.discount,
+        channelInstallments: o.channelInstallments,
+        channelDiscount: o.channelDiscount,
+        discountUntil: o.discountUntil,
+        decision: o.decision,
+      };
+      return { mode: 'option', key: selectionKey(selected), plan: planOf(o), option: o, group: { ...g, ...face, anchorId: o.id, publicationIds: [o.id], pricesDiffer: false, measures: o.measure ? [o.measure] : g.measures } };
+    }
+  }
+  const g = groups[0];
+  return { mode: 'main', key: g.anchorId, plan: planOf(g), option: g.options.find((o) => o.id === g.anchorId) ?? null, group: g };
+}
 
 /** El nombre de una pestaña: sus medidas y su costo. */
 const groupLabel = (g: PriceGroupData) => `${measuresText(g.measures) || 'Sin medida'} · ${g.cost !== null ? formatPrice(g.cost) : 'sin costo'}`;
@@ -168,12 +215,26 @@ function PromoResult({
 
 export function PriceStep(props: StepProps) {
   const { groups } = props.data;
+  const view = viewOf(groups, props.selected);
   const [chosen, setChosen] = useState(groups[0].anchorId);
-  if (groups.length === 1) return <PriceCalculator {...props} group={groups[0]} />;
-  // Si las pestañas cambiaron, por ejemplo porque se cambió un costo, vuelve a la primera.
-  const active = groups.some((g) => g.anchorId === chosen) ? chosen : groups[0].anchorId;
+  // La pestaña de la publicación elegida: la que tiene esa publicación, o la principal de la que falta.
+  const viewTab = groups.find((g) => g.options.some((o) => o.id === (view.option?.id ?? '') || (view.mode === 'missing' && o.id === view.group.anchorId)))?.anchorId ?? groups[0].anchorId;
+  const calculator = (g: PriceGroupData) => {
+    // La pestaña elegida muestra la publicación elegida; las demás, su principal.
+    const v = g.anchorId === viewTab ? view : viewOf(groups, { id: g.anchorId });
+    return <PriceCalculator key={v.key} {...props} group={v.group} view={v} />;
+  };
+  if (groups.length === 1) return calculator(groups[0]);
+  const active = props.selected ? viewTab : groups.some((g) => g.anchorId === chosen) ? chosen : groups[0].anchorId;
   return (
-    <Tabs value={active} onValueChange={setChosen} className="space-y-4">
+    <Tabs
+      value={active}
+      onValueChange={(v) => {
+        setChosen(v);
+        props.onSelect?.({ id: v });
+      }}
+      className="space-y-4"
+    >
       <div className="space-y-2">
         <TabsList aria-label="Medidas con distinto costo">
           {groups.map((g) => (
@@ -182,19 +243,25 @@ export function PriceStep(props: StepProps) {
             </TabsTrigger>
           ))}
         </TabsList>
-        <p className="text-sm text-muted-foreground">Las medidas cuestan distinto: cada pestaña tiene su precio, sus cuotas y su descuento.</p>
+        <p className="text-sm text-muted-foreground">Las medidas cuestan distinto: cada pestaña tiene su precio.</p>
       </div>
       {/* Todas quedan armadas, así lo que se cambió en una no se pierde al pasar a otra. */}
       {groups.map((g) => (
         <TabsContent key={g.anchorId} value={g.anchorId} forceMount className="mt-0 data-[state=inactive]:hidden">
-          <PriceCalculator {...props} group={g} />
+          {calculator(g)}
         </TabsContent>
       ))}
     </Tabs>
   );
 }
 
-function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, settingsHref, push = false }: StepProps & { group: PriceGroupData }) {
+function PriceCalculator({ accountSlug, data, group, view, today, timeZone, infoHref, settingsHref, push = false, onSelect }: StepProps & { group: PriceGroupData; view: View }) {
+  // Copiar la forma de cobro de un competidor es ir a esa fila de la tabla: la publicación de la medida con esas cuotas, o la que falta.
+  const copyPlan = (p: InstallmentPlan) => {
+    const mainId = view.option?.mainId ?? group.anchorId;
+    const same = group.options.find((o) => o.mainId === mainId && planOf(o) === p);
+    onSelect?.(same ? { id: same.id } : { missing: { mainId, plan: p } });
+  };
   const router = useRouter();
   const account = data.account;
   const costHref = `/a/${accountSlug}/productos/${data.productId}?seccion=stock`;
@@ -210,8 +277,8 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
 
   // Lo que tiene hoy la publicación, que puede haber llegado del canal; si no, lo último que se guardó.
   const start = group.decision ?? null;
-  const firstPlan = group.installments !== null && isInstallmentPlan(group.installments) ? group.installments : (start?.installments ?? 0);
-  const [plan, setPlan] = useState<InstallmentPlan>(isInstallmentPlan(firstPlan) ? firstPlan : 0);
+  // La forma de cobro es la de la publicación elegida y no se cambia: otra forma de cobro es otra publicación.
+  const plan = view.plan;
   const [discount, setDiscount] = useState(group.discount ?? start?.discountPct ?? 0);
   const firstPrice = group.price ?? start?.listPrice ?? (cost ? targetListPrice(cost, params, 0, 0) : null) ?? 0;
   const [listText, setListText] = useState(firstPrice ? amountText(firstPrice) : '');
@@ -340,10 +407,12 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
     router.refresh();
   }
   // Con el precio cambiado, se guarda si el precio se puede guardar; si no, la campaña abierta, si entra.
-  const canSave = !pending && (dirty ? ready && !(below && !confirm) && !outOfRange : campaign !== null && !campaign.problem);
+  // Por ahora se guarda desde la principal de la medida: guardar una sola forma de cobro, aparte, llega después.
+  const editable = view.mode === 'main';
+  const canSave = editable && !pending && (dirty ? ready && !(below && !confirm) && !outOfRange : campaign !== null && !campaign.problem);
   const saveLabel = dirty && campaign ? 'Guardar precio y campaña' : campaign ? 'Guardar campaña' : 'Guardar precio';
   // Subir en el momento, solo si ya está publicada: sin cambios, sube lo que quedó guardado en Por subir.
-  const canPush = push && group.channelPrice !== null;
+  const canPush = editable && push && group.channelPrice !== null;
   const pushLabel = dirty || campaign ? 'Guardar y subir' : `Subir a ${data.channelName}`;
 
   const levelBox = ready ? LEVEL[sim.level] : null;
@@ -352,6 +421,15 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
 
   return (
     <div className="space-y-4 md:space-y-6">
+      <p className="rounded-md border bg-muted/30 px-3 py-2 text-sm" role="status">
+        Viendo{' '}
+        <span className="font-semibold">
+          {view.mode === 'missing' ? `${planLabel(plan).toLowerCase()}, que todavía no existe` : (view.option?.externalId ?? 'la publicación sin publicar')}
+        </span>
+        {view.mode !== 'missing' ? ` · ${planLabel(plan).toLowerCase()}` : ''}
+        {view.mode === 'main' ? ' · la principal' : ''}
+        {group.measures.length > 0 ? ` · ${group.measures.length === 1 ? 'medida' : 'medidas'} ${measuresText(group.measures)}` : ''}. Para ver otra, elegila en la tabla de arriba.
+      </p>
       <div className="grid gap-4 md:gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
         <SectionCard
           title="Simulador"
@@ -386,44 +464,18 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
             </div>
 
             <div className="space-y-1.5">
-              <p className="text-sm font-medium">Cuotas</p>
-              <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Cuotas">
-                {INSTALLMENT_PLANS.map((p) => {
-                  const enabled = plans.includes(p);
-                  return (
-                    <button
-                      key={p}
-                      type="button"
-                      role="radio"
-                      aria-checked={plan === p}
-                      disabled={!enabled}
-                      title={
-                        !enabled
-                          ? `Cargá el costo de ${planLabel(p).toLowerCase()} en Ajustes > Precios`
-                          : p === LOW_INTEREST_PLAN
-                            ? 'De 3 a 12 cuotas con interés bajo: el comprador paga parte del interés'
-                            : undefined
-                      }
-                      onClick={() => change(() => setPlan(p))}
-                      className={cn(
-                        'rounded-full border px-3 py-1 text-sm transition-colors',
-                        plan === p ? 'border-foreground bg-foreground text-background' : 'bg-background text-muted-foreground hover:text-foreground',
-                        !enabled && 'cursor-not-allowed opacity-40 hover:text-muted-foreground',
-                      )}
-                    >
-                      {planButton(p)}
-                    </button>
-                  );
-                })}
-              </div>
-              {group.channelInstallments !== null ? (
-                <p className="text-xs text-muted-foreground">
-                  En {data.channelName}: {planLabel(group.channelInstallments).toLowerCase()}.
-                </p>
-              ) : null}
-              {plans.length < INSTALLMENT_PLANS.length ? (
-                <p className="text-xs text-muted-foreground">
-                  Los planes sin costo cargado no se pueden elegir: se cargan en{' '}
+              <p className="text-sm font-medium">Forma de cobro</p>
+              <p className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full border border-foreground bg-foreground px-3 py-1 text-sm text-background">{planButton(plan)}</span>
+                <span className="text-xs text-muted-foreground">
+                  {view.mode === 'missing'
+                    ? 'La medida todavía no tiene esta forma de cobro: acá solo se simula.'
+                    : 'Es la de esta publicación y no se cambia acá: para ver otra forma de cobro, elegila en la tabla de arriba.'}
+                </span>
+              </p>
+              {!plans.includes(plan) ? (
+                <p className="text-xs text-amber-700">
+                  Falta cargar el costo de {planLabel(plan).toLowerCase()} en{' '}
                   <Link href={settingsHref} className="text-primary underline-offset-4 hover:underline">
                     Ajustes &gt; Precios
                   </Link>
@@ -476,19 +528,6 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
                 onClick={() => change(() => setList(cost ? targetListPrice(cost, params, plan, discount) : null))}
               >
                 Publicar al objetivo
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={!cost || cushionListPrice(cost, params) === null}
-                onClick={() =>
-                  change(() => {
-                    setList(cost ? cushionListPrice(cost, params) : null);
-                    setNote(`Este precio aguanta ${CUSHION.plan} cuotas y ${CUSHION.discountPct} % de descuento sin bajar del margen mínimo.`);
-                  })
-                }
-              >
-                Objetivo + colchón {CUSHION.plan} cuotas y {CUSHION.discountPct} % off
               </Button>
             </div>
             {note ? <p className="text-xs text-muted-foreground">{note}</p> : null}
@@ -646,7 +685,7 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
         infoHref={infoHref}
         today={today}
         onMatch={(d) => change(() => setDiscount(Math.ceil(d * 100) / 100))}
-        onCopyPlan={(p) => change(() => setPlan(p))}
+        onCopyPlan={onSelect ? copyPlan : undefined}
       />
 
       <div className="grid gap-4 md:grid-cols-2 md:gap-6">
@@ -706,6 +745,15 @@ function PriceCalculator({ accountSlug, data, group, today, timeZone, infoHref, 
         description={`El precio, las cuotas y el descuento pasan a Por subir y se mandan a ${data.channelName} desde ahí. ${data.channelName} pone fin a los descuentos: antes de que venza, la app lo vuelve a subir sola.`}
       >
         <SectionBody>
+          {view.mode === 'option' ? (
+            <p className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900" role="status">
+              Esta forma de cobro se guarda desde la tabla de arriba, con el precio sin cuotas: toma la misma ganancia que las demás. Guardarla sola, con otro precio, llega en la próxima parte.
+            </p>
+          ) : view.mode === 'missing' ? (
+            <p className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900" role="status">
+              La medida todavía no tiene esta forma de cobro en {data.channelName}: lo de arriba es solo para simular. Crearla desde acá llega en la próxima parte.
+            </p>
+          ) : null}
           {start ? (
             <p className="text-sm text-muted-foreground">
               Último guardado: {formatPrice(start.listPrice)}

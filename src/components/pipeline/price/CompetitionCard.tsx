@@ -129,7 +129,8 @@ export function CompetitionCard({
   infoHref: string;
   today: string;
   onMatch: (discountPct: number) => void;
-  onCopyPlan: (plan: InstallmentPlan) => void;
+  // Ir a la forma de cobro del más barato. Sin esto, no se ofrece.
+  onCopyPlan?: (plan: InstallmentPlan) => void;
   disabled?: boolean;
 }) {
   const others = comparison?.rows.filter((r) => !r.mine) ?? [];
@@ -219,9 +220,11 @@ export function CompetitionCard({
           >
             Igualar al más barato con descuento
           </Button>
-          <Button size="sm" variant="outline" disabled={disabled || !copy || !copy.available || copy.plan === plan} onClick={() => copy && onCopyPlan(copy.plan)}>
-            Copiar sus cuotas
-          </Button>
+          {onCopyPlan ? (
+            <Button size="sm" variant="outline" disabled={disabled || !copy || !copy.available || copy.plan === plan} onClick={() => copy && onCopyPlan(copy.plan)}>
+              Ver su forma de cobro
+            </Button>
+          ) : null}
           {tooMuch ? <span className="text-xs text-muted-foreground">Igualarlo pide más de {MAX_DISCOUNT} % de descuento: queda en {MAX_DISCOUNT} %.</span> : null}
           {copy && !copy.available ? (
             <span className="text-xs text-muted-foreground">Ofrece {copy.plan} cuotas: cargá su costo en Ajustes &gt; Precios para usarlas.</span>

@@ -4,7 +4,7 @@ import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { PriceStep } from '@/components/pipeline/price/PriceStep';
+import { PriceWorkspace } from '@/components/pipeline/price/PriceWorkspace';
 import { SalesHistoryCard } from '@/components/sales/SalesHistoryCard';
 import { can } from '@/domain/access';
 import { todayIn } from '@/domain/applications';
@@ -124,7 +124,7 @@ export default async function PriceSimulatorPage({ params, searchParams }: { par
                 </Button>
               </div>
             </div>
-            <PriceStep
+            <PriceWorkspace
               key={pub.id}
               accountSlug={account.slug}
               data={price}

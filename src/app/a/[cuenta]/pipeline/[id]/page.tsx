@@ -23,7 +23,7 @@ import { listScoredPublications } from '@/lib/queries/scoring';
 import { familyLeadId, familyOf } from '@/lib/families';
 import { loadSaleOptions } from '@/lib/sale-options';
 import { SaleOptionsCard } from '@/components/sale-options/SaleOptionsCard';
-import { OptionTableCard } from '@/components/pipeline/price/OptionTableCard';
+import { PriceWorkspace } from '@/components/pipeline/price/PriceWorkspace';
 import { familyMeasuresText, loadPublicationFacts } from '@/lib/publication-facts';
 import { firstPhoto, productCovers } from '@/lib/queries/products';
 import { PipelineHistory } from '@/components/pipeline/PipelineHistory';
@@ -75,7 +75,6 @@ import { DescriptionStep } from '@/components/pipeline/description/DescriptionSt
 import { loadDescriptionStep } from '@/lib/descriptions';
 import { QaPanel } from '@/components/pipeline/qa/QaPanel';
 import { loadQaStep } from '@/lib/publication-qa';
-import { PriceStep } from '@/components/pipeline/price/PriceStep';
 import { campaignMarginFor, latestPriceDecision, loadPriceStep, productPricing } from '@/lib/pricing';
 import { PriceDecisionCard, type PendingCampaignRow } from '@/components/pipeline/price/PriceDecisionCard';
 import { PublicationPromotions } from '@/components/publication/PublicationPromotions';
@@ -504,8 +503,7 @@ export default async function PipelineStepPage({
           />
         ) : price && viewing === 'PRICE' ? (
           <>
-          <OptionTableCard accountSlug={account.slug} publicationId={pub.id} />
-          <PriceStep
+          <PriceWorkspace
             accountSlug={account.slug}
             data={price}
             today={todayIn(account.timezone)}

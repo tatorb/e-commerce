@@ -14,6 +14,7 @@ import { planLabel, type MarginLevel } from '@/domain/pricing';
 import type { OptionTable, TableGroup, TableOption } from '@/lib/option-table';
 import { loadOptionTableAction, saveFlatPriceAction, type OptionTableResult } from '@/app/a/[cuenta]/pipeline/option-table-actions';
 import { pushPriceAction } from '@/app/a/[cuenta]/simulador-precio/actions';
+import type { PriceSelection } from './PriceWorkspace';
 import { cn } from '@/lib/utils/cn';
 
 // La tabla de precios por modo de compra: se parte del precio sin cuotas y
@@ -74,6 +75,23 @@ function OptionCell({ o, channelName }: { o: TableOption; channelName: string })
   );
 }
 
+/** Elegir la publicación que muestran el simulador y lo demás de abajo. */
+function SelectButton({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(
+        'rounded-full border px-2.5 py-0.5 text-xs transition-colors',
+        active ? 'border-primary bg-primary text-primary-foreground' : 'text-muted-foreground hover:border-primary hover:text-primary',
+      )}
+    >
+      {active ? 'Viendo abajo' : label}
+    </button>
+  );
+}
+
 type Line = { text: string; bad: boolean };
 
 // Las que se pueden subir: publicadas, con algo por subir y que el canal no frenó ni está revisando.
@@ -86,6 +104,8 @@ function GroupTable({
   multiple,
   accountSlug,
   onSaved,
+  selected,
+  onSelect,
 }: {
   group: TableGroup;
   params: OptionTable['params'];
@@ -93,6 +113,8 @@ function GroupTable({
   multiple: boolean;
   accountSlug: string;
   onSaved: () => Promise<void>;
+  selected?: PriceSelection | null;
+  onSelect?: (s: PriceSelection) => void;
 }) {
   const router = useRouter();
   const [text, setText] = useState(group.flatPrice ? String(group.flatPrice) : '');
@@ -236,16 +258,28 @@ function GroupTable({
               ) : null}
               {m.modes.map((mode) => {
                 const calc = rows.find((r) => r.plan === mode.plan);
+                const isSelected = (id: string) => selected !== undefined && selected !== null && 'id' in selected && selected.id === id;
+                const missingSelected =
+                  mode.options.length === 0 && !!selected && 'missing' in selected && selected.missing.mainId === m.mainId && selected.missing.plan === mode.plan;
+                const rowSelected = missingSelected || mode.options.some((o) => isSelected(o.id));
                 return (
-                  <tr key={mode.plan} className="align-top">
+                  <tr key={mode.plan} className={cn('align-top', rowSelected && 'bg-primary/5 ring-1 ring-inset ring-primary/40')}>
                     <td className="px-3 py-2 font-medium">{calc?.label ?? planLabel(mode.plan)}</td>
                     <td className="px-3 py-2">
                       {mode.options.length === 0 ? (
-                        <span className="text-muted-foreground">No existe</span>
+                        <div className="space-y-1">
+                          <span className="text-muted-foreground">No existe</span>
+                          {onSelect ? (
+                            <SelectButton active={missingSelected} onClick={() => onSelect({ missing: { mainId: m.mainId, plan: mode.plan } })} label="Trabajarla" />
+                          ) : null}
+                        </div>
                       ) : (
                         <div className="space-y-1.5">
                           {mode.options.map((o) => (
-                            <OptionCell key={o.id} o={o} channelName={channelName} />
+                            <div key={o.id} className="space-y-1">
+                              <OptionCell o={o} channelName={channelName} />
+                              {onSelect ? <SelectButton active={isSelected(o.id)} onClick={() => onSelect({ id: o.id })} label="Ver abajo" /> : null}
+                            </div>
                           ))}
                         </div>
                       )}
@@ -298,7 +332,18 @@ function GroupTable({
   );
 }
 
-export function OptionTableCard({ accountSlug, publicationId }: { accountSlug: string; publicationId: string }) {
+export function OptionTableCard({
+  accountSlug,
+  publicationId,
+  selected,
+  onSelect,
+}: {
+  accountSlug: string;
+  publicationId: string;
+  // En el paso Precio: la fila que se elige es la que muestra el simulador de abajo.
+  selected?: PriceSelection | null;
+  onSelect?: (s: PriceSelection) => void;
+}) {
   const [result, setResult] = useState<OptionTableResult | null>(null);
   const load = useCallback(
     () => loadOptionTableAction(accountSlug, publicationId).catch((): OptionTableResult => ({ ok: false, error: 'Se cortó la conexión con la app. Probá de nuevo.' })),
@@ -342,6 +387,8 @@ export function OptionTableCard({ accountSlug, publicationId }: { accountSlug: s
                 multiple={result.table.groups.length > 1}
                 accountSlug={accountSlug}
                 onSaved={reload}
+                selected={selected}
+                onSelect={onSelect}
               />
             ))}
             {!result.table.campaignsRead ? <p className="text-xs text-muted-foreground">No se pudieron leer las campañas del canal.</p> : null}
