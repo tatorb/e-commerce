@@ -164,6 +164,12 @@ describe('lo cargado contra lo que sale de la ficha', () => {
     expect(auditCompatibilities([amarok], loadedOnes).incomplete).toEqual([]);
   });
 
+  it('un grupo sin nada cargado, en el que el catálogo no tiene nada para cargar, no falta', () => {
+    const a = auditCompatibilities([amarok], [v('Volkswagen Amarok 2015 2.0 TDI 180cv Highline')], new Map([['0|2014|2.0', 0], ['0|2015|2.0', 1]]));
+    expect(a.missing).toEqual([]);
+    expect(a.incomplete).toEqual([]);
+  });
+
   it('dice qué grupos faltan y qué sobra', () => {
     const a = auditCompatibilities([amarok], [v('Volkswagen Amarok 2015 2.0 TDI 180cv Highline'), v('Ford Mustang 2024 5.0 V8 GT'), v('Toyota', { byChannel: true, total: 2 })]);
     expect(a.covered).toBe(1);
@@ -259,6 +265,11 @@ const CATALOG: Vehicle[] = [
   car(PEUGEOT, ['M7', '208'], 2022, NAFTA, ['E3', '1.6'], ['P3', '115 hp'], ['V20', '1.6 Allure']),
   car(PEUGEOT, ['M7', '208'], 2022, NAFTA, ['E3', '1.6'], ['P3', '115 hp'], ['V21', '1.6 Active']),
   car(PEUGEOT, ['M7', '208'], 2022, NAFTA, ['E3', '1.6'], ['P9', '130 hp'], ['V22', '1.2 Gt']),
+  // Un grupo donde todo lo que tiene el catálogo no sale de la ficha.
+  car(PEUGEOT, ['M8', 'Partner'], 2018, NAFTA, ['E3', '1.6'], ['P3', '115 hp'], ['V30', '1.2 Confort']),
+  // Un grupo donde el catálogo cuenta un vehículo que el canal no carga al mandar el grupo.
+  car(FORD, ['M9', 'Ka'], 2020, NAFTA, ['E8', '1.5'], ['P10', '105 hp'], ['V31', '1.5 S']),
+  { ...car(FORD, ['M9', 'Ka'], 2020, NAFTA, ['E8', '1.5'], ['P10', '105 hp'], ['V32', '1.5 Se']), NOADD: ['1', '1'] },
   car(FORD, ['M3', 'Mustang'], 2024, NAFTA, ['E4', '5.0'], ['P5', '450 hp'], ['V6', '5.0 V8 GT']),
   car(MB, ['M4', 'Sprinter'], 2015, DIESEL, ['E5', '2.1'], ['P6', '163 hp'], ['V7', '415 CDI']),
 ];
@@ -340,7 +351,7 @@ describe.skipIf(!url)('auditar contra Mercado Libre simulado', () => {
             for (const [i, v] of CATALOG.entries()) {
               const fits = f.attributes.every((a) => (a.value_ids ?? [a.value_id]).includes(v[a.id]?.[0]));
               const id = `MLA7${i}`;
-              if (fits && !list.some((x) => (x as { catalog_product_id?: string }).catalog_product_id === id)) {
+              if (fits && !v.NOADD && !list.some((x) => (x as { catalog_product_id?: string }).catalog_product_id === id)) {
                 list.push({ id: `c-new-${i}`, catalog_product_id: id, catalog_product_name: `${v.BRAND[1]} ${v.MODEL[1]} ${v.VEHICLE_YEAR[1]} ${v.SHORT_VERSION[1]}`, source: 'SELLER' });
               }
             }
@@ -759,6 +770,47 @@ describe.skipIf(!url)('auditar contra Mercado Libre simulado', () => {
     // Lo que sobra se mostró y no se mandó: una subida normal lo borra sin volver a auditar.
     const full = await pushCompatibilities(db, { accountId, publicationIds: [main.id] });
     expect(full.subidas[0]).toMatchObject({ resultado: 'subido', agregados: { grupos: 0 }, borrados: { cantidad: 1, ejemplos: ['Ford Mustang 2024 5.0 V8 GT'] } });
+  });
+
+  it('si todo lo que trae un grupo no sale de la ficha, se saca y el grupo deja de faltar', async () => {
+    const kit = await product('Subconjunto de prueba Partner', [{ vehicleBrand: 'Peugeot', model: 'Partner', engine: '1.6', fuel: 'Nafta' }]);
+    const p = await pub(kit.id, 'MLA9000901', { up: 'MLAU9' });
+    upOf.MLA9000901 = 'MLAU9';
+    loaded.MLAU9 = [];
+    const r = await auditAccountCompatibilities(db, { accountId, publicationIds: [p.id] });
+    expect(r.publicaciones[0]).toMatchObject({ faltan: { cantidad: 1, ejemplos: ['Peugeot Partner 2018 1.6 nafta'] } });
+    const pushed = await pushCompatibilities(db, { accountId });
+    expect(pushed.subidas[0]).toMatchObject({
+      resultado: 'subido',
+      deshechos: { cantidad: 1, ejemplos: ['Peugeot Partner 2018 1.2 Confort'] },
+      despues: { faltan: 0, incompletos: 0, sobran: 0 },
+    });
+    expect(loaded.MLAU9).toEqual([]);
+    // Una auditoría nueva tampoco lo muestra: no queda nada por subir.
+    const again = await auditAccountCompatibilities(db, { accountId, publicationIds: [p.id] });
+    expect(again.publicaciones[0]).toMatchObject({ faltan: { cantidad: 0 }, incompletos: { cantidad: 0 } });
+    expect(await listCompatibilitiesToPush(db, accountId)).toEqual([]);
+  });
+
+  it('si el canal no carga todo lo que cuenta en un grupo, queda anotado y el grupo deja de estar pendiente', async () => {
+    const kit = await product('Subconjunto de prueba Ka', [{ vehicleBrand: 'Ford', model: 'Ka', engine: '1.5', fuel: 'Nafta' }]);
+    const p = await pub(kit.id, 'MLA9001001', { up: 'MLAU10' });
+    upOf.MLA9001001 = 'MLAU10';
+    loaded.MLAU10 = [];
+    await auditAccountCompatibilities(db, { accountId, publicationIds: [p.id] });
+    const pushed = await pushCompatibilities(db, { accountId });
+    // Cuenta dos y carga uno: no queda pendiente para siempre.
+    expect(pushed.subidas[0]).toMatchObject({
+      resultado: 'subido',
+      agregados: { grupos: 1 },
+      no_cargados: { grupos: 1, ejemplos: ['Ford Ka 2020 1.5 nafta: hay 1 de 2'] },
+      despues: { faltan: 0, incompletos: 0, sobran: 0 },
+      aviso: expect.stringContaining('no se muestra más como pendiente'),
+    });
+    expect(loaded.MLAU10).toHaveLength(1);
+    const again = await auditAccountCompatibilities(db, { accountId, publicationIds: [p.id] });
+    expect(again.publicaciones[0]).toMatchObject({ faltan: { cantidad: 0 }, incompletos: { cantidad: 0 } });
+    expect(await listCompatibilitiesToPush(db, accountId)).toEqual([]);
   });
 
   it('una auditoría de antes, que no dice qué se mostró, hay que repetirla antes de subir', async () => {

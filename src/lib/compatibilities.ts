@@ -71,9 +71,13 @@ type Catalog = {
   values(field: CatalogField, known: CatalogFilter[]): Promise<CatalogValue[] | null>;
   // Cuántos vehículos tiene el catálogo con esos filtros. Null si el canal no lo dice.
   count(filters: CatalogFilter[]): Promise<number | null>;
-  // Cuántos de esos se sabe que no salen de la ficha (ver rememberIntruders).
-  intruders(filters: CatalogFilter[]): Promise<number>;
+  // Lo que la app ya sabe del grupo por las subidas: cuántos vehículos no salen de la ficha
+  // (ver rememberIntruders), cuántos no carga el canal (ver rememberUnfilled) y si ya se mandó.
+  known(filters: CatalogFilter[]): Promise<KnownGroup>;
 };
+
+/** Lo que la app aprendió de un grupo al subirlo. */
+export type KnownGroup = { intruders: number; unfilled: number; tried: boolean };
 
 // ───────────────────────────── Lo que el catálogo mete de más en un grupo ─────────────────────────────
 
@@ -104,6 +108,35 @@ export async function rememberIntruders(
   const before = await knownIntruders(db, key, now);
   const list = [...before, ...args.vehicles.filter((v) => !before.some((b) => b.vehicleId === v.vehicleId))];
   const data = { values: list as unknown as Prisma.InputJsonValue, fetchedAt: now };
+  await db.channelCatalogValue.upsert({ where: { key }, create: { key, ...data }, update: data });
+}
+
+// ───────────────────────────── Lo que el catálogo cuenta y el canal no carga ─────────────────────────────
+
+const unfilledKey = (kind: ChannelKind, site: string, filters: CatalogFilter[]) => `${kind}:${site}:nocarga:${filtersText(filters)}`;
+
+/** Cuántos vehículos del grupo el canal cuenta pero no carga al mandarlo. Null si el grupo nunca se mandó. */
+async function knownUnfilled(db: Db, key: string, now: Date): Promise<number | null> {
+  const row = await db.channelCatalogValue.findUnique({ where: { key } });
+  return row && typeof row.values === 'number' && fresh(row.fetchedAt, now) ? row.values : null;
+}
+
+/**
+ * Anota que un grupo se mandó, y cuántos de los vehículos que el catálogo cuenta
+ * en él el canal no cargó (por ejemplo la Amarok 140 cv 2017: cuenta 12 y carga 9).
+ * Con add 0 solo anota que se mandó: así la relectura de la subida lo cuenta
+ * aunque siga sin nada cargado. Desde ahí la auditoría descuenta esos vehículos
+ * del número del grupo, así no queda pendiente para siempre.
+ */
+export async function rememberUnfilled(
+  db: Db,
+  args: { kind: ChannelKind; site: string; filters: CatalogFilter[]; add: number; now?: Date },
+): Promise<void> {
+  const now = args.now ?? new Date();
+  const key = unfilledKey(args.kind, args.site, args.filters);
+  const before = await knownUnfilled(db, key, now);
+  if (before !== null && args.add === 0) return;
+  const data = { values: (before ?? 0) + args.add, fetchedAt: now };
   await db.channelCatalogValue.upsert({ where: { key }, create: { key, ...data }, update: data });
 }
 
@@ -192,8 +225,12 @@ function catalogFor(
       }
       return pending;
     },
-    async intruders(filters) {
-      return (await knownIntruders(db, intrudersKey(args.kind, args.site, filters), args.now)).length;
+    async known(filters) {
+      const [intruders, unfilled] = await Promise.all([
+        knownIntruders(db, intrudersKey(args.kind, args.site, filters), args.now),
+        knownUnfilled(db, unfilledKey(args.kind, args.site, filters), args.now),
+      ]);
+      return { intruders: intruders.length, unfilled: unfilled ?? 0, tried: unfilled !== null || intruders.length > 0 };
     },
   };
 }
@@ -489,6 +526,8 @@ export type StoredAudit = {
   review: { vehicle: LoadedVehicle; reason: string }[];
   // El producto del canal que comparten las opciones de venta: lo cargado ahí vale para todas.
   productId?: string | null;
+  // Cuántos vehículos tiene que tener cada grupo contado (por groupKey), sin lo que la app sabe que no va.
+  counts?: Record<string, number>;
   // Lo que vio la persona en la última auditoría que pidió: la subida manda solo de acá.
   // Falta en las auditorías viejas: esas hay que repetirlas antes de subir.
   shown?: ShownForPush;
@@ -771,22 +810,26 @@ export async function auditAccountCompatibilities(
             extraByChannel: [],
             review: [],
           };
-    // A los grupos con algo cargado se les cuenta cuántos vehículos tiene el catálogo, para ver si están completos.
-    if (fichaLines.length > 0 && audit.covered > 0) {
+    // A los grupos con algo cargado se les cuenta cuántos vehículos tiene el catálogo, para ver si
+    // están completos. Los que no tienen nada se cuentan solo si ya se mandaron alguna vez: así se
+    // sabe si queda algo que el canal cargue.
+    const counts = new Map<string, number>();
+    if (fichaLines.length > 0) {
       const missingKeys = new Set(audit.missing.map(groupKey));
       const byKey = new Map<string, TargetGroup[]>();
       for (const l of lines) {
         if (l.status !== 'ok') continue;
-        for (const g of l.groups) if (!missingKeys.has(groupKey(g))) byKey.set(groupKey(g), [...(byKey.get(groupKey(g)) ?? []), g]);
+        for (const g of l.groups) byKey.set(groupKey(g), [...(byKey.get(groupKey(g)) ?? []), g]);
       }
-      const counts = new Map<string, number>();
       await Promise.all(
         [...byKey].map(async ([key, groups]) => {
-          // Sin los que se sabe que el catálogo mete de más y no salen de la ficha.
+          const known = await Promise.all(groups.map((g) => cat.known(g.filters as CatalogFilter[])));
+          if (missingKeys.has(key) && !known.some((k) => k.tried)) return;
+          // Sin lo que se sabe que no sale de la ficha ni lo que el canal no carga.
           const each = await Promise.all(
-            groups.map(async (g) => {
+            groups.map(async (g, i) => {
               const n = await cat.count(g.filters as CatalogFilter[]);
-              return n === null ? null : Math.max(0, n - (await cat.intruders(g.filters as CatalogFilter[])));
+              return n === null ? null : Math.max(0, n - known[i].intruders - known[i].unfilled);
             }),
           );
           if (each.every((n) => n !== null))
@@ -796,7 +839,7 @@ export async function auditAccountCompatibilities(
             );
         }),
       );
-      audit = auditCompatibilities(lines, loaded, counts);
+      if (counts.size > 0) audit = auditCompatibilities(lines, loaded, counts);
     }
     const status = t.channelCopy?.status ?? t.channelStatus;
     const byChannel = loaded.filter((v) => v.byChannel);
@@ -850,6 +893,7 @@ export async function auditAccountCompatibilities(
       extraByChannel: audit.extraByChannel,
       review: audit.review,
       productId: read.productId,
+      counts: Object.fromEntries(counts),
     };
     if (args.forPush) {
       const prev = await db.publicationCompatibility.findUnique({ where: { publicationId: t.id }, select: { audit: true } });

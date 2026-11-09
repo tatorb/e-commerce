@@ -385,6 +385,8 @@ export function auditCompatibilities(lines: TranslatedLine[], loaded: LoadedVehi
     const g = groups[0];
     const have = present.filter((p) => p.line === g.line && p.year === g.year && (!g.displacement || !p.displacement || p.displacement === g.displacement)).length;
     if (have === 0) {
+      // El catálogo no tiene nada que el canal cargue y salga de la ficha: no falta.
+      if (counts?.get(key) === 0) continue;
       out.missing.push(...groups);
       continue;
     }

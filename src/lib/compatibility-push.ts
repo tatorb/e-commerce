@@ -1,13 +1,14 @@
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { getChannelCompatibilities, type CatalogFilter, type ChannelVehicle, type CompatibilityWriteResult } from '@/channels/compatibilities';
 import { ConnectError } from '@/channels/connect';
-import { hasWords, yearOf, type TargetGroup } from '@/domain/compatibilities';
+import { groupKey, hasWords, yearOf, type TargetGroup } from '@/domain/compatibilities';
 import {
   auditAccountCompatibilities,
   groupName,
   groupsToAdd,
   linesKey,
   rememberIntruders,
+  rememberUnfilled,
   removableExtra,
   withRelated,
   type StoredAudit,
@@ -185,6 +186,8 @@ export type CompatibilityPushOutcome = {
   borrados: { cantidad: number; ejemplos: string[] };
   // Lo que el canal metió al agregar los grupos y no sale de la ficha: se sacó en la misma subida.
   deshechos?: { cantidad: number; ejemplos: string[] };
+  // Grupos recién mandados en los que el canal no cargó todo lo que cuenta: queda anotado.
+  no_cargados?: { grupos: number; ejemplos: string[] };
   motivo?: string;
   rechazos?: string[];
   // Cómo quedó al volver a auditar después de mandar.
@@ -361,17 +364,23 @@ async function pushRow(db: Db, accountId: string, row: CompatibilityPushRow, add
   // Lo mandado, aunque el canal lo haya rechazado: no se repite sin una auditoría nueva.
   await markSent(db, row.publicationIds, add.map(groupName), remove.map((x) => x.vehicle.vehicleId!));
 
+  const rejectedIdx = new Set(result?.rejectedGroups.map((r) => r.index) ?? []);
+  const added = result ? add.filter((_, i) => !rejectedIdx.has(i)) : [];
+  const removed = result && !result.removeRejected ? remove : [];
+  const rechazos = [...new Set([...(result?.rejectedGroups.map((r) => r.message) ?? []), ...(result?.removeRejected ? [result.removeRejected] : [])])];
+  const site = row.codes[0].slice(0, 3).toUpperCase();
+  // Los grupos que el canal aceptó, uno por cada número que se cuenta: se anota que se mandaron,
+  // así la relectura los cuenta aunque sigan sin nada cargado.
+  const addedByKey = new Map<string, TargetGroup>();
+  for (const g of added) if (!addedByKey.has(groupKey(g))) addedByKey.set(groupKey(g), g);
+  for (const g of addedByKey.values()) await rememberUnfilled(db, { kind, site, filters: g.filters as CatalogFilter[], add: 0 });
+
   // Después de mandar: cómo quedó.
   const read = async () => {
     const r = await audit();
     return r.quedan.length === 0 && r.salteadas.length === 0 ? await storedAudit(db, main) : null;
   };
   let done = await read();
-
-  const rejectedIdx = new Set(result?.rejectedGroups.map((r) => r.index) ?? []);
-  const added = result ? add.filter((_, i) => !rejectedIdx.has(i)) : [];
-  const removed = result && !result.removeRejected ? remove : [];
-  const rechazos = [...new Set([...(result?.rejectedGroups.map((r) => r.message) ?? []), ...(result?.removeRejected ? [result.removeRejected] : [])])];
 
   // Lo que el canal metió al agregar los grupos y no sale de la ficha: no estaba antes (o se acababa de
   // borrar) y ahora sobra. Se saca enseguida, porque lo puso esta subida, y se anota para que la
@@ -382,7 +391,6 @@ async function pushRow(db: Db, accountId: string, row: CompatibilityPushRow, add
     const justRemoved = new Set(removed.map((x) => x.vehicle.vehicleId!));
     const brought = removableExtra(done).filter((x) => !loadedBefore.has(x.vehicle.vehicleId!) || justRemoved.has(x.vehicle.vehicleId!));
     if (brought.length > 0) {
-      const site = row.codes[0].slice(0, 3).toUpperCase();
       for (const x of brought) {
         const g = groupOfVehicle(x.vehicle.name, added);
         if (g) await rememberIntruders(db, { kind, site, filters: g.filters as CatalogFilter[], vehicles: [{ vehicleId: x.vehicle.vehicleId!, name: x.vehicle.name }] });
@@ -399,6 +407,23 @@ async function pushRow(db: Db, accountId: string, row: CompatibilityPushRow, add
     }
   }
 
+  // Lo que el catálogo cuenta en un grupo recién mandado y el canal no cargó: se anota, para que
+  // la auditoría no lo muestre más como pendiente ni la subida lo vuelva a mandar sin resultado.
+  const unfilled: string[] = [];
+  if (done && !failure) {
+    const audited = done;
+    for (const [key, g] of addedByKey) {
+      const expected = audited.counts?.[key];
+      if (expected === undefined) continue;
+      const incomplete = incompleteOf(audited).find((x) => x.groups.some((y) => groupKey(y) === key));
+      const have = incomplete ? incomplete.loaded : audited.missing.some((y) => groupKey(y) === key) ? 0 : expected;
+      if (expected - have <= 0) continue;
+      await rememberUnfilled(db, { kind, site, filters: g.filters as CatalogFilter[], add: expected - have });
+      unfilled.push(incomplete?.label ?? g.label);
+    }
+    if (unfilled.length > 0) done = await read();
+  }
+
   const sentSomething = added.length > 0 || removed.length > 0;
   const resultado: CompatibilityPushOutcome['resultado'] = failure ? 'error' : rechazos.length === 0 ? 'subido' : sentSomething ? 'en parte' : 'rechazado';
   const despues = done ? counts(done) : undefined;
@@ -406,6 +431,9 @@ async function pushRow(db: Db, accountId: string, row: CompatibilityPushRow, add
     failure ? null : more ? 'Había más de lo que entra en una subida: lo que falta queda en Por subir para la siguiente.' : null,
     undone.length > 0
       ? 'Al agregar los grupos, Mercado Libre metió vehículos que no salen de la ficha: se sacaron en la misma subida y quedan anotados para no contarlos como faltantes.'
+      : null,
+    unfilled.length > 0
+      ? `Mercado Libre no cargó todo lo que cuenta en ${unfilled.length === 1 ? '1 grupo' : `${unfilled.length} grupos`}: queda anotado y no se muestra más como pendiente.`
       : null,
     undoFailure
       ? `Al agregar los grupos, Mercado Libre metió vehículos que no salen de la ficha y no se pudieron sacar (${undoFailure.replace(/\.+$/, '')}). Aparecen en sobran: borralos a mano en el canal.`
@@ -421,6 +449,7 @@ async function pushRow(db: Db, accountId: string, row: CompatibilityPushRow, add
     agregados: { grupos: added.length, ejemplos: added.slice(0, EXAMPLES).map((g) => g.label) },
     borrados: { cantidad: removed.length, ejemplos: removed.slice(0, EXAMPLES).map((x) => x.vehicle.name) },
     ...(undone.length > 0 ? { deshechos: { cantidad: undone.length, ejemplos: undone.slice(0, EXAMPLES) } } : {}),
+    ...(unfilled.length > 0 ? { no_cargados: { grupos: unfilled.length, ejemplos: unfilled.slice(0, EXAMPLES) } } : {}),
     ...(failure ? { motivo: failure } : {}),
     ...(rechazos.length > 0 ? { rechazos } : {}),
     ...(despues ? { despues } : {}),
