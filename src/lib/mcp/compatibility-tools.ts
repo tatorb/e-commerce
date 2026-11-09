@@ -108,6 +108,10 @@ const pushTool = defineTool({
       .optional()
       .describe('Las publicaciones: su id en la app o su código en el canal, hasta 100. Sin la lista, todas las que tienen compatibilidades por subir.'),
     marca: z.string().min(1).max(80).optional().describe('Solo las publicaciones de productos con esa marca del repuesto en la ficha, por ejemplo Persan.'),
+    solo_agregar: z
+      .boolean()
+      .default(false)
+      .describe('Solo agrega lo que falta y completa los incompletos, sin borrar nada: lo que sobra queda para otra subida, que lo puede borrar sin volver a auditar. Las que solo tienen para borrar quedan salteadas.'),
   }),
   readOnly: false,
   destructive: true,
@@ -129,6 +133,7 @@ const pushTool = defineTool({
       accountId: account.id,
       publicationIds: args.publicaciones ? ids : undefined,
       brand: args.marca ?? null,
+      addOnly: args.solo_agregar,
       budgetMs: PUSH_BUDGET_MS,
     });
     // Como el botón de Por subir: queda en la actividad de la persona, hecho por Claude.

@@ -747,6 +747,20 @@ describe.skipIf(!url)('auditar contra Mercado Libre simulado', () => {
     expect(third.subidas[0]).toMatchObject({ resultado: 'subido', borrados: { cantidad: 1, ejemplos: ['Ford Mustang 2024 5.0 V8 GT'] }, despues: { sobran: 0 } });
   });
 
+  it('con solo agregar, agrega lo que falta y deja lo que sobra para otra subida', async () => {
+    const { main } = await amarokWithExtras();
+    const r = await pushCompatibilities(db, { accountId, addOnly: true });
+    expect(r.subidas[0]).toMatchObject({ resultado: 'subido', agregados: { grupos: 2 }, borrados: { cantidad: 0 }, despues: { faltan: 0, sobran: 2 } });
+    expect(writes.every((w) => !w.body.delete)).toBe(true);
+    // Otra subida solo para agregar no tiene nada: queda salteada sin pedir nada al canal.
+    const sent = writes.length;
+    expect((await pushCompatibilities(db, { accountId, addOnly: true })).subidas[0]).toMatchObject({ resultado: 'salteada', motivo: expect.stringContaining('Solo tiene para borrar') });
+    expect(writes.length).toBe(sent);
+    // Lo que sobra se mostró y no se mandó: una subida normal lo borra sin volver a auditar.
+    const full = await pushCompatibilities(db, { accountId, publicationIds: [main.id] });
+    expect(full.subidas[0]).toMatchObject({ resultado: 'subido', agregados: { grupos: 0 }, borrados: { cantidad: 1, ejemplos: ['Ford Mustang 2024 5.0 V8 GT'] } });
+  });
+
   it('una auditoría de antes, que no dice qué se mostró, hay que repetirla antes de subir', async () => {
     const { main } = await amarokWithExtras();
     const row = await db.publicationCompatibility.findUniqueOrThrow({ where: { publicationId: main.id } });

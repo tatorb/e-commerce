@@ -76,6 +76,7 @@ function pendingOf(a: StoredAudit): { add: Set<string>; remove: Set<string> } | 
 
 const NOT_SHOWN = 'Hay que auditarla de nuevo antes de subir: la subida manda solo lo que mostró una auditoría.';
 const ALREADY_SENT = 'Ya se mandó lo que mostró la auditoría: auditala de nuevo para ver cómo quedó y qué queda.';
+const ONLY_REMOVE = 'Solo tiene para borrar, y esta subida es solo para agregar: lo que sobra queda para otra.';
 
 /**
  * Lo que hay por subir según la última auditoría, agrupado por producto del
@@ -237,7 +238,8 @@ const groupOfVehicle = (name: string, groups: TargetGroup[]) =>
  */
 export async function pushCompatibilities(
   db: Db,
-  args: { accountId: string; publicationIds?: string[]; brand?: string | null; exact?: boolean; budgetMs?: number },
+  // addOnly: solo agrega lo que falta y completa los incompletos; lo que sobra queda para otra subida.
+  args: { accountId: string; publicationIds?: string[]; brand?: string | null; exact?: boolean; budgetMs?: number; addOnly?: boolean },
 ): Promise<CompatibilityPushReport> {
   const started = Date.now();
   const budget = args.budgetMs ?? 40_000;
@@ -256,6 +258,10 @@ export async function pushCompatibilities(
       report.subidas.push({ ...base, resultado: 'salteada', motivo: row.blocked });
       continue;
     }
+    if (args.addOnly && row.add.count + row.complete.count === 0) {
+      report.subidas.push({ ...base, resultado: 'salteada', motivo: ONLY_REMOVE });
+      continue;
+    }
     // La primera siempre va; las demás, si se calcula que entran.
     const calls =
       Math.ceil(Math.min(row.add.count + row.complete.count, MAX_GROUPS) / GROUPS_PER_CALL) +
@@ -266,7 +272,7 @@ export async function pushCompatibilities(
       continue;
     }
     try {
-      const outcome = await pushRow(db, args.accountId, row);
+      const outcome = await pushRow(db, args.accountId, row, Boolean(args.addOnly));
       if (outcome === 'later') report.quedan.push(...row.codes);
       else report.subidas.push(outcome);
     } catch (e) {
@@ -288,7 +294,7 @@ export async function pushCompatibilities(
 }
 
 /** Sube lo de un producto del canal. 'later' si no hubo tiempo de releer el canal antes de mandar. */
-async function pushRow(db: Db, accountId: string, row: CompatibilityPushRow): Promise<CompatibilityPushOutcome | 'later'> {
+async function pushRow(db: Db, accountId: string, row: CompatibilityPushRow, addOnly: boolean): Promise<CompatibilityPushOutcome | 'later'> {
   const main = row.publicationIds[0];
   const base = { publicaciones: row.codes, titulo: row.title, publicationIds: row.publicationIds };
   const nothing = { agregados: { grupos: 0, ejemplos: [] }, borrados: { cantidad: 0, ejemplos: [] } };
@@ -321,8 +327,10 @@ async function pushRow(db: Db, accountId: string, row: CompatibilityPushRow): Pr
   // Solo lo que se mostró, no se mandó todavía y sigue haciendo falta.
   const pending = pendingOf({ ...now, shown })!;
   if (pending.add.size + pending.remove.size === 0) return { ...base, ...nothing, resultado: 'salteada', motivo: ALREADY_SENT, despues: counts(now) };
+  if (addOnly && pending.add.size === 0) return { ...base, ...nothing, resultado: 'salteada', motivo: ONLY_REMOVE, despues: counts(now) };
   const addAll = groupsToAdd(now).filter((g) => pending.add.has(groupName(g)));
-  const removeAll = removableExtra(now).filter((x) => pending.remove.has(x.vehicle.vehicleId!));
+  // Con solo agregar, lo que sobra no se borra ni se anota como mandado: queda para otra subida.
+  const removeAll = addOnly ? [] : removableExtra(now).filter((x) => pending.remove.has(x.vehicle.vehicleId!));
   const add = addAll.slice(0, MAX_GROUPS);
   const remove = removeAll.slice(0, MAX_REMOVE);
   const more = addAll.length > add.length || removeAll.length > remove.length;
