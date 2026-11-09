@@ -34,6 +34,8 @@ export type ProductFormValues = {
     engine: string;
     displacement: string;
     fuel: string;
+    power: string;
+    excludedVersions: string;
     yearFrom: string;
     yearTo: string;
     note: string;
@@ -252,7 +254,7 @@ export function ProductForm({
             <CardTitle>Compatibilidades</CardTitle>
             <CardDescription>
               Con qué vehículos y motores es compatible. Si dejás vacíos la cilindrada o el combustible, se completan con
-              lo que diga el motor.
+              lo que diga el motor. La potencia y las versiones que no van ayudan a elegir los vehículos del canal.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -260,18 +262,20 @@ export function ProductForm({
               idPrefix="compat"
               rows={values.compatibilities}
               onChange={(rows) => set('compatibilities', rows)}
-              template={{ vehicleBrand: '', model: '', engine: '', displacement: '', fuel: '', yearFrom: '', yearTo: '', note: '' }}
+              template={{ vehicleBrand: '', model: '', engine: '', displacement: '', fuel: '', power: '', excludedVersions: '', yearFrom: '', yearTo: '', note: '' }}
               columns={[
                 { key: 'vehicleBrand', label: 'Marca', placeholder: 'Ford…' },
                 { key: 'model', label: 'Modelo', placeholder: 'Fiesta…' },
                 { key: 'engine', label: 'Motor', placeholder: '1.6 8v Rocam…' },
                 { key: 'displacement', label: 'Cilindrada', placeholder: '1.6' },
                 { key: 'fuel', label: 'Combustible', placeholder: 'Nafta…' },
+                { key: 'power', label: 'Potencia', placeholder: '115 cv' },
                 { key: 'yearFrom', label: 'Desde', placeholder: 'año', inputMode: 'numeric' },
                 { key: 'yearTo', label: 'Hasta', placeholder: 'año', inputMode: 'numeric' },
+                { key: 'excludedVersions', label: 'Versiones que no', placeholder: 'THP, VTi…' },
                 { key: 'note', label: 'Nota' },
               ]}
-              gridClassName="sm:grid-cols-[1fr_1fr_1fr_4.5rem_6rem_4.5rem_4.5rem_1fr]"
+              gridClassName="sm:grid-cols-[1fr_1fr_1fr_4.5rem_6rem_4.5rem_4.5rem_4.5rem_1fr_1fr]"
               mobileGridClassName="grid-cols-2"
               addLabel="Agregar compatibilidad"
               emptyLabel="Sin compatibilidades cargadas."

@@ -43,6 +43,7 @@ describe('lista de herramientas', () => {
       'get_text_images_step',
       'list_vehicle_brands',
       'check_photo_measures',
+      'audit_compatibilities',
     ]);
     for (const t of tools) {
       expect(t.inputSchema.type).toBe('object');

@@ -47,12 +47,28 @@ export async function mpGet(path: string, accessToken: string): Promise<unknown>
   return getFrom(paymentsApiUrl(), path, accessToken);
 }
 
-async function getFrom(base: string, path: string, accessToken: string): Promise<unknown> {
+/**
+ * POST que solo lee, como las listas del catálogo de vehículos: no cambia nada
+ * en Mercado Libre, así que se reintenta igual que mlGet.
+ */
+export async function mlQuery(path: string, accessToken: string, body?: unknown): Promise<unknown> {
+  return getFrom(apiUrl(), path, accessToken, body === undefined ? null : body);
+}
+
+async function getFrom(base: string, path: string, accessToken: string, postBody?: unknown): Promise<unknown> {
+  // Sin postBody es un GET; con postBody (aunque sea null), un POST que solo lee.
+  const post = postBody !== undefined;
   for (let attempt = 0; ; attempt++) {
     let res: Response;
     try {
       res = await fetch(`${base}${path}`, {
-        headers: { Accept: 'application/json', Authorization: `Bearer ${accessToken}` },
+        ...(post ? { method: 'POST' } : {}),
+        headers: {
+          Accept: 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+          ...(post && postBody !== null ? { 'Content-Type': 'application/json' } : {}),
+        },
+        ...(post && postBody !== null ? { body: JSON.stringify(postBody) } : {}),
         signal: AbortSignal.timeout(15_000),
         cache: 'no-store',
       });

@@ -44,7 +44,8 @@ describe('herramientas de escritura en la lista', () => {
     expect(tools.get('set_auto_answer')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('set_main_sale_option')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('reconcile_publications')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
-    expect(tools.size).toBe(78);
+    expect(tools.get('audit_compatibilities')).toMatchObject({ readOnlyHint: true });
+    expect(tools.size).toBe(79);
   });
 });
 
@@ -206,10 +207,13 @@ describe.skipIf(!url)('herramientas de escritura', () => {
 
     await call('update_product_info', {
       publicacion: 'MLA1110001',
-      compatibilidades: [{ marca: 'Volkswagen', modelo: 'Gol', motor: '1.6 8v', desde: 2010, hasta: 2015 }],
+      compatibilidades: [{ marca: 'Volkswagen', modelo: 'Gol', motor: '1.6 8v', potencia: '101 cv', versiones_que_no: 'GTi', desde: 2010, hasta: 2015 }],
     });
     const c = await db.compatibility.findFirstOrThrow({ where: { productId } });
-    expect(c).toMatchObject({ displacement: '1.6', yearFrom: 2010, yearTo: 2015 });
+    expect(c).toMatchObject({ displacement: '1.6', power: '101 cv', excludedVersions: 'GTi', yearFrom: 2010, yearTo: 2015 });
+    // Cambiar otra cosa de la ficha no borra la potencia ni las versiones que no van.
+    await call('update_product_info', { publicacion: 'MLA1110001', marca: 'Marca Dos' });
+    expect(await db.compatibility.findFirstOrThrow({ where: { productId } })).toMatchObject({ power: '101 cv', excludedVersions: 'GTi' });
     const bad = await call('update_product_info', { publicacion: 'MLA1110001', compatibilidades: [{ marca: 'VW', desde: 2015, hasta: 2010 }] });
     expect(bad).toMatchObject({ isError: true });
     expect(bad.text).toContain('año desde');

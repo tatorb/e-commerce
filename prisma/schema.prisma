@@ -412,6 +412,9 @@ model Compatibility {
   // Cilindrada, por ejemplo "1.9", y combustible, por ejemplo "Diesel".
   displacement String?
   fuel         String?
+  // Potencia, por ejemplo "115 cv", y las versiones que no van, por ejemplo "THP, VTi".
+  power            String?
+  excludedVersions String?
   yearFrom     Int?
   yearTo       Int?
   note         String?
@@ -574,6 +577,7 @@ model Publication {
   titleApprovals    TitleApproval[]
   positions         SearchPosition[]
   channelCopy       ChannelCopy?
+  compatibility     PublicationCompatibility?
   syncChanges       ChannelSyncChange[]
   buyerQuestions    BuyerQuestion[]
   priceDecisions    PriceDecision[]
@@ -2475,4 +2479,36 @@ model PublicationTextImage {
   @@id([publicationId, textImageId])
   @@index([textImageId])
   @@map("publication_text_images")
+}
+
+// Las compatibilidades con vehículos de una publicación: lo que tiene cargado
+// el canal, leído en el momento, y la auditoría contra la ficha.
+model PublicationCompatibility {
+  publicationId String      @id
+  publication   Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  readAt        DateTime
+  // El canal pide informar los vehículos compatibles, o tiene sugerencias esperando.
+  needed        Boolean     @default(false)
+  suggested     Boolean     @default(false)
+  // Lo que tiene el canal: { listing: [...], product: [...] }, cada vehículo con su código y su nombre.
+  vehicles      Json
+  // La auditoría: cuántos faltan, sobran y quedan a revisar, y el detalle.
+  missing       Int         @default(0)
+  extra         Int         @default(0)
+  review        Int         @default(0)
+  // La ficha no tiene compatibilidades: no se puede corregir sin datos.
+  noData        Boolean     @default(false)
+  audit         Json?
+
+  @@map("publication_compatibilities")
+}
+
+// Las listas del catálogo de vehículos de cada canal (marcas, modelos, años...),
+// guardadas un tiempo para no pedirlas cada vez.
+model ChannelCatalogValue {
+  key       String   @id
+  values    Json
+  fetchedAt DateTime
+
+  @@map("channel_catalog_values")
 }

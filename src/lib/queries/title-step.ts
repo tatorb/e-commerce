@@ -78,6 +78,8 @@ export async function loadTitleContext(db: PrismaClient, accountId: string, publ
               engine: true,
               displacement: true,
               fuel: true,
+              power: true,
+              excludedVersions: true,
               yearFrom: true,
               yearTo: true,
               note: true,

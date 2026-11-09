@@ -99,6 +99,8 @@ export function InfoStep({
                 engine: s(c.engine),
                 displacement: s(c.displacement),
                 fuel: s(c.fuel),
+                power: s(c.power),
+                excludedVersions: s(c.excludedVersions),
                 yearFrom: c.yearFrom?.toString() ?? '',
                 yearTo: c.yearTo?.toString() ?? '',
                 note: s(c.note),

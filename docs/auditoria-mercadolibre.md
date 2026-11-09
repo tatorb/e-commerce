@@ -73,6 +73,7 @@ Cada punto dice qué pasa, dónde está en el código y de qué archivo de `docs
 **15. Compatibilidades de autopartes por la API.** Hoy es una lista manual. `POST /items/{id}/compatibilities` (o `/user-products/{id}/compatibilities`), hasta 200 por pedido.
 - Código: `src/channels/mercadolibre/apply.ts`.
 - Docs: `guia-para-productos/categorizacion/051-compatibilidades-entre-items-y-productos.md`.
+- En curso. Etapa 1 hecha: la lectura de lo cargado (por publicación y por user product), la traducción de la ficha con `top_values` y la auditoría (`audit_compatibilities`), sin subir nada. La ficha suma potencia y versiones que no van. Desde el 15/07/2026 ya no existe la búsqueda de vehículos uno por uno (`products_search/chunks`), y las compatibilidades que cargó Mercado Libre (`source: CATALOGO`) solo traen la marca y el total, y no se borran por la API. Falta la subida (etapa 2) y el filtro en Publicaciones (etapa 3).
 
 **16. Validar antes de crear.** `POST /items/validate` devuelve 204 si se aceptaría. Útil sobre todo al crear una familia (`createMembers`), para que no queden medidas a medias.
 - Código: `src/channels/mercadolibre/publish.ts`.

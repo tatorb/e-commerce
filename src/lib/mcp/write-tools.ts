@@ -436,6 +436,8 @@ const updateProductInfoTool = defineTool({
           motor: z.string().optional(),
           cilindrada: z.string().optional().describe('Sin mandar, sale del motor.'),
           combustible: z.string().optional().describe('Sin mandar, sale del motor.'),
+          potencia: z.string().optional().describe('Por ejemplo "115 cv". Sirve para elegir los vehículos del canal.'),
+          versiones_que_no: z.string().optional().describe('Las versiones que no van, separadas por coma, por ejemplo "THP, VTi".'),
           desde: z.number().int().nullable().optional().describe('Año desde.'),
           hasta: z.number().int().nullable().optional().describe('Año hasta.'),
           nota: z.string().optional(),
@@ -483,6 +485,8 @@ const updateProductInfoTool = defineTool({
                 engine: true,
                 displacement: true,
                 fuel: true,
+                power: true,
+                excludedVersions: true,
                 yearFrom: true,
                 yearTo: true,
                 note: true,
@@ -512,13 +516,15 @@ const updateProductInfoTool = defineTool({
       : p.variants.map((v) => ({ id: v.id, measure: v.measure ?? '', sku: v.sku ?? '' }));
     const compatibilities = args.compatibilidades
       ? args.compatibilidades
-          .filter((c) => filled([c.marca, c.modelo, c.motor, c.cilindrada, c.combustible, c.desde, c.hasta, c.nota]))
+          .filter((c) => filled([c.marca, c.modelo, c.motor, c.cilindrada, c.combustible, c.potencia, c.versiones_que_no, c.desde, c.hasta, c.nota]))
           .map((c) => ({
             vehicleBrand: c.marca ?? '',
             model: c.modelo ?? '',
             engine: c.motor ?? '',
             displacement: c.cilindrada,
             fuel: c.combustible,
+            power: c.potencia,
+            excludedVersions: c.versiones_que_no,
             yearFrom: c.desde ?? null,
             yearTo: c.hasta ?? null,
             note: c.nota ?? '',
@@ -529,6 +535,8 @@ const updateProductInfoTool = defineTool({
           engine: c.engine ?? '',
           displacement: c.displacement ?? undefined,
           fuel: c.fuel ?? undefined,
+          power: c.power ?? undefined,
+          excludedVersions: c.excludedVersions ?? undefined,
           yearFrom: c.yearFrom,
           yearTo: c.yearTo,
           note: c.note ?? '',

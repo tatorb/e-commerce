@@ -69,7 +69,7 @@ export async function saveProductInfoAction(accountSlug: string, publicationId: 
       ...input,
       variants: (input.variants ?? []).filter((v) => filled([v.measure, v.sku])),
       compatibilities: (input.compatibilities ?? []).filter((c) =>
-        filled([c.vehicleBrand, c.model, c.engine, c.displacement, c.fuel, c.yearFrom, c.yearTo, c.note]),
+        filled([c.vehicleBrand, c.model, c.engine, c.displacement, c.fuel, c.power, c.excludedVersions, c.yearFrom, c.yearTo, c.note]),
       ),
     });
     if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Revisá los datos.' };

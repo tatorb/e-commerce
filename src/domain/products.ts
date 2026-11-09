@@ -73,6 +73,9 @@ export const productInputSchema = z.object({
           // Vacíos o sin venir, se sacan del motor.
           displacement: optionalText(20),
           fuel: optionalText(40),
+          // Potencia, por ejemplo "115 cv", y las versiones que no van, por ejemplo "THP, VTi".
+          power: optionalText(20),
+          excludedVersions: optionalText(200),
           yearFrom: year,
           yearTo: year,
           note: text(500),
@@ -104,7 +107,7 @@ export function dropEmptyRows(input: ProductInput): ProductInput {
     specs: compactNameValues(input.specs.map((s) => ({ name: s.name.trim(), value: s.value.trim() }))),
     variants: input.variants.filter((v) => filled([v.measure, v.sku])),
     compatibilities: input.compatibilities.filter((c) =>
-      filled([c.vehicleBrand, c.model, c.engine, c.displacement, c.fuel, c.yearFrom, c.yearTo, c.note]),
+      filled([c.vehicleBrand, c.model, c.engine, c.displacement, c.fuel, c.power, c.excludedVersions, c.yearFrom, c.yearTo, c.note]),
     ),
     assets: input.assets.filter((a) => filled([a.url])),
   };
