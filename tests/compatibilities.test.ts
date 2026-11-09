@@ -255,6 +255,10 @@ const CATALOG: Vehicle[] = [
   car(VW, ['M6', 'Saveiro'], 2015, NAFTA, ['E6', '1.6'], ['P8', '101 hp'], ['V11', '1.6 Trendline']),
   // Un modelo que parece un año.
   ...[2019, 2020].map((y) => car(PEUGEOT, ['M5', '2008'], y, NAFTA, ['E3', '1.6'], ['P3', '115 hp'], ['V8', '1.6 Allure'])),
+  // Un grupo donde el catálogo tiene con motor 1.6 un vehículo que se llama 1.2.
+  car(PEUGEOT, ['M7', '208'], 2022, NAFTA, ['E3', '1.6'], ['P3', '115 hp'], ['V20', '1.6 Allure']),
+  car(PEUGEOT, ['M7', '208'], 2022, NAFTA, ['E3', '1.6'], ['P3', '115 hp'], ['V21', '1.6 Active']),
+  car(PEUGEOT, ['M7', '208'], 2022, NAFTA, ['E3', '1.6'], ['P9', '130 hp'], ['V22', '1.2 Gt']),
   car(FORD, ['M3', 'Mustang'], 2024, NAFTA, ['E4', '5.0'], ['P5', '450 hp'], ['V6', '5.0 V8 GT']),
   car(MB, ['M4', 'Sprinter'], 2015, DIESEL, ['E5', '2.1'], ['P6', '163 hp'], ['V7', '415 CDI']),
 ];
@@ -715,5 +719,88 @@ describe.skipIf(!url)('auditar contra Mercado Libre simulado', () => {
     expect(await listCompatibilitiesToPush(db, accountId)).toEqual([]);
     expect(await pushCompatibilities(db, { accountId })).toEqual({ subidas: [], quedan: [] });
     expect(writes).toEqual([]);
+  });
+
+  it('lo ya mandado no se repite sin una auditoría nueva, y no se borra lo que no se mostró', async () => {
+    const kit = await product('Subconjunto de prueba Amarok', [{ vehicleBrand: 'Volkswagen', model: 'Amarok', engine: '2.0 TDI', yearFrom: 2010, yearTo: 2016 }]);
+    const p = await pub(kit.id, 'MLA9000801', { up: 'MLAU8' });
+    upOf.MLA9000801 = 'MLAU8';
+    loaded.MLAU8 = [{ id: 'c-1', catalog_product_id: 'MLA71', catalog_product_name: 'Volkswagen Amarok 2011 2.0 TDI 180cv Highline', source: 'SELLER' }];
+    await auditAccountCompatibilities(db, { accountId, publicationIds: [p.id] });
+    // Después de la auditoría, alguien carga un Mustang a mano: no se mostró, no se borra.
+    loaded.MLAU8.push({ id: 'c-2', catalog_product_id: 'MLA801', catalog_product_name: 'Ford Mustang 2024 5.0 V8 GT', source: 'SELLER' });
+    const first = await pushCompatibilities(db, { accountId });
+    expect(first.subidas[0]).toMatchObject({ resultado: 'subido', agregados: { grupos: 2 }, borrados: { cantidad: 0 }, despues: { faltan: 0, sobran: 1 } });
+    // No lo trajeron los grupos: ya estaba antes de mandar.
+    expect(first.subidas[0].deshechos).toBeUndefined();
+
+    // Otra vuelta sin auditar: no manda nada, ni borra lo que apareció después.
+    const sent = writes.length;
+    expect((await listCompatibilitiesToPush(db, accountId))[0]).toMatchObject({ blocked: expect.stringContaining('Ya se mandó'), remove: { count: 0 } });
+    const second = await pushCompatibilities(db, { accountId });
+    expect(second.subidas[0]).toMatchObject({ resultado: 'salteada', motivo: expect.stringContaining('Ya se mandó') });
+    expect(writes.length).toBe(sent);
+
+    // Con una auditoría nueva, que lo muestra, sí se borra.
+    await auditAccountCompatibilities(db, { accountId, publicationIds: [p.id] });
+    const third = await pushCompatibilities(db, { accountId });
+    expect(third.subidas[0]).toMatchObject({ resultado: 'subido', borrados: { cantidad: 1, ejemplos: ['Ford Mustang 2024 5.0 V8 GT'] }, despues: { sobran: 0 } });
+  });
+
+  it('una auditoría de antes, que no dice qué se mostró, hay que repetirla antes de subir', async () => {
+    const { main } = await amarokWithExtras();
+    const row = await db.publicationCompatibility.findUniqueOrThrow({ where: { publicationId: main.id } });
+    const { shown: _shown, ...old } = row.audit as Record<string, unknown>;
+    void _shown;
+    await db.publicationCompatibility.update({ where: { publicationId: main.id }, data: { audit: old as object } });
+    expect((await listCompatibilitiesToPush(db, accountId))[0]).toMatchObject({ blocked: expect.stringContaining('auditarla de nuevo') });
+    const r = await pushCompatibilities(db, { accountId });
+    expect(r.subidas[0]).toMatchObject({ resultado: 'salteada', motivo: expect.stringContaining('auditarla de nuevo') });
+    expect(writes).toEqual([]);
+  });
+
+  it('si el catálogo mete en un grupo un vehículo que no sale de la ficha, la subida lo saca y no lo vuelve a contar', async () => {
+    const kit = await product('Subconjunto de prueba 208 en familia', [{ vehicleBrand: 'Peugeot', model: '208', engine: '1.6', fuel: 'Nafta' }]);
+    const std = await pub(kit.id, 'MLA9000701', { up: 'MLAU71' });
+    const half = await pub(kit.id, 'MLA9000702', { up: 'MLAU72' });
+    upOf.MLA9000701 = 'MLAU71';
+    upOf.MLA9000702 = 'MLAU72';
+    await db.listingFamily.create({ data: { storeId, productId: kit.id, channelFamilyId: 'FAM-7', leadId: std.id, members: { connect: [{ id: std.id }, { id: half.id }] } } });
+    const as = (version: string) => {
+      const i = CATALOG.findIndex((v) => v.MODEL[1] === '208' && v.SHORT_VERSION[1] === version);
+      return { id: `c-${i}`, catalog_product_id: `MLA7${i}`, catalog_product_name: `Peugeot 208 2022 ${version}`, source: 'SELLER' };
+    };
+    // La medida STD tiene los dos 1.6 que van; la 0,50, uno.
+    loaded.MLAU71 = [as('1.6 Allure'), as('1.6 Active')];
+    loaded.MLAU72 = [as('1.6 Allure')];
+    const r = await auditAccountCompatibilities(db, { accountId, publicationIds: [half.id] });
+    // El catálogo cuenta tres con motor 1.6, pero uno se llama 1.2: parece que a la STD le falta uno.
+    expect(r.publicaciones.map((x) => [x.publicacion, x.incompletos.ejemplos])).toEqual([
+      ['MLA9000701', ['Peugeot 208 2022 1.6 nafta: hay 2 de 3']],
+      ['MLA9000702', ['Peugeot 208 2022 1.6 nafta: hay 1 de 3']],
+    ]);
+
+    // Se pide una sola medida y van las dos, cada una una vez: la segunda no se queda esperando detrás de la primera.
+    const pushed = await pushCompatibilities(db, { accountId, publicationIds: [half.id] });
+    expect(pushed.quedan).toEqual([]);
+    const clean = { faltan: 0, incompletos: 0, sobran: 0, a_revisar: 0 };
+    const intruder = { cantidad: 1, ejemplos: ['Peugeot 208 2022 1.2 Gt'] };
+    expect(pushed.subidas.map((x) => [x.publicaciones, x.resultado, x.agregados.grupos, x.borrados.cantidad, x.deshechos, x.despues])).toEqual([
+      [['MLA9000701'], 'subido', 1, 0, intruder, clean],
+      [['MLA9000702'], 'subido', 1, 0, intruder, clean],
+    ]);
+    expect(pushed.subidas[0].aviso).toContain('se sacaron en la misma subida');
+    // Quedan los 1.6, sin el 1.2.
+    const names = (k: string) => loaded[k].map((v) => (v as { catalog_product_name: string }).catalog_product_name).sort();
+    expect(names('MLAU71')).toEqual(['Peugeot 208 2022 1.6 Active', 'Peugeot 208 2022 1.6 Allure']);
+    expect(names('MLAU72')).toEqual(['Peugeot 208 2022 1.6 Active', 'Peugeot 208 2022 1.6 Allure']);
+
+    // Una auditoría nueva ya no lo cuenta: el grupo está completo y no queda nada por subir.
+    const again = await auditAccountCompatibilities(db, { accountId, publicationIds: [half.id] });
+    expect(again.publicaciones.map((x) => [x.incompletos.cantidad, x.sobran.cantidad])).toEqual([
+      [0, 0],
+      [0, 0],
+    ]);
+    expect(await listCompatibilitiesToPush(db, accountId)).toEqual([]);
   });
 });

@@ -71,7 +71,41 @@ type Catalog = {
   values(field: CatalogField, known: CatalogFilter[]): Promise<CatalogValue[] | null>;
   // Cuántos vehículos tiene el catálogo con esos filtros. Null si el canal no lo dice.
   count(filters: CatalogFilter[]): Promise<number | null>;
+  // Cuántos de esos se sabe que no salen de la ficha (ver rememberIntruders).
+  intruders(filters: CatalogFilter[]): Promise<number>;
 };
+
+// ───────────────────────────── Lo que el catálogo mete de más en un grupo ─────────────────────────────
+
+/** Un vehículo que el catálogo mete en un grupo y no sale de la ficha. */
+export type CatalogIntruder = { vehicleId: string; name: string };
+
+const filtersText = (filters: CatalogFilter[]) => filters.map((k) => `${k.field}=${k.id}`).join('&');
+const intrudersKey = (kind: ChannelKind, site: string, filters: CatalogFilter[]) => `${kind}:${site}:intrusos:${filtersText(filters)}`;
+const fresh = (fetchedAt: Date, now: Date) => now.getTime() - fetchedAt.getTime() < CATALOG_DAYS * 86_400_000;
+
+async function knownIntruders(db: Db, key: string, now: Date): Promise<CatalogIntruder[]> {
+  const row = await db.channelCatalogValue.findUnique({ where: { key } });
+  return row && Array.isArray(row.values) && fresh(row.fetchedAt, now) ? (row.values as CatalogIntruder[]) : [];
+}
+
+/**
+ * Anota vehículos que el catálogo del canal mete en un grupo y no salen de la
+ * ficha, por ejemplo un 1.2 que Mercado Libre tiene con motor 1.6. Se sabe al
+ * subir: aparecen al agregar el grupo. Desde ahí la auditoría no los cuenta
+ * entre los que tiene que tener el grupo, así no queda incompleto para siempre.
+ */
+export async function rememberIntruders(
+  db: Db,
+  args: { kind: ChannelKind; site: string; filters: CatalogFilter[]; vehicles: CatalogIntruder[]; now?: Date },
+): Promise<void> {
+  const now = args.now ?? new Date();
+  const key = intrudersKey(args.kind, args.site, args.filters);
+  const before = await knownIntruders(db, key, now);
+  const list = [...before, ...args.vehicles.filter((v) => !before.some((b) => b.vehicleId === v.vehicleId))];
+  const data = { values: list as unknown as Prisma.InputJsonValue, fetchedAt: now };
+  await db.channelCatalogValue.upsert({ where: { key }, create: { key, ...data }, update: data });
+}
 
 function catalogFor(
   db: Db,
@@ -157,6 +191,9 @@ function catalogFor(
         pending.catch(() => counted.delete(key));
       }
       return pending;
+    },
+    async intruders(filters) {
+      return (await knownIntruders(db, intrudersKey(args.kind, args.site, filters), args.now)).length;
     },
   };
 }
@@ -452,7 +489,35 @@ export type StoredAudit = {
   review: { vehicle: LoadedVehicle; reason: string }[];
   // El producto del canal que comparten las opciones de venta: lo cargado ahí vale para todas.
   productId?: string | null;
+  // Lo que vio la persona en la última auditoría que pidió: la subida manda solo de acá.
+  // Falta en las auditorías viejas: esas hay que repetirlas antes de subir.
+  shown?: ShownForPush;
 };
+
+/**
+ * Lo que mostró la auditoría que pidió la persona, y lo ya mandado desde
+ * entonces. Las relecturas de la subida no lo cambian: lo que aparece después
+ * de subir no se manda sin que la persona lo vea en una auditoría nueva.
+ */
+export type ShownForPush = {
+  // Las líneas de la ficha de esa auditoría: si cambian, no se manda nada.
+  lines: string;
+  // Los grupos para agregar (por su nombre) y los vehículos para borrar (por su código).
+  add: string[];
+  remove: string[];
+  // Lo ya mandado desde esa auditoría: no se vuelve a mandar sin auditar de nuevo.
+  sentAdd: string[];
+  sentRemove: string[];
+};
+
+/** Los grupos que se mandan para agregar: los que faltan y los de los incompletos. */
+export const groupsToAdd = (a: Pick<StoredAudit, 'missing' | 'incomplete'>): TargetGroup[] => [...a.missing, ...(a.incomplete ?? []).flatMap((x) => x.groups)];
+/** Lo cargado por la tienda que sobra: se puede borrar desde la app. */
+export const removableExtra = (a: Pick<StoredAudit, 'extra'>) => a.extra.filter((x) => x.vehicle.vehicleId);
+/** Las líneas de la ficha de una auditoría, en una sola clave, para saber si cambiaron. */
+export const linesKey = (a: Pick<StoredAudit, 'lines'>) => a.lines.map((l) => norm(l.linea)).join('|');
+/** El nombre de un grupo como se compara. */
+export const groupName = (g: Pick<TargetGroup, 'label'>) => norm(g.label);
 
 export type LineReport = {
   linea: string;
@@ -537,6 +602,9 @@ export async function auditAccountCompatibilities(
     freshSince?: Date | null;
     // Solo las de la lista, sin sumar las otras medidas y opciones de venta.
     exact?: boolean;
+    // La relectura de la subida: guarda cómo está el canal, pero lo que vio la
+    // persona y lo ya mandado quedan como estaban.
+    forPush?: boolean;
     raw?: boolean;
     budgetMs?: number;
     now?: Date;
@@ -714,7 +782,13 @@ export async function auditAccountCompatibilities(
       const counts = new Map<string, number>();
       await Promise.all(
         [...byKey].map(async ([key, groups]) => {
-          const each = await Promise.all(groups.map((g) => cat.count(g.filters as CatalogFilter[])));
+          // Sin los que se sabe que el catálogo mete de más y no salen de la ficha.
+          const each = await Promise.all(
+            groups.map(async (g) => {
+              const n = await cat.count(g.filters as CatalogFilter[]);
+              return n === null ? null : Math.max(0, n - (await cat.intruders(g.filters as CatalogFilter[])));
+            }),
+          );
           if (each.every((n) => n !== null))
             counts.set(
               key,
@@ -777,6 +851,19 @@ export async function auditAccountCompatibilities(
       review: audit.review,
       productId: read.productId,
     };
+    if (args.forPush) {
+      const prev = await db.publicationCompatibility.findUnique({ where: { publicationId: t.id }, select: { audit: true } });
+      const shown = (prev?.audit as StoredAudit | null)?.shown;
+      if (shown) detail.shown = shown;
+    } else {
+      detail.shown = {
+        lines: linesKey(detail),
+        add: groupsToAdd(detail).map(groupName),
+        remove: removableExtra(detail).map((x) => x.vehicle.vehicleId!),
+        sentAdd: [],
+        sentRemove: [],
+      };
+    }
     const data = {
       readAt: now,
       needed: read.needed,

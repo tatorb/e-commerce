@@ -1,16 +1,29 @@
-import type { PrismaClient } from '@/generated/prisma/client';
-import { getChannelCompatibilities, type CatalogFilter, type CompatibilityWriteResult } from '@/channels/compatibilities';
+import type { Prisma, PrismaClient } from '@/generated/prisma/client';
+import { getChannelCompatibilities, type CatalogFilter, type ChannelVehicle, type CompatibilityWriteResult } from '@/channels/compatibilities';
 import { ConnectError } from '@/channels/connect';
-import { norm } from '@/domain/compatibilities';
-import { auditAccountCompatibilities, withRelated, type StoredAudit } from '@/lib/compatibilities';
+import { hasWords, yearOf, type TargetGroup } from '@/domain/compatibilities';
+import {
+  auditAccountCompatibilities,
+  groupName,
+  groupsToAdd,
+  linesKey,
+  rememberIntruders,
+  removableExtra,
+  withRelated,
+  type StoredAudit,
+} from '@/lib/compatibilities';
 import { withAccessToken } from '@/lib/connections';
 
 // La subida de las compatibilidades con vehículos al canal. Se manda solo lo
-// que mostró la auditoría y que, al releer el canal justo antes de mandar,
-// sigue faltando o sobrando: nada que la persona no haya visto. Se manda una
+// que mostró la auditoría que pidió la persona y que, al releer el canal justo
+// antes de mandar, sigue faltando o sobrando: nada que no haya visto. Lo ya
+// mandado no se vuelve a mandar sin una auditoría nueva, así una vuelta
+// siguiente no repite lo mismo ni borra lo que apareció después. Se manda una
 // vez por producto del canal, porque las opciones de venta de una medida
 // comparten lo cargado; en una familia, cada medida va por su lado. Después
-// se vuelve a auditar y queda guardado cómo quedó.
+// se vuelve a auditar y queda guardado cómo quedó. Si al agregar un grupo el
+// canal mete vehículos que no salen de la ficha, se sacan en la misma subida
+// y quedan anotados, para que la auditoría no los cuente como faltantes.
 
 type Db = PrismaClient;
 
@@ -52,10 +65,17 @@ export type CompatibilityPushRow = {
   blocked: string | null;
 };
 
-const removable = (a: StoredAudit) => a.extra.filter((x) => x.vehicle.vehicleId);
 const incompleteOf = (a: StoredAudit) => a.incomplete ?? [];
-// Lo que se manda para agregar: los grupos que faltan y los de los incompletos.
-const toAdd = (a: StoredAudit) => [...a.missing, ...incompleteOf(a).flatMap((x) => x.groups)];
+
+/** Lo que mostró la auditoría y todavía no se mandó: los nombres de los grupos y los códigos de los vehículos. */
+function pendingOf(a: StoredAudit): { add: Set<string>; remove: Set<string> } | null {
+  const s = a.shown;
+  if (!s) return null;
+  return { add: new Set(s.add.filter((x) => !s.sentAdd.includes(x))), remove: new Set(s.remove.filter((x) => !s.sentRemove.includes(x))) };
+}
+
+const NOT_SHOWN = 'Hay que auditarla de nuevo antes de subir: la subida manda solo lo que mostró una auditoría.';
+const ALREADY_SENT = 'Ya se mandó lo que mostró la auditoría: auditala de nuevo para ver cómo quedó y qué queda.';
 
 /**
  * Lo que hay por subir según la última auditoría, agrupado por producto del
@@ -115,8 +135,13 @@ export async function listCompatibilitiesToPush(
     const first = members[0];
     const audit = first.audit as StoredAudit | null;
     if (!audit) continue;
-    const remove = removable(audit);
-    if (audit.missing.length === 0 && incompleteOf(audit).length === 0 && remove.length === 0) continue;
+    if (audit.missing.length === 0 && incompleteOf(audit).length === 0 && removableExtra(audit).length === 0) continue;
+    // Solo lo que mostró la auditoría y todavía no se mandó. Sin lo mostrado, se ve todo pero no se puede subir.
+    const pending = pendingOf(audit);
+    const isPending = (g: TargetGroup) => !pending || pending.add.has(groupName(g));
+    const missing = audit.missing.filter(isPending);
+    const incomplete = incompleteOf(audit).filter((x) => x.groups.some(isPending));
+    const remove = removableExtra(audit).filter((x) => !pending || pending.remove.has(x.vehicle.vehicleId!));
     const p = first.publication;
     const channelName = p.store.channel.name;
     const channel = getChannelCompatibilities(p.store.channel.kind);
@@ -128,12 +153,10 @@ export async function listCompatibilitiesToPush(
       channelName,
       readAt: first.readAt,
       needed: members.some((m) => m.needed),
-      add: { count: audit.missing.length, examples: audit.missing.slice(0, EXAMPLES).map((g) => g.label) },
+      add: { count: missing.length, examples: missing.slice(0, EXAMPLES).map((g) => g.label) },
       complete: {
-        count: incompleteOf(audit).length,
-        examples: incompleteOf(audit)
-          .slice(0, EXAMPLES)
-          .map((x) => x.label),
+        count: incomplete.length,
+        examples: incomplete.slice(0, EXAMPLES).map((x) => x.label),
       },
       remove: { count: remove.length, examples: remove.slice(0, EXAMPLES).map((x) => ({ vehicle: x.vehicle.name, reason: x.reason })) },
       byChannel: audit.extraByChannel.map((x) => ({ brand: x.vehicle.name, count: x.vehicle.total })),
@@ -142,7 +165,11 @@ export async function listCompatibilitiesToPush(
         ? `Todavía no se pueden subir compatibilidades a ${channelName}.`
         : p.store.connection?.status !== 'ACTIVE'
           ? `La tienda no está conectada con ${channelName}.`
-          : null,
+          : !pending
+            ? NOT_SHOWN
+            : missing.length + incomplete.length + remove.length === 0
+              ? ALREADY_SENT
+              : null,
     });
   }
   // Primero las que el canal pide completar.
@@ -155,6 +182,8 @@ export type CompatibilityPushOutcome = {
   resultado: 'subido' | 'en parte' | 'rechazado' | 'sin cambios' | 'salteada' | 'error';
   agregados: { grupos: number; ejemplos: string[] };
   borrados: { cantidad: number; ejemplos: string[] };
+  // Lo que el canal metió al agregar los grupos y no sale de la ficha: se sacó en la misma subida.
+  deshechos?: { cantidad: number; ejemplos: string[] };
   motivo?: string;
   rechazos?: string[];
   // Cómo quedó al volver a auditar después de mandar.
@@ -171,12 +200,35 @@ export type CompatibilityPushReport = {
   busy?: true;
 };
 
-const sameLines = (a: StoredAudit, b: StoredAudit) => a.lines.map((l) => norm(l.linea)).join('|') === b.lines.map((l) => norm(l.linea)).join('|');
-
 async function storedAudit(db: Db, publicationId: string): Promise<StoredAudit | null> {
   const row = await db.publicationCompatibility.findUnique({ where: { publicationId }, select: { audit: true } });
   return (row?.audit as StoredAudit | null) ?? null;
 }
+
+/** Los códigos de los vehículos cargados según la última lectura del canal. */
+async function loadedIds(db: Db, publicationId: string): Promise<Set<string>> {
+  const row = await db.publicationCompatibility.findUnique({ where: { publicationId }, select: { vehicles: true } });
+  const v = (row?.vehicles ?? {}) as { listing?: ChannelVehicle[] | null; product?: ChannelVehicle[] | null };
+  return new Set([...(v.listing ?? []), ...(v.product ?? [])].map((x) => x.vehicleId).filter((x): x is string => Boolean(x)));
+}
+
+/** Anota lo mandado en todas las que comparten lo cargado: no se vuelve a mandar sin auditar de nuevo. */
+async function markSent(db: Db, publicationIds: string[], add: string[], remove: string[]): Promise<void> {
+  for (const publicationId of publicationIds) {
+    const audit = await storedAudit(db, publicationId);
+    if (!audit?.shown) continue;
+    const s = audit.shown;
+    const shown = { ...s, sentAdd: [...new Set([...s.sentAdd, ...add])], sentRemove: [...new Set([...s.sentRemove, ...remove])] };
+    await db.publicationCompatibility.update({
+      where: { publicationId },
+      data: { audit: { ...audit, shown } as unknown as Prisma.InputJsonValue },
+    });
+  }
+}
+
+/** El grupo agregado del que vino un vehículo: la misma marca, el mismo modelo y el mismo año. */
+const groupOfVehicle = (name: string, groups: TargetGroup[]) =>
+  groups.find((g) => hasWords(name, g.brand) && hasWords(name, g.model) && yearOf(name, g.model) === g.year) ?? null;
 
 /**
  * Sube las compatibilidades: agrega lo que falta y borra lo que sobra, en la
@@ -239,90 +291,117 @@ export async function pushCompatibilities(
 async function pushRow(db: Db, accountId: string, row: CompatibilityPushRow): Promise<CompatibilityPushOutcome | 'later'> {
   const main = row.publicationIds[0];
   const base = { publicaciones: row.codes, titulo: row.title, publicationIds: row.publicationIds };
-  const shown = await storedAudit(db, main);
-  if (!shown)
-    return {
-      ...base,
-      resultado: 'salteada',
-      agregados: { grupos: 0, ejemplos: [] },
-      borrados: { cantidad: 0, ejemplos: [] },
-      motivo: 'No tiene auditoría: auditala antes de subir.',
-    };
+  const nothing = { agregados: { grupos: 0, ejemplos: [] }, borrados: { cantidad: 0, ejemplos: [] } };
+  const stored = await storedAudit(db, main);
+  if (!stored) return { ...base, ...nothing, resultado: 'salteada', motivo: 'No tiene auditoría: auditala antes de subir.' };
+  if (!stored.shown) return { ...base, ...nothing, resultado: 'salteada', motivo: NOT_SHOWN };
 
-  // Antes de mandar: el canal y la ficha como están ahora.
-  const before = await auditAccountCompatibilities(db, { accountId, publicationIds: row.publicationIds, exact: true, budgetMs: AUDIT_BUDGET_MS });
+  // Antes de mandar: el canal y la ficha como están ahora. Lo que vio la persona queda como estaba.
+  const audit = () => auditAccountCompatibilities(db, { accountId, publicationIds: row.publicationIds, exact: true, forPush: true, budgetMs: AUDIT_BUDGET_MS });
+  const before = await audit();
   if (before.quedan.includes(row.codes[0])) {
     if (before.busy) throw new ConnectError('Mercado Libre pidió esperar porque hubo demasiados pedidos. Probá de nuevo en unos minutos.', false, true);
     return 'later';
   }
   const skipped = before.salteadas.find((s) => s.publicacion === row.codes[0]);
-  if (skipped) return { ...base, resultado: 'error', agregados: { grupos: 0, ejemplos: [] }, borrados: { cantidad: 0, ejemplos: [] }, motivo: skipped.motivo };
+  if (skipped) return { ...base, ...nothing, resultado: 'error', motivo: skipped.motivo };
   const now = await storedAudit(db, main);
   if (!now) return 'later';
-  if (!sameLines(shown, now)) {
+  const shown = now.shown ?? stored.shown;
+  if (shown.lines !== linesKey(now)) {
     return {
       ...base,
+      ...nothing,
       resultado: 'salteada',
-      agregados: { grupos: 0, ejemplos: [] },
-      borrados: { cantidad: 0, ejemplos: [] },
       motivo: 'La ficha cambió después de la auditoría que se mostró: mirá de nuevo qué falta y qué sobra, y volvé a subir.',
       despues: counts(now),
     };
   }
 
-  // Solo lo que se mostró y sigue haciendo falta.
-  const shownGroups = new Set(toAdd(shown).map((g) => norm(g.label)));
-  const shownExtra = new Set(removable(shown).map((x) => x.vehicle.vehicleId));
-  const addAll = toAdd(now).filter((g) => shownGroups.has(norm(g.label)));
-  const removeAll = removable(now).filter((x) => shownExtra.has(x.vehicle.vehicleId));
+  // Solo lo que se mostró, no se mandó todavía y sigue haciendo falta.
+  const pending = pendingOf({ ...now, shown })!;
+  if (pending.add.size + pending.remove.size === 0) return { ...base, ...nothing, resultado: 'salteada', motivo: ALREADY_SENT, despues: counts(now) };
+  const addAll = groupsToAdd(now).filter((g) => pending.add.has(groupName(g)));
+  const removeAll = removableExtra(now).filter((x) => pending.remove.has(x.vehicle.vehicleId!));
   const add = addAll.slice(0, MAX_GROUPS);
   const remove = removeAll.slice(0, MAX_REMOVE);
   const more = addAll.length > add.length || removeAll.length > remove.length;
   if (add.length === 0 && remove.length === 0) {
-    return {
-      ...base,
-      resultado: 'sin cambios',
-      agregados: { grupos: 0, ejemplos: [] },
-      borrados: { cantidad: 0, ejemplos: [] },
-      motivo: 'Ya estaba al día en el canal.',
-      despues: counts(now),
-    };
+    return { ...base, ...nothing, resultado: 'sin cambios', motivo: 'Ya estaba al día en el canal.', despues: counts(now) };
   }
 
   const target = await db.publication.findUniqueOrThrow({
     where: { id: main },
     select: { storeId: true, store: { select: { channel: { select: { kind: true } } } } },
   });
-  const channel = getChannelCompatibilities(target.store.channel.kind)!;
+  const kind = target.store.channel.kind;
+  const channel = getChannelCompatibilities(kind)!;
+  const send = (change: { add: CatalogFilter[][]; remove: string[] }) =>
+    withAccessToken(db, target.storeId, (token) => channel.write!(token, { externalId: row.codes[0] }, change));
+  // Lo cargado antes de mandar: lo que aparezca después y no salga de la ficha lo trajeron los grupos.
+  const loadedBefore = await loadedIds(db, main);
   let result: CompatibilityWriteResult | null = null;
   let failure: string | null = null;
   try {
-    result = await withAccessToken(db, target.storeId, (token) =>
-      channel.write!(
-        token,
-        { externalId: row.codes[0] },
-        { add: add.map((g) => g.filters as CatalogFilter[]), remove: remove.map((x) => x.vehicle.vehicleId!) },
-      ),
-    );
+    result = await send({ add: add.map((g) => g.filters as CatalogFilter[]), remove: remove.map((x) => x.vehicle.vehicleId!) });
   } catch (e) {
     // Se cortó o falló el canal: no se sabe qué entró. Se vuelve a auditar igual, para saberlo.
+    // Si pidió esperar o hay que reconectar, no se anota: la próxima vuelta relee y manda solo lo que siga faltando.
     if (!(e instanceof ConnectError) || e.reauth || e.busy) throw e;
     failure = e.message;
   }
+  // Lo mandado, aunque el canal lo haya rechazado: no se repite sin una auditoría nueva.
+  await markSent(db, row.publicationIds, add.map(groupName), remove.map((x) => x.vehicle.vehicleId!));
 
   // Después de mandar: cómo quedó.
-  const after = await auditAccountCompatibilities(db, { accountId, publicationIds: row.publicationIds, exact: true, budgetMs: AUDIT_BUDGET_MS });
-  const done = after.quedan.length === 0 && after.salteadas.length === 0 ? await storedAudit(db, main) : null;
+  const read = async () => {
+    const r = await audit();
+    return r.quedan.length === 0 && r.salteadas.length === 0 ? await storedAudit(db, main) : null;
+  };
+  let done = await read();
 
   const rejectedIdx = new Set(result?.rejectedGroups.map((r) => r.index) ?? []);
   const added = result ? add.filter((_, i) => !rejectedIdx.has(i)) : [];
   const removed = result && !result.removeRejected ? remove : [];
   const rechazos = [...new Set([...(result?.rejectedGroups.map((r) => r.message) ?? []), ...(result?.removeRejected ? [result.removeRejected] : [])])];
+
+  // Lo que el canal metió al agregar los grupos y no sale de la ficha: no estaba antes (o se acababa de
+  // borrar) y ahora sobra. Se saca enseguida, porque lo puso esta subida, y se anota para que la
+  // auditoría no lo cuente entre lo que tiene que tener el grupo.
+  let undone: string[] = [];
+  let undoFailure: string | null = null;
+  if (done && added.length > 0) {
+    const justRemoved = new Set(removed.map((x) => x.vehicle.vehicleId!));
+    const brought = removableExtra(done).filter((x) => !loadedBefore.has(x.vehicle.vehicleId!) || justRemoved.has(x.vehicle.vehicleId!));
+    if (brought.length > 0) {
+      const site = row.codes[0].slice(0, 3).toUpperCase();
+      for (const x of brought) {
+        const g = groupOfVehicle(x.vehicle.name, added);
+        if (g) await rememberIntruders(db, { kind, site, filters: g.filters as CatalogFilter[], vehicles: [{ vehicleId: x.vehicle.vehicleId!, name: x.vehicle.name }] });
+      }
+      try {
+        const r = await send({ add: [], remove: brought.map((x) => x.vehicle.vehicleId!) });
+        if (r.removeRejected) undoFailure = r.removeRejected;
+        else undone = brought.map((x) => x.vehicle.name);
+      } catch (e) {
+        if (!(e instanceof ConnectError) || e.reauth) throw e;
+        undoFailure = e.message;
+      }
+      done = await read();
+    }
+  }
+
   const sentSomething = added.length > 0 || removed.length > 0;
   const resultado: CompatibilityPushOutcome['resultado'] = failure ? 'error' : rechazos.length === 0 ? 'subido' : sentSomething ? 'en parte' : 'rechazado';
   const despues = done ? counts(done) : undefined;
   const notes = [
     failure ? null : more ? 'Había más de lo que entra en una subida: lo que falta queda en Por subir para la siguiente.' : null,
+    undone.length > 0
+      ? 'Al agregar los grupos, Mercado Libre metió vehículos que no salen de la ficha: se sacaron en la misma subida y quedan anotados para no contarlos como faltantes.'
+      : null,
+    undoFailure
+      ? `Al agregar los grupos, Mercado Libre metió vehículos que no salen de la ficha y no se pudieron sacar (${undoFailure.replace(/\.+$/, '')}). Aparecen en sobran: borralos a mano en el canal.`
+      : null,
     despues && despues.faltan + despues.incompletos > 0 && resultado !== 'rechazado' && !failure
       ? 'Mercado Libre guarda al momento hasta 200 vehículos y el resto unos minutos después: si siguen faltando, volvé a auditar en un rato.'
       : null,
@@ -333,6 +412,7 @@ async function pushRow(db: Db, accountId: string, row: CompatibilityPushRow): Pr
     resultado,
     agregados: { grupos: added.length, ejemplos: added.slice(0, EXAMPLES).map((g) => g.label) },
     borrados: { cantidad: removed.length, ejemplos: removed.slice(0, EXAMPLES).map((x) => x.vehicle.name) },
+    ...(undone.length > 0 ? { deshechos: { cantidad: undone.length, ejemplos: undone.slice(0, EXAMPLES) } } : {}),
     ...(failure ? { motivo: failure } : {}),
     ...(rechazos.length > 0 ? { rechazos } : {}),
     ...(despues ? { despues } : {}),

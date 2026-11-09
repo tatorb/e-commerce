@@ -36,6 +36,7 @@ function outcomeText(r: Awaited<ReturnType<typeof pushCompatibilitiesAction>> | 
   const sent = [
     o.agregados.grupos > 0 ? `agregó ${groups(o.agregados.grupos)}` : null,
     o.borrados.cantidad > 0 ? `borró ${vehicles(o.borrados.cantidad)}` : null,
+    o.deshechos ? `sacó ${vehicles(o.deshechos.cantidad)} que metió el canal y no salen de la ficha` : null,
   ]
     .filter(Boolean)
     .join(' y ');
