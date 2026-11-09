@@ -13,18 +13,18 @@ import { measuresText } from '@/domain/costs';
 import { formatPercent, formatPrice, parsePrice } from '@/domain/money';
 import { compare } from '@/domain/price-comparison';
 import { promoForSimulation, type SimPromo } from '@/domain/family-campaigns';
+import { optionPriceForProfit } from '@/domain/option-table';
 import {
   availablePlans,
   breakdown,
-  CUSHION,
-  cushionListPrice,
-  INSTALLMENT_PLANS,
+  finalPriceOf,
   isInstallmentPlan,
   listPriceForMargin,
   LOW_INTEREST_PLAN,
   marginLevel,
   marginOf,
   planLabel,
+  profitOf,
   maxDiscount,
   parsePricingText,
   PRICING_KEYS,
@@ -40,7 +40,13 @@ import {
 } from '@/domain/pricing';
 import type { PriceGroupData, PriceOptionData, PriceStepData } from '@/lib/pricing';
 import { selectionKey, type PriceSelection } from './PriceWorkspace';
-import { queueFamilyCampaignAction, savePriceDecisionAction } from '@/app/a/[cuenta]/pipeline/price-actions';
+import {
+  createSaleOptionAction,
+  normalizeFromOptionAction,
+  queueFamilyCampaignAction,
+  saveOptionPriceAction,
+  savePriceDecisionAction,
+} from '@/app/a/[cuenta]/pipeline/price-actions';
 import { pushPriceAction } from '@/app/a/[cuenta]/simulador-precio/actions';
 import { formatDateTime } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
@@ -108,10 +114,20 @@ type StepProps = {
   // La publicación elegida en la tabla por modo de compra; sin elegir, la principal de la primera pestaña.
   selected?: PriceSelection | null;
   onSelect?: (s: PriceSelection) => void;
+  // Se guardó o se creó algo: la tabla de arriba se vuelve a leer y, si se creó una publicación, se elige.
+  onSaved?: (next?: PriceSelection) => void;
 };
 
 /** Qué se muestra abajo: la principal de la medida (con su pestaña), otra opción de venta o una forma de cobro que no existe. */
-type View = { mode: 'main' | 'option' | 'missing'; key: string; plan: InstallmentPlan; option: PriceOptionData | null; group: PriceGroupData };
+type View = {
+  mode: 'main' | 'option' | 'missing';
+  key: string;
+  plan: InstallmentPlan;
+  option: PriceOptionData | null;
+  group: PriceGroupData;
+  // Para una forma de cobro que no existe: el precio y la forma de cobro de la principal, para arrancar con la misma ganancia.
+  base?: { price: number; discount: number; plan: InstallmentPlan } | null;
+};
 
 const planOf = (o: { channelInstallments: number | null; installments: number | null }): InstallmentPlan => {
   const p = o.channelInstallments ?? o.installments ?? 0;
@@ -127,7 +143,8 @@ function viewOf(groups: PriceGroupData[], selected: PriceSelection | null | unde
       // Una forma de cobro que la medida no tiene: se simula sin nada guardado ni del canal.
       const empty = { price: null, channelPrice: null, installments: plan, discount: 0, channelInstallments: null, channelDiscount: null, discountUntil: null, decision: null };
       const measure = g.options.find((o) => o.id === selected.missing.mainId)?.measure;
-      return { mode: 'missing', key: selectionKey(selected), plan, option: null, group: { ...g, ...empty, publicationIds: [], pricesDiffer: false, measures: measure ? [measure] : g.measures } };
+      const base = g.price !== null ? { price: g.price, discount: g.discount ?? 0, plan: planOf(g) } : null;
+      return { mode: 'missing', key: selectionKey(selected), plan, option: null, base, group: { ...g, ...empty, publicationIds: [], pricesDiffer: false, measures: measure ? [measure] : g.measures } };
     }
   }
   if (selected && 'id' in selected) {
@@ -222,7 +239,9 @@ export function PriceStep(props: StepProps) {
   const calculator = (g: PriceGroupData) => {
     // La pestaña elegida muestra la publicación elegida; las demás, su principal.
     const v = g.anchorId === viewTab ? view : viewOf(groups, { id: g.anchorId });
-    return <PriceCalculator key={v.key} {...props} group={v.group} view={v} />;
+    // Con datos nuevos (otro precio guardado), se vuelve a armar con ellos.
+    const fresh = `${v.key}:${v.group.price ?? ''}:${v.group.discount ?? ''}:${v.group.decision?.decidedAt ? new Date(v.group.decision.decidedAt).getTime() : ''}`;
+    return <PriceCalculator key={fresh} {...props} group={v.group} view={v} />;
   };
   if (groups.length === 1) return calculator(groups[0]);
   const active = props.selected ? viewTab : groups.some((g) => g.anchorId === chosen) ? chosen : groups[0].anchorId;
@@ -255,7 +274,118 @@ export function PriceStep(props: StepProps) {
   );
 }
 
-function PriceCalculator({ accountSlug, data, group, view, today, timeZone, infoHref, settingsHref, push = false, onSelect }: StepProps & { group: PriceGroupData; view: View }) {
+
+/** Lo que se hace con la forma de cobro elegida: guardarla sola, normalizar todas según ella o crearla si no existe. */
+function OptionActions({
+  accountSlug,
+  view,
+  group,
+  channelName,
+  listPrice,
+  discount,
+  ready,
+  below,
+  confirmMain,
+  onSaved,
+}: {
+  accountSlug: string;
+  confirmMain: boolean;
+  view: View;
+  group: PriceGroupData;
+  channelName: string;
+  listPrice: number;
+  discount: number;
+  ready: boolean;
+  below: boolean;
+  onSaved?: (next?: PriceSelection) => void;
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = useState<'save' | 'normalize' | 'create' | null>(null);
+  const [confirmBelow, setConfirmBelow] = useState(false);
+  const [asking, setAsking] = useState(false);
+  const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+  const publicationId = view.option?.id ?? null;
+  // En la principal, debajo del mínimo se confirma con la casilla de Guardar precio.
+  const confirmed = view.mode === 'main' ? confirmMain : confirmBelow;
+  const input = { listPrice, discountPct: discount, confirmBelowMin: confirmed };
+  const blocked = !ready || (below && !confirmed);
+
+  async function run(kind: 'save' | 'normalize' | 'create') {
+    setBusy(kind);
+    setMessage(null);
+    const lost = 'Se cortó la conexión con la app. Probá de nuevo.';
+    let next: PriceSelection | undefined;
+    let r: { ok: true; message?: string } | { ok: false; error: string } | null;
+    if (kind === 'create') {
+      const mainId = view.group.anchorId;
+      const c = await createSaleOptionAction(accountSlug, mainId, view.plan, listPrice).catch(() => null);
+      r = c ? (c.ok ? { ok: true, message: c.message } : c) : null;
+      if (c?.ok) next = { id: c.id };
+      setAsking(false);
+    } else {
+      const act = kind === 'save' ? saveOptionPriceAction : normalizeFromOptionAction;
+      r = publicationId ? await act(accountSlug, publicationId, input).catch(() => null) : null;
+    }
+    setBusy(null);
+    setMessage(r ? (r.ok ? { kind: 'ok', text: r.message ?? 'Listo.' } : { kind: 'error', text: r.error }) : { kind: 'error', text: lost });
+    if (r?.ok) {
+      setConfirmBelow(false);
+      onSaved?.(next);
+      router.refresh();
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      {below && view.mode === 'option' ? (
+        <label className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
+          <input type="checkbox" checked={confirmBelow} onChange={(e) => setConfirmBelow(e.target.checked)} className="mt-0.5" />
+          <span>Queda debajo del margen mínimo. Confirmo este precio igual para guardar solo esta o normalizar todas.</span>
+        </label>
+      ) : null}
+      <div className="flex flex-wrap items-center gap-2">
+        {view.mode === 'option' ? (
+          <Button onClick={() => run('save')} pending={busy === 'save'} disabled={busy !== null || blocked}>
+            Guardar solo esta (personalizada)
+          </Button>
+        ) : null}
+        {view.mode !== 'missing' && publicationId ? (
+          <Button variant="outline" onClick={() => run('normalize')} pending={busy === 'normalize'} disabled={busy !== null || blocked}>
+            Normalizar todas según esta
+          </Button>
+        ) : null}
+        {view.mode === 'missing' && !asking ? (
+          <Button onClick={() => setAsking(true)} disabled={busy !== null || !ready}>
+            Crear en {channelName}
+          </Button>
+        ) : null}
+      </div>
+      {view.mode === 'missing' && asking ? (
+        <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900" role="alertdialog" aria-label="Confirmar">
+          <p>
+            Se crea en {channelName} una publicación nueva de {group.measures.length > 0 ? `la medida ${measuresText(group.measures)}` : 'esta medida'} con{' '}
+            {planLabel(view.plan).toLowerCase()}, a {formatPrice(listPrice)}. Queda a la venta.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" onClick={() => run('create')} pending={busy === 'create'} disabled={busy !== null}>
+              Sí, crearla
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setAsking(false)} disabled={busy !== null}>
+              Cancelar
+            </Button>
+          </div>
+        </div>
+      ) : null}
+      {message ? (
+        <p className={cn('text-sm', message.kind === 'error' ? 'text-destructive' : 'text-foreground')} role="status">
+          {message.text}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function PriceCalculator({ accountSlug, data, group, view, today, timeZone, infoHref, settingsHref, push = false, onSelect, onSaved }: StepProps & { group: PriceGroupData; view: View }) {
   // Copiar la forma de cobro de un competidor es ir a esa fila de la tabla: la publicación de la medida con esas cuotas, o la que falta.
   const copyPlan = (p: InstallmentPlan) => {
     const mainId = view.option?.mainId ?? group.anchorId;
@@ -280,7 +410,12 @@ function PriceCalculator({ accountSlug, data, group, view, today, timeZone, info
   // La forma de cobro es la de la publicación elegida y no se cambia: otra forma de cobro es otra publicación.
   const plan = view.plan;
   const [discount, setDiscount] = useState(group.discount ?? start?.discountPct ?? 0);
-  const firstPrice = group.price ?? start?.listPrice ?? (cost ? targetListPrice(cost, params, 0, 0) : null) ?? 0;
+  // Una forma de cobro que no existe arranca con la misma ganancia que la principal; sin eso, en el objetivo.
+  const seed =
+    view.mode === 'missing' && view.base && cost
+      ? optionPriceForProfit({ profit: profitOf(finalPriceOf(view.base.price, view.base.discount), cost, params, view.base.plan), cost, params, plan, discountPct: 0 })
+      : null;
+  const firstPrice = group.price ?? start?.listPrice ?? seed ?? (cost ? targetListPrice(cost, params, plan, 0) : null) ?? 0;
   const [listText, setListText] = useState(firstPrice ? amountText(firstPrice) : '');
   const listParsed = parsePrice(listText);
   const listPrice = typeof listParsed === 'number' ? listParsed : 0;
@@ -747,11 +882,11 @@ function PriceCalculator({ accountSlug, data, group, view, today, timeZone, info
         <SectionBody>
           {view.mode === 'option' ? (
             <p className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900" role="status">
-              Esta forma de cobro se guarda desde la tabla de arriba, con el precio sin cuotas: toma la misma ganancia que las demás. Guardarla sola, con otro precio, llega en la próxima parte.
+              Guardala sola y queda personalizada: guardar desde el precio sin cuotas ya no la recalcula. O normalizá todas según esta: todas las formas de cobro, también las personalizadas, pasan a dejar la misma ganancia que esta.
             </p>
           ) : view.mode === 'missing' ? (
             <p className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900" role="status">
-              La medida todavía no tiene esta forma de cobro en {data.channelName}: lo de arriba es solo para simular. Crearla desde acá llega en la próxima parte.
+              La medida todavía no tiene esta forma de cobro en {data.channelName}. Probá el precio arriba y creala: se suma al mismo producto de {data.channelName} que la principal, con su nombre, fotos y datos.
             </p>
           ) : null}
           {start ? (
@@ -791,7 +926,19 @@ function PriceCalculator({ accountSlug, data, group, view, today, timeZone, info
               </span>
             </label>
           ) : null}
-          <div className="hidden flex-wrap items-center gap-3 md:flex">
+          <OptionActions
+            accountSlug={accountSlug}
+            view={view}
+            group={group}
+            channelName={data.channelName}
+            listPrice={Math.round(listPrice)}
+            discount={discount}
+            ready={ready}
+            below={below}
+            confirmMain={confirm}
+            onSaved={onSaved}
+          />
+          <div className={cn('hidden flex-wrap items-center gap-3', editable && 'md:flex')}>
             <Button onClick={() => save()} pending={pending} disabled={!canSave}>
               {saveLabel}
             </Button>
@@ -812,7 +959,7 @@ function PriceCalculator({ accountSlug, data, group, view, today, timeZone, info
       </SectionCard>
 
       {/* En el celular, el resultado y Guardar quedan fijos abajo. */}
-      <div className="sticky bottom-0 z-30 -mx-4 border-t bg-background/95 px-4 py-2 backdrop-blur md:hidden">
+      <div className={cn('sticky bottom-0 z-30 -mx-4 border-t bg-background/95 px-4 py-2 backdrop-blur md:hidden', !editable && 'hidden')}>
         <div className="flex items-center gap-3">
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold tabular-nums">{listPrice > 0 ? formatPrice(Math.round(sim.finalPrice)) : '—'}</p>

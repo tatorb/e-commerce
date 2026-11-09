@@ -546,6 +546,8 @@ model Publication {
   variantKey        String?
   // En una familia: la medida tiene su propio precio y no sigue al de la familia.
   ownPrice          Boolean               @default(false)
+  // Una opción de venta con precio personalizado: no se recalcula desde el precio sin cuotas.
+  customPrice       Boolean               @default(false)
   // Opciones de venta: cuando el canal vende la misma medida en varias
   // publicaciones, cada una con su forma de cobro y su precio, una es la
   // principal y las demás apuntan a ella. Null: es la principal o la única.

@@ -1,5 +1,6 @@
 'use server';
 
+import { ConnectError } from '@/channels/connect';
 import { formatPrice } from '@/domain/money';
 import { act } from '@/lib/auth/guard';
 import { revalidatePath } from 'next/cache';
@@ -7,7 +8,8 @@ import { prisma } from '@/lib/db';
 import { requireUser } from '@/lib/auth/session';
 import { pricingInputSchema } from '@/domain/pricing';
 import { getAccountBySlug } from '@/lib/queries/accounts';
-import { PricingError, savePriceDecision, savePricingSettings } from '@/lib/pricing';
+import { normalizeFromOption, PricingError, saveOptionPrice, savePriceDecision, savePricingSettings } from '@/lib/pricing';
+import { createSaleOption, SaleOptionCopyError } from '@/lib/sale-option-copy';
 import { readPromotions, type PromotionsResult } from '@/lib/channel-promotions';
 import { CampaignError, cancelCampaign, familyCampaignAction, queueCampaign, type CampaignChoice } from '@/lib/channel-campaigns';
 import { familyCampaignInput, type FamilyCampaignActionResult, type FamilyCampaignInput } from '@/lib/family-campaign-input';
@@ -144,5 +146,79 @@ export async function cancelCampaignAction(accountSlug: string, requestId: strin
     }
     revalidatePath(`/a/${accountSlug}`, 'layout');
     return { ok: true };
+  });
+}
+
+export type OptionPriceInput = { listPrice: number; discountPct: number; confirmBelowMin: boolean };
+
+/** Guarda el precio de una sola forma de cobro y la deja personalizada. */
+export async function saveOptionPriceAction(accountSlug: string, publicationId: string, input: OptionPriceInput): Promise<Result> {
+  return act(accountSlug, { section: ['pipeline'], does: 'Guardó el precio personalizado de una forma de cobro', publicationId }, async ({ user, account }) => {
+    try {
+      await saveOptionPrice(prisma, {
+        accountId: account.id,
+        publicationId: String(publicationId),
+        userId: user.id,
+        listPrice: Number(input?.listPrice),
+        discountPct: Number(input?.discountPct ?? 0),
+        confirmBelowMin: input?.confirmBelowMin === true,
+      });
+    } catch (e) {
+      if (e instanceof PricingError) return { ok: false, error: e.message };
+      throw e;
+    }
+    revalidatePath(`/a/${accountSlug}`, 'layout');
+    return { ok: true, message: 'Guardado como personalizado: queda en Por subir y no se recalcula desde el precio sin cuotas.' };
+  });
+}
+
+/** Normaliza todas las formas de cobro según esta: la misma ganancia que ella, también las personalizadas. */
+export async function normalizeFromOptionAction(accountSlug: string, publicationId: string, input: OptionPriceInput): Promise<Result> {
+  return act(accountSlug, { section: ['pipeline'], does: 'Normalizó los precios de las formas de cobro', publicationId }, async ({ user, account }) => {
+    let lines: string[];
+    try {
+      const r = await normalizeFromOption(prisma, {
+        accountId: account.id,
+        publicationId: String(publicationId),
+        userId: user.id,
+        listPrice: Number(input?.listPrice),
+        discountPct: Number(input?.discountPct ?? 0),
+        confirmBelowMin: input?.confirmBelowMin === true,
+      });
+      lines = [
+        `Sin cuotas: ${formatPrice(r.flatPrice)}.`,
+        ...r.options.map((o) =>
+          o.listPrice === null
+            ? `${o.externalId ?? 'Otra opción'} (${o.planLabel.toLowerCase()}) queda sin precio: ${o.reason}`
+            : `${o.externalId ?? 'Otra opción'} (${o.planLabel.toLowerCase()}): ${formatPrice(o.listPrice)}.`,
+        ),
+      ];
+    } catch (e) {
+      if (e instanceof PricingError) return { ok: false, error: e.message };
+      throw e;
+    }
+    revalidatePath(`/a/${accountSlug}`, 'layout');
+    return { ok: true, message: ['Todas normalizadas con la misma ganancia: quedan en Por subir.', ...lines].join(' ') };
+  });
+}
+
+export type CreateOptionResult = { ok: true; id: string; message: string } | { ok: false; error: string };
+
+/** Crea en el canal la forma de cobro que la medida no tiene, copiada de la buena, a ese precio. */
+export async function createSaleOptionAction(accountSlug: string, mainId: string, plan: number, price: number): Promise<CreateOptionResult> {
+  return act<CreateOptionResult>(accountSlug, { section: 'subir', does: 'Creó una forma de cobro en el canal', publicationId: mainId }, async ({ user, account }) => {
+    if (!(Number(price) > 0)) return { ok: false, error: 'Cargá el precio.' };
+    try {
+      const r = await createSaleOption(prisma, { accountId: account.id, publicationId: String(mainId), plan: Number(plan), price: Number(price), userId: user.id });
+      revalidatePath(`/a/${accountSlug}`, 'layout');
+      return {
+        ok: true,
+        id: r.id,
+        message: [`Se creó ${r.externalId} (${r.plan.toLowerCase()}) a ${formatPrice(r.price)}.`, ...r.warnings].join(' '),
+      };
+    } catch (e) {
+      if (e instanceof SaleOptionCopyError || e instanceof ConnectError) return { ok: false, error: e.message };
+      throw e;
+    }
   });
 }

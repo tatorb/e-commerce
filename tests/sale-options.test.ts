@@ -5,7 +5,7 @@ import { chooseMain, optionListPrice, planMainOptions, samePlanOptions, type Opt
 import { PRICING_DEFAULTS } from '@/domain/pricing';
 import { planClash } from '@/lib/channel-push';
 import { setProductCosts } from '@/lib/costs';
-import { loadPriceStep, saveFlatPrice, savePriceDecision } from '@/lib/pricing';
+import { loadPriceStep, normalizeFromOption, saveFlatPrice, saveOptionPrice, savePriceDecision } from '@/lib/pricing';
 import { flatProfit, optionPriceForProfit, resultAt } from '@/domain/option-table';
 import { statusReasonOf } from '@/channels/mercadolibre/listings';
 import { familyMeasures, type FamilyMember } from '@/lib/families';
@@ -300,5 +300,36 @@ describe.skipIf(!url)('agrupar las opciones de venta en la base', () => {
       expect.objectContaining({ id: main.id, externalId: 'MLA40', main: true, mainId: main.id, channelInstallments: 0, channelPrice: 250_000 }),
       expect.objectContaining({ id: low.id, externalId: 'MLA41', main: false, mainId: main.id, channelInstallments: 1, channelPrice: 270_000 }),
     ]);
+  });
+
+  it('una forma de cobro personalizada no se recalcula desde el sin cuotas, hasta normalizar todas según una', async () => {
+    const product = await db.product.create({ data: { accountId, name: 'Subconjunto SP-6', variants: { create: [{ sku: 'SP-6-00', measure: 'STD', position: 0 }] } } });
+    await setProductCosts(db, { accountId, productId: product.id, costs: { '': '100000' } });
+    const main = await db.publication.create({ data: { productId: product.id, storeId, externalId: 'MLA50', title: 'Subconjunto' } });
+    const low = await db.publication.create({ data: { productId: product.id, storeId, externalId: 'MLA51', title: 'Subconjunto' } });
+    const six = await db.publication.create({ data: { productId: product.id, storeId, externalId: 'MLA52', title: 'Subconjunto' } });
+    for (const [p, installments] of [[main, 0], [low, 1], [six, 6]] as const) {
+      await db.channelCopy.create({ data: { publicationId: p.id, readAt: new Date(), status: 'ACTIVE', installments, price: 1, discount: 0, channelProductId: 'UP-SP6' } });
+    }
+    await assignSaleOptions(db, storeId);
+
+    // La principal se guarda con Guardar precio, no sola.
+    await expect(saveOptionPrice(db, { accountId, publicationId: main.id, userId, listPrice: 300_000, discountPct: 0, confirmBelowMin: false })).rejects.toThrow('Es la principal');
+    const own = await saveOptionPrice(db, { accountId, publicationId: low.id, userId, listPrice: 300_000, discountPct: 0, confirmBelowMin: false });
+    expect(own.simulation.finalPrice).toBe(300_000);
+    expect(await db.publication.findUniqueOrThrow({ where: { id: low.id } })).toMatchObject({ customPrice: true, installments: 1 });
+
+    // Guardar desde el sin cuotas no la toca.
+    const flat = await saveFlatPrice(db, { accountId, publicationId: main.id, userId, flatPrice: 250_000, confirmBelowMin: false });
+    expect(flat.options.find((o) => o.externalId === 'MLA51')).toMatchObject({ listPrice: null, reason: expect.stringContaining('personalizado') });
+    expect(Number((await db.publication.findUniqueOrThrow({ where: { id: low.id } })).price)).toBe(300_000);
+
+    // Normalizar según la de 6 cuotas: el sin cuotas que deja la misma ganancia, y todas desde ahí, la personalizada también.
+    const sixPrice = Number((await db.publication.findUniqueOrThrow({ where: { id: six.id } })).price);
+    const norm = await normalizeFromOption(db, { accountId, publicationId: six.id, userId, listPrice: sixPrice, discountPct: 0, confirmBelowMin: false });
+    expect(Math.abs(norm.flatPrice - 250_000)).toBeLessThanOrEqual(1);
+    const lowAfter = await db.publication.findUniqueOrThrow({ where: { id: low.id } });
+    expect(lowAfter.customPrice).toBe(false);
+    expect(Number(lowAfter.price)).not.toBe(300_000);
   });
 });

@@ -29,7 +29,7 @@ import { CampaignError, campaignText, familyCampaignAction, type CampaignOutcome
 import { familyCampaigns, membersText, splitText } from '@/domain/family-campaigns';
 import { measuresOf } from '@/lib/media';
 import { pushDrafts, PushError } from '@/lib/channel-push';
-import { loadPricingSettings, loadPriceStep, PricingError, saveFlatPrice, savePriceDecision, savePricingSettings, type PriceGroupData } from '@/lib/pricing';
+import { loadPricingSettings, loadPriceStep, PricingError, saveFlatPrice, saveOptionPrice, savePriceDecision, savePricingSettings, type PriceGroupData } from '@/lib/pricing';
 import { listToPush } from '@/lib/queries/sync';
 import { McpToolError, accountArg, defineTool, findPublication, publicationArg, resolveAccount, resolvePublication, type McpContext } from './tool';
 
@@ -336,6 +336,7 @@ function optionForClaude(o: TableOptionRow) {
     ...(o.statusReason ? { motivo: o.statusReason } : {}),
     ...(o.blocked ? { frenada_por_el_canal: true } : {}),
     ...(o.main ? { principal: true } : {}),
+    ...(o.custom ? { personalizada: true } : {}),
     precio_hoy: o.priceNow,
     ...(o.discountNow ? { descuento_hoy_pct: o.discountNow } : {}),
     ...(o.now ? { hoy: resultForClaude(o.now) } : {}),
@@ -399,12 +400,46 @@ const savePrice = defineTool({
     cuotas: z.enum(['sin_cuotas', 'promocionada', '3', '6', '9', '12']).default('sin_cuotas').describe('Las cuotas sin interés, o la cuota promocionada.'),
     costos_propios_del_producto: pricingArgs.optional().describe('Los costos que valen solo para este producto. null vuelve al de la cuenta.'),
     confirmar_debajo_del_minimo: z.boolean().default(false).describe('Guardar aunque el margen quede debajo del mínimo: solo si la persona lo confirmó.'),
+    solo_esta_forma_de_cobro: z
+      .boolean()
+      .default(false)
+      .describe('Con precio_publicado y una publicación que no es la principal de su medida: guarda solo esa forma de cobro y la deja personalizada (guardar desde el precio sin cuotas ya no la recalcula). descuento_pct es el suyo; las cuotas son las suyas y no se cambian.'),
+    normalizar_todas: z
+      .boolean()
+      .default(false)
+      .describe('Con precio_sin_cuotas: también las formas de cobro personalizadas vuelven a tomar el precio de la tabla.'),
   }),
   readOnly: false,
   destructive: true,
   run: async (ctx, args) => {
     const account = await resolveAccount(ctx, args.cuenta);
     const id = await resolvePublication(ctx, account.id, args.publicacion);
+    if (args.solo_esta_forma_de_cobro) {
+      if (args.precio_publicado === undefined) throw new McpToolError('Con solo_esta_forma_de_cobro, mandá precio_publicado.');
+      try {
+        const r = await saveOptionPrice(ctx.db, {
+          accountId: account.id,
+          publicationId: id,
+          userId: ctx.userId,
+          listPrice: args.precio_publicado,
+          discountPct: args.descuento_pct,
+          confirmBelowMin: args.confirmar_debajo_del_minimo,
+        });
+        return {
+          guardado: true,
+          personalizada: true,
+          precio_final: round(r.simulation.finalPrice),
+          margen_pct: round(r.simulation.marginPct),
+          nivel: LEVEL_TEXT[r.simulation.level],
+          ganancia_por_venta: round(r.simulation.profit),
+          ...(r.belowMin ? { se_confirmo_debajo_del_minimo: true } : {}),
+          queda: 'En Por subir. Guardar desde el precio sin cuotas ya no la recalcula, salvo con normalizar_todas.',
+        };
+      } catch (e) {
+        if (e instanceof PricingError) throw new McpToolError(e.message);
+        throw e;
+      }
+    }
     const before = (await loadPriceStep(ctx.db, account.id, id))!.overrides;
     const overrides = args.costos_propios_del_producto ? merged(before, pricingFrom(args.costos_propios_del_producto), false) : before;
     if ((args.precio_publicado === undefined) === (args.precio_sin_cuotas === undefined)) throw new McpToolError('Mandá precio_publicado o precio_sin_cuotas, uno de los dos.');
@@ -417,6 +452,7 @@ const savePrice = defineTool({
           flatPrice: args.precio_sin_cuotas,
           overrides,
           confirmBelowMin: args.confirmar_debajo_del_minimo,
+          resetCustom: args.normalizar_todas,
         });
         const main = await ctx.db.publication.findUnique({ where: { id: r.main.id }, select: { externalId: true } });
         return {

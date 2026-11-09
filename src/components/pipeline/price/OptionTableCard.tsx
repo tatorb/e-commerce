@@ -62,6 +62,11 @@ function OptionCell({ o, channelName }: { o: TableOption; channelName: string })
           </a>
         ) : null}
         {o.main ? <span className="text-xs text-primary">principal</span> : null}
+        {o.custom ? (
+          <span className="rounded-full bg-violet-100 px-1.5 text-xs text-violet-800 dark:bg-violet-950/50 dark:text-violet-300" title="Tiene precio propio: guardar desde el sin cuotas no la recalcula">
+            personalizada
+          </span>
+        ) : null}
         {o.status !== 'ACTIVE' ? <ChannelStatusBadge status={o.status} /> : null}
       </div>
       {o.statusReason ? <p className="max-w-xs text-xs text-muted-foreground">{o.statusReason}</p> : null}
@@ -337,12 +342,18 @@ export function OptionTableCard({
   publicationId,
   selected,
   onSelect,
+  refreshKey = 0,
+  onChanged,
 }: {
   accountSlug: string;
   publicationId: string;
   // En el paso Precio: la fila que se elige es la que muestra el simulador de abajo.
   selected?: PriceSelection | null;
   onSelect?: (s: PriceSelection) => void;
+  // Cambia cuando se guardó algo abajo: la tabla se vuelve a leer.
+  refreshKey?: number;
+  // Se guardó algo en la tabla: lo de abajo se vuelve a armar.
+  onChanged?: () => void;
 }) {
   const [result, setResult] = useState<OptionTableResult | null>(null);
   const load = useCallback(
@@ -351,16 +362,17 @@ export function OptionTableCard({
   );
   useEffect(() => {
     let alive = true;
-    load().then((r) => alive && setResult(r));
+    load().then((r) => alive && (r.ok || refreshKey === 0) && setResult(r));
     return () => {
       alive = false;
     };
-  }, [load]);
+  }, [load, refreshKey]);
   // Después de guardar o subir: la tabla vuelve a leerse, sin perder lo que se ve mientras tanto.
   const reload = useCallback(async () => {
     const r = await load();
     if (r.ok) setResult(r);
-  }, [load]);
+    onChanged?.();
+  }, [load, onChanged]);
 
   return (
     <SectionCard

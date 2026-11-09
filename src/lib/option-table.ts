@@ -35,6 +35,8 @@ export type TableOption = {
   savedPrice: number | null;
   savedDiscount: number | null;
   pending: boolean;
+  // Con precio personalizado: no se recalcula desde el precio sin cuotas.
+  custom: boolean;
 };
 
 export type TableMeasure = {
@@ -84,6 +86,7 @@ export async function loadOptionTable(
       installments: true,
       price: true,
       discount: true,
+      customPrice: true,
       product: { select: { variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } } } },
       channelCopy: { select: { installments: true, status: true, statusReason: true, statusBlocked: true, price: true, discount: true, url: true } },
     },
@@ -146,6 +149,7 @@ export async function loadOptionTable(
         campaign: campaign && cost !== null && valid ? { ...campaign, result: resultAt(campaign.price, cost, params, plan) } : null,
         savedPrice,
         savedDiscount,
+        custom: r.customPrice,
         pending:
           Boolean(r.externalId) &&
           ((savedPrice !== null && savedPrice !== priceNow) || (savedDiscount !== null && discountNow !== null && savedDiscount !== discountNow)),

@@ -8,9 +8,11 @@ import { matchSlot, stockSlots } from '@/domain/stock';
 import { discountText, fingerprint, installmentsText, priceText, storedPrints } from '@/domain/channel-sync';
 import type { CompetitorPrice } from '@/domain/price-comparison';
 import {
+  finalPriceOf,
   installmentCostPct,
   isInstallmentPlan,
   parsePricingValues,
+  profitOf,
   planLabel,
   resolvePricing,
   simulate,
@@ -20,7 +22,7 @@ import {
 import { COST_SELECT, costLines } from './costs';
 import { singleMeasure } from './stock-plan';
 import { measuresOf } from './media';
-import { flatProfit, optionPriceForProfit } from '@/domain/option-table';
+import { flatProfit, optionPriceForProfit, priceForProfit } from '@/domain/option-table';
 
 // El paso Precio: los parámetros de la cuenta, el costo de cada medida y los
 // parámetros propios del producto, la competencia que se cargó en Información
@@ -351,7 +353,7 @@ export type OptionPrice = {
  */
 async function priceSaleOptions(
   tx: Prisma.TransactionClient,
-  args: { mainIds: string[]; cost: number; profit: number; params: PricingParams; userId: string | null; now?: Date },
+  args: { mainIds: string[]; cost: number; profit: number; params: PricingParams; userId: string | null; resetCustom?: boolean; now?: Date },
 ): Promise<OptionPrice[]> {
   const rows = await tx.publication.findMany({
     where: { mainOptionId: { in: args.mainIds } },
@@ -361,6 +363,7 @@ async function priceSaleOptions(
       externalId: true,
       installments: true,
       discount: true,
+      customPrice: true,
       channelStatus: true,
       channelCopy: { select: { installments: true, discount: true, status: true, statusBlocked: true } },
     },
@@ -377,6 +380,10 @@ async function priceSaleOptions(
     }
     if (r.channelCopy?.statusBlocked) {
       out.push({ ...base, listPrice: null, reason: 'El canal la frenó: no se toca.' });
+      continue;
+    }
+    if (r.customPrice && !args.resetCustom) {
+      out.push({ ...base, listPrice: null, reason: 'Tiene precio personalizado: queda como está.' });
       continue;
     }
     if (plan === null) {
@@ -407,7 +414,7 @@ async function priceSaleOptions(
     });
     await seedPriceAgreed(tx, r.id);
     // Su forma de cobro y su descuento siguen como están en el canal: solo cambia el precio.
-    await tx.publication.update({ where: { id: r.id }, data: { price: listPrice, installments: plan, discount: discountPct, ownPrice: true } });
+    await tx.publication.update({ where: { id: r.id }, data: { price: listPrice, installments: plan, discount: discountPct, ownPrice: true, customPrice: false } });
     out.push({ ...base, listPrice, reason: null, note: status === 'UNDER_REVIEW' ? 'El canal la está revisando: queda en Por subir hasta que termine.' : null });
   }
   return out;
@@ -435,6 +442,8 @@ export async function savePriceDecision(
     confirmBelowMin: boolean;
     // La ganancia en pesos que tienen que dejar las otras opciones de venta; sin decirla, la de este precio.
     optionProfit?: number;
+    // También las personalizadas vuelven a tomar el precio de la tabla.
+    resetCustom?: boolean;
     now?: Date;
   },
 ) {
@@ -498,7 +507,7 @@ export async function savePriceDecision(
     const family = found.family?.leadId ? { ownPrice: !group.publicationIds.includes(found.family.leadId) } : {};
     await tx.publication.updateMany({ where: { id: { in: group.publicationIds } }, data: { price: listPrice, installments: plan, discount: discountPct, ...family } });
     // Las otras opciones de venta de esas medidas: la misma ganancia, con su forma de cobro.
-    const options = await priceSaleOptions(tx, { mainIds: group.publicationIds, cost, profit: args.optionProfit ?? s.profit, params, userId: args.userId, now: args.now });
+    const options = await priceSaleOptions(tx, { mainIds: group.publicationIds, cost, profit: args.optionProfit ?? s.profit, params, userId: args.userId, resetCustom: args.resetCustom, now: args.now });
     return { id: decision!.id, decidedAt: decision!.decidedAt, simulation: s, belowMin: below, options };
   });
 }
@@ -519,6 +528,7 @@ export async function saveFlatPrice(
     confirmBelowMin: boolean;
     // Los parámetros propios del producto; sin decirlos, los que ya tiene.
     overrides?: Partial<PricingParams>;
+    resetCustom?: boolean;
     now?: Date;
   },
 ) {
@@ -550,7 +560,92 @@ export async function saveFlatPrice(
     overrides,
     confirmBelowMin: args.confirmBelowMin,
     optionProfit: profit,
+    resetCustom: args.resetCustom,
     now: args.now,
   });
   return { ...r, main: { id: group.anchorId, listPrice, discountPct, plan, planLabel: planLabel(plan) }, flatPrice: flat, profit };
+}
+
+/** La publicación, su principal y la pestaña de la principal, con el costo y los parámetros. */
+async function optionContext(db: PrismaClient, accountId: string, publicationId: string) {
+  const pub = await db.publication.findFirst({
+    where: { id: publicationId, product: { accountId } },
+    select: { id: true, mainOptionId: true, installments: true, channelCopy: { select: { installments: true, status: true, statusBlocked: true } }, channelStatus: true },
+  });
+  if (!pub) throw new PricingError('La publicación no existe en esta cuenta.');
+  const mainId = pub.mainOptionId ?? pub.id;
+  const data = await loadPriceStep(db, accountId, mainId);
+  const group = data?.groups.find((g) => g.publicationIds.includes(mainId));
+  if (!data || !group) throw new PricingError('No se encontró la pestaña de precio de la publicación.');
+  if (group.cost === null) throw new PricingError('Cargá el costo de reposición sin IVA en la pestaña Costo y Stock del producto.');
+  const plan = pub.channelCopy?.installments ?? pub.installments ?? 0;
+  if (!isInstallmentPlan(plan)) throw new PricingError('Todavía no se leyó la forma de cobro de la publicación.');
+  return { pub, mainId, data, group, cost: group.cost, params: resolvePricing(data.account, data.overrides), plan };
+}
+
+/**
+ * Guarda el precio de una sola opción de venta, con su forma de cobro y su
+ * descuento, y la deja personalizada: guardar desde el precio sin cuotas no
+ * la vuelve a calcular hasta que se normalice. Queda en Por subir.
+ */
+export async function saveOptionPrice(
+  db: PrismaClient,
+  args: { accountId: string; publicationId: string; userId: string | null; listPrice: number; discountPct: number; confirmBelowMin: boolean; now?: Date },
+) {
+  if (!(args.listPrice > 0)) throw new PricingError('Cargá el precio publicado.');
+  if (!(args.discountPct >= 0 && args.discountPct < 100)) throw new PricingError('El descuento va de 0 a 99 %.');
+  const c = await optionContext(db, args.accountId, args.publicationId);
+  if (!c.pub.mainOptionId) throw new PricingError('Es la principal: su precio se guarda con Guardar precio.');
+  const status = c.pub.channelCopy?.status ?? c.pub.channelStatus;
+  if (status === 'CLOSED' || status === 'DELETED') throw new PricingError('Está finalizada: no se le guarda precio.');
+  if (c.pub.channelCopy?.statusBlocked) throw new PricingError('El canal la frenó: no se le guarda precio.');
+  const listPrice = Math.round(args.listPrice);
+  const discountPct = Math.round(args.discountPct * 100) / 100;
+  if (installmentCostPct(c.params, c.plan) === null) throw new PricingError(`Cargá el costo de ${planLabel(c.plan).toLowerCase()} en Ajustes > Precios.`);
+  const s = simulate({ listPrice, discountPct, plan: c.plan, cost: c.cost, params: c.params });
+  const below = s.marginPct < c.params.minMarginPct - 1e-9;
+  if (below && !args.confirmBelowMin) {
+    throw new PricingError(
+      `El margen queda en ${s.marginPct.toFixed(1).replace('.', ',')} %, debajo del mínimo de ${String(c.params.minMarginPct).replace('.', ',')} %. Confirmalo para guardarlo igual.`,
+    );
+  }
+  return db.$transaction(async (tx) => {
+    const d = await tx.priceDecision.create({
+      data: {
+        publicationId: c.pub.id,
+        listPrice,
+        discountPct,
+        installments: c.plan,
+        finalPrice: Math.round(s.finalPrice * 100) / 100,
+        cost: c.cost,
+        marginPct: Math.round(s.marginPct * 100) / 100,
+        minMarginPct: c.params.minMarginPct,
+        params: c.params as unknown as Prisma.InputJsonValue,
+        belowMinConfirmed: below,
+        decidedById: args.userId,
+        ...(args.now ? { decidedAt: args.now } : {}),
+      },
+      select: { id: true, decidedAt: true },
+    });
+    await seedPriceAgreed(tx, c.pub.id);
+    await tx.publication.update({ where: { id: c.pub.id }, data: { price: listPrice, discount: discountPct, installments: c.plan, ownPrice: true, customPrice: true } });
+    return { id: d.id, decidedAt: d.decidedAt, simulation: s, belowMin: below };
+  });
+}
+
+/**
+ * Normaliza todas las opciones de venta de la pestaña según una: el precio sin
+ * cuotas que deja la misma ganancia que ella a ese precio y descuento, y desde
+ * ahí todas, también las personalizadas. Queda en Por subir.
+ */
+export async function normalizeFromOption(
+  db: PrismaClient,
+  args: { accountId: string; publicationId: string; userId: string | null; listPrice: number; discountPct: number; confirmBelowMin: boolean; now?: Date },
+) {
+  if (!(args.listPrice > 0)) throw new PricingError('Cargá el precio publicado.');
+  const c = await optionContext(db, args.accountId, args.publicationId);
+  const profit = profitOf(finalPriceOf(Math.round(args.listPrice), args.discountPct), c.cost, c.params, c.plan);
+  const flat = priceForProfit(profit, c.cost, c.params, 0);
+  if (flat === null) throw new PricingError('No se pudo calcular el precio sin cuotas.');
+  return saveFlatPrice(db, { accountId: args.accountId, publicationId: c.mainId, userId: args.userId, flatPrice: flat, confirmBelowMin: args.confirmBelowMin, resetCustom: true, now: args.now });
 }

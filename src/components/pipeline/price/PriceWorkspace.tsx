@@ -18,10 +18,26 @@ export const selectionKey = (s: PriceSelection | null) => (!s ? '' : 'id' in s ?
 export function PriceWorkspace(props: ComponentProps<typeof PriceStep>) {
   // Arranca en la principal de la primera pestaña: la sin cuotas, la que se trabaja en el pipeline.
   const [selected, setSelected] = useState<PriceSelection | null>({ id: props.data.groups[0].anchorId });
+  // Lo que se guarda abajo vuelve a leer la tabla. Lo de abajo se rearma solo cuando llegan los datos nuevos.
+  const [tableKey, setTableKey] = useState(0);
   return (
     <>
-      <OptionTableCard accountSlug={props.accountSlug} publicationId={props.data.publicationId} selected={selected} onSelect={setSelected} />
-      <PriceStep {...props} selected={selected} onSelect={setSelected} />
+      <OptionTableCard
+        accountSlug={props.accountSlug}
+        publicationId={props.data.publicationId}
+        selected={selected}
+        onSelect={setSelected}
+        refreshKey={tableKey}
+      />
+      <PriceStep
+        {...props}
+        selected={selected}
+        onSelect={setSelected}
+        onSaved={(next) => {
+          if (next) setSelected(next);
+          setTableKey((k) => k + 1);
+        }}
+      />
     </>
   );
 }
