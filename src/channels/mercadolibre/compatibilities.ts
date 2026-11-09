@@ -18,11 +18,13 @@ import { MercadoLibreRequestError, mlGet, mlQuery, mlSend } from './http';
 // - El catálogo de vehículos se recorre con top_values, como los filtros de la
 //   pantalla: marca, modelo, año, versión, motor, combustible y potencia. La
 //   búsqueda de vehículos uno por uno (products_search/chunks) ya no existe.
-// - Se agregan y se borran con PUT /items/{id}/compatibilities: create con
-//   grupos de vehículos (products_families, con creation_source) y delete con
-//   los vehículos (products). Hasta 10 grupos y 200 vehículos por pedido, y
-//   100 pedidos por minuto. Las opciones de venta de un mismo producto de
-//   usuario comparten lo cargado: alcanza con mandarlo a una.
+// - Se agregan y se borran con PUT: create con grupos de vehículos
+//   (products_families, con creation_source) y delete con los vehículos
+//   (products). Hasta 10 grupos y 200 vehículos por pedido, y 100 pedidos por
+//   minuto. Si la publicación tiene producto de usuario, va a
+//   /user-products/{id}/compatibilities con domain_id y category_id (en la
+//   publicación lo rechaza); si no, a /items/{id}/compatibilities. Las opciones
+//   de venta de un mismo producto comparten lo cargado: alcanza con una.
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -214,8 +216,15 @@ export const mercadolibreCompatibilities: ChannelCompatibilities = {
 
   async write(accessToken, { externalId }, change) {
     const site = externalId.slice(0, 3).toUpperCase();
-    const path = `/items/${encodeURIComponent(externalId)}/compatibilities`;
-    const put = (body: unknown) => mlSend('PUT', path, accessToken, body);
+    // En el modelo de producto de usuario, lo cargado vive en el producto: Mercado
+    // Libre rechaza el cambio en la publicación ("Use the corresponding User
+    // Product resources") y pide mandarlo al producto, con el dominio y la categoría.
+    const item = await mlGet(`/items/${encodeURIComponent(externalId)}?attributes=id,category_id,user_product_id`, accessToken);
+    const productId = isObj(item) ? str(item.user_product_id) : null;
+    const categoryId = isObj(item) ? str(item.category_id) : null;
+    const path = productId ? `/user-products/${encodeURIComponent(productId)}/compatibilities` : `/items/${encodeURIComponent(externalId)}/compatibilities`;
+    const top = productId ? { domain_id: vehicleDomain(site), ...(categoryId ? { category_id: categoryId } : {}) } : {};
+    const put = (body: object) => mlSend('PUT', path, accessToken, { ...top, ...body });
     const out: CompatibilityWriteResult = { rejectedGroups: [], removeRejected: null };
 
     for (const ids of chunks(change.remove, REMOVE_PER_CALL)) {

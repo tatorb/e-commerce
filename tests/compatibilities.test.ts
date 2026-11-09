@@ -260,7 +260,16 @@ describe.skipIf(!url)('auditar contra Mercado Libre simulado', () => {
   // El producto de usuario de cada publicación: lo cargado ahí lo comparten sus opciones de venta.
   const upOf: Record<string, string> = {};
   // Lo que se mandó a cada publicación, en orden.
-  const writes: { item: string; body: { create?: { products_families: { attributes: { id: string; value_id?: string; value_ids?: string[] }[] }[] }; delete?: { products: { id: string }[] } } }[] = [];
+  const writes: {
+    item: string;
+    path: string;
+    body: {
+      domain_id?: string;
+      category_id?: string;
+      create?: { products_families: { attributes: { id: string; value_id?: string; value_ids?: string[] }[] }[] };
+      delete?: { products: { id: string }[] };
+    };
+  }[] = [];
   // Un grupo que el canal no acepta: el año que tenga este código.
   let rejectYear: string | null = null;
 
@@ -283,18 +292,26 @@ describe.skipIf(!url)('auditar contra Mercado Libre simulado', () => {
         }
         const item = u.pathname.match(/^\/items\/(\w+)$/);
         if (item && item[1] === 'MLA9000099') return res.writeHead(429, { 'Retry-After': '0' }).end('{}');
-        if (item) return send(200, { id: item[1], tags: tags[item[1]] ?? [], domain_id: 'MLA-ENGINE_PARTS', user_product_id: upOf[item[1]] ?? null });
+        if (item) return send(200, { id: item[1], tags: tags[item[1]] ?? [], domain_id: 'MLA-ENGINE_PARTS', category_id: 'MLA373289', user_product_id: upOf[item[1]] ?? null });
         const compat = u.pathname.match(/^\/(items|user-products)\/(\w+)\/compatibilities$/);
         // Lo de una publicación con producto de usuario vive en el producto.
         const listOf = (id: string) => (compat?.[1] === 'items' && upOf[id] ? upOf[id] : id);
         if (compat && req.method === 'PUT') {
           const body = JSON.parse(raw) as (typeof writes)[number]['body'];
+          // Como Mercado Libre: con producto de usuario, en la publicación no acepta cambios.
+          if (compat[1] === 'items' && upOf[compat[2]]) {
+            return send(400, {
+              error: 'bad_request',
+              message: `This Item ${compat[2]} has User Product compatibilities. Use the corresponding User Product resources.`,
+              status: 400,
+            });
+          }
           const families = body.create?.products_families ?? [];
           const year = (f: (typeof families)[number]) => f.attributes.find((a) => a.id === 'VEHICLE_YEAR')?.value_id;
           if (rejectYear && families.some((f) => year(f) === rejectYear)) {
             return send(400, { message: 'Invalid compatibilities', error: 'bad_request', cause: [{ type: 'error', code: 'invalid.family', message: 'El grupo no tiene vehículos para esta categoría.' }] });
           }
-          writes.push({ item: compat[2], body });
+          writes.push({ item: compat[2], path: compat[1], body });
           const key = listOf(compat[2]);
           const gone = new Set((body.delete?.products ?? []).map((p) => p.id));
           const list = (loaded[key] ?? []).filter((v) => !gone.has((v as { catalog_product_id?: string }).catalog_product_id ?? ''));
@@ -587,9 +604,9 @@ describe.skipIf(!url)('auditar contra Mercado Libre simulado', () => {
         despues: { faltan: 0, sobran: 1, a_revisar: 0 },
       }),
     ]);
-    // Se mandó una vez, a la principal: primero el borrado, después los grupos, con el origen que pide el canal.
-    expect(writes.map((w) => w.item)).toEqual(['MLA9000201', 'MLA9000201']);
-    expect(writes[0].body).toEqual({ delete: { products: [{ id: 'MLA801' }] } });
+    // Se mandó una vez, al producto de usuario que comparten: primero el borrado, después los grupos, con el origen que pide el canal.
+    expect(writes.map((w) => `${w.path}/${w.item}`)).toEqual(['user-products/MLAU1', 'user-products/MLAU1']);
+    expect(writes[0].body).toEqual({ domain_id: 'MLA-CARS_AND_VANS', category_id: 'MLA373289', delete: { products: [{ id: 'MLA801' }] } });
     expect(writes[1].body.create?.products_families).toHaveLength(2);
     expect(writes[1].body.create?.products_families[0]).toMatchObject({ domain_id: 'MLA-CARS_AND_VANS', creation_source: 'DEFAULT' });
     // Queda guardado cómo quedó, en las dos opciones, y ya no hay nada por subir.
@@ -641,7 +658,17 @@ describe.skipIf(!url)('auditar contra Mercado Libre simulado', () => {
       [['MLA9000301'], 'subido', 3],
       [['MLA9000302'], 'subido', 3],
     ]);
-    expect(new Set(writes.map((w) => w.item))).toEqual(new Set(['MLA9000301', 'MLA9000302']));
+    expect(new Set(writes.map((w) => w.item))).toEqual(new Set(['MLAU31', 'MLAU32']));
+  });
+
+  it('sin producto de usuario, se manda a la publicación', async () => {
+    const kit = await product('Subconjunto de prueba Amarok suelto', [{ vehicleBrand: 'Volkswagen', model: 'Amarok', engine: '2.0 TDI', yearFrom: 2010, yearTo: 2010 }]);
+    const p = await pub(kit.id, 'MLA9000501');
+    await auditAccountCompatibilities(db, { accountId, publicationIds: [p.id] });
+    const r = await pushCompatibilities(db, { accountId });
+    expect(r.subidas[0]).toMatchObject({ resultado: 'subido', agregados: { grupos: 1 }, despues: { faltan: 0 } });
+    expect(writes.map((w) => `${w.path}/${w.item}`)).toEqual(['items/MLA9000501']);
+    expect(writes[0].body.domain_id).toBeUndefined();
   });
 
   it('sin ficha no se sube nada, ni se borra lo cargado', async () => {
