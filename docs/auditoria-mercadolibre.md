@@ -1,6 +1,6 @@
 # Auditoría de la integración con Mercado Libre
 
-Fecha: 2026-11-09. Se comparó cada conexión de la app con Mercado Libre contra la documentación oficial, guardada en `docs/ml-docs/` (empezar por `docs/ml-docs/INDEX.md`). Todavía no se cambió código: falta que el dueño apruebe cada paquete.
+Fecha: 2026-11-09. Se comparó cada conexión de la app con Mercado Libre contra la documentación oficial, guardada en `docs/ml-docs/` (empezar por `docs/ml-docs/INDEX.md`). El primer paquete, puntos 1, 2, 3, 4 y 7, ya está hecho: cada uno dice qué se cambió. Los demás esperan que el dueño apruebe cada paquete.
 
 Cada punto dice qué pasa, dónde está en el código y de qué archivo de `docs/ml-docs/` sale. Las líneas del código son aproximadas: verificarlas antes de cambiar.
 
@@ -9,18 +9,22 @@ Cada punto dice qué pasa, dónde está en el código y de qué archivo de `docs
 **1. Cambiar el precio con la automatización de precios prendida.** Desde el 18 de marzo de 2026, Mercado Libre rechaza con 400 un PUT /items que cambia solo `price` si la publicación tiene la automatización de precios activa. Si `price` va con otros campos, devuelve 200 pero ignora el precio y avisa con un warning, que la app no lee. La app no consulta `GET /pricing-automation/users/$USER_ID/items` antes.
 - Código: `src/channels/mercadolibre/publish.ts` (`updatePrice`, cerca de la línea 528).
 - Docs: `guia-para-productos/precios-y-costos/064-api-de-precios.md`, `guia-para-productos/precios-y-costos/068-automatizaciones-de-precios.md`, `guia-para-productos/077-producto-sincroniza-modifica-publicaciones.md`.
+- Hecho: el rechazo `item.price.not_modifiable` se explica (`PRICE_AUTOMATED`), y una respuesta 200 con ese aviso en `warnings` cuenta como rechazo. No se consulta antes: leer bien la respuesta alcanza, porque cuando no deja, no cambia nada.
 
 **2. Mensajes de error que confunden el motivo.** `rejectionMessage` y `detailOf` juntan todos los `cause`, avisos incluidos (`type: warning`), y toman el primer mensaje sin mirar si es error o aviso. La lista `KNOWN` prueba `/attribute/i` antes que las reglas del título y `/closed|inactive|status/i` toma cualquier cosa con "status" como finalizada.
 - Código: `src/channels/mercadolibre/publish.ts` líneas 28-60 y los usos de `detailOf`.
 - Docs: `guia-para-productos/059-validaciones.md` (cada causa trae `type`: `error` bloqueante o `warning` informativa).
+- Hecho: se usan solo las causas que frenan, una por una y en orden, con los motivos de los más puntuales a los más generales (`findKnown`). "Finalizada" solo con `closed`; otro estado da un mensaje neutro con el detalle. `moderat` ya no se toma como "en revisión". De paso: `item.title.minimum_length` se explicaba como título largo.
 
 **3. Reintentos de escrituras que pueden duplicar.** `mlSend` reintenta POST y PUT ante 500/502/503/504 y fallas de red. Si Mercado Libre ya hizo el cambio, queda duplicado (una respuesta a un comprador, una publicación creada). Reintentar solo los GET; en escrituras, solo 429 y quizás 503.
 - Código: `src/channels/mercadolibre/http.ts` (`RETRY_STATUS`, `mlSend`).
 - Docs: `faqs/223-rate-limit-error-429.md`.
+- Hecho: `mlSend` reintenta solo ante 429. Ante 5xx o un corte, no repite y avisa que no se sabe si se hizo el cambio (`changeUnknown`). Las lecturas siguen igual.
 
 **4. La conexión vencida no avisa a tiempo.** Un 401 en un pedido común no marca la tienda como "hay que volver a conectar": eso solo pasa si falla la renovación de la llave. Si el vendedor cambia la contraseña o revoca el permiso, todo falla hasta 6 horas sin el aviso. Propuesta: ante un 401, forzar una renovación y reintentar una vez; si falla, marcar `NEEDS_REAUTH`.
 - Código: `src/lib/connections.ts` (`withAccessToken`), `src/channels/mercadolibre/http.ts`, `src/lib/channel-sync.ts`.
 - Docs: `primeros-pasos/002-autenticacion-y-autorizacion.md` (eventos que invalidan la llave antes de tiempo).
+- Hecho, en `withAccessToken`, sin nada propio del canal: ante un rechazo de la llave se renueva en el momento; si falla, `NEEDS_REAUTH`. Si se renueva, no se repite lo que se estaba haciendo, para no duplicar cambios, y se pide probar de nuevo.
 
 **5. Comisiones fijas.** `src/domain/pricing.ts` tiene 14,3% sin cuotas, +5% cuota promocionada, +8,5% 3 cuotas. Mercado Libre da la comisión exacta en `GET /sites/MLA/listing_prices` por precio, tipo de publicación, tag, dominio y logística, con un `fixed_fee` por unidad que la app no usa. La documentación dice 4% para la cuota promocionada (tag `pcj-co-funded`), pero las ventas reales de insur mostraron 5%: leerlo de Mercado Libre lo resuelve.
 - Docs: `guia-para-productos/precios-y-costos/065-comision-por-vender.md`, `guia-para-productos/precios-y-costos/066-campana-con-cuotas-para-marketplace.md`.
@@ -34,6 +38,7 @@ Cada punto dice qué pasa, dónde está en el código y de qué archivo de `docs
 **7. "En revisión" que sí se puede arreglar.** Con `sub_status` `waiting_for_patch`, Mercado Libre pausa la publicación para que el vendedor la corrija, y corregirla la reactiva. La app la trata como bloqueada.
 - Código: `src/channels/mercadolibre/publish.ts` (patrón `under_review`), `src/domain/channel-status.ts`.
 - Docs: `recursos-de-la-api/moderaciones/031-gestionar-moderaciones.md`.
+- Hecho, con la marca general `statusNeedsFix`: a una en revisión que el canal pide corregir se le pueden subir cambios, también el precio del paso Precio, y la ayuda del estado lo explica. Esa marca también se prende con `pending_documentation`: ahí subir cambios no la reactiva, pero no hace daño.
 
 **8. Título de familia bloqueado.** El `family_name` no se puede cambiar si alguna condición de venta del User Product tiene ventas; la app mira solo las ventas de la publicación propia. Además `PUT /items/{id}/family_name` no figura en la documentación (figuran PUT /items y `PUT /user-products-families/{family_id}`): confirmar con una prueba real antes de cambiarlo.
 - Código: `src/channels/mercadolibre/publish.ts` (`update`, campo `title`), `src/domain/title-lock.ts`.

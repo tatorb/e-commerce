@@ -4,7 +4,9 @@ import { apiUrl, paymentsApiUrl } from './urls';
 // Pedidos a la API de Mercado Libre con la llave de la cuenta conectada.
 // Mercado Libre limita los pedidos sin publicar un número: ante "demasiados
 // pedidos" o una falla pasajera, se espera lo que pide o un poco más cada
-// vez, y se reintenta.
+// vez, y se reintenta. Los cambios se reintentan solo ante "demasiados
+// pedidos": ante una falla, Mercado Libre puede haberlo hecho igual, y
+// repetirlo duplicaría una publicación o una respuesta.
 
 export class MercadoLibreRequestError extends ConnectError {
   constructor(
@@ -12,12 +14,16 @@ export class MercadoLibreRequestError extends ConnectError {
     readonly status: number,
     // Lo que respondió Mercado Libre, para explicar por qué no aceptó un cambio.
     readonly body: unknown = null,
+    // Un cambio que falló del lado de Mercado Libre: no se sabe si lo hizo.
+    readonly changeUnknown = false,
   ) {
     super(message, status === 401, status === 429);
   }
 }
 
 const RETRY_STATUS = new Set([429, 500, 502, 503, 504]);
+// En un cambio, solo "demasiados pedidos": ahí Mercado Libre seguro no hizo nada.
+const SEND_RETRY_STATUS = new Set([429]);
 const TRIES = 3;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -73,8 +79,10 @@ async function getFrom(base: string, path: string, accessToken: string): Promise
 }
 
 /**
- * PUT, POST o DELETE con la llave y un cuerpo JSON. Reintenta igual que mlGet;
- * si Mercado Libre no acepta el cambio, el error trae su respuesta.
+ * PUT, POST o DELETE con la llave y un cuerpo JSON. Reintenta solo cuando
+ * Mercado Libre pide esperar; si se corta la conexión o falla de su lado,
+ * avisa que no se sabe si hizo el cambio. Si no lo acepta, el error trae su
+ * respuesta.
  */
 export async function mlSend(method: 'PUT' | 'POST' | 'DELETE', path: string, accessToken: string, body?: unknown): Promise<unknown> {
   // Un formulario (para subir un archivo) va tal cual; lo demás, como JSON. DELETE va sin cuerpo.
@@ -95,11 +103,8 @@ export async function mlSend(method: 'PUT' | 'POST' | 'DELETE', path: string, ac
         cache: 'no-store',
       });
     } catch {
-      if (attempt + 1 < TRIES) {
-        await sleep(500 * 2 ** attempt);
-        continue;
-      }
-      throw new ConnectError('No se pudo conectar con Mercado Libre. Probá de nuevo.');
+      // El pedido pudo haber llegado: repetirlo podría duplicar el cambio.
+      throw new ConnectError('Se cortó la conexión con Mercado Libre y no se sabe si hizo el cambio. Revisalo en Mercado Libre antes de volver a probar.');
     }
     const text = await res.text();
     let parsed: unknown = null;
@@ -109,13 +114,22 @@ export async function mlSend(method: 'PUT' | 'POST' | 'DELETE', path: string, ac
       parsed = text;
     }
     if (res.ok) return parsed;
-    if (RETRY_STATUS.has(res.status) && attempt + 1 < TRIES) {
+    if (SEND_RETRY_STATUS.has(res.status) && attempt + 1 < TRIES) {
       await sleep(waitFor(res, attempt));
       continue;
     }
     if (res.status === 401) throw new MercadoLibreRequestError('Mercado Libre no aceptó la llave: hay que volver a conectar.', 401, parsed);
     if (res.status === 429) {
       throw new MercadoLibreRequestError('Mercado Libre pidió esperar porque hubo demasiados pedidos. Probá de nuevo en unos minutos.', 429, parsed);
+    }
+    // Falló de su lado: puede haberlo hecho igual.
+    if (res.status >= 500) {
+      throw new MercadoLibreRequestError(
+        `Mercado Libre falló (código ${res.status}) y no se sabe si hizo el cambio. Revisalo en Mercado Libre antes de volver a probar.`,
+        res.status,
+        parsed,
+        true,
+      );
     }
     throw new MercadoLibreRequestError(`Mercado Libre respondió con un error (código ${res.status}).`, res.status, parsed);
   }

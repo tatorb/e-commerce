@@ -24,12 +24,15 @@ export function ChannelStatusCard({
   accountSlug,
   publicationId,
   status,
+  needsFix = false,
   channelName,
   relist,
 }: {
   accountSlug: string;
   publicationId: string;
   status: ChannelStatus;
+  // El canal pide corregirla para reactivarla.
+  needsFix?: boolean;
   channelName: string;
   // Lo que hace falta para republicar, si se puede.
   relist: RelistInfo | null;
@@ -86,7 +89,7 @@ export function ChannelStatusCard({
   const missingQuantity = measures.length > 0 ? measures.some((m) => !quantities[m.key]?.trim()) : !quantity.trim();
 
   return (
-    <SectionCard title={`Estado en ${channelName}`} description={`${CHANNEL_STATUS_LABEL[status]}. ${statusHelp(status, channelName)}`}>
+    <SectionCard title={`Estado en ${channelName}`} description={`${CHANNEL_STATUS_LABEL[status]}. ${statusHelp(status, channelName, needsFix)}`}>
       <SectionBody className="space-y-3">
         {actions.length > 0 ? (
           <div className="flex flex-wrap gap-2">

@@ -365,7 +365,7 @@ async function priceSaleOptions(
       discount: true,
       customPrice: true,
       channelStatus: true,
-      channelCopy: { select: { installments: true, discount: true, status: true, statusBlocked: true } },
+      channelCopy: { select: { installments: true, discount: true, status: true, statusNeedsFix: true, statusBlocked: true } },
     },
   });
   const out: OptionPrice[] = [];
@@ -415,7 +415,8 @@ async function priceSaleOptions(
     await seedPriceAgreed(tx, r.id);
     // Su forma de cobro y su descuento siguen como están en el canal: solo cambia el precio.
     await tx.publication.update({ where: { id: r.id }, data: { price: listPrice, installments: plan, discount: discountPct, ownPrice: true, customPrice: false } });
-    out.push({ ...base, listPrice, reason: null, note: status === 'UNDER_REVIEW' ? 'El canal la está revisando: queda en Por subir hasta que termine.' : null });
+    const reviewing = status === 'UNDER_REVIEW' && !r.channelCopy?.statusNeedsFix;
+    out.push({ ...base, listPrice, reason: null, note: reviewing ? 'El canal la está revisando: queda en Por subir hasta que termine.' : null });
   }
   return out;
 }

@@ -25,54 +25,113 @@ import {
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v);
 
-// Los motivos que más aparecen, por el código que manda Mercado Libre.
-const KNOWN: [RegExp, string][] = [
-  [/attributes? \[[^\]]*\] (is|are) (all )?required|missing_required/i, 'Mercado Libre pide datos de catálogo que faltan.'],
-  [/item\.variations|field variations/i, 'Mercado Libre no aceptó las medidas.'],
-  [/available_quantity|quantity|stock/i, 'Mercado Libre no aceptó la cantidad.'],
-  [/item\.price|price/i, 'Mercado Libre no aceptó el precio.'],
-  [/attribute/i, 'Mercado Libre no aceptó un dato de catálogo.'],
-  [/title.*not_modifiable|title.*modif/i, 'Mercado Libre no deja cambiar el título.'],
-  [/title.*(length|max|long)/i, 'El título es más largo de lo que acepta la categoría en Mercado Libre.'],
-  [/title/i, 'Mercado Libre no aceptó el título.'],
-  [/description.*(length|max|long)/i, 'La descripción es más larga de lo que acepta Mercado Libre.'],
-  [/description.*(html|tag|link|url|mail|phone|contact)/i, 'Mercado Libre no acepta links, mails, teléfonos ni etiquetas HTML en la descripción.'],
-  [/description/i, 'Mercado Libre no aceptó la descripción.'],
-  [/picture|image/i, 'Mercado Libre no aceptó las fotos.'],
-  [/under_review|moderat/i, 'La publicación está en revisión en Mercado Libre: no se puede cambiar por ahora.'],
-  [/closed|inactive|status/i, 'La publicación está finalizada en Mercado Libre: no se puede cambiar.'],
+// Lo que se dice cuando la automatización de precios de Mercado Libre no deja cambiar el precio.
+export const PRICE_AUTOMATED =
+  'Esta publicación tiene prendida la automatización de precios de Mercado Libre. Apagala allá para cambiar el precio desde la app.';
+
+// De qué trata un motivo conocido, para elegir los que corresponden a cada cambio.
+type Topic = 'automation' | 'catalog' | 'title' | 'description' | 'measures' | 'quantity' | 'price' | 'pictures' | 'status';
+
+// Los motivos que más aparecen, de los más puntuales a los más generales. detail:
+// "cause" suma lo que dice Mercado Libre; "raw", además, la respuesta completa.
+type Known = { pattern: RegExp; message: string; topic: Topic; detail?: 'cause' | 'raw' };
+const KNOWN: Known[] = [
+  { pattern: /item\.price\.not_modifiable|dynamic pricing/i, message: PRICE_AUTOMATED, topic: 'automation' },
+  {
+    pattern: /attributes? \[[^\]]*\] (is|are) (all )?required|missing_(conditional_|catalog_)?required/i,
+    message: 'Mercado Libre pide datos de catálogo que faltan.',
+    topic: 'catalog',
+    detail: 'cause',
+  },
+  // En el título va el motivo tal cual y la respuesta completa: hay rechazos que no se entienden sin ella.
+  { pattern: /title.*not_modifiable|title.*modif/i, message: 'Mercado Libre no deja cambiar el título.', topic: 'title', detail: 'raw' },
+  // Muy corto: item.title.minimum_length, antes que el de muy largo.
+  { pattern: /title.*(minimum|short)/i, message: 'Mercado Libre pide un título con más detalle del producto.', topic: 'title', detail: 'raw' },
+  { pattern: /title.*(length|max|long)/i, message: 'El título es más largo de lo que acepta la categoría en Mercado Libre.', topic: 'title', detail: 'raw' },
+  { pattern: /title/i, message: 'Mercado Libre no aceptó el título.', topic: 'title', detail: 'raw' },
+  { pattern: /description.*(length|max|long)/i, message: 'La descripción es más larga de lo que acepta Mercado Libre.', topic: 'description' },
+  {
+    pattern: /description.*(html|tag|link|url|mail|phone|contact)/i,
+    message: 'Mercado Libre no acepta links, mails, teléfonos ni etiquetas HTML en la descripción.',
+    topic: 'description',
+  },
+  { pattern: /description/i, message: 'Mercado Libre no aceptó la descripción.', topic: 'description' },
+  // En las medidas, la cantidad, el precio, las fotos y los datos de catálogo, el detalle dice cuál fue.
+  { pattern: /item\.variations|field variations/i, message: 'Mercado Libre no aceptó las medidas.', topic: 'measures', detail: 'cause' },
+  { pattern: /available_quantity|quantity|stock/i, message: 'Mercado Libre no aceptó la cantidad.', topic: 'quantity', detail: 'cause' },
+  { pattern: /item\.price|price/i, message: 'Mercado Libre no aceptó el precio.', topic: 'price', detail: 'cause' },
+  { pattern: /picture|image/i, message: 'Mercado Libre no aceptó las fotos.', topic: 'pictures', detail: 'cause' },
+  { pattern: /attribute/i, message: 'Mercado Libre no aceptó un dato de catálogo.', topic: 'catalog', detail: 'cause' },
+  { pattern: /under_review/i, message: 'La publicación está en revisión en Mercado Libre: no se puede cambiar por ahora.', topic: 'status' },
+  { pattern: /\bclosed\b/i, message: 'La publicación está finalizada en Mercado Libre: no se puede cambiar.', topic: 'status' },
+  // Otro estado: no se sabe cuál, así que no se dice "finalizada".
+  { pattern: /item\.status|\bstatus\b/i, message: 'Mercado Libre no deja este cambio por el estado de la publicación.', topic: 'status', detail: 'cause' },
 ];
 
-/** Lo que explica Mercado Libre del rechazo, tal cual lo manda. */
-function detailOf(body: unknown): string | null {
-  const causes = isObj(body) && Array.isArray(body.cause) ? body.cause.filter(isObj) : [];
-  return causes.map((c) => (typeof c.message === 'string' ? c.message : null)).find(Boolean) ?? (isObj(body) && typeof body.message === 'string' ? body.message : null);
+const text = (v: unknown): string => (typeof v === 'string' ? v : '');
+
+/**
+ * Las causas que frenan el cambio. Mercado Libre marca cada una con type:
+ * "error" frena y "warning" solo avisa. Sin type, cuenta como error.
+ */
+function blockingCauses(body: unknown): Obj[] {
+  const all = isObj(body) && Array.isArray(body.cause) ? body.cause.filter(isObj) : [];
+  return all.filter((c) => c.type !== 'warning');
 }
+
+/** Lo que explica Mercado Libre del rechazo, tal cual lo manda, sin los avisos. */
+function detailOf(body: unknown): string | null {
+  return blockingCauses(body).map((c) => text(c.message)).find(Boolean) ?? (text(isObj(body) ? body.message : null) || null);
+}
+
+/**
+ * El primer motivo conocido del rechazo y lo que dice Mercado Libre de él. Se
+ * mira cada causa que frena, en el orden en que llegan, con su código y su
+ * texto; al final, el error y el mensaje generales.
+ */
+function findKnown<T extends { pattern: RegExp }>(body: unknown, list: T[]): { known: T | null; detail: string | null } {
+  const sources = [
+    ...blockingCauses(body).map((c) => ({ said: `${text(c.code)} ${text(c.message)}`, message: text(c.message) || null })),
+    ...(isObj(body) ? [{ said: `${text(body.error)} ${text(body.message)}`, message: text(body.message) || null }] : []),
+  ];
+  for (const s of sources) {
+    const known = list.find((k) => k.pattern.test(s.said));
+    if (known) return { known, detail: s.message ?? detailOf(body) };
+  }
+  return { known: null, detail: detailOf(body) };
+}
+
+const explained = (message: string, detail: string | null) => (detail ? `${message.slice(0, -1)}: ${detail}` : message);
+const fullBody = (body: unknown) =>
+  body !== null && body !== undefined && JSON.stringify(body) !== '{}' ? ` Respuesta completa: ${JSON.stringify(body).slice(0, 600)}` : '';
 
 /** El motivo, en castellano, de por qué Mercado Libre no aceptó el cambio. */
 export function rejectionMessage(status: number, body: unknown): string {
   if (status === 403) return 'La aplicación de Mercado Libre no tiene permiso para modificar publicaciones. Revisá que tenga el permiso de escritura y volvé a conectar la tienda.';
   if (status === 404) return 'Mercado Libre no encontró la publicación.';
-  const causes = isObj(body) && Array.isArray(body.cause) ? body.cause.filter(isObj) : [];
-  const codes = [...causes.map((c) => `${c.code ?? ''} ${c.message ?? ''}`), isObj(body) ? `${body.error ?? ''} ${body.message ?? ''}` : ''].join(' ');
-  const detail = detailOf(body);
-  for (const [pattern, message] of KNOWN) {
-    if (!pattern.test(codes)) continue;
-    // En el título va el motivo tal cual y la respuesta completa: hay rechazos que no se entienden sin ella.
-    if (/title/i.test(pattern.source)) {
-      const raw = body !== null && body !== undefined ? ` Respuesta completa: ${JSON.stringify(body).slice(0, 600)}` : '';
-      return `${detail ? `${message.slice(0, -1)}: ${detail}` : message}${raw}`;
-    }
-    // En las medidas, los datos de catálogo y las fotos, el detalle dice cuál fue.
-    return /variation|attribute|picture|price|quantity/i.test(pattern.source) && detail ? `${message.slice(0, -1)}: ${detail}` : message;
-  }
+  const { known, detail } = findKnown(body, KNOWN);
+  if (known?.detail === 'raw') return `${explained(known.message, detail)}${fullBody(body)}`;
+  if (known) return known.detail === 'cause' ? explained(known.message, detail) : known.message;
   // Un motivo que no se conoce: va con la respuesta completa, para poder entenderlo.
-  const raw = body !== null && body !== undefined && JSON.stringify(body) !== '{}' ? ` Respuesta completa: ${JSON.stringify(body).slice(0, 600)}` : '';
+  const raw = fullBody(body);
   return detail ? `Mercado Libre no lo aceptó: ${detail}${raw}` : `Mercado Libre no lo aceptó (código ${status}).${raw}`;
 }
 
+/**
+ * Si Mercado Libre aceptó el pedido pero avisa que no cambió el precio porque
+ * la publicación tiene la automatización de precios: el aviso llega en warnings.
+ */
+function priceIgnored(res: unknown): boolean {
+  const notes = isObj(res) ? [res.warnings, res.cause].flatMap((list) => (Array.isArray(list) ? list.filter(isObj) : [])) : [];
+  return notes.some((w) => /item\.price\.not_modifiable/i.test(text(w.code)) || /dynamic pricing/i.test(text(w.message)));
+}
+
+/** Si Mercado Libre falló al hacer un cambio: no se sabe si lo hizo, y el aviso lo dice. */
+const changeUnknown = (e: unknown): e is MercadoLibreRequestError => e instanceof MercadoLibreRequestError && e.changeUnknown;
+
 // Una llave vencida o "demasiados pedidos" siguen como error de conexión.
 function translated(e: unknown): unknown {
+  if (changeUnknown(e)) return new PublishError(e.message);
   return e instanceof MercadoLibreRequestError && e.status !== 401 && e.status !== 429 ? new PublishError(rejectionMessage(e.status, e.body)) : e;
 }
 
@@ -100,16 +159,17 @@ async function statusNow(e: unknown, id: string, token: string): Promise<string 
 function fullRejection(what: 'description' | 'pictures', method: 'PUT' | 'POST', path: string, e: unknown, before?: string): unknown {
   if (!(e instanceof MercadoLibreRequestError) || e.status === 401 || e.status === 429) return e;
   const body = e.body === null || e.body === undefined ? 'sin cuerpo' : typeof e.body === 'string' ? e.body.slice(0, 1500) : JSON.stringify(e.body).slice(0, 1500);
-  const detail = detailOf(e.body);
+  const request = `Pedido: ${method} ${path}. Código HTTP ${e.status}. Respuesta: ${body}${before ? ` ${before}` : ''}`;
+  if (e.changeUnknown) return new PublishError(`${e.message} ${request}`);
   const it = what === 'description' ? 'la descripción' : 'las fotos';
   const generic = `Mercado Libre no aceptó ${it}.`;
   // Un motivo conocido va explicado en castellano; si no, el genérico.
-  const causes = isObj(e.body) && Array.isArray(e.body.cause) ? e.body.cause.filter(isObj) : [];
-  const codes = [...causes.map((c) => `${c.code ?? ''} ${c.message ?? ''}`), isObj(e.body) ? `${e.body.error ?? ''} ${e.body.message ?? ''}` : ''].join(' ');
-  const own = what === 'description' ? /description/ : /picture/;
-  const known = KNOWN.find(([pattern]) => (own.test(pattern.source) || /under_review|closed/.test(pattern.source)) && pattern.test(codes));
-  const reason = known && known[1] !== generic ? known[1].slice(0, -1) : e.status === 403 ? `Mercado Libre no dejó cambiar ${it}` : generic.slice(0, -1);
-  return new PublishError(`${reason}${detail ? `: ${detail}` : ''}. Pedido: ${method} ${path}. Código HTTP ${e.status}. Respuesta: ${body}${before ? ` ${before}` : ''}`);
+  const { known, detail } = findKnown(
+    e.body,
+    KNOWN.filter((k) => k.topic === what || k.topic === 'status'),
+  );
+  const reason = known && known.message !== generic ? known.message.slice(0, -1) : e.status === 403 ? `Mercado Libre no dejó cambiar ${it}` : generic.slice(0, -1);
+  return new PublishError(`${reason}${detail ? `: ${detail}` : ''}. ${request}`);
 }
 
 /** El rechazo de la descripción, con la respuesta completa. */
@@ -132,6 +192,7 @@ async function sendPictures(method: 'PUT' | 'POST', path: string, token: string,
  */
 function rejectedAs(what: string, e: unknown, opts: { raw?: boolean } = {}): unknown {
   if (!(e instanceof MercadoLibreRequestError) || e.status === 401 || e.status === 429) return e;
+  if (e.changeUnknown) return new PublishError(e.message);
   if (e.status === 404) return new PublishError('Mercado Libre no encontró la publicación.');
   const detail = detailOf(e.body);
   // Con raw, la respuesta completa de Mercado Libre va en el mensaje, para entender rechazos que no se conocen.
@@ -174,11 +235,11 @@ function variantOf<T extends VariantLike>(list: T[], v: VariantLike): T | undefi
 }
 
 // Los motivos más comunes al cambiar el estado, antes que los generales.
-const STATUS_KNOWN: [RegExp, string][] = [
-  [/quantity|stock/i, 'No tiene stock en Mercado Libre: cargale stock para reactivarla.'],
-  [/under_review|moderat/i, 'La publicación está en revisión en Mercado Libre: no se puede cambiar por ahora.'],
-  [/deleted|delete/i, 'Mercado Libre solo deja eliminar publicaciones finalizadas.'],
-  [/relist/i, 'Mercado Libre no deja republicar esta publicación.'],
+const STATUS_KNOWN: { pattern: RegExp; message: string }[] = [
+  { pattern: /quantity|stock/i, message: 'No tiene stock en Mercado Libre: cargale stock para reactivarla.' },
+  { pattern: /under_review/i, message: 'La publicación está en revisión en Mercado Libre: no se puede cambiar por ahora.' },
+  { pattern: /deleted|delete/i, message: 'Mercado Libre solo deja eliminar publicaciones finalizadas.' },
+  { pattern: /relist/i, message: 'Mercado Libre no deja republicar esta publicación.' },
 ];
 
 /** Lo mismo que send, con los motivos de los cambios de estado. */
@@ -186,11 +247,9 @@ async function sendStatus(method: 'PUT' | 'POST', path: string, token: string, b
   try {
     return await mlSend(method, path, token, body);
   } catch (e) {
-    if (e instanceof MercadoLibreRequestError && e.status !== 401 && e.status !== 429 && e.status !== 403 && e.status !== 404) {
-      const causes = isObj(e.body) && Array.isArray(e.body.cause) ? e.body.cause.filter(isObj) : [];
-      const text = [...causes.map((c) => `${c.code ?? ''} ${c.message ?? ''}`), isObj(e.body) ? `${e.body.error ?? ''} ${e.body.message ?? ''}` : ''].join(' ');
-      const known = STATUS_KNOWN.find(([pattern]) => pattern.test(text));
-      if (known) throw new PublishError(known[1]);
+    if (e instanceof MercadoLibreRequestError && !e.changeUnknown && ![401, 403, 404, 429].includes(e.status)) {
+      const { known } = findKnown(e.body, STATUS_KNOWN);
+      if (known) throw new PublishError(known.message);
     }
     throw translated(e);
   }
@@ -530,7 +589,9 @@ export const mercadolibrePublisher: ChannelPublisher = {
     // Con medidas, Mercado Libre pide el precio en cada una.
     const item = await get(`/items/${id}?attributes=variations`, accessToken);
     const variations = isObj(item) ? variationsOf(item) : [];
-    await send('PUT', `/items/${id}`, accessToken, variations.length > 0 ? { variations: variations.map((v) => ({ id: v.id, price })) } : { price });
+    const res = await send('PUT', `/items/${id}`, accessToken, variations.length > 0 ? { variations: variations.map((v) => ({ id: v.id, price })) } : { price });
+    // Con la automatización de precios prendida, Mercado Libre puede responder bien y dejar el precio que tenía.
+    if (priceIgnored(res)) throw new PublishError(PRICE_AUTOMATED);
   },
 
   async addOption(accessToken, sellerId, o) {

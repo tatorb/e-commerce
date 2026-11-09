@@ -12,8 +12,12 @@ export const CHANNEL_STATUS_LABEL: Record<ChannelStatus, string> = {
   UNPUBLISHED: 'Sin publicar',
 };
 
-/** Qué quiere decir cada estado, en pocas palabras. */
-export function statusHelp(status: ChannelStatus, channelName: string): string {
+/**
+ * Qué quiere decir cada estado, en pocas palabras. needsFix: el canal la
+ * frenó y pide corregirla; al subir la corrección, se reactiva.
+ */
+export function statusHelp(status: ChannelStatus, channelName: string, needsFix = false): string {
+  if (status === 'UNDER_REVIEW' && needsFix) return `${channelName} pide corregirla. Cuando subas la corrección, se reactiva.`;
   switch (status) {
     case 'ACTIVE':
       return 'Se ve y se vende.';

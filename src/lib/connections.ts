@@ -189,6 +189,12 @@ export async function completeAuthorization(
  * Corre algo con la llave de uso de la tienda, renovándola antes si está por
  * vencer. La renovación bloquea la fila: la llave de renovación es de un solo
  * uso y dos renovaciones al mismo tiempo romperían la conexión.
+ *
+ * Si el canal no acepta la llave antes de que venza (por ejemplo, porque se
+ * cambió la contraseña o se sacó el permiso), se renueva en ese momento. Si
+ * no se puede, la tienda queda para volver a conectar. Si se puede, no se
+ * repite lo que se estaba haciendo, porque podría duplicar un cambio que ya
+ * se hizo: se pide probar de nuevo.
  */
 export async function withAccessToken<T>(
   db: PrismaClient,
@@ -197,7 +203,29 @@ export async function withAccessToken<T>(
   opts: { now?: () => Date } = {},
 ): Promise<T> {
   const now = opts.now ?? (() => new Date());
-  type Got = { kind: 'token'; accessToken: string; userId: string } | { kind: 'reauth'; message: string };
+  const token = await tokenFor(db, storeId, now, null);
+  try {
+    return await run(token.accessToken, token.userId);
+  } catch (e) {
+    if (!(e instanceof ConnectError) || !e.reauth) throw e;
+    // Si la renovación falla, tokenFor deja la tienda para volver a conectar y avisa.
+    await tokenFor(db, storeId, now, token.accessToken);
+    throw new ConnectError(`${token.channelName} no aceptó la llave de la conexión y ya se renovó. Probá de nuevo.`);
+  }
+}
+
+/**
+ * La llave de uso de la tienda, renovada si está por vencer. rejected: la
+ * llave que el canal no aceptó; se renueva aunque no esté por vencer, salvo
+ * que otro pedido ya la haya renovado.
+ */
+async function tokenFor(
+  db: PrismaClient,
+  storeId: string,
+  now: () => Date,
+  rejected: string | null,
+): Promise<{ accessToken: string; userId: string; channelName: string }> {
+  type Got = { kind: 'token'; accessToken: string; userId: string; channelName: string } | { kind: 'reauth'; message: string };
   const token = await db.$transaction(
     async (tx): Promise<Got> => {
       const [row] = await tx.$queryRaw<{ id: string }[]>`
@@ -205,7 +233,7 @@ export async function withAccessToken<T>(
       if (!row) throw new ConnectError('La tienda no está conectada.');
       const c = await tx.channelConnection.findUniqueOrThrow({
         where: { storeId },
-        include: { store: { select: { channel: { select: { kind: true } } } } },
+        include: { store: { select: { channel: { select: { kind: true, name: true } } } } },
       });
       if (c.status !== 'ACTIVE' || !c.accessToken || !c.refreshToken || !c.externalUserId) {
         throw new ConnectError(
@@ -213,8 +241,12 @@ export async function withAccessToken<T>(
           c.status === 'NEEDS_REAUTH',
         );
       }
-      if (c.expiresAt && c.expiresAt.getTime() - now().getTime() > REFRESH_MARGIN_MS) {
-        return { kind: 'token', accessToken: decrypt(c.accessToken), userId: c.externalUserId };
+      const channelName = c.store.channel.name;
+      const current = decrypt(c.accessToken);
+      const fresh = c.expiresAt && c.expiresAt.getTime() - now().getTime() > REFRESH_MARGIN_MS;
+      // Sin rechazo, sirve la que hay si no está por vencer; con rechazo, sirve si ya es otra.
+      if (rejected === null ? fresh : current !== rejected) {
+        return { kind: 'token', accessToken: current, userId: c.externalUserId, channelName };
       }
       const connector = connectorFor(c.store.channel.kind);
       try {
@@ -234,7 +266,7 @@ export async function withAccessToken<T>(
             lastError: null,
           },
         });
-        return { kind: 'token', accessToken: tokens.accessToken, userId: c.externalUserId };
+        return { kind: 'token', accessToken: tokens.accessToken, userId: c.externalUserId, channelName };
       } catch (e) {
         if (e instanceof ConnectError && e.reauth) return { kind: 'reauth', message: e.message };
         throw e;
@@ -250,7 +282,7 @@ export async function withAccessToken<T>(
     });
     throw new ConnectError(token.message, true);
   }
-  return run(token.accessToken, token.userId);
+  return token;
 }
 
 /** Desconecta: borra las llaves y avisa al canal. Los datos de la aplicación quedan, para volver a conectar. */

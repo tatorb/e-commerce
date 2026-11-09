@@ -100,7 +100,9 @@ function SelectButton({ active, onClick, label }: { active: boolean; onClick: ()
 type Line = { text: string; bad: boolean };
 
 // Las que se pueden subir: publicadas, con algo por subir y que el canal no frenó ni está revisando.
-const pushable = (o: TableOption) => o.externalId !== null && o.pending && !o.blocked && !['CLOSED', 'DELETED', 'UNDER_REVIEW'].includes(o.status);
+// Una en revisión que el canal pide corregir sí: al subir la corrección, se reactiva.
+const pushable = (o: TableOption) =>
+  o.externalId !== null && o.pending && !o.blocked && !['CLOSED', 'DELETED'].includes(o.status) && (o.status !== 'UNDER_REVIEW' || o.needsFix);
 
 function GroupTable({
   group,

@@ -336,7 +336,7 @@ export default async function PublicationPage({
           </nav>
         ) : null}
         {p.externalId ? (
-          <ChannelStatusCard accountSlug={account.slug} publicationId={p.id} status={p.channelStatus} channelName={channelName} relist={relist} />
+          <ChannelStatusCard accountSlug={account.slug} publicationId={p.id} status={p.channelStatus} needsFix={copy?.statusNeedsFix ?? false} channelName={channelName} relist={relist} />
         ) : null}
 
         {/* Las dos caras de la publicación, y su puntaje e historial. */}

@@ -26,6 +26,12 @@ describe('los estados en el canal', () => {
     expect(statusHelp('PAUSED', 'Mercado Libre')).toContain('Mercado Libre también pausa las que se quedan sin stock');
   });
 
+  it('en revisión: si el canal pide corregirla, la ayuda dice que al corregirla se reactiva', () => {
+    expect(statusHelp('UNDER_REVIEW', 'Mercado Libre')).toBe('Mercado Libre la está revisando. Mientras tanto no se puede cambiar.');
+    expect(statusHelp('UNDER_REVIEW', 'Mercado Libre', true)).toBe('Mercado Libre pide corregirla. Cuando subas la corrección, se reactiva.');
+    expect(statusHelp('PAUSED', 'Mercado Libre', true)).toContain('se puede reactivar');
+  });
+
   it('se leen como los maneja Mercado Libre', () => {
     const status = (raw: Record<string, unknown>) => parseItem({ id: 'MLA1', pictures: [], attributes: [], ...raw }).status;
     expect(status({ status: 'active' })).toBe('ACTIVE');
