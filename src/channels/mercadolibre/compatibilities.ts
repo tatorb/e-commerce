@@ -115,16 +115,17 @@ export const mercadolibreCompatibilities: ChannelCompatibilities = {
   async read(accessToken, ref, opts) {
     const id = encodeURIComponent(ref.externalId);
     const site = ref.externalId.slice(0, 3).toUpperCase();
-    const item = await mlGet(`/items/${id}?attributes=id,tags,domain_id,category_id,user_product_id`, accessToken);
+    const productList = (productId: string) =>
+      readList(`/user-products/${encodeURIComponent(productId)}/compatibilities?main_domain_id=${encodeURIComponent(vehicleDomain(site))}&extended=true`, accessToken);
+    // Lo que no depende de otra respuesta se pide a la vez.
+    const [item, listing, known] = await Promise.all([
+      mlGet(`/items/${id}?attributes=id,tags,domain_id,category_id,user_product_id`, accessToken),
+      readList(`/items/${id}/compatibilities?extended=true`, accessToken),
+      ref.channelProductId ? productList(ref.channelProductId) : Promise.resolve(null),
+    ]);
     const tags = isObj(item) && Array.isArray(item.tags) ? item.tags : [];
     const productId = ref.channelProductId ?? (isObj(item) ? str(item.user_product_id) : null);
-    const listing = await readList(`/items/${id}/compatibilities?extended=true`, accessToken);
-    const product = productId
-      ? await readList(
-          `/user-products/${encodeURIComponent(productId)}/compatibilities?main_domain_id=${encodeURIComponent(vehicleDomain(site))}&extended=true`,
-          accessToken,
-        )
-      : null;
+    const product = known ?? (productId ? await productList(productId) : null);
     const out: ChannelCompatibilityRead = {
       listing: listing.list ?? [],
       product: product?.list ?? null,

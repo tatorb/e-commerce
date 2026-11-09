@@ -46,6 +46,10 @@ type Db = PrismaClient;
 const CATALOG_DAYS = 30;
 // Cuántos ejemplos se muestran de cada cosa.
 const EXAMPLES = 10;
+// Cuántos pedidos al canal van a la vez: más rápido, sin pasarse de los que acepta.
+const PARALLEL = 6;
+// Cuántos productos se auditan a la vez: cada uno traduce su ficha y lee sus publicaciones.
+const PRODUCTS_AT_ONCE = 4;
 
 // Se acabó el tiempo de este pedido: lo que falta queda para el siguiente.
 class OutOfTime extends Error {}
@@ -72,46 +76,83 @@ function catalogFor(
     token: string;
     site: string;
     now: Date;
+    // Cada pedido al canal pasa por acá: limita cuántos van a la vez y corta si se acabó el tiempo.
+    ask: <T>(run: () => Promise<T>) => Promise<T>;
     trace?: CatalogStep[];
   },
 ): Catalog {
-  const memory = new Map<string, CatalogValue[] | null>();
+  // Lo ya pedido en esta vuelta, o pidiéndose: dos líneas que necesitan la misma lista la piden una vez.
+  const memory = new Map<string, Promise<CatalogValue[] | null>>();
+
+  async function load(key: string, field: CatalogField, known: CatalogFilter[], filters: string): Promise<CatalogValue[] | null> {
+    const row = await db.channelCatalogValue.findUnique({ where: { key } });
+    let values: CatalogValue[] | null;
+    if (row && args.now.getTime() - row.fetchedAt.getTime() < CATALOG_DAYS * 86_400_000) values = row.values as CatalogValue[];
+    else {
+      values = await args.ask(() => args.channel.values(args.token, { site: args.site, field, known }));
+      // Una lista que no se pudo leer no se guarda: se vuelve a pedir la próxima vez.
+      if (values !== null) {
+        const data = {
+          values: values as unknown as Prisma.InputJsonValue,
+          fetchedAt: args.now,
+        };
+        await db.channelCatalogValue.upsert({
+          where: { key },
+          create: { key, ...data },
+          update: data,
+        });
+      }
+    }
+    args.trace?.push({
+      lista: field,
+      filtros: filters,
+      cantidad: values?.length ?? null,
+      valores: (values ?? []).slice(0, 15).map((v) => v.name),
+    });
+    return values;
+  }
+
   return {
-    async values(field, known) {
+    values(field, known) {
       const filters = known.map((k) => `${k.field}=${k.id}`).join('&');
       const key = `${args.kind}:${args.site}:${field}:${filters}`;
-      if (memory.has(key)) return memory.get(key)!;
-      const row = await db.channelCatalogValue.findUnique({ where: { key } });
-      let values: CatalogValue[] | null;
-      if (row && args.now.getTime() - row.fetchedAt.getTime() < CATALOG_DAYS * 86_400_000) values = row.values as CatalogValue[];
-      else {
-        values = await args.channel.values(args.token, {
-          site: args.site,
-          field,
-          known,
-        });
-        // Una lista que no se pudo leer no se guarda: se vuelve a pedir la próxima vez.
-        if (values !== null) {
-          const data = {
-            values: values as unknown as Prisma.InputJsonValue,
-            fetchedAt: args.now,
-          };
-          await db.channelCatalogValue.upsert({
-            where: { key },
-            create: { key, ...data },
-            update: data,
-          });
-        }
+      let pending = memory.get(key);
+      if (!pending) {
+        pending = load(key, field, known, filters);
+        memory.set(key, pending);
+        // Lo que no se terminó (por tiempo o por un error) no queda en memoria.
+        pending.catch(() => memory.delete(key));
       }
-      memory.set(key, values);
-      args.trace?.push({
-        lista: field,
-        filtros: filters,
-        cantidad: values?.length ?? null,
-        valores: (values ?? []).slice(0, 15).map((v) => v.name),
-      });
-      return values;
+      return pending;
     },
+  };
+}
+
+/** Corre la tarea con cada uno, de a size a la vez. La tarea no tiene que fallar. */
+async function inPool<T>(items: T[], size: number, run: (item: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) await run(items[next++]);
+  };
+  await Promise.all(Array.from({ length: Math.min(size, items.length) }, worker));
+}
+
+/** El sitio del canal de un código de publicación, por ejemplo MLA de MLA123. */
+const siteOf = (code: string) => code.slice(0, 3).toUpperCase();
+
+/** Un límite de tareas a la vez: la que no tiene lugar espera. */
+function limiter(size: number) {
+  let running = 0;
+  const waiting: (() => void)[] = [];
+  return async function <T>(run: () => Promise<T>): Promise<T> {
+    if (running >= size) await new Promise<void>((r) => waiting.push(r));
+    running++;
+    try {
+      return await run();
+    } finally {
+      running--;
+      waiting.shift()?.();
+    }
   };
 }
 
@@ -290,11 +331,12 @@ async function withRelated(db: Db, accountId: string, ids: string[]): Promise<st
   return [...new Set([...ids, ...all.map((p) => p.id)])];
 }
 
-async function loadTargets(db: Db, accountId: string, ids: string[] | null) {
+async function loadTargets(db: Db, accountId: string, ids: string[] | null, opts: { brand?: string | null; freshSince?: Date | null } = {}) {
   const asked = ids ? await withRelated(db, accountId, ids) : null;
+  const brand = opts.brand?.trim();
   return db.publication.findMany({
     where: {
-      product: { accountId },
+      product: { accountId, ...(brand ? { brand: { equals: brand, mode: 'insensitive' as const } } : {}) },
       externalId: { not: null },
       // Pedidas por su código van aunque estén finalizadas; si no, solo las vivas.
       ...(asked
@@ -302,7 +344,11 @@ async function loadTargets(db: Db, accountId: string, ids: string[] | null) {
             id: { in: asked },
             OR: [{ id: { in: ids! } }, { channelStatus: LIVE }],
           }
-        : { channelStatus: LIVE }),
+        : {
+            channelStatus: LIVE,
+            // Sin lista, lo auditado hace poco no se repite: cada vuelta sigue donde quedó la anterior.
+            ...(opts.freshSince ? { OR: [{ compatibility: null }, { compatibility: { readAt: { lt: opts.freshSince } } }] } : {}),
+          }),
       store: { connection: { is: { status: 'ACTIVE' } } },
     },
     orderBy: [{ storeId: 'asc' }, { productId: 'asc' }, { mainOptionId: { sort: 'asc', nulls: 'first' } }, { externalId: 'asc' }],
@@ -423,12 +469,21 @@ const lineReport = (l: TranslatedLine): LineReport => ({
  * Audita las compatibilidades de las publicaciones de la cuenta, o de esas y
  * sus otras medidas y opciones de venta. No sube nada al canal: guarda lo
  * leído y el resultado. raw suma lo que respondió el canal, para revisarlo.
+ *
+ * Va de a varios productos a la vez: cada uno traduce su ficha una vez y lee
+ * sus publicaciones. Antes de cada pedido al canal mira el reloj: lo que no
+ * entra vuelve en quedan, y las listas del catálogo ya leídas quedan
+ * guardadas, así la vuelta siguiente sigue rápido.
  */
 export async function auditAccountCompatibilities(
   db: Db,
   args: {
     accountId: string;
     publicationIds?: string[];
+    // Solo los productos con esa marca del repuesto en la ficha.
+    brand?: string | null;
+    // Sin lista: se saltean las auditadas desde ese momento, para seguir donde quedó la vuelta anterior.
+    freshSince?: Date | null;
     raw?: boolean;
     budgetMs?: number;
     now?: Date;
@@ -436,8 +491,8 @@ export async function auditAccountCompatibilities(
 ): Promise<CompatibilityAuditReport> {
   const started = Date.now();
   const now = args.now ?? new Date();
-  const budget = args.budgetMs ?? 40_000;
-  const targets = await loadTargets(db, args.accountId, args.publicationIds ?? null);
+  const budget = args.budgetMs ?? 30_000;
+  const targets = await loadTargets(db, args.accountId, args.publicationIds ?? null, { brand: args.brand, freshSince: args.freshSince });
   const report: CompatibilityAuditReport = {
     publicaciones: [],
     fichas: [],
@@ -446,11 +501,44 @@ export async function auditAccountCompatibilities(
     quedan: [],
   };
   const trace: CatalogStep[] | undefined = args.raw ? [] : undefined;
-  const translated = new Map<string, TranslatedLine[]>();
-  const noData = new Map<string, { producto: string; publicaciones: string[] }>();
+  // Las fichas en el orden de la lista, aunque se traduzcan varias a la vez.
+  const fichas: { at: number; entry: CompatibilityAuditReport['fichas'][number] }[] = [];
+  const noData: { at: number; entry: CompatibilityAuditReport['fichas_sin_compatibilidades'][number] }[] = [];
+  const order = new Map(targets.map((t, i) => [t.externalId!, i]));
+  const at = (code: string) => order.get(code) ?? 0;
   let probed = false;
   let busy = false;
-  const late = () => Date.now() - started > budget;
+  // Una llave que no sirve corta la vuelta entera.
+  let fatal: unknown = null;
+  const stop = () => busy || fatal !== null || Date.now() - started > budget;
+  const slots = limiter(PARALLEL);
+  // Cada pedido al canal espera su lugar y, si ya no hay tiempo, no sale.
+  const ask = <T>(run: () => Promise<T>): Promise<T> =>
+    slots(async () => {
+      if (stop()) throw new OutOfTime();
+      return run();
+    });
+
+  // Lo que no se pudo auditar: queda para la vuelta siguiente o va a salteadas con el motivo.
+  const failed = (codes: string[], e: unknown) => {
+    if (e instanceof OutOfTime) return void report.quedan.push(...codes);
+    // "Demasiados pedidos": lo que falta queda para después.
+    if (e instanceof ConnectError && e.busy) {
+      busy = true;
+      report.busy = true;
+      return void report.quedan.push(...codes);
+    }
+    if (e instanceof ConnectError && e.reauth) {
+      fatal ??= e;
+      return void report.quedan.push(...codes);
+    }
+    if (!(e instanceof ConnectError)) console.error('Auditoría de compatibilidades', codes.join(', '), e instanceof Error ? e.message : e);
+    for (const code of codes)
+      report.salteadas.push({
+        publicacion: code,
+        motivo: e instanceof ConnectError ? e.message : 'No se pudo auditar: hubo un error en la app.',
+      });
+  };
 
   const byStore = new Map<string, Target[]>();
   for (const t of targets) byStore.set(t.store.id, [...(byStore.get(t.store.id) ?? []), t]);
@@ -468,90 +556,87 @@ export async function auditAccountCompatibilities(
       continue;
     }
     await withAccessToken(db, storeId, async (token) => {
+      const catalogs = new Map<string, Catalog>();
+      // La ficha es del producto: se traduce una vez para todas sus publicaciones del mismo sitio.
+      const byProduct = new Map<string, Target[]>();
       for (const t of list) {
-        const code = t.externalId!;
-        if (late() || busy) {
-          report.quedan.push(code);
-          continue;
-        }
-        try {
-          await auditOne(t, code, token);
-        } catch (e) {
-          if (e instanceof OutOfTime) {
-            report.quedan.push(code);
-            continue;
-          }
-          // "Demasiados pedidos": lo que falta queda para después. Una llave que no sirve corta la vuelta.
-          if (e instanceof ConnectError && e.busy) {
-            busy = true;
-            report.busy = true;
-            report.quedan.push(code);
-            continue;
-          }
-          if (e instanceof ConnectError && e.reauth) throw e;
-          if (!(e instanceof ConnectError)) console.error('Auditoría de compatibilidades', code, e instanceof Error ? e.message : e);
-          report.salteadas.push({
-            publicacion: code,
-            motivo: e instanceof ConnectError ? e.message : 'No se pudo auditar: hubo un error en la app.',
-          });
-        }
+        const key = `${siteOf(t.externalId!)}:${t.productId}`;
+        byProduct.set(key, [...(byProduct.get(key) ?? []), t]);
       }
+      await inPool([...byProduct.values()], PRODUCTS_AT_ONCE, async (pubs) => {
+        const site = siteOf(pubs[0].externalId!);
+        let cat = catalogs.get(site);
+        if (!cat) {
+          cat = catalogFor(db, { kind, channel, token, site, now, ask, trace });
+          catalogs.set(site, cat);
+        }
+        await auditProduct(pubs, channel, cat, token, site);
+      });
+      if (fatal) throw fatal;
     });
   }
+
+  report.fichas = fichas.sort((a, b) => a.at - b.at).map((f) => f.entry);
+  report.fichas_sin_compatibilidades = noData.sort((a, b) => a.at - b.at).map((f) => f.entry);
+  for (const e of report.fichas_sin_compatibilidades) e.publicaciones.sort((a, b) => at(a) - at(b));
+  report.publicaciones.sort((a, b) => at(a.publicacion) - at(b.publicacion));
+  report.quedan.sort((a, b) => at(a) - at(b));
+  report.salteadas.sort((a, b) => at(a.publicacion) - at(b.publicacion));
   if (args.raw && trace && !report.catalogo) report.catalogo = { pasos: trace };
   return report;
 
-  async function auditOne(t: Target, code: string, token: string) {
-    const kind = t.store.channel.kind;
-    const channel = getChannelCompatibilities(kind)!;
-    const site = code.slice(0, 3).toUpperCase();
-    const fichaLines = t.product.compatibilities as FichaCompatibility[];
-    // La ficha es del producto: se traduce una vez para todas sus publicaciones.
-    let lines = translated.get(t.productId);
-    if (!lines) {
-      const cat = catalogFor(db, { kind, channel, token, site, now, trace });
-      lines = [];
-      for (const [i, c] of fichaLines.entries()) {
-        // Una ficha larga puede no entrar: lo pedido queda guardado y la próxima vuelta sigue rápido.
-        if (Date.now() - started > budget * 1.25) throw new OutOfTime();
-        lines.push(await translateLine(cat, lineRule(c, i)));
-      }
-      translated.set(t.productId, lines);
-      if (fichaLines.length > 0)
-        report.fichas.push({
-          producto: t.product.name,
-          lineas: lines.map(lineReport),
-        });
-      else {
-        const entry = {
-          producto: t.product.name,
-          publicaciones: [] as string[],
-        };
-        noData.set(t.productId, entry);
-        report.fichas_sin_compatibilidades.push(entry);
-      }
-      // Si el canal deja buscar vehículos uno por uno: se prueba una vez, para saberlo.
-      const first = lines.find((l) => l.status === 'ok')?.groups[0];
-      if (args.raw && !probed && first && channel.probeSearch) {
-        probed = true;
-        report.catalogo = {
-          pasos: trace ?? [],
-          busqueda_de_vehiculos: await channel.probeSearch(token, {
-            site,
-            filters: first.filters as CatalogFilter[],
-          }),
-        };
-      }
+  async function auditProduct(pubs: Target[], channel: ChannelCompatibilities, cat: Catalog, token: string, site: string) {
+    const codes = pubs.map((t) => t.externalId!);
+    if (stop()) return failed(codes, new OutOfTime());
+    const first = pubs[0];
+    const fichaLines = first.product.compatibilities as FichaCompatibility[];
+    let lines: TranslatedLine[];
+    try {
+      // Todas las líneas a la vez: las listas que comparten se piden una sola vez.
+      lines = await Promise.all(fichaLines.map((c, i) => translateLine(cat, lineRule(c, i))));
+    } catch (e) {
+      return failed(codes, e);
     }
-    noData.get(t.productId)?.publicaciones.push(code);
+    let entry: { producto: string; publicaciones: string[] } | null = null;
+    if (fichaLines.length > 0) fichas.push({ at: at(codes[0]), entry: { producto: first.product.name, lineas: lines.map(lineReport) } });
+    else {
+      entry = { producto: first.product.name, publicaciones: [] };
+      noData.push({ at: at(codes[0]), entry });
+    }
+    // Si el canal deja buscar vehículos uno por uno: se prueba una vez, para saberlo.
+    const sample = lines.find((l) => l.status === 'ok')?.groups[0];
+    if (args.raw && !probed && sample && channel.probeSearch) {
+      probed = true;
+      const probe = channel.probeSearch;
+      const found = await ask(() => probe(token, { site, filters: sample.filters as CatalogFilter[] })).catch((e: unknown) => ({
+        error: e instanceof Error ? e.message : String(e),
+      }));
+      report.catalogo = { pasos: trace ?? [], busqueda_de_vehiculos: found };
+    }
+    await Promise.all(
+      pubs.map(async (t) => {
+        const code = t.externalId!;
+        entry?.publicaciones.push(code);
+        try {
+          await auditOne(t, code, token, channel, lines);
+        } catch (e) {
+          failed([code], e);
+        }
+      }),
+    );
+  }
 
-    const read = await channel.read(
-      token,
-      {
-        externalId: code,
-        channelProductId: t.channelCopy?.channelProductId ?? null,
-      },
-      { raw: args.raw },
+  async function auditOne(t: Target, code: string, token: string, channel: ChannelCompatibilities, lines: TranslatedLine[]) {
+    const fichaLines = t.product.compatibilities as FichaCompatibility[];
+    const read = await ask(() =>
+      channel.read(
+        token,
+        {
+          externalId: code,
+          channelProductId: t.channelCopy?.channelProductId ?? null,
+        },
+        { raw: args.raw },
+      ),
     );
     const loaded = mergeLoaded(read.listing, read.product);
     const audit: CompatibilityAudit =

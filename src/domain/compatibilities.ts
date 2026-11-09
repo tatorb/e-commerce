@@ -250,10 +250,32 @@ export type VehicleVerdict =
   | { kind: 'extra'; reason: string }
   | { kind: 'review'; reason: string };
 
-/** El año de un nombre de vehículo, por ejemplo 2015 de "Volkswagen Amarok 2015 2.0". */
-export function yearOf(name: string): number | null {
-  const m = name.match(/\b(19[5-9]\d|20[0-4]\d)\b/);
-  return m ? Number(m[1]) : null;
+const YEAR = /^(19[5-9]\d|20[0-4]\d)$/;
+
+/**
+ * El año de un nombre de vehículo, por ejemplo 2015 de "Volkswagen Amarok 2015 2.0".
+ * El canal nombra marca, modelo y después el año: con el modelo, el año es el
+ * primero que sigue. Hay modelos que parecen años (Peugeot 2008): sin el modelo,
+ * si hay dos, el primero es el modelo.
+ */
+export function yearOf(name: string, model?: string | null): number | null {
+  const words = norm(name).split(' ');
+  let start = 0;
+  const m = model ? norm(model).split(' ') : [];
+  if (m.length > 0 && m[0] !== '') {
+    for (let i = 0; i + m.length <= words.length; i++) {
+      if (m.every((w, j) => words[i + j] === w)) {
+        start = i + m.length;
+        break;
+      }
+    }
+  }
+  const years = words
+    .slice(start)
+    .filter((w) => YEAR.test(w))
+    .map(Number);
+  if (years.length === 0) return null;
+  return start > 0 || years.length === 1 ? years[0] : years[1];
 }
 
 /** Si un vehículo cargado sale de la ficha, sobra o hay que revisarlo, y por qué. */
@@ -266,7 +288,6 @@ export function judgeVehicle(v: LoadedVehicle, lines: TranslatedLine[]): Vehicle
       ? { kind: 'review', reason: `${v.total ?? 'Varios'} de ${v.name} los cargó el canal: no dice cuáles son, revisalos en el canal.` }
       : { kind: 'extra', reason: `${v.total ?? 'Varios'} de ${v.name} los cargó el canal y la ficha no tiene esa marca: se borran a mano en el canal.` };
   }
-  const year = yearOf(v.name);
   const fuel = fuelOf(v.name);
   const displacement = displacementOf(v.name);
   const power = powerOf(v.name);
@@ -275,12 +296,14 @@ export function judgeVehicle(v: LoadedVehicle, lines: TranslatedLine[]): Vehicle
   for (const l of lines) {
     const brand = brandOf(l);
     const models = l.modelNames.length > 0 ? l.modelNames : l.rule.models;
-    if (!brand || !hasWords(v.name, brand) || !models.some((m) => hasWords(v.name, m))) continue;
+    const model = brand && hasWords(v.name, brand) ? models.find((m) => hasWords(v.name, m)) : undefined;
+    if (!model) continue;
     if (l.status === 'review') {
       reviewReason ??= `Coincide con una línea de la ficha que está a revisar: ${l.rule.label}.`;
       continue;
     }
     const r = l.rule;
+    const year = yearOf(v.name, model);
     const why =
       year !== null && ((r.from !== null && year < r.from) || (r.to !== null && year > r.to))
         ? `el año ${year} está fuera de la ficha (${yearsText(r.from, r.to)})`

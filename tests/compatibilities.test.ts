@@ -15,6 +15,7 @@ import {
   pickPower,
   pickYears,
   powerOf,
+  yearOf,
   type FichaCompatibility,
   type TranslatedLine,
 } from '@/domain/compatibilities';
@@ -122,6 +123,35 @@ describe('lo cargado contra lo que sale de la ficha', () => {
     expect(judgeVehicle(v('Mercedes-Benz Sprinter 2015 415 CDI'), [amarok, truck])).toMatchObject({ kind: 'extra' });
   });
 
+  it('un modelo que parece un año, como el Peugeot 2008, no se toma por el año', () => {
+    expect(yearOf('Peugeot 2008 2019 1.6 Allure AR')).toBe(2019);
+    expect(yearOf('Peugeot 2008 2019 1.6 Allure AR', '2008')).toBe(2019);
+    expect(yearOf('Volkswagen Amarok 2015 2.0 Cd Tdi', 'Amarok')).toBe(2015);
+    expect(yearOf('Peugeot 308 2018 1.6 Allure Pack AR')).toBe(2018);
+    expect(yearOf('Toyota')).toBeNull();
+    const peugeot2008: TranslatedLine = {
+      ...amarok,
+      rule: lineRule(ficha({ vehicleBrand: 'Peugeot', model: '2008', engine: '1.6', fuel: 'Nafta' }), 2),
+      brandName: 'Peugeot',
+      modelNames: ['2008'],
+      groups: [2019, 2020].map((year) => ({
+        line: 2,
+        brand: 'Peugeot',
+        model: '2008',
+        year,
+        fuel: 'nafta' as const,
+        displacement: '1.6',
+        power: null,
+        versions: null,
+        filters: [],
+        label: `Peugeot 2008 ${year} 1.6 nafta`,
+      })),
+    };
+    expect(judgeVehicle(v('Peugeot 2008 2019 1.6 Allure AR'), [peugeot2008])).toMatchObject({ kind: 'covered', year: 2019 });
+    const a = auditCompatibilities([peugeot2008], [v('Peugeot 2008 2019 1.6 Allure AR'), v('Peugeot 2008 2020 1.6 Active AR')]);
+    expect(a).toMatchObject({ covered: 2, missing: [], extra: [] });
+  });
+
   it('dice qué grupos faltan y qué sobra', () => {
     const a = auditCompatibilities([amarok], [v('Volkswagen Amarok 2015 2.0 TDI 180cv Highline'), v('Ford Mustang 2024 5.0 V8 GT'), v('Toyota', { byChannel: true, total: 2 })]);
     expect(a.covered).toBe(1);
@@ -177,6 +207,8 @@ const CATALOG: Vehicle[] = [
     car(PEUGEOT, ['M2', '308'], y, NAFTA, ['E3', '1.6'], ['P3', '115 hp'], ['V4', '1.6 VTi 115cv Active']),
     car(PEUGEOT, ['M2', '308'], y, NAFTA, ['E3', '1.6'], ['P4', '165 hp'], ['V5', '1.6 THP 165cv GT']),
   ]),
+  // Un modelo que parece un año.
+  ...[2019, 2020].map((y) => car(PEUGEOT, ['M5', '2008'], y, NAFTA, ['E3', '1.6'], ['P3', '115 hp'], ['V8', '1.6 Allure'])),
   car(FORD, ['M3', 'Mustang'], 2024, NAFTA, ['E4', '5.0'], ['P5', '450 hp'], ['V6', '5.0 V8 GT']),
   car(MB, ['M4', 'Sprinter'], 2015, DIESEL, ['E5', '2.1'], ['P6', '163 hp'], ['V7', '415 CDI']),
 ];
@@ -187,6 +219,8 @@ describe.skipIf(!url)('auditar contra Mercado Libre simulado', () => {
   let accountId = '';
   let storeId = '';
   let catalogCalls = 0;
+  // Cuánto tarda cada lista del catálogo, para probar el corte por tiempo.
+  let catalogDelay = 0;
   // Lo cargado en cada publicación y en cada producto del canal, tal cual lo devuelve Mercado Libre.
   const loaded: Record<string, unknown[]> = {};
   const tags: Record<string, string[]> = {};
@@ -205,7 +239,8 @@ describe.skipIf(!url)('auditar contra Mercado Libre simulado', () => {
           const known = ((raw ? JSON.parse(raw) : {}).known_attributes ?? []) as { id: string; value_id: string }[];
           const values = new Map<string, string>();
           for (const v of CATALOG) if (known.every((k) => v[k.id]?.[0] === k.value_id)) values.set(v[top[1]][0], v[top[1]][1]);
-          return send(200, [...values].map(([id, name]) => ({ id, name, metric: 1 })));
+          const body = [...values].map(([id, name]) => ({ id, name, metric: 1 }));
+          return catalogDelay > 0 ? void setTimeout(() => send(200, body), catalogDelay) : send(200, body);
         }
         const item = u.pathname.match(/^\/items\/(\w+)$/);
         if (item && item[1] === 'MLA9000099') return res.writeHead(429, { 'Retry-After': '0' }).end('{}');
@@ -228,6 +263,7 @@ describe.skipIf(!url)('auditar contra Mercado Libre simulado', () => {
 
   beforeEach(async () => {
     catalogCalls = 0;
+    catalogDelay = 0;
     for (const k of Object.keys(loaded)) delete loaded[k];
     for (const k of Object.keys(tags)) delete tags[k];
     await db.$executeRawUnsafe('TRUNCATE channel_catalog_values, publication_compatibilities, channel_copies, publications, products, channel_connections, stores, channels, accounts, users CASCADE');
@@ -249,9 +285,9 @@ describe.skipIf(!url)('auditar contra Mercado Libre simulado', () => {
     });
   });
 
-  async function product(name: string, compatibilities: Partial<FichaCompatibility>[]) {
+  async function product(name: string, compatibilities: Partial<FichaCompatibility>[], brand: string | null = null) {
     return db.product.create({
-      data: { accountId, name, compatibilities: { create: compatibilities.map((c, position) => ({ ...ficha(c), position })) } },
+      data: { accountId, name, brand, compatibilities: { create: compatibilities.map((c, position) => ({ ...ficha(c), position })) } },
     });
   }
 
@@ -361,14 +397,71 @@ describe.skipIf(!url)('auditar contra Mercado Libre simulado', () => {
     expect(r.publicaciones).toEqual([]);
   });
 
+  it('con una ficha larga corta a tiempo, y la vuelta siguiente sigue con lo ya pedido', async () => {
+    const kit = await product('Kit de prueba largo', [
+      { vehicleBrand: 'Volkswagen', model: 'Amarok', fuel: 'Diésel' },
+      { vehicleBrand: 'Peugeot', model: '308', engine: '1.6 HDi' },
+      { vehicleBrand: 'Ford', model: 'Mustang', fuel: 'Nafta' },
+    ]);
+    const p = await pub(kit.id, 'MLA9000060');
+    // Cuántas listas hacen falta para la ficha entera.
+    await auditAccountCompatibilities(db, { accountId, publicationIds: [p.id] });
+    const all = catalogCalls;
+    await db.channelCatalogValue.deleteMany();
+    catalogCalls = 0;
+
+    // Cada lista tarda 150 ms y hay 200 ms: corta en el medio de la traducción, sin esperar a terminarla.
+    catalogDelay = 150;
+    const begun = Date.now();
+    const r = await auditAccountCompatibilities(db, { accountId, publicationIds: [p.id], budgetMs: 200 });
+    // Terminar la primera línea sola lleva 600 ms: corta antes.
+    expect(Date.now() - begun).toBeLessThan(550);
+    expect(r.quedan).toEqual(['MLA9000060']);
+    expect(r.publicaciones).toEqual([]);
+    const first = catalogCalls;
+    expect(first).toBeGreaterThan(0);
+    expect(first).toBeLessThan(all);
+
+    // Con tiempo, termina pidiendo solo lo que faltaba.
+    catalogDelay = 0;
+    const r2 = await auditAccountCompatibilities(db, { accountId, publicationIds: [p.id] });
+    expect(r2.publicaciones.map((x) => x.publicacion)).toEqual(['MLA9000060']);
+    expect(r2.quedan).toEqual([]);
+    expect(catalogCalls).toBe(all);
+  });
+
+  it('por marca del repuesto, y sin lista sigue donde quedó la vuelta anterior', async () => {
+    const persan = await product('Kit de prueba Persan', [{ vehicleBrand: 'Peugeot', model: '2008', engine: '1.6', fuel: 'Nafta' }], 'Persan');
+    const other = await product('Kit de prueba de otra marca', [{ vehicleBrand: 'Volkswagen', model: 'Amarok', fuel: 'Diésel' }], 'Otra');
+    const a = await pub(persan.id, 'MLA9000070');
+    await pub(other.id, 'MLA9000071');
+    loaded.MLA9000070 = [2019, 2020].map((y) => ({ id: `c-${y}`, catalog_product_id: `MLA87${y}`, catalog_product_name: `Peugeot 2008 ${y} 1.6 Allure AR`, source: 'SELLER' }));
+    const hourAgo = () => new Date(Date.now() - 3_600_000);
+
+    const r = await auditAccountCompatibilities(db, { accountId, brand: 'persan', freshSince: hourAgo() });
+    expect(r.publicaciones.map((x) => x.publicacion)).toEqual(['MLA9000070']);
+    // El 2008 es el modelo, no el año: lo cargado sale de la ficha y no falta nada.
+    expect(r.publicaciones[0]).toMatchObject({ salen_de_la_ficha: 2, faltan: { cantidad: 0 }, sobran: { cantidad: 0 } });
+
+    // La vuelta siguiente sin lista no repite lo auditado.
+    expect((await auditAccountCompatibilities(db, { accountId, brand: 'Persan', freshSince: hourAgo() })).publicaciones).toEqual([]);
+    // Pedida por su código, se audita igual.
+    const listed = await auditAccountCompatibilities(db, { accountId, publicationIds: [a.id], brand: 'Persan' });
+    expect(listed.publicaciones.map((x) => x.publicacion)).toEqual(['MLA9000070']);
+  });
+
   it('si el canal pide esperar, lo que falta queda en quedan sin cortar lo hecho', async () => {
     const amarok = await product('Subconjunto de prueba Amarok', [{ vehicleBrand: 'Volkswagen', model: 'Amarok', fuel: 'Diésel' }]);
     const a = await pub(amarok.id, 'MLA9000050');
     const b = await pub(amarok.id, 'MLA9000099');
     const c = await pub(amarok.id, 'MLA9000100');
     const r = await auditAccountCompatibilities(db, { accountId, publicationIds: [a.id, b.id, c.id] });
-    expect(r.publicaciones.map((p) => p.publicacion)).toEqual(['MLA9000050']);
-    expect(r.quedan).toEqual(['MLA9000099', 'MLA9000100']);
+    // Van varias a la vez: la que el canal frenó queda para después, lo terminado no se pierde.
+    const done = r.publicaciones.map((p) => p.publicacion);
+    expect(done).toContain('MLA9000050');
+    expect(r.quedan).toContain('MLA9000099');
+    expect(done).not.toContain('MLA9000099');
+    expect([...done, ...r.quedan].sort()).toEqual(['MLA9000050', 'MLA9000099', 'MLA9000100']);
     expect(r.busy).toBe(true);
   });
 
