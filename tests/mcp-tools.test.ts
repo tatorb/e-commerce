@@ -203,7 +203,7 @@ describe.skipIf(!url)('herramientas para Claude', () => {
     const info = data.pasos.find((p: { paso: string }) => p.paso === 'INFO');
     expect(info).toMatchObject({ nombre: 'Información', cantidad: 1 });
     expect(info.publicaciones[0]).toMatchObject({ codigo: 'MLA2220002', dias_en_el_paso: 0 });
-    expect(data.pasos).toHaveLength(10);
+    expect(data.pasos).toHaveLength(11);
   });
 
   it('get_publication: ficha, precio, puntaje, medición e historial, sin datos del proveedor', async () => {

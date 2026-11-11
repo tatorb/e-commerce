@@ -164,25 +164,77 @@ export function storedCompetitor(c: StoredCompetitor): CompetitorsOutput[number]
   };
 }
 
+/** Lo que dice una lista sobre de quién es, para mostrarlo: "Compartida por las 6 publicaciones de este producto". */
+export function sharedText(owner: { scope: 'PUBLICATION' | 'PRODUCT'; publications: number }): string | null {
+  if (owner.scope !== 'PRODUCT') return null;
+  return owner.publications === 1 ? 'Es la competencia del producto: la comparten todas sus publicaciones.' : `Compartida por las ${owner.publications} publicaciones de este producto.`;
+}
+
+/** De quién es una lista: de una publicación o, cuando su tipo la comparte, del producto. */
+export type CompetitorOwnerKey = { publicationId: string } | { productId: string };
+
+/** La condición para leer o borrar la lista de ese dueño. */
+export const ownerWhere = (owner: CompetitorOwnerKey) =>
+  'productId' in owner ? { productId: owner.productId } : { publicationId: owner.publicationId };
+
 /**
- * Reemplaza la lista entera. Con `today`, las que tienen precio y no dicen de
- * qué día es quedan con la fecha de hoy.
+ * Reemplaza la lista entera de una publicación (con su id) o del producto.
+ * Con `today`, las que tienen precio y no dicen de qué día es quedan con la
+ * fecha de hoy.
  */
 export async function saveCompetitors(
   tx: Prisma.TransactionClient,
-  publicationId: string,
+  owner: string | CompetitorOwnerKey,
   rows: CompetitorsOutput,
   today?: string,
 ): Promise<void> {
-  await tx.competitorListing.deleteMany({ where: { publicationId } });
+  const key: CompetitorOwnerKey = typeof owner === 'string' ? { publicationId: owner } : owner;
+  await tx.competitorListing.deleteMany({ where: ownerWhere(key) });
   if (rows.length > 0) {
     await tx.competitorListing.createMany({
       data: rows.map(({ surveyedAt, ...r }, position) => {
         const day = surveyedAt ?? (r.listPrice !== null ? today : undefined);
-        return { ...r, surveyedAt: day ? new Date(`${day}T00:00:00Z`) : null, publicationId, position };
+        return { ...r, surveyedAt: day ? new Date(`${day}T00:00:00Z`) : null, ...key, position };
       }),
     });
   }
+}
+
+/**
+ * Cuándo dos son el mismo competidor: el mismo link, sin lo que va después de
+ * "?" o "#" ni la barra del final. Sin link, el mismo título y el mismo vendedor.
+ */
+export function competitorKey(c: Pick<CompetitorsOutput[number], 'url' | 'title' | 'sellerName'>): string {
+  if (c.url) {
+    const link = c.url.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split(/[?#]/)[0].replace(/\/+$/, '');
+    return `link:${link}`;
+  }
+  const words = (s: string | null) => (s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+  return `sin link:${words(c.title)}|${words(c.sellerName)}`;
+}
+
+/**
+ * Junta varias listas en una, sin repetidos: de dos versiones del mismo
+ * competidor queda la de fecha de relevamiento más nueva (sin fecha cuenta
+ * como la más vieja; si empatan, la que vino primero). Respeta el orden en que
+ * aparecen. Devuelve también cuántas se juntaron por repetidas.
+ */
+export function mergeCompetitors(lists: CompetitorsOutput[]): { rows: CompetitorsOutput; repeated: number } {
+  const byKey = new Map<string, { at: number; row: CompetitorsOutput[number] }>();
+  let repeated = 0;
+  for (const list of lists) {
+    for (const row of list) {
+      const key = competitorKey(row);
+      const before = byKey.get(key);
+      if (!before) {
+        byKey.set(key, { at: byKey.size, row });
+        continue;
+      }
+      repeated++;
+      if ((row.surveyedAt ?? '') > (before.row.surveyedAt ?? '')) byKey.set(key, { at: before.at, row });
+    }
+  }
+  return { rows: [...byKey.values()].sort((a, b) => a.at - b.at).map((x) => x.row), repeated };
 }
 
 // ───────────────────────────── Precios ─────────────────────────────

@@ -125,7 +125,7 @@ export default async function SalePage({ params }: { params: Promise<{ cuenta: s
                       </p>
                       <p className="flex flex-wrap gap-x-2 text-xs text-muted-foreground">
                         <span className="tabular-nums">{l.listingId}</span>
-                        {l.sku ? <span>SKU {l.sku}</span> : null}
+                        <span>{l.sku ? `SKU ${l.sku}` : 'Sin SKU'}</span>
                         {pub && canPublications ? (
                           <Link href={`/a/${account.slug}/publicaciones/${pub.id}`} className="text-primary underline-offset-4 hover:underline">
                             Publicación

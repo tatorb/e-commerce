@@ -1,3 +1,4 @@
+import { settleProductCompetitors } from '@/lib/competitors';
 import type { Prisma } from '@/generated/prisma/client';
 import { OptionError, resolveProductOptions } from '@/lib/product-options';
 import { parseEngine } from './engine';
@@ -395,6 +396,8 @@ export async function writeContentField(
         next = null;
       }
       await tx.product.update({ where: { id: productId }, data: { [field]: next } });
+      // Con otro tipo, la competencia puede pasar a ser del producto o de cada publicación.
+      if (field === 'productType') await settleProductCompetitors(tx, productId);
       return;
     }
     default:

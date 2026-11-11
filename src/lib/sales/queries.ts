@@ -31,7 +31,13 @@ type Db = PrismaClient;
 // ───────────────────────────── El costo de cada línea ─────────────────────────────
 
 /** Lo que se sabe hoy de una línea vendida: la medida del producto y su costo de reposición por unidad. */
-export type LineFacts = { key: string | null; measure: string | null; unitCost: number | null };
+export type LineFacts = {
+  key: string | null;
+  measure: string | null;
+  unitCost: number | null;
+  // La SKU: la que mandó el canal con la venta o, si no mandó ninguna, la de esa medida en el producto.
+  sku: string | null;
+};
 
 /**
  * La medida y el costo de reposición por unidad de cada línea vendida, con los
@@ -66,21 +72,24 @@ export async function lineFacts(db: Db, accountId: string, lines: SaleLineRow[])
     return line.sku ? matchSlot(p.slots, { sku: line.sku, measure: null }) : null;
   };
   return (line) => {
-    if (!line.productId) return { key: null, measure: line.measure, unitCost: null };
+    const sold = line.sku?.trim() || null;
+    if (!line.productId) return { key: null, measure: line.measure, unitCost: null, sku: sold };
     const key = keyOf(line);
     const p = byId.get(line.productId);
-    const measure = key === null ? null : key === NO_MEASURE ? line.measure : (p?.slots.find((s) => s.key === key)?.label ?? line.measure);
+    const slot = key === null ? undefined : p?.slots.find((s) => s.key === key);
+    const measure = key === null ? null : key === NO_MEASURE ? line.measure : (slot?.label ?? line.measure);
+    const sku = sold ?? (slot?.sku?.trim() || null);
     const own = unit(line.productId, key);
-    if (own !== null) return { key, measure, unitCost: own };
+    if (own !== null) return { key, measure, unitCost: own, sku };
     // Un combo sin costo propio: lo que cuestan sus piezas.
-    if (!line.parts?.length) return { key, measure, unitCost: null };
+    if (!line.parts?.length) return { key, measure, unitCost: null, sku };
     let sum = 0;
     for (const part of line.parts) {
       const c = unit(part.productId, part.key);
-      if (c === null) return { key, measure, unitCost: null };
+      if (c === null) return { key, measure, unitCost: null, sku };
       sum += c * part.quantity;
     }
-    return { key, measure, unitCost: sum };
+    return { key, measure, unitCost: sum, sku };
   };
 }
 

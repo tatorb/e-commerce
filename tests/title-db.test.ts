@@ -47,13 +47,13 @@ describe.skipIf(!url)('paso Título', () => {
     );
   const pub = () => db.publication.findUniqueOrThrow({ where: { id: publicationId } });
 
-  it('aprobar escribe el título, guarda lo que propuso la IA y pasa a Descripción', async () => {
+  it('aprobar escribe el título, guarda lo que propuso la IA y pasa a Compatibilidades', async () => {
     await db.titleWork.create({ data: { publicationId, proposals: [{ title: 'Kit Prueba Modelo 1', reason: 'r' }] } });
     const r = await approve('Kit Prueba Modelo 1 Nafta', { aiTitle: 'Kit Prueba Modelo 1' });
     expect(r.outcome).toBe('WRITTEN');
     const p = await pub();
     expect(p.title).toBe('Kit Prueba Modelo 1 Nafta');
-    expect(p.pipelineStep).toBe('DESCRIPTION');
+    expect(p.pipelineStep).toBe('COMPATIBILITIES');
     const a = await db.titleApproval.findFirstOrThrow({ where: { publicationId } });
     expect(a).toMatchObject({
       outcome: 'WRITTEN',
@@ -81,7 +81,7 @@ describe.skipIf(!url)('paso Título', () => {
     expect(r.outcome).toBe('COPY');
     const p = await pub();
     expect(p.title).toBe('Kit viejo');
-    expect(p.pipelineStep).toBe('DESCRIPTION');
+    expect(p.pipelineStep).toBe('COMPATIBILITIES');
     expect(await db.titleApproval.findFirstOrThrow({ where: { publicationId } })).toMatchObject({
       outcome: 'COPY',
       title: 'Kit Prueba Modelo 2',
@@ -93,13 +93,13 @@ describe.skipIf(!url)('paso Título', () => {
     await db.$transaction((tx) => decideLock(tx, { publicationId, decision: 'KEEP', userId }));
     const p = await pub();
     expect(p.title).toBe('Kit viejo');
-    expect(p.pipelineStep).toBe('DESCRIPTION');
+    expect(p.pipelineStep).toBe('COMPATIBILITIES');
     expect(await db.titleApproval.findFirstOrThrow({ where: { publicationId } })).toMatchObject({ outcome: 'KEPT', title: 'Kit viejo' });
     const work = await db.titleWork.findUniqueOrThrow({ where: { publicationId } });
     expect(work).toMatchObject({ lockDecision: 'KEEP', lockDecidedById: userId });
     // Ya no está en Título: se puede aprobar igual, y no se mueve de paso.
     await approve('Kit Prueba Modelo 3');
-    expect(await pub()).toMatchObject({ title: 'Kit Prueba Modelo 3', pipelineStep: 'DESCRIPTION' });
+    expect(await pub()).toMatchObject({ title: 'Kit Prueba Modelo 3', pipelineStep: 'COMPATIBILITIES' });
   });
 
   it('las palabras se marcan de a una, aunque lleguen juntas', async () => {

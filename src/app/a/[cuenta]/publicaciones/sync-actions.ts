@@ -28,6 +28,7 @@ import { WarrantyError, warrantyFromInput } from '@/domain/warranty';
 import { clearWarranty, setWarranties } from '@/lib/warranty';
 import { familyCampaignInput, type FamilyCampaignActionResult, type FamilyCampaignInput } from '@/lib/family-campaign-input';
 import { pushCompatibilities, type CompatibilityPushOutcome } from '@/lib/compatibility-push';
+import { auditAccountCompatibilities } from '@/lib/compatibilities';
 
 // Lo que se hace desde la página de una publicación y desde Por subir: cambiar
 // el borrador, subirlo al canal, descartarlo y volver a leer del canal.
@@ -153,6 +154,8 @@ export async function pushDraftsAction(accountSlug: string, publicationId: strin
 export async function pushCompatibilitiesAction(
   accountSlug: string,
   publicationIds: string[],
+  // Solo agrega lo que falta y completa los incompletos, sin borrar.
+  addOnly = false,
 ): Promise<Result<{ outcome: Omit<CompatibilityPushOutcome, 'publicationIds'> | null; later: boolean; busy: boolean }>> {
   const parsed = z.array(idSchema).min(1).max(50).safeParse(publicationIds);
   const first = parsed.success ? parsed.data[0] : undefined;
@@ -163,13 +166,40 @@ export async function pushCompatibilitiesAction(
     if (!parsed.success) return { ok: false, error: 'Elegí qué subir.' };
     try {
       // Una fila por vez: la pantalla sigue con la siguiente.
-      const r = await pushCompatibilities(prisma, { accountId: account.id, publicationIds: parsed.data, exact: true, budgetMs: 0 });
+      const r = await pushCompatibilities(prisma, { accountId: account.id, publicationIds: parsed.data, exact: true, budgetMs: 0, addOnly: addOnly === true });
       for (const id of parsed.data) refresh(accountSlug, id);
       const found = r.subidas[0];
       if (!found) return { ok: true, outcome: null, later: r.quedan.length > 0, busy: Boolean(r.busy) };
       const { publicationIds: _ids, ...outcome } = found;
       void _ids;
       return { ok: true, outcome, later: false, busy: false };
+    } catch (e) {
+      return failure(e);
+    }
+  });
+}
+
+/**
+ * Revisa en el canal los vehículos compatibles de una publicación, y de las
+ * otras medidas de su familia y opciones de venta, contra la ficha. No sube
+ * nada: guarda lo leído y lo que mostró, que es lo único que se puede subir.
+ */
+export async function auditCompatibilitiesAction(
+  accountSlug: string,
+  publicationId: string,
+): Promise<Result<{ audited: number; left: number; busy: boolean }>> {
+  const parsed = idSchema.safeParse(publicationId);
+  return act(accountSlug, { section: 'publicaciones', does: 'Revisó las compatibilidades en el canal', publicationId: parsed.success ? parsed.data : undefined }, async () => {
+    await requireUser();
+    const account = await getAccountBySlug(accountSlug);
+    if (!account) return { ok: false, error: 'La cuenta no existe.' };
+    if (!parsed.success) return { ok: false, error: 'Elegí qué revisar.' };
+    try {
+      const r = await auditAccountCompatibilities(prisma, { accountId: account.id, publicationIds: [parsed.data], budgetMs: 45_000 });
+      refresh(accountSlug, parsed.data);
+      const failed = r.salteadas.find((x) => x.motivo);
+      if (r.publicaciones.length === 0 && failed) return { ok: false, error: failed.motivo };
+      return { ok: true, audited: r.publicaciones.length, left: r.quedan.length, busy: Boolean(r.busy) };
     } catch (e) {
       return failure(e);
     }

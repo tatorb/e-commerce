@@ -1,3 +1,4 @@
+import { settleProductCompetitors } from '@/lib/competitors';
 import { z } from 'zod';
 import { resolveProductOptions } from '@/lib/product-options';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
@@ -159,6 +160,8 @@ export async function writeProduct(tx: Tx, args: SaveArgs): Promise<{ id: string
     if (!existing) throw new Error('El producto no existe en esta cuenta.');
     id = existing.id;
     await tx.product.update({ where: { id }, data: fields });
+    // Con otro tipo, la competencia puede pasar a ser del producto o de cada publicación.
+    if (fields.productType !== undefined && fields.productType !== current?.productType) await settleProductCompetitors(tx, id);
     if (data.kind) await setProductKind(tx, { accountId, productId: id, kind: data.kind });
     before = await tx.productVariant.findMany({ where: { productId: id }, orderBy: { position: 'asc' }, select: { sku: true, measure: true } });
     await tx.productVariant.deleteMany({ where: { productId: id } });

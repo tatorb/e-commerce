@@ -24,6 +24,7 @@ import {
 } from '@/domain/compatibilities';
 import { auditAccountCompatibilities } from '@/lib/compatibilities';
 import { listCompatibilitiesToPush, pushCompatibilities } from '@/lib/compatibility-push';
+import { loadCompatibilityView, loadedCompatibilitiesData } from '@/lib/compatibility-view';
 import { encrypt } from '@/lib/crypto';
 
 // Las compatibilidades con vehículos: las reglas para traducir la ficha, la
@@ -53,6 +54,9 @@ describe('cómo se lee una línea de la ficha', () => {
 
   it('la potencia y las versiones que no van, del campo o de la nota', () => {
     expect(lineRule(ficha({ vehicleBrand: 'Peugeot', model: '308', fuel: 'Nafta', power: '115' }), 0).power).toBe(115);
+    // La nota no da la potencia: suele hablar de otro motor.
+    expect(lineRule(ficha({ vehicleBrand: 'Volkswagen', model: 'Gol', engine: '1.0 8v EA111', fuel: 'Nafta', note: 'El 1.0 16v Turbo de 112 cv lleva otro pistón.' }), 0).power).toBeNull();
+    expect(lineRule(ficha({ vehicleBrand: 'Renault', model: 'Logan', engine: '1.6 8v K7M', fuel: 'Nafta', note: 'K7M de 85 a 90 CV.', power: '90' }), 0).power).toBe(90);
     expect(excludedOf({ excludedVersions: 'THP, VTi', note: null })).toEqual(['THP', 'VTi']);
     expect(excludedOf({ excludedVersions: null, note: 'Sirve para el 1.6, no THP. Excepto GTi.' })).toEqual(['THP', 'GTi']);
     // "No sirve" no es una versión.
@@ -139,6 +143,29 @@ describe('lo cargado contra lo que sale de la ficha', () => {
     expect(judgeVehicle(v('Ford Ecosport 2010 1.6 S 4x2 AR'), [ecosport])).toMatchObject({ kind: 'extra', reason: expect.stringContaining('deja afuera (S)') });
     expect(isExcluded('Xls S/aa', ['S'])).toBe(false);
     expect(isExcluded('S C/aa', ['S'])).toBe(true);
+  });
+
+  it('"Pack Electric" son los vidrios eléctricos, no un auto eléctrico', () => {
+    const palio: TranslatedLine = {
+      ...amarok,
+      rule: lineRule(ficha({ vehicleBrand: 'Fiat', model: 'Palio', engine: '1.8 8v', fuel: 'Nafta', yearTo: 2010 }), 5),
+      brandName: 'Fiat',
+      modelNames: ['Palio'],
+    };
+    expect(judgeVehicle(v('Fiat Palio 2006 1.8 Hlx Pack Electric AR'), [palio])).toMatchObject({ kind: 'covered', year: 2006 });
+    expect(judgeVehicle(v('Fiat Palio Weekend 2005 1.8 Elx Pack Electrico AR'), [palio])).toMatchObject({ kind: 'covered' });
+    expect(judgeVehicle(v('Fiat 500e 2023 Eléctrico AR'), [palio])).toMatchObject({ kind: 'extra' });
+  });
+
+  it('el modelo se busca como lo llama el catálogo y como lo escribe la ficha', () => {
+    const megane2: TranslatedLine = {
+      ...amarok,
+      rule: lineRule(ficha({ vehicleBrand: 'Renault', model: 'Megane2', engine: '1.9 dTi F9Q', fuel: 'Diésel' }), 6),
+      brandName: 'Renault',
+      modelNames: ['Megane 2'],
+    };
+    expect(judgeVehicle(v('Renault Megane 2 2003 1.9 Rn AR'), [megane2])).toMatchObject({ kind: 'covered', year: 2003 });
+    expect(judgeVehicle(v('1.9 Rn Expression Renault Ar Megane2'), [megane2])).toMatchObject({ kind: 'covered' });
   });
 
   it('una versión GNC de fábrica va en la línea de nafta, salvo que la ficha diga que no va', () => {
@@ -802,6 +829,29 @@ describe.skipIf(!url)('auditar contra Mercado Libre simulado', () => {
     await auditAccountCompatibilities(db, { accountId, publicationIds: [p.id] });
     const third = await pushCompatibilities(db, { accountId });
     expect(third.subidas[0]).toMatchObject({ resultado: 'subido', borrados: { cantidad: 1, ejemplos: ['Ford Mustang 2024 5.0 V8 GT'] }, despues: { sobran: 0 } });
+  });
+
+  it('la pantalla muestra lo cargado por marca y modelo, marcado como va, sobra o lo cargó el canal, y lo que se puede subir', async () => {
+    const amarok = await product('Subconjunto de prueba Amarok vista', [{ vehicleBrand: 'Volkswagen', model: 'Amarok', engine: '2.0 TDI', yearFrom: 2010, yearTo: 2016 }]);
+    const main = await pub(amarok.id, 'MLA9000061', { up: 'MLAU61' });
+    expect(await loadCompatibilityView(db, accountId, main.id)).toMatchObject({ readAt: null, fichaLines: 1, published: true, loaded: 0, toPush: [] });
+    loaded.MLA9000061 = [
+      { id: 'c-1', domain_id: 'MLA-CARS_AND_VANS', catalog_product_id: 'MLA800', catalog_product_name: 'Volkswagen Amarok 2011 2.0 TDI 180cv Highline AR', source: 'SELLER' },
+      { id: 'c-2', domain_id: 'MLA-CARS_AND_VANS', catalog_product_id: 'MLA801', catalog_product_name: 'Ford Mustang 2024 5.0 V8 GT AR', source: 'SELLER' },
+      { id: null, domain_id: null, catalog_product_id: null, catalog_product_name: 'Toyota', source: 'CATALOGO', total: 2 },
+    ];
+    await auditAccountCompatibilities(db, { accountId, publicationIds: [main.id] });
+    const view = await loadCompatibilityView(db, accountId, main.id);
+    expect(view).toMatchObject({ loaded: 2, covered: 1, extra: 1, review: 0, missing: ['Volkswagen Amarok 2010 2.0 diésel', 'Volkswagen Amarok 2012 2.0 diésel'] });
+    expect(view!.models.map((g) => [g.model, g.covered, g.extra])).toEqual([
+      ['Ford Mustang', 0, 1],
+      ['Volkswagen Amarok', 1, 0],
+    ]);
+    expect(view!.models[1].vehicles[0]).toMatchObject({ year: 2011, rest: '2.0 TDI 180cv Highline', mark: 'covered' });
+    expect(view!.byChannel).toEqual([{ brand: 'Toyota', count: 2, extra: true }]);
+    expect(view!.toPush).toHaveLength(1);
+    expect(view!.toPush[0]).toMatchObject({ add: { count: 2 }, remove: { count: 1 } });
+    expect(loadedCompatibilitiesData(view!, 'America/Argentina/Buenos_Aires')).toMatchObject({ readAtText: expect.any(String), loaded: 2 });
   });
 
   it('con solo agregar, agrega lo que falta y deja lo que sobra para otra subida', async () => {

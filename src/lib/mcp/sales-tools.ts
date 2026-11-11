@@ -25,7 +25,7 @@ function brief(ctx: McpContext, account: AccountRef, r: SaleRow, now: Date) {
     fecha: when(r.orderedAt, account),
     estado: SALE_STATE_LABEL[r.state],
     comprador: r.buyer,
-    productos: r.lines.map((l) => ({ titulo: l.title, codigo: l.listingId, medida: l.measure, cantidad: l.quantity, precio_unitario: l.unitPrice })),
+    productos: r.lines.map((l) => ({ titulo: l.title, codigo: l.listingId, sku: l.sku, medida: l.measure, cantidad: l.quantity, precio_unitario: l.unitPrice })),
     vendido: r.money.sold,
     comision: r.money.fee,
     envio_a_cargo: r.money.shipping,

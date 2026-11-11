@@ -55,6 +55,12 @@ export function CompatibilityPushList({ accountSlug, rows }: { accountSlug: stri
   const key = (r: CompatibilityPushRow) => r.publicationIds[0];
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [asking, setAsking] = useState<CompatibilityPushRow[] | null>(null);
+  // Solo agregar: lo que sobra queda para otra subida.
+  const [addOnly, setAddOnly] = useState(false);
+  const ask = (list: CompatibilityPushRow[], only: boolean) => {
+    setAddOnly(only);
+    setAsking(list);
+  };
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [outcomes, setOutcomes] = useState<Record<string, Outcome>>({});
   const stop = useRef(false);
@@ -65,7 +71,7 @@ export function CompatibilityPushList({ accountSlug, rows }: { accountSlug: stri
     stop.current = false;
     setProgress({ done: 0, total: list.length });
     for (let i = 0; i < list.length && !stop.current; i++) {
-      const r = await pushCompatibilitiesAction(accountSlug, list[i].publicationIds).catch(() => null);
+      const r = await pushCompatibilitiesAction(accountSlug, list[i].publicationIds, addOnly).catch(() => null);
       setOutcomes((prev) => ({ ...prev, [key(list[i])]: outcomeText(r) }));
       setProgress({ done: i + 1, total: list.length });
       if (r && r.ok && r.busy) break;
@@ -84,7 +90,8 @@ export function CompatibilityPushList({ accountSlug, rows }: { accountSlug: stri
     });
   const chosen = pushable.filter((r) => selected.has(key(r)));
   const totalAdd = (asking ?? []).reduce((n, r) => n + r.add.count + r.complete.count, 0);
-  const totalRemove = (asking ?? []).reduce((n, r) => n + r.remove.count, 0);
+  const totalRemove = addOnly ? 0 : (asking ?? []).reduce((n, r) => n + r.remove.count, 0);
+  const canAdd = (r: CompatibilityPushRow) => r.add.count + r.complete.count > 0;
 
   return (
     <div className="overflow-hidden rounded-2xl border bg-card shadow-card">
@@ -113,7 +120,16 @@ export function CompatibilityPushList({ accountSlug, rows }: { accountSlug: stri
               </Button>
             </>
           ) : null}
-          <Button access="subir" size="sm" disabled={chosen.length === 0 || progress !== null} pending={progress !== null} onClick={() => setAsking(chosen)}>
+          <Button
+            access="subir"
+            size="sm"
+            variant="outline"
+            disabled={!chosen.some(canAdd) || progress !== null}
+            onClick={() => ask(chosen.filter(canAdd), true)}
+          >
+            Solo agregar
+          </Button>
+          <Button access="subir" size="sm" disabled={chosen.length === 0 || progress !== null} pending={progress !== null} onClick={() => ask(chosen, false)}>
             <Upload />
             Subir las elegidas{chosen.length > 0 ? ` (${chosen.length})` : ''}
           </Button>
@@ -165,9 +181,16 @@ export function CompatibilityPushList({ accountSlug, rows }: { accountSlug: stri
               </div>
               <div className="flex shrink-0 flex-col items-end gap-2">
                 {row.blocked ? null : (
-                  <Button access="subir" size="sm" variant="outline" disabled={progress !== null} onClick={() => setAsking([row])}>
-                    Subir
-                  </Button>
+                  <>
+                    <Button access="subir" size="sm" variant="outline" disabled={progress !== null} onClick={() => ask([row], false)}>
+                      Subir
+                    </Button>
+                    {canAdd(row) && row.remove.count > 0 ? (
+                      <Button access="subir" size="sm" variant="ghost" disabled={progress !== null} onClick={() => ask([row], true)}>
+                        Solo agregar
+                      </Button>
+                    ) : null}
+                  </>
                 )}
               </div>
             </li>
@@ -180,11 +203,12 @@ export function CompatibilityPushList({ accountSlug, rows }: { accountSlug: stri
           <DialogHeader>
             <DialogTitle>¿Subir las compatibilidades a {asking?.[0]?.channelName ?? 'el canal'}?</DialogTitle>
             <DialogDescription>
-              Se agregan o completan {groups(totalAdd)} y se borran {vehicles(totalRemove)} en {plural(asking?.length ?? 0, 'publicación', 'publicaciones')}.
+              Se agregan o completan {groups(totalAdd)}
+              {addOnly ? ', sin borrar nada,' : ` y se borran ${vehicles(totalRemove)}`} en {plural(asking?.length ?? 0, 'publicación', 'publicaciones')}.
               Antes de mandar se vuelve a leer el canal: va solo lo que sigue faltando o sobrando. Si la ficha cambió desde la auditoría, esa no se sube.
             </DialogDescription>
           </DialogHeader>
-          {asking && asking.length === 1 ? <Detail row={asking[0]} /> : null}
+          {asking && asking.length === 1 ? <Detail row={asking[0]} addOnly={addOnly} /> : null}
           <DialogFooter className="gap-2 sm:gap-2">
             <Button variant="ghost" onClick={() => setAsking(null)}>
               Cancelar
@@ -200,7 +224,7 @@ export function CompatibilityPushList({ accountSlug, rows }: { accountSlug: stri
   );
 }
 
-function Detail({ row }: { row: CompatibilityPushRow }) {
+function Detail({ row, addOnly = false }: { row: CompatibilityPushRow; addOnly?: boolean }) {
   return (
     <div className="mt-1.5 space-y-2 text-xs">
       {row.add.count > 0 ? (
@@ -227,7 +251,7 @@ function Detail({ row }: { row: CompatibilityPushRow }) {
           ) : null}
         </div>
       ) : null}
-      {row.remove.count > 0 ? (
+      {row.remove.count > 0 && !addOnly ? (
         <div>
           <p className="font-medium">Se borran, porque no salen de la ficha:</p>
           <ul className="mt-0.5 list-disc space-y-0.5 pl-4">

@@ -48,6 +48,8 @@ import { DraftBar, DraftField, FaceValue, ReadOneButton } from '@/components/pub
 import { CatalogCard } from '@/components/pipeline/info/CatalogCard';
 import { MediaOrganizer, PhotoStrip } from '@/components/publication/MediaOrganizer';
 import { prisma } from '@/lib/db';
+import { loadCompatibilityView, loadedCompatibilitiesData } from '@/lib/compatibility-view';
+import { AuditCompatibilitiesButton, LoadedCompatibilities } from '@/components/compatibilities/LoadedCompatibilities';
 import { loadMediaSources } from '@/lib/media';
 import { createChecks } from '@/lib/channel-create';
 import { CreateInChannelCard } from '@/components/publication/CreateInChannelCard';
@@ -220,6 +222,7 @@ export default async function PublicationPage({
         timeZone={tz}
       />
     ) : null;
+  const compat = face !== 'historial' ? await loadCompatibilityView(prisma, account.id, p.id) : null;
   const [others, history, knowledge, qa, tasks, people, stockPlans, factsOf, family, covers] = await Promise.all([
     prisma.publication.findMany({
       where: { productId: p.product.id, id: { not: p.id } },
@@ -570,6 +573,25 @@ export default async function PublicationPage({
 
         {face !== 'historial' ? (
           <>
+        {compat && (compat.fichaLines > 0 || compat.loaded > 0) ? (
+          <SectionCard
+            title={`Compatibles en ${compat.channelName}`}
+            description={`Los vehículos que tiene cargados en ${compat.channelName}, comparados con la ficha. Para subir cambios, andá al paso Compatibilidades del pipeline.`}
+            action={
+              <div className="flex flex-col items-end gap-2">
+                {compat.published ? <AuditCompatibilitiesButton accountSlug={account.slug} publicationId={p.id} channelName={compat.channelName} /> : null}
+                <Link href={`/a/${account.slug}/pipeline/${p.id}?paso=compatibilidades`} className="text-xs font-medium underline-offset-4 hover:underline">
+                  Ir al paso Compatibilidades
+                </Link>
+              </div>
+            }
+            collapsible
+          >
+            <SectionBody>
+              <LoadedCompatibilities data={loadedCompatibilitiesData(compat, tz)} fichaHref={`${productHref}?seccion=compatibilidades`} />
+            </SectionBody>
+          </SectionCard>
+        ) : null}
         <PublicationTasksCard
           accountSlug={account.slug}
           publication={{ id: p.id, title, externalId: p.externalId }}

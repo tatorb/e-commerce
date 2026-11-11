@@ -1,8 +1,9 @@
-import { Tag, Shapes } from 'lucide-react';
+import { Tag, Shapes, Users } from 'lucide-react';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { SectionBody, SectionCard } from '@/components/ui/section-card';
 import { OptionListEditor } from '@/components/settings/OptionListEditor';
+import { CompetitorScopeEditor } from '@/components/settings/CompetitorScopeEditor';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { prisma } from '@/lib/db';
 import { loadProductOptions, optionUsage } from '@/lib/product-options';
@@ -20,7 +21,12 @@ export async function generateMetadata({ params }: { params: Promise<{ cuenta: s
 export default async function OptionsPage({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
   const { account, canWrite } = await requireAccount(cuenta, 'productos');
-  const [options, usage] = await Promise.all([loadProductOptions(prisma, account.id), optionUsage(prisma, account.id)]);
+  const [options, usage, scopes] = await Promise.all([
+    loadProductOptions(prisma, account.id),
+    optionUsage(prisma, account.id),
+    prisma.productOption.findMany({ where: { accountId: account.id, kind: 'TYPE' }, select: { name: true, competitorScope: true } }),
+  ]);
+  const scopeOf = new Map(scopes.map((o) => [o.name, o.competitorScope]));
   const rows = (names: string[], used: Map<string, number>) => names.map((name) => ({ name, products: used.get(name) ?? 0 }));
 
   return (
@@ -47,6 +53,19 @@ export default async function OptionsPage({ params }: { params: Promise<{ cuenta
             </SectionBody>
           </SectionCard>
         </div>
+        <SectionCard
+          title="Competencia por tipo de producto"
+          icon={<Users />}
+          description="Por publicación: cada publicación tiene su propia lista de competencia. Por producto: una sola lista, compartida por todas las publicaciones del producto (sus opciones de venta y las medidas de su familia), igual que la ficha. La comparación de precios siempre usa el precio y las cuotas de cada publicación."
+        >
+          <SectionBody>
+            <CompetitorScopeEditor
+              accountSlug={account.slug}
+              types={options.types.map((name) => ({ name, scope: scopeOf.get(name) ?? 'PUBLICATION', products: usage.types.get(name) ?? 0 }))}
+              canWrite={canWrite}
+            />
+          </SectionBody>
+        </SectionCard>
       </PageBody>
     </>
   );

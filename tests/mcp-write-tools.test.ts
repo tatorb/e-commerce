@@ -323,7 +323,7 @@ describe.skipIf(!url)('herramientas de escritura', () => {
 
     expect((await call('approve_title', { publicacion: 'MLA1110001', titulo: 'Kit Embrague Gol Oferta!' })).text).toContain('Para aprobar falta');
     const ok = await call('approve_title', { publicacion: 'MLA1110001', titulo: 'Kit Embrague Gol 1.6 8v', propuesta_elegida: 'Kit Embrague Gol 1.6 8v' });
-    expect(ok.data).toMatchObject({ listo: true, titulo: 'Kit Embrague Gol 1.6 8v', pipeline: 'En pipeline · Descripción' });
+    expect(ok.data).toMatchObject({ listo: true, titulo: 'Kit Embrague Gol 1.6 8v', pipeline: 'En pipeline · Compatibilidades' });
     expect(await db.titleApproval.findFirstOrThrow({ where: { publicationId: kitId } })).toMatchObject({
       outcome: 'WRITTEN',
       before: 'Kit Embrague Gol',
@@ -333,14 +333,14 @@ describe.skipIf(!url)('herramientas de escritura', () => {
     });
     // Desde otro paso también se aprueba, sin mover la publicación.
     const again = await call('approve_title', { publicacion: 'MLA1110001', titulo: 'Kit Embrague Gol 1.6 8v Sachs' });
-    expect(again.data).toMatchObject({ listo: true, pipeline: 'En pipeline · Descripción' });
+    expect(again.data).toMatchObject({ listo: true, pipeline: 'En pipeline · Compatibilidades' });
   });
 
   it('título bloqueado: no deja aprobar sin decidir; mantener completa el paso', async () => {
     await toTitle('MLA2220002');
     expect((await call('approve_title', { publicacion: 'MLA2220002', titulo: 'Bomba Agua Fiat Uno' })).text).toContain('bloqueado');
     const keep = await call('decide_title_lock', { publicacion: 'MLA2220002', decision: 'mantener' });
-    expect(keep.data).toMatchObject({ pipeline: 'En pipeline · Descripción', titulo: 'Bomba Agua Fiat' });
+    expect(keep.data).toMatchObject({ pipeline: 'En pipeline · Compatibilidades', titulo: 'Bomba Agua Fiat' });
     expect((await db.titleApproval.findFirstOrThrow({ where: { publicationId: bombaId } })).outcome).toBe('KEPT');
   });
 
