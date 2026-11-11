@@ -19,11 +19,14 @@ describe('pasos del pipeline', () => {
     expect(nextStep('TITLE')).toBe('COMPATIBILITIES');
     expect(nextStep('COMPATIBILITIES')).toBe('DESCRIPTION');
     expect(previousStep('DESCRIPTION')).toBe('COMPATIBILITIES');
-    expect(nextStep('DESCRIPTION')).toBe('PRICE');
-    expect(previousStep('PRICE')).toBe('DESCRIPTION');
+    // Preguntas y respuestas va después de Descripción, antes de Precio.
+    expect(nextStep('DESCRIPTION')).toBe('QA');
+    expect(previousStep('QA')).toBe('DESCRIPTION');
+    expect(nextStep('QA')).toBe('PRICE');
+    expect(previousStep('PRICE')).toBe('QA');
     expect(nextStep('PRICE')).toBe('IMAGES');
     expect(nextStep('IMAGES')).toBe('TEXT_IMAGES');
-    expect(nextStep('QA')).toBe('PUBLISH');
+    expect(nextStep('MEDIA')).toBe('PUBLISH');
     expect(nextStep('PUBLISH')).toBeNull();
     expect(previousStep('TITLE')).toBe('INFO');
     expect(previousStep('INFO')).toBeNull();

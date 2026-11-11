@@ -51,12 +51,12 @@ describe('el pipeline con el paso nuevo', () => {
       'Título',
       'Compatibilidades',
       'Descripción',
+      'Preguntas y respuestas',
       'Precio',
       'Fotos',
       'Imágenes con texto',
       'Videos',
       'Organización de multimedia',
-      'Preguntas y respuestas',
       'Publicación',
     ]);
     expect(nextStep('TITLE')).toBe('COMPATIBILITIES');
