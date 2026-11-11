@@ -198,9 +198,18 @@ export function pickYears<T extends Named>(list: T[], from: number | null, to: n
     .sort((a, b) => a.year - b.year);
 }
 
+// "S/aa" y "C/aa" son sin y con aire acondicionado: su "s" o su "c" no es una versión.
+const AIR = /\b[sc]\s*\/\s*a\.?(?:\s*a\.?)?(?![a-z])/gi;
+
+/** La palabra de las que no van que tiene el nombre, o undefined si no tiene ninguna. */
+export function excludedWordIn(name: string, exclude: string[]): string | undefined {
+  const text = name.replace(AIR, ' ');
+  return exclude.find((w) => hasWords(text, w));
+}
+
 /** Si una versión es de las que no van: tiene alguna de esas palabras. */
 export function isExcluded(version: string, exclude: string[]): boolean {
-  return exclude.some((w) => hasWords(version, w));
+  return excludedWordIn(version, exclude) !== undefined;
 }
 
 // ───────────────────────────── La traducción ─────────────────────────────
@@ -288,6 +297,8 @@ export function judgeVehicle(v: LoadedVehicle, lines: TranslatedLine[]): Vehicle
       ? { kind: 'review', reason: `${v.total ?? 'Varios'} de ${v.name} los cargó el canal: no dice cuáles son, revisalos en el canal.` }
       : { kind: 'extra', reason: `${v.total ?? 'Varios'} de ${v.name} los cargó el canal y la ficha no tiene esa marca: se borran a mano en el canal.` };
   }
+  // Una versión GNC de fábrica lleva el motor naftero con el equipo de gas: va en las líneas de nafta,
+  // salvo que la ficha la deje afuera con "Gnc" en las versiones que no van.
   const fuel = fuelOf(v.name);
   const displacement = displacementOf(v.name);
   const power = powerOf(v.name);
@@ -304,17 +315,18 @@ export function judgeVehicle(v: LoadedVehicle, lines: TranslatedLine[]): Vehicle
     }
     const r = l.rule;
     const year = yearOf(v.name, model);
+    const excluded = excludedWordIn(v.name, r.exclude);
     const why =
       year !== null && ((r.from !== null && year < r.from) || (r.to !== null && year > r.to))
         ? `el año ${year} está fuera de la ficha (${yearsText(r.from, r.to)})`
-        : fuel && r.fuel && fuel !== r.fuel
+        : fuel && r.fuel && fuel !== r.fuel && !(fuel === 'gnc' && r.fuel === 'nafta')
           ? `es ${FUEL_LABEL[fuel]} y la ficha dice ${FUEL_LABEL[r.fuel]}`
           : displacement && r.displacement && displacement !== r.displacement
             ? `es ${displacement} y la ficha dice ${r.displacement}`
             : power && r.power && power !== r.power
               ? `tiene ${power} cv y la ficha dice ${r.power} cv`
-              : r.exclude.find((w) => hasWords(v.name, w))
-                ? `es una versión que la ficha deja afuera (${r.exclude.find((w) => hasWords(v.name, w))})`
+              : excluded
+                ? `es una versión que la ficha deja afuera (${excluded})`
                 : null;
     if (!why) return { kind: 'covered', line: r.index, year, displacement };
     firstReason ??= why;

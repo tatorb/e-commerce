@@ -125,6 +125,32 @@ describe('lo cargado contra lo que sale de la ficha', () => {
     expect(judgeVehicle(v('Mercedes-Benz Sprinter 2015 415 CDI'), [amarok, truck])).toMatchObject({ kind: 'extra' });
   });
 
+  it('"S/aa" es sin aire: no es la versión S que la ficha deja afuera', () => {
+    const ecosport: TranslatedLine = {
+      ...amarok,
+      rule: lineRule(ficha({ vehicleBrand: 'Ford', model: 'Ecosport', engine: '1.6 8v Rocam', fuel: 'Nafta', excludedVersions: 'S, Se, Titanium', yearTo: 2012 }), 3),
+      brandName: 'Ford',
+      modelNames: ['Ecosport'],
+    };
+    expect(judgeVehicle(v('Ford Ecosport 2010 1.6 My10 Xls 4x2 S/aa AR'), [ecosport])).toMatchObject({ kind: 'covered', year: 2010 });
+    expect(judgeVehicle(v('Ford Ecosport 2011 1.6 Xl Plus C/aa AR'), [ecosport])).toMatchObject({ kind: 'covered' });
+    expect(judgeVehicle(v('Ford Ecosport 2010 1.6 S 4x2 AR'), [ecosport])).toMatchObject({ kind: 'extra', reason: expect.stringContaining('deja afuera (S)') });
+    expect(isExcluded('Xls S/aa', ['S'])).toBe(false);
+    expect(isExcluded('S C/aa', ['S'])).toBe(true);
+  });
+
+  it('una versión GNC de fábrica va en la línea de nafta, salvo que la ficha diga que no va', () => {
+    const fire = (excludedVersions: string | null): TranslatedLine => ({
+      ...amarok,
+      rule: lineRule(ficha({ vehicleBrand: 'Fiat', model: 'Siena', engine: '1.3 8v Fire', fuel: 'Nafta', excludedVersions }), 4),
+      brandName: 'Fiat',
+      modelNames: ['Siena'],
+    });
+    expect(judgeVehicle(v('Fiat Siena 2006 1.3 Fire Suite Gnc AR'), [fire(null)])).toMatchObject({ kind: 'covered', year: 2006 });
+    expect(judgeVehicle(v('Fiat Siena 2006 1.3 Fire Suite Gnc AR'), [fire('Gnc')])).toMatchObject({ kind: 'extra', reason: expect.stringContaining('deja afuera (Gnc)') });
+    expect(judgeVehicle(v('Fiat Siena 2006 1.3 Jtd AR'), [fire(null)])).toMatchObject({ kind: 'extra', reason: expect.stringContaining('es diésel') });
+  });
+
   it('un modelo que parece un año, como el Peugeot 2008, no se toma por el año', () => {
     expect(yearOf('Peugeot 2008 2019 1.6 Allure AR')).toBe(2019);
     expect(yearOf('Peugeot 2008 2019 1.6 Allure AR', '2008')).toBe(2019);
