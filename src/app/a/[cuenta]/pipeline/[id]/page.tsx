@@ -58,6 +58,9 @@ import { loadResearch } from '@/lib/queries/research';
 import { loadCatalogData } from '@/lib/catalog-data';
 import { autoAvailable } from '@/lib/research';
 import { prisma } from '@/lib/db';
+import { loadCompatibilityView, loadedCompatibilitiesData } from '@/lib/compatibility-view';
+import { AuditCompatibilitiesButton, LoadedCompatibilities } from '@/components/compatibilities/LoadedCompatibilities';
+import { CompatibilityPushList } from '@/components/sync/CompatibilityPushList';
 import { AI_NOT_CONFIGURED, isAiConfigured } from '@/ai/claude';
 import { InfoStep } from '@/components/pipeline/info/InfoStep';
 import { TitleStep } from '@/components/pipeline/title/TitleStep';
@@ -215,6 +218,7 @@ export default async function PipelineStepPage({
     viewing === 'TEXT_IMAGES' ? loadTextImageStep(prisma, { accountId: account.id, publicationId: pub.id, slot: textSlot }) : null,
   ]);
   const warranty = viewing === 'PUBLISH' ? await warrantyOverview(prisma, { accountId: account.id, publicationId: pub.id }) : null;
+  const compat = viewing === 'COMPATIBILITIES' ? await loadCompatibilityView(prisma, account.id, pub.id) : null;
   // La misma medida en otras publicaciones del canal, con otra forma de cobro: se ven en el paso Publicación.
   const saleOptions = viewing === 'PUBLISH' ? await loadSaleOptions(prisma, pub.id) : null;
   // Paso Precio: las ventas de la publicación y, en una familia, de todas sus medidas, solo para quien ve Ventas.
@@ -439,6 +443,32 @@ export default async function PipelineStepPage({
             auto={auto}
             aiDisabledReason={isAiConfigured() ? null : AI_NOT_CONFIGURED}
           />
+        ) : compat && viewing === 'COMPATIBILITIES' ? (
+          <>
+            <SectionCard
+              title={`Compatibles en ${compat.channelName}`}
+              description={`Los vehículos que tiene cargados en ${compat.channelName}, comparados con la ficha.${family && family.members.length > 1 ? ' La revisión y la subida van a todas las medidas de la familia.' : ''}`}
+              action={compat.published ? <AuditCompatibilitiesButton accountSlug={account.slug} publicationId={pub.id} channelName={compat.channelName} /> : undefined}
+            >
+              <SectionBody>
+                <LoadedCompatibilities data={loadedCompatibilitiesData(compat, account.timezone)} fichaHref={`${pageHref}?paso=${PIPELINE_STEP_SLUG.INFO}`} />
+              </SectionBody>
+            </SectionCard>
+            {compat.toPush.length > 0 ? (
+              <div className="space-y-2">
+                <div className="space-y-1">
+                  <h2 className="text-base font-semibold">Subir los cambios a {compat.channelName}</h2>
+                  <p className="text-sm text-muted-foreground">
+                    Va solo lo que mostró la última revisión. «Solo agregar» suma lo que falta y no borra nada. Antes de mandar se ve qué se agrega y qué se
+                    borra, y se confirma.
+                  </p>
+                </div>
+                <CompatibilityPushList accountSlug={account.slug} rows={compat.toPush} />
+              </div>
+            ) : compat.readAt && compat.fichaLines > 0 ? (
+              <p className="text-sm text-muted-foreground">No hay nada para subir: lo cargado ya coincide con la ficha, o lo que queda está a revisar.</p>
+            ) : null}
+          </>
         ) : media && viewing === 'MEDIA' ? (
           <SectionCard
             title="Fotos y videos de la publicación"

@@ -7,11 +7,12 @@ import { lockFamily } from '@/domain/family-members';
 
 // El código de cada paso no cambia aunque cambie el orden o el nombre que se ve:
 // IMAGES se muestra como Fotos.
-export const PIPELINE_STEPS: PipelineStep[] = ['INFO', 'TITLE', 'DESCRIPTION', 'PRICE', 'IMAGES', 'TEXT_IMAGES', 'VIDEOS', 'MEDIA', 'QA', 'PUBLISH'];
+export const PIPELINE_STEPS: PipelineStep[] = ['INFO', 'TITLE', 'COMPATIBILITIES', 'DESCRIPTION', 'PRICE', 'IMAGES', 'TEXT_IMAGES', 'VIDEOS', 'MEDIA', 'QA', 'PUBLISH'];
 
 export const PIPELINE_STEP_LABEL: Record<PipelineStep, string> = {
   INFO: 'Información',
   TITLE: 'Título',
+  COMPATIBILITIES: 'Compatibilidades',
   DESCRIPTION: 'Descripción',
   PRICE: 'Precio',
   IMAGES: 'Fotos',
@@ -26,6 +27,7 @@ export const PIPELINE_STEP_LABEL: Record<PipelineStep, string> = {
 export const PIPELINE_STEP_SLUG: Record<PipelineStep, string> = {
   INFO: 'informacion',
   TITLE: 'titulo',
+  COMPATIBILITIES: 'compatibilidades',
   DESCRIPTION: 'descripcion',
   PRICE: 'precio',
   IMAGES: 'imagenes',

@@ -866,6 +866,7 @@ model ChannelApplication {
 enum PipelineStep {
   INFO
   TITLE
+  COMPATIBILITIES
   IMAGES
   TEXT_IMAGES
   VIDEOS

@@ -24,6 +24,7 @@ import {
 } from '@/domain/compatibilities';
 import { auditAccountCompatibilities } from '@/lib/compatibilities';
 import { listCompatibilitiesToPush, pushCompatibilities } from '@/lib/compatibility-push';
+import { loadCompatibilityView, loadedCompatibilitiesData } from '@/lib/compatibility-view';
 import { encrypt } from '@/lib/crypto';
 
 // Las compatibilidades con vehículos: las reglas para traducir la ficha, la
@@ -802,6 +803,29 @@ describe.skipIf(!url)('auditar contra Mercado Libre simulado', () => {
     await auditAccountCompatibilities(db, { accountId, publicationIds: [p.id] });
     const third = await pushCompatibilities(db, { accountId });
     expect(third.subidas[0]).toMatchObject({ resultado: 'subido', borrados: { cantidad: 1, ejemplos: ['Ford Mustang 2024 5.0 V8 GT'] }, despues: { sobran: 0 } });
+  });
+
+  it('la pantalla muestra lo cargado por marca y modelo, marcado como va, sobra o lo cargó el canal, y lo que se puede subir', async () => {
+    const amarok = await product('Subconjunto de prueba Amarok vista', [{ vehicleBrand: 'Volkswagen', model: 'Amarok', engine: '2.0 TDI', yearFrom: 2010, yearTo: 2016 }]);
+    const main = await pub(amarok.id, 'MLA9000061', { up: 'MLAU61' });
+    expect(await loadCompatibilityView(db, accountId, main.id)).toMatchObject({ readAt: null, fichaLines: 1, published: true, loaded: 0, toPush: [] });
+    loaded.MLA9000061 = [
+      { id: 'c-1', domain_id: 'MLA-CARS_AND_VANS', catalog_product_id: 'MLA800', catalog_product_name: 'Volkswagen Amarok 2011 2.0 TDI 180cv Highline AR', source: 'SELLER' },
+      { id: 'c-2', domain_id: 'MLA-CARS_AND_VANS', catalog_product_id: 'MLA801', catalog_product_name: 'Ford Mustang 2024 5.0 V8 GT AR', source: 'SELLER' },
+      { id: null, domain_id: null, catalog_product_id: null, catalog_product_name: 'Toyota', source: 'CATALOGO', total: 2 },
+    ];
+    await auditAccountCompatibilities(db, { accountId, publicationIds: [main.id] });
+    const view = await loadCompatibilityView(db, accountId, main.id);
+    expect(view).toMatchObject({ loaded: 2, covered: 1, extra: 1, review: 0, missing: ['Volkswagen Amarok 2010 2.0 diésel', 'Volkswagen Amarok 2012 2.0 diésel'] });
+    expect(view!.models.map((g) => [g.model, g.covered, g.extra])).toEqual([
+      ['Ford Mustang', 0, 1],
+      ['Volkswagen Amarok', 1, 0],
+    ]);
+    expect(view!.models[1].vehicles[0]).toMatchObject({ year: 2011, rest: '2.0 TDI 180cv Highline', mark: 'covered' });
+    expect(view!.byChannel).toEqual([{ brand: 'Toyota', count: 2, extra: true }]);
+    expect(view!.toPush).toHaveLength(1);
+    expect(view!.toPush[0]).toMatchObject({ add: { count: 2 }, remove: { count: 1 } });
+    expect(loadedCompatibilitiesData(view!, 'America/Argentina/Buenos_Aires')).toMatchObject({ readAtText: expect.any(String), loaded: 2 });
   });
 
   it('con solo agregar, agrega lo que falta y deja lo que sobra para otra subida', async () => {
