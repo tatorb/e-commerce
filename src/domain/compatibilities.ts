@@ -113,7 +113,9 @@ export function lineRule(c: FichaCompatibility, index: number): LineRule {
   const engine = parseEngine(c.engine);
   const fuel = fuelOf(c.fuel) ?? fuelOf(c.engine) ?? (engine.fuel ? fuelOf(engine.fuel) : null);
   const displacement = displacementOf(c.displacement) ?? displacementOf(c.engine);
-  const power = powerOf(c.power) ?? (c.power && /^\d{2,3}$/.test(c.power.trim()) ? Number(c.power.trim()) : null) ?? powerOf(c.engine) ?? powerOf(c.note);
+  // La potencia sale del campo potencia o del motor, nunca de la nota: la nota explica, y suele nombrar
+  // la potencia de otro motor ("el 1.0 16v Turbo de 112 cv lleva otro pistón").
+  const power = powerOf(c.power) ?? (c.power && /^\d{2,3}$/.test(c.power.trim()) ? Number(c.power.trim()) : null) ?? powerOf(c.engine);
   const models = (c.model ?? '')
     .split(/\s*[/,]\s*/)
     .map((m) => m.trim())

@@ -54,6 +54,9 @@ describe('cómo se lee una línea de la ficha', () => {
 
   it('la potencia y las versiones que no van, del campo o de la nota', () => {
     expect(lineRule(ficha({ vehicleBrand: 'Peugeot', model: '308', fuel: 'Nafta', power: '115' }), 0).power).toBe(115);
+    // La nota no da la potencia: suele hablar de otro motor.
+    expect(lineRule(ficha({ vehicleBrand: 'Volkswagen', model: 'Gol', engine: '1.0 8v EA111', fuel: 'Nafta', note: 'El 1.0 16v Turbo de 112 cv lleva otro pistón.' }), 0).power).toBeNull();
+    expect(lineRule(ficha({ vehicleBrand: 'Renault', model: 'Logan', engine: '1.6 8v K7M', fuel: 'Nafta', note: 'K7M de 85 a 90 CV.', power: '90' }), 0).power).toBe(90);
     expect(excludedOf({ excludedVersions: 'THP, VTi', note: null })).toEqual(['THP', 'VTi']);
     expect(excludedOf({ excludedVersions: null, note: 'Sirve para el 1.6, no THP. Excepto GTi.' })).toEqual(['THP', 'GTi']);
     // "No sirve" no es una versión.
