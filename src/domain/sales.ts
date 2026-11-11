@@ -367,3 +367,10 @@ export function dispatchUrgency(dispatchBy: Date | null, now: Date, timeZone: st
 export function searchTextOf(parts: (string | null | undefined)[]): string {
   return [...new Set(parts.filter((p): p is string => !!p && p.trim() !== '').map((p) => p.trim().toLowerCase()))].join(' ').slice(0, 4000);
 }
+
+/** Las SKU de lo vendido, en una línea: "SKU SP-631-00", o una por producto si son varios. */
+export function skusText(lines: { sku: string | null }[]): string {
+  const skus = lines.map((l) => l.sku ?? 'sin SKU');
+  if (skus.length === 0 || skus.every((x) => x === 'sin SKU')) return 'Sin SKU';
+  return `SKU ${[...new Set(skus)].join(' · ')}`;
+}

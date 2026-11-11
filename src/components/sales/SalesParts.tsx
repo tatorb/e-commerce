@@ -3,7 +3,7 @@ import { AlertTriangle, Clock, ExternalLink, MessageSquareWarning, Truck } from 
 import type * as React from 'react';
 import { TabLinks } from '@/components/ui/tab-links';
 import { formatPrice } from '@/domain/money';
-import { dayText, dispatchUrgency, PERIODS, SALE_STATE_LABEL, SHIP_STATE_LABEL, type Period } from '@/domain/sales';
+import { dayText, dispatchUrgency, PERIODS, SALE_STATE_LABEL, SHIP_STATE_LABEL, skusText, type Period } from '@/domain/sales';
 import { formatDateTime, plural } from '@/lib/format';
 import type { ReaderStatus, SaleRow } from '@/lib/sales/queries';
 import { cn } from '@/lib/utils/cn';
@@ -215,6 +215,7 @@ export function SaleLine({ row, accountSlug, timeZone, now, showDeadline }: { ro
             {linesText(row)}
           </Link>
         </p>
+        <p className="text-sm text-muted-foreground">{skusText(row.lines)}</p>
         <p className="flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
           <span className="tabular-nums">{formatDateTime(row.orderedAt, timeZone)}</span>
           <span>· Venta {row.orderId}</span>
