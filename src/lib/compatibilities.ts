@@ -17,6 +17,7 @@ import {
   groupKey,
   groupLabel,
   isExcluded,
+  judgeVehicle,
   lineRule,
   norm,
   pickByName,
@@ -71,13 +72,17 @@ type Catalog = {
   values(field: CatalogField, known: CatalogFilter[]): Promise<CatalogValue[] | null>;
   // Cuántos vehículos tiene el catálogo con esos filtros. Null si el canal no lo dice.
   count(filters: CatalogFilter[]): Promise<number | null>;
-  // Lo que la app ya sabe del grupo por las subidas: cuántos vehículos no salen de la ficha
-  // (ver rememberIntruders), cuántos no carga el canal (ver rememberUnfilled) y si ya se mandó.
+  // Lo que la app ya sabe del grupo por las subidas: qué vehículos trajo el canal que alguna ficha
+  // dejó afuera (ver rememberIntruders), cuántos no carga (ver rememberUnfilled) y si ya se mandó.
   known(filters: CatalogFilter[]): Promise<KnownGroup>;
 };
 
-/** Lo que la app aprendió de un grupo al subirlo. */
-export type KnownGroup = { intruders: number; unfilled: number; tried: boolean };
+/**
+ * Lo que la app aprendió de un grupo al subirlo. Los vehículos de más son del grupo, no de una
+ * ficha: al contar, cada ficha descuenta solo los que ella deja afuera (un BX Tzd Turbo sobra en
+ * el pistón sin turbo y es justo lo que va en el turbo).
+ */
+export type KnownGroup = { intruders: CatalogIntruder[]; unfilled: number; tried: boolean };
 
 // ───────────────────────────── Lo que el catálogo mete de más en un grupo ─────────────────────────────
 
@@ -230,7 +235,7 @@ function catalogFor(
         knownIntruders(db, intrudersKey(args.kind, args.site, filters), args.now),
         knownUnfilled(db, unfilledKey(args.kind, args.site, filters), args.now),
       ]);
-      return { intruders: intruders.length, unfilled: unfilled ?? 0, tried: unfilled !== null || intruders.length > 0 };
+      return { intruders, unfilled: unfilled ?? 0, tried: unfilled !== null || intruders.length > 0 };
     },
   };
 }
@@ -825,11 +830,13 @@ export async function auditAccountCompatibilities(
         [...byKey].map(async ([key, groups]) => {
           const known = await Promise.all(groups.map((g) => cat.known(g.filters as CatalogFilter[])));
           if (missingKeys.has(key) && !known.some((k) => k.tried)) return;
-          // Sin lo que se sabe que no sale de la ficha ni lo que el canal no carga.
+          // Sin lo que el canal no carga, ni lo que trae de más y esta ficha deja afuera.
+          const leftOut = (k: KnownGroup) =>
+            k.intruders.filter((v) => judgeVehicle({ id: null, vehicleId: v.vehicleId, name: v.name, byChannel: false, total: null }, lines).kind !== 'covered').length;
           const each = await Promise.all(
             groups.map(async (g, i) => {
               const n = await cat.count(g.filters as CatalogFilter[]);
-              return n === null ? null : Math.max(0, n - known[i].intruders - known[i].unfilled);
+              return n === null ? null : Math.max(0, n - leftOut(known[i]) - known[i].unfilled);
             }),
           );
           if (each.every((n) => n !== null))

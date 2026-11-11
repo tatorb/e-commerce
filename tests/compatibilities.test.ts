@@ -270,6 +270,8 @@ const CATALOG: Vehicle[] = [
   // Un grupo donde el catálogo cuenta un vehículo que el canal no carga al mandar el grupo.
   car(FORD, ['M9', 'Ka'], 2020, NAFTA, ['E8', '1.5'], ['P10', '105 hp'], ['V31', '1.5 S']),
   { ...car(FORD, ['M9', 'Ka'], 2020, NAFTA, ['E8', '1.5'], ['P10', '105 hp'], ['V32', '1.5 Se']), NOADD: ['1', '1'] },
+  // Un grupo cuyo único vehículo es turbo, aunque la versión corta no lo diga: sobra en una ficha y va en otra.
+  { ...car(['B5', 'Citroën'], ['M10', 'BX'], 1990, DIESEL, ['E9', '1.9'], ['P11', '90 hp'], ['V40', 'Tzd']), NAME: ['n', 'Citroën BX 1990 1.9 Tzd Turbo'] },
   car(FORD, ['M3', 'Mustang'], 2024, NAFTA, ['E4', '5.0'], ['P5', '450 hp'], ['V6', '5.0 V8 GT']),
   car(MB, ['M4', 'Sprinter'], 2015, DIESEL, ['E5', '2.1'], ['P6', '163 hp'], ['V7', '415 CDI']),
 ];
@@ -352,7 +354,8 @@ describe.skipIf(!url)('auditar contra Mercado Libre simulado', () => {
               const fits = f.attributes.every((a) => (a.value_ids ?? [a.value_id]).includes(v[a.id]?.[0]));
               const id = `MLA7${i}`;
               if (fits && !v.NOADD && !list.some((x) => (x as { catalog_product_id?: string }).catalog_product_id === id)) {
-                list.push({ id: `c-new-${i}`, catalog_product_id: id, catalog_product_name: `${v.BRAND[1]} ${v.MODEL[1]} ${v.VEHICLE_YEAR[1]} ${v.SHORT_VERSION[1]}`, source: 'SELLER' });
+                const name = v.NAME?.[1] ?? `${v.BRAND[1]} ${v.MODEL[1]} ${v.VEHICLE_YEAR[1]} ${v.SHORT_VERSION[1]}`;
+                list.push({ id: `c-new-${i}`, catalog_product_id: id, catalog_product_name: name, source: 'SELLER' });
               }
             }
           }
@@ -790,6 +793,32 @@ describe.skipIf(!url)('auditar contra Mercado Libre simulado', () => {
     const again = await auditAccountCompatibilities(db, { accountId, publicationIds: [p.id] });
     expect(again.publicaciones[0]).toMatchObject({ faltan: { cantidad: 0 }, incompletos: { cantidad: 0 } });
     expect(await listCompatibilitiesToPush(db, accountId)).toEqual([]);
+  });
+
+  it('lo que el catálogo trae de más se descuenta solo en la ficha que lo deja afuera', async () => {
+    // El mismo grupo (BX 1990 1.9 diésel, versión Tzd) en dos fichas: el pistón sin turbo deja afuera el turbo, el turbo no.
+    const aspirado = await product('Subconjunto de prueba BX sin turbo', [{ vehicleBrand: 'Citroën', model: 'BX', engine: '1.9', fuel: 'Diésel', excludedVersions: 'Turbo, Gti' }]);
+    const turbo = await product('Subconjunto de prueba BX turbo', [{ vehicleBrand: 'Citroën', model: 'BX', engine: '1.9', fuel: 'Diésel', excludedVersions: 'Gti' }]);
+    const a = await pub(aspirado.id, 'MLA9001101', { up: 'MLAU11' });
+    const b = await pub(turbo.id, 'MLA9001102', { up: 'MLAU12' });
+    upOf.MLA9001101 = 'MLAU11';
+    upOf.MLA9001102 = 'MLAU12';
+    loaded.MLAU11 = [];
+    loaded.MLAU12 = [];
+
+    // En la ficha sin turbo, el canal mete el Tzd Turbo: la subida lo saca y lo anota, y el grupo deja de faltar.
+    await auditAccountCompatibilities(db, { accountId, publicationIds: [a.id] });
+    const first = await pushCompatibilities(db, { accountId, publicationIds: [a.id] });
+    expect(first.subidas[0]).toMatchObject({ deshechos: { cantidad: 1, ejemplos: ['Citroën BX 1990 1.9 Tzd Turbo'] }, despues: { faltan: 0, sobran: 0 } });
+    expect(loaded.MLAU11).toEqual([]);
+
+    // En la ficha turbo, ese mismo vehículo va: el grupo sigue faltando y la subida lo carga.
+    const r = await auditAccountCompatibilities(db, { accountId, publicationIds: [b.id] });
+    expect(r.publicaciones[0]).toMatchObject({ faltan: { cantidad: 1 } });
+    const second = await pushCompatibilities(db, { accountId, publicationIds: [b.id] });
+    expect(second.subidas[0]).toMatchObject({ resultado: 'subido', agregados: { grupos: 1 }, despues: { faltan: 0, incompletos: 0, sobran: 0 } });
+    expect(second.subidas[0].deshechos).toBeUndefined();
+    expect(loaded.MLAU12.map((v) => (v as { catalog_product_name: string }).catalog_product_name)).toEqual(['Citroën BX 1990 1.9 Tzd Turbo']);
   });
 
   it('si el canal no carga todo lo que cuenta en un grupo, queda anotado y el grupo deja de estar pendiente', async () => {
