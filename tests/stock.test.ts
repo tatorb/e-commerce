@@ -479,6 +479,39 @@ describe.skipIf(!url)('el stock en la base', () => {
     expect(t.publications.map((p) => p.publicationId)).toEqual(expect.arrayContaining([ids.p1, ids.p2]));
   };
 
+  it('una venta de antes de que el producto llevara stock no lo descuenta ni dispara la alarma, aunque el canal avise de ella después', async () => {
+    await withShowMore();
+    const since = (await db.product.findUniqueOrThrow({ where: { id: ids.bulon } })).stockSince!;
+    // Queda la última, cargada a mano.
+    await setProductStock(db, { accountId, productId: ids.bulon, userId: 'ana', stock: { '': 1 } });
+    expect((await task())!.title).toBe('Queda 1: Bulón de tapa');
+    const before = await db.stockMovement.count({ where: { kind: 'SALE' } });
+
+    // El canal avisa de una venta de antes, por ejemplo al liberar la plata: se anota y no se descuenta.
+    const old = new Date(since.getTime() - 20 * 86_400_000).toISOString();
+    const products = await recordOrder(db, { storeId, order: sale('6001', [{ listingId: 'MLA1000001', variationId: null, sku: null, quantity: 1 }], { orderedAt: old, delivered: true }) });
+    expect(products).toEqual([]);
+    expect(await stockOf(ids.bulon)).toEqual({ '-': 1 });
+    expect(await db.stockMovement.count({ where: { kind: 'SALE' } })).toBe(before);
+    const row = await db.channelSale.findFirstOrThrow({ where: { orderId: '6001' } });
+    expect(row.status).toBe('SKIPPED');
+    expect(row.lines).toMatchObject([{ counted: false, reason: 'Se vendió antes de que el producto llevara stock en la app.' }]);
+    expect(await alarm()).toMatchObject({ quantity: 1, outSince: null });
+    expect((await task())!.title).toBe('Queda 1: Bulón de tapa');
+    // Lo mismo por un combo: sus piezas ya llevaban stock después de la venta.
+    await recordOrder(db, { storeId, order: sale('6002', [{ listingId: 'MLA1000004', variationId: null, sku: null, quantity: 1 }], { orderedAt: old }) });
+    expect(await stockOf(ids.bulon)).toEqual({ '-': 1 });
+    // Si vuelve a avisar, tampoco.
+    await recordOrder(db, { storeId, order: sale('6001', [{ listingId: 'MLA1000001', variationId: null, sku: null, quantity: 1 }], { orderedAt: old, delivered: true }) });
+    expect(await stockOf(ids.bulon)).toEqual({ '-': 1 });
+
+    // Una venta de después sí descuenta y avisa.
+    await sell('6003', 1);
+    expect(await stockOf(ids.bulon)).toEqual({ '-': 0 });
+    expect((await alarm()).outSince).toEqual(expect.any(Date));
+    expect((await task())!.title).toBe('Reponer: Bulón de tapa, sin stock');
+  });
+
   it('mostrar más de 5: una venta en Mercado Libre que deja el stock en 0 sigue mostrando 6, con alarma y tarea, y nunca se pausa', async () => {
     await withShowMore();
     const plan = (await plansFor(db, [ids.p1])).get(ids.p1)!;

@@ -367,8 +367,22 @@ export function soldMeasure(pub: PlanRow, line: Pick<ChannelOrderLine, 'listingI
   return null;
 }
 
+export const SOLD_BEFORE_STOCK = 'Se vendió antes de que el producto llevara stock en la app.';
+
+/** Si la venta es de antes de que el producto, o alguna pieza del combo, empezara a llevar stock. */
+function soldBeforeStock(product: PlanRow['product'], orderedAt: Date): boolean {
+  const starts = product.kind === 'COMBO' ? product.comboItems.map((i) => i.product.stockSince) : [product.stockSince];
+  return starts.some((since) => since !== null && orderedAt < since);
+}
+
 /** De qué publicación de la app es la línea, y qué sale del stock. */
-async function resolveLine(db: Db | Tx, storeId: string, line: ChannelOrderLine, owners: () => Promise<Map<string, string>>): Promise<SaleLine> {
+async function resolveLine(
+  db: Db | Tx,
+  storeId: string,
+  line: ChannelOrderLine,
+  orderedAt: Date,
+  owners: () => Promise<Map<string, string>>,
+): Promise<SaleLine> {
   const base = { listingId: line.listingId, variationId: line.variationId, sku: line.sku, quantity: line.quantity, parts: [] as SalePart[] };
   const pub = await soldPublication(db, storeId, line.listingId, owners);
   if (!pub) return { ...base, publicationId: null, counted: false, reason: 'La publicación no está en la app.' };
@@ -380,6 +394,10 @@ async function resolveLine(db: Db | Tx, storeId: string, line: ChannelOrderLine,
   if (!unit) return skip('No se sabe de qué medida del producto es.');
   const parts = unit.map((u) => ({ ...u, quantity: u.quantity * line.quantity }));
   if (!isManaged(source)) return skip('El producto todavía no tenía stock en la app.', { parts, unmanaged: true });
+  // Vendida antes de que el producto llevara stock: el stock de partida ya la
+  // tiene descontada. Pasa cuando el canal avisa de algo de una venta vieja,
+  // como la plata liberada o un reclamo.
+  if (soldBeforeStock(pub.product, orderedAt)) return skip(SOLD_BEFORE_STOCK, { parts });
   return { ...base, publicationId: pub.id, counted: true, parts };
 }
 
@@ -468,7 +486,7 @@ export async function recordOrder(db: Db, args: { storeId: string; order: Channe
     let owners: Map<string, string> | null = null;
     const ownersOf = async () => (owners ??= await variantListingOwners(db, args.storeId));
     const lines: SaleLine[] = [];
-    for (const line of order.lines) lines.push(await resolveLine(db, args.storeId, line, ownersOf));
+    for (const line of order.lines) lines.push(await resolveLine(db, args.storeId, line, new Date(order.orderedAt), ownersOf));
     const counted = lines.some((l) => l.counted);
     const boosted = await boostedOf(db, lines);
     let events: AlarmEvent[] = [];
