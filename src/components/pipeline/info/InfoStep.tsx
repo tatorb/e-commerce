@@ -18,7 +18,7 @@ import { ManufacturerCard } from './ManufacturerCard';
 import { ProductInfoForm } from './ProductInfoForm';
 import { withSharedNote } from './SharedNote';
 import { todayIn } from '@/domain/applications';
-import { storedCompetitor } from '@/domain/competitors';
+import { sharedText, storedCompetitor } from '@/domain/competitors';
 
 // Una publicación de la competencia como la edita el formulario: punto de miles y coma decimal.
 function competitorRow(c: TitleContext['competitors'][number]): CompetitorRow {
@@ -142,6 +142,7 @@ export function InfoStep({
         initial={ctx.competitors.map(competitorRow)}
         today={todayIn(timeZone)}
         shippingCost={shippingCost}
+        shared={sharedText(ctx.competitorsOwner)}
       />
       <BuyerPainsCard
         accountSlug={accountSlug}

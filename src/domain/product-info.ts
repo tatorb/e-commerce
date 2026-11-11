@@ -1,3 +1,4 @@
+import { settleProductCompetitors } from '@/lib/competitors';
 import { z } from 'zod';
 import type { Prisma } from '@/generated/prisma/client';
 import { withEngineData } from './engine';
@@ -41,6 +42,8 @@ export async function updateProductInfo(tx: Tx, args: { accountId: string; produ
     where: { id: productId },
     data: { productType: data.productType, brand: data.brand, partNumber: data.partNumber, line: data.line, origin: data.origin },
   });
+  // Con otro tipo, la competencia puede pasar a ser del producto o de cada publicación.
+  if (data.productType !== undefined && data.productType !== current?.productType) await settleProductCompetitors(tx, productId);
 
   // Medidas: se actualizan en su lugar, se suman las nuevas y se borran las que se sacaron.
   const before = await tx.productVariant.findMany({ where: { productId }, orderBy: { position: 'asc' }, select: { id: true, sku: true, measure: true } });

@@ -1,3 +1,4 @@
+import { competitorOwner, loadCompetitors } from '@/lib/competitors';
 import { z } from 'zod';
 import { parseWarranty, warrantyLabel } from '@/domain/warranty';
 import { CHANNEL_STATUS_LABEL } from '@/domain/channel-status';
@@ -374,7 +375,7 @@ const getPublication = defineTool({
   section: ['publicaciones', 'pipeline', 'productos'],
   title: 'Ver una publicación',
   description:
-    'Muestra todo de una publicación: la ficha del producto (la fuente de verdad), el título y la descripción actuales, los atributos del canal, los datos de catálogo del canal (cada campo del formulario de su categoría, con sus opciones y lo cargado), el precio (el de la app, el que leyó del canal y el último guardado en el paso Precio, con su margen), el puntaje y lo que le falta, la última medición, las visitas por semana (con las de antes y después de corregirla), las unidades vendidas en 90 días, el estado e historial del pipeline, el candado del título, la competencia cargada, las preguntas frecuentes y las reglas de la publicación (paso Preguntas y respuestas) y la investigación del producto: lo del fabricante, las aclaraciones para las imágenes, las preguntas de los compradores (las que llegaron solas del canal, con su respuesta y quién la hizo: su usuario, de dónde es, cuántas preguntas hizo y si ya compró; y las pegadas) y sus dolores y objeciones. La ficha y la investigación son del producto y las comparten todas sus publicaciones; las preguntas de la publicación propia son solo de esta.',
+    'Muestra todo de una publicación: la ficha del producto (la fuente de verdad), el título y la descripción actuales, los atributos del canal, los datos de catálogo del canal (cada campo del formulario de su categoría, con sus opciones y lo cargado), el precio (el de la app, el que leyó del canal y el último guardado en el paso Precio, con su margen), el puntaje y lo que le falta, la última medición, las visitas por semana (con las de antes y después de corregirla), las unidades vendidas en 90 días, el estado e historial del pipeline, el candado del título, la competencia cargada (de la publicación o, si el tipo de producto la comparte, del producto: competencia_de lo dice), las preguntas frecuentes y las reglas de la publicación (paso Preguntas y respuestas) y la investigación del producto: lo del fabricante, las aclaraciones para las imágenes, las preguntas de los compradores (las que llegaron solas del canal, con su respuesta y quién la hizo: su usuario, de dónde es, cuántas preguntas hizo y si ya compró; y las pegadas) y sus dolores y objeciones. La ficha y la investigación son del producto y las comparten todas sus publicaciones; las preguntas de la publicación propia son solo de esta.',
   input: z.object({ cuenta: accountArg, publicacion: publicationArg }),
   readOnly: true,
   async run(ctx, args) {
@@ -411,7 +412,6 @@ const getPublication = defineTool({
             select: { text: true, answer: true, askedAt: true, storeId: true, buyerId: true },
           },
           measurements: { orderBy: { takenAt: 'desc' }, take: LATEST_MEASUREMENTS, select: { takenAt: true, metrics: true } },
-          competitors: { orderBy: { position: 'asc' }, select: COMPETITOR_SELECT },
           product: {
             select: {
               id: true,
@@ -474,6 +474,9 @@ const getPublication = defineTool({
       loadSaleOptions(ctx.db, id),
       ctx.db.channelCopy.findUnique({ where: { publicationId: id }, select: { status: true, statusReason: true, readAt: true } }),
     ]);
+    // La competencia: la de esta publicación o, si el tipo la comparte, la del producto.
+    const competitorsOf = (await competitorOwner(ctx.db, id))!;
+    const competitors = await loadCompetitors(ctx.db, competitorsOf, COMPETITOR_SELECT);
     // Las otras opciones de venta de cada medida de la familia, sin repetir la medida.
     const familyOptions = family
       ? await Promise.all(familyMeasures(family.members).map(async (m) => [m.id, m.options.length > 0 ? await loadSaleOptions(ctx.db, m.id) : null] as const))
@@ -650,7 +653,10 @@ const getPublication = defineTool({
         cuando_responde_una_persona: richTextToMarkdown(pub.answerRules) || null,
         claude_responde_solo: pub.autoAnswer,
       },
-      competencia: pub.competitors.map(competitorOut),
+      competencia: competitors.map(competitorOut),
+      // De quién es la lista: de esta publicación, o del producto y compartida por todas sus publicaciones.
+      competencia_de: competitorsOf.scope === 'PRODUCT' ? 'producto' : 'publicacion',
+      ...(competitorsOf.scope === 'PRODUCT' ? { competencia_compartida_por: competitorsOf.publications } : {}),
       investigacion: {
         fabricante: {
           sitio: r?.manufacturerSite ?? null,
@@ -786,6 +792,8 @@ const getTitleWorkspace = defineTool({
       propuestas: tc.proposals.map((p) => ({ titulo: p.title, motivo: p.reason })),
       propuestas_fecha: when(tc.proposalsAt, account),
       competencia: tc.competitors.map(competitorOut),
+      competencia_de: tc.competitorsOwner.scope === 'PRODUCT' ? 'producto' : 'publicacion',
+      ...(tc.competitorsOwner.scope === 'PRODUCT' ? { competencia_compartida_por: tc.competitorsOwner.publications } : {}),
       ultimo_titulo_aprobado: tc.lastApproval
         ? {
             resultado: tc.lastApproval.outcome,

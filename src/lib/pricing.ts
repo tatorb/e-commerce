@@ -1,3 +1,4 @@
+import { competitorOwner, loadCompetitors, sharedText } from '@/lib/competitors';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
 import { lockFamily } from '@/domain/family-members';
@@ -150,17 +151,26 @@ export async function loadPriceStep(db: Db, accountId: string, publicationId: st
     select: {
       id: true,
       store: { select: { channel: { select: { kind: true, name: true } } } },
-      competitors: {
-        orderBy: { position: 'asc' },
-        select: { title: true, sellerName: true, brand: true, url: true, surveyedAt: true, listPrice: true, discountPct: true, installments: true, freeShipping: true },
-      },
       product: { select: { id: true, name: true, brand: true, pricingOverrides: true, variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } } } },
     },
   });
   if (!p) return null;
+  // La competencia: la de la publicación o, si el tipo la comparte, la del producto. Se compara con el precio de cada publicación.
+  const owner = (await competitorOwner(db, p.id))!;
+  const listed = await loadCompetitors(db, owner, {
+    title: true,
+    sellerName: true,
+    brand: true,
+    url: true,
+    surveyedAt: true,
+    listPrice: true,
+    discountPct: true,
+    installments: true,
+    freeShipping: true,
+  });
   const settings = await loadPricingSettings(db, accountId);
   const overrides = parsePricingValues(p.product.pricingOverrides);
-  const competitors: CompetitorPrice[] = p.competitors.flatMap((c) => {
+  const competitors: CompetitorPrice[] = listed.flatMap((c) => {
     const offer = offerOf(c);
     return offer ? [{ title: c.title, sellerName: c.sellerName, brand: c.brand, url: c.url, surveyedAt: dayOf(c.surveyedAt), offer }] : [];
   });
@@ -196,7 +206,9 @@ export async function loadPriceStep(db: Db, accountId: string, publicationId: st
     account: settings.params,
     overrides,
     competitors,
-    competitorsWithoutPrice: p.competitors.length - competitors.length,
+    competitorsWithoutPrice: listed.length - competitors.length,
+    // "Compartida por las 6 publicaciones de este producto", o null si es solo de esta.
+    competitorsShared: sharedText(owner),
     groups: groups.map((g) => ({
       ...g,
       ...priceFace(rowOf.get(g.anchorId)!),

@@ -1,3 +1,5 @@
+import { competitorOwner } from '@/lib/competitors';
+import { ownerWhere } from '@/domain/competitors';
 import type { PrismaClient } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
 import { LATEST_MEASUREMENTS } from '@/domain/measurements';
@@ -89,7 +91,6 @@ export async function loadTitleContext(db: PrismaClient, accountId: string, publ
         },
       },
       titleWork: true,
-      competitors: { orderBy: { position: 'asc' } },
       positions: { orderBy: { checkedAt: 'desc' }, take: 50 },
       titleApprovals: { orderBy: { createdAt: 'desc' }, take: 1, include: { user: { select: { name: true } } } },
     },
@@ -104,12 +105,15 @@ export async function loadTitleContext(db: PrismaClient, accountId: string, publ
 
   // Las reglas y lo leído para estas semillas, de cualquier publicación de la
   // cuenta, se piden juntos. De lo leído vale lo más nuevo de cada cosa escrita.
-  const [{ rules, custom }, rows] = await Promise.all([
+  // La competencia: la de la publicación o, si el tipo la comparte, la del producto.
+  const owner = (await competitorOwner(db, pub.id))!;
+  const [{ rules, custom }, rows, competitors] = await Promise.all([
     loadTitleRules(db, accountId, channel),
     db.searchSuggestion.findMany({
       where: { accountId, channelId: channel.id, seed: { in: seeds } },
       orderBy: { capturedAt: 'desc' },
     }),
+    db.competitorListing.findMany({ where: ownerWhere(owner.key), orderBy: { position: 'asc' } }),
   ]);
   const captures: Capture[] = [];
   for (const r of rows) {
@@ -120,7 +124,7 @@ export async function loadTitleContext(db: PrismaClient, accountId: string, publ
   const statuses = parseWordStatuses(work?.words);
   const words = buildWordMap(
     suggestions,
-    pub.competitors.map((c) => c.title),
+    competitors.map((c) => c.title),
     statuses,
   );
 
@@ -152,7 +156,9 @@ export async function loadTitleContext(db: PrismaClient, accountId: string, publ
     mainSearches: parseStrings(work?.mainSearches),
     proposals: parseProposals(work?.proposals),
     proposalsAt: work?.proposalsAt ?? null,
-    competitors: pub.competitors,
+    competitors,
+    // De quién es la lista y cuántas publicaciones la comparten.
+    competitorsOwner: { scope: owner.scope, publications: owner.publications },
     positions: pub.positions,
     lastApproval: pub.titleApprovals[0] ?? null,
   };

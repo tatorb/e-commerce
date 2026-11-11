@@ -121,7 +121,10 @@ export function CompetitionCard({
   onMatch,
   onCopyPlan,
   disabled,
+  shared = null,
 }: {
+  // "Compartida por las 6 publicaciones de este producto", cuando el tipo la guarda en el producto.
+  shared?: string | null;
   comparison: Comparison | null;
   params: PricingParams;
   plan: InstallmentPlan;
@@ -140,7 +143,10 @@ export function CompetitionCard({
 
   if (!comparison || others.length === 0) {
     return (
-      <SectionCard title="Comparación con la competencia" description="Con los precios que se cargan en el paso Información.">
+      <SectionCard
+        title="Comparación con la competencia"
+        description={shared ? `${shared} Con los precios que se cargan en el paso Información.` : 'Con los precios que se cargan en el paso Información.'}
+      >
         <SectionBody>
           <p className="text-sm text-muted-foreground">
             {withoutPrice > 0 ? `${missing} ` : 'Todavía no hay competencia cargada. '}Cargá el precio de lista, el descuento, las cuotas y el envío de cada
@@ -172,7 +178,7 @@ export function CompetitionCard({
     <SectionCard
       title="Comparación con la competencia"
       count={others.length}
-      description={`Por precio efectivo: lo que paga el comprador en total. El tuyo va con envío gratis; al de un competidor sin envío gratis se le suman ${formatPrice(params.shipping)}. La rentabilidad estimada supone que les cuesta lo mismo que a vos.`}
+      description={`${shared ? `${shared} ` : ''}Por precio efectivo: lo que paga el comprador en total. El tuyo va con envío gratis; al de un competidor sin envío gratis se le suman ${formatPrice(params.shipping)}. La rentabilidad estimada supone que les cuesta lo mismo que a vos.`}
       // Recorta sin volverse una caja con scroll propio, así los títulos de la tabla quedan fijos al bajar.
       className="overflow-clip"
     >

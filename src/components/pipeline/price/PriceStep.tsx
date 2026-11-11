@@ -813,6 +813,7 @@ function PriceCalculator({ accountSlug, data, group, view, today, timeZone, info
       </CollapsibleCard>
 
       <CompetitionCard
+        shared={data.competitorsShared}
         comparison={comparison}
         params={params}
         plan={plan}

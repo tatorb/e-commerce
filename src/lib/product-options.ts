@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
+import { settleProductCompetitors } from '@/lib/competitors';
 import { cleanOptionName, matchOption, notInListMessage, OPTION_LABEL, optionNameProblem, type OptionKind } from '@/domain/product-options';
 
 // Las listas fijas de tipos de producto y marcas de cada cuenta: leerlas,
@@ -147,7 +148,10 @@ export async function removeOption(db: PrismaClient, accountId: string, kind: Op
     const removed = await tx.productOption.deleteMany({ where: { accountId, kind, name } });
     if (removed.count === 0) throw new OptionError(`«${name}» ya no está en la lista.`);
     const field = kind === 'TYPE' ? 'productType' : 'brand';
+    const affected = kind === 'TYPE' ? await tx.product.findMany({ where: { accountId, productType: name }, select: { id: true } }) : [];
     const { count } = await tx.product.updateMany({ where: { accountId, [field]: name }, data: { [field]: null } });
+    // Sin tipo, la competencia es de cada publicación: la del producto pasa a sus publicaciones.
+    for (const p of affected) await settleProductCompetitors(tx, p.id);
     return count;
   });
 }

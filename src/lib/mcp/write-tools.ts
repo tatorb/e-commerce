@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { todayIn } from '@/domain/applications';
-import { COMPETITOR_SELECT, competitorsSchema, INSTALLMENT_OPTIONS, MAX_COMPETITORS, saveCompetitors, storedCompetitor } from '@/domain/competitors';
+import { COMPETITOR_SELECT, competitorsSchema, INSTALLMENT_OPTIONS, MAX_COMPETITORS, storedCompetitor } from '@/domain/competitors';
+import { competitorOwner, loadCompetitors, saveCompetitorsFrom, sharedText } from '@/lib/competitors';
 import {
   addToPipeline,
   advanceStep,
@@ -583,7 +584,7 @@ const saveCompetitorsTool = defineTool({
   name: 'save_competitors',
   section: 'pipeline',
   title: 'Cargar la competencia',
-  description: `Guarda las publicaciones de la competencia que más venden; conviene al menos 3 y no hay un tope práctico. Sus títulos suman palabras al mapa del paso Título, y su precio, descuento, cuotas y envío sirven para comparar precios. Reemplaza la lista entera; una lista vacía la borra, y lo que no mandes de una publicación queda vacío. Solo publicaciones y precios reales que te pasó la persona o que viste en el canal. Si mandás el precio sin la fecha, queda con la fecha de hoy.`,
+  description: `Guarda las publicaciones de la competencia que más venden; conviene al menos 3 y no hay un tope práctico. Sus títulos suman palabras al mapa del paso Título, y su precio, descuento, cuotas y envío sirven para comparar precios. Reemplaza la lista entera; una lista vacía la borra, y lo que no mandes de una publicación queda vacío. Solo publicaciones y precios reales que te pasó la persona o que viste en el canal. Si mandás el precio sin la fecha, queda con la fecha de hoy. Dónde se guarda depende del tipo de producto (Ajustes, Tipos y marcas): si el tipo tiene la competencia "Por producto", la lista es del producto y la comparten todas sus publicaciones (opciones de venta y medidas), así que guardarla desde cualquiera la cambia en todas; si es "Por publicación", es solo de esta. La respuesta dice de quién quedó (competencia_de) y entre cuántas se comparte. La comparación de precios usa siempre el precio y las cuotas de cada publicación.`,
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg,
@@ -632,8 +633,14 @@ const saveCompetitorsTool = defineTool({
       })),
     );
     if (!parsed.success) throw new McpToolError(parsed.error.issues[0]?.message ?? 'Revisá los datos.');
-    await ctx.db.$transaction((tx) => saveCompetitors(tx, id, parsed.data, todayIn(account.timezone)));
-    return { listo: true, guardadas: parsed.data.length, link_app: appLink(ctx, account, id) };
+    const owner = await ctx.db.$transaction((tx) => saveCompetitorsFrom(tx, id, parsed.data, todayIn(account.timezone)));
+    return {
+      listo: true,
+      guardadas: parsed.data.length,
+      competencia_de: owner.scope === 'PRODUCT' ? 'producto' : 'publicacion',
+      ...(owner.scope === 'PRODUCT' ? { compartida_por: owner.publications, aviso: sharedText(owner) } : {}),
+      link_app: appLink(ctx, account, id),
+    };
   },
 });
 
@@ -1292,7 +1299,6 @@ const copyResearchTool = defineTool({
       title: true,
       externalId: true,
       ownQuestions: true,
-      competitors: { orderBy: { position: 'asc' as const }, select: COMPETITOR_SELECT },
       titleWork: { select: { seeds: true, mainSearches: true } },
     };
     const [from, to] = await Promise.all([
@@ -1300,6 +1306,10 @@ const copyResearchTool = defineTool({
       ctx.db.publication.findUniqueOrThrow({ where: { id }, select }),
     ]);
     if (from.productId !== to.productId) throw new McpToolError('Solo se copia entre publicaciones del mismo producto.');
+    // La competencia de cada una: la propia o, si el tipo la comparte, la del producto.
+    const [fromOwner, toOwner] = await Promise.all([competitorOwner(ctx.db, fromId), competitorOwner(ctx.db, id)]);
+    const fromCompetitors = fromOwner ? await loadCompetitors(ctx.db, fromOwner, COMPETITOR_SELECT) : [];
+    const sameList = fromOwner?.scope === 'PRODUCT' && toOwner?.scope === 'PRODUCT';
 
     const wanted = [...new Set(args.copiar)];
     const copied: Record<string, unknown> = {};
@@ -1311,10 +1321,12 @@ const copyResearchTool = defineTool({
         // Las fotos y los clips se copian después, con las reglas de Organización de multimedia.
         if (what === 'fotos' || what === 'clips') continue;
         if (what === 'competencia') {
-          if (from.competitors.length === 0) skipped.push(COPYABLE[what]);
+          // Con la lista del producto, las dos ya ven la misma: no hay nada que copiar.
+          if (sameList) copied.competencia = 'Es la del producto: las dos ya ven la misma lista.';
+          else if (fromCompetitors.length === 0) skipped.push(COPYABLE[what]);
           else {
-            await saveCompetitors(tx, id, from.competitors.map(storedCompetitor));
-            copied.competencia = from.competitors.length;
+            await saveCompetitorsFrom(tx, id, fromCompetitors.map(storedCompetitor));
+            copied.competencia = fromCompetitors.length;
           }
         } else if (what === 'preguntas_propias') {
           if (!from.ownQuestions?.trim()) skipped.push(COPYABLE[what]);
