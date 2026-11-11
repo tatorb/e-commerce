@@ -145,6 +145,29 @@ describe('lo cargado contra lo que sale de la ficha', () => {
     expect(isExcluded('S C/aa', ['S'])).toBe(true);
   });
 
+  it('"Pack Electric" son los vidrios eléctricos, no un auto eléctrico', () => {
+    const palio: TranslatedLine = {
+      ...amarok,
+      rule: lineRule(ficha({ vehicleBrand: 'Fiat', model: 'Palio', engine: '1.8 8v', fuel: 'Nafta', yearTo: 2010 }), 5),
+      brandName: 'Fiat',
+      modelNames: ['Palio'],
+    };
+    expect(judgeVehicle(v('Fiat Palio 2006 1.8 Hlx Pack Electric AR'), [palio])).toMatchObject({ kind: 'covered', year: 2006 });
+    expect(judgeVehicle(v('Fiat Palio Weekend 2005 1.8 Elx Pack Electrico AR'), [palio])).toMatchObject({ kind: 'covered' });
+    expect(judgeVehicle(v('Fiat 500e 2023 Eléctrico AR'), [palio])).toMatchObject({ kind: 'extra' });
+  });
+
+  it('el modelo se busca como lo llama el catálogo y como lo escribe la ficha', () => {
+    const megane2: TranslatedLine = {
+      ...amarok,
+      rule: lineRule(ficha({ vehicleBrand: 'Renault', model: 'Megane2', engine: '1.9 dTi F9Q', fuel: 'Diésel' }), 6),
+      brandName: 'Renault',
+      modelNames: ['Megane 2'],
+    };
+    expect(judgeVehicle(v('Renault Megane 2 2003 1.9 Rn AR'), [megane2])).toMatchObject({ kind: 'covered', year: 2003 });
+    expect(judgeVehicle(v('1.9 Rn Expression Renault Ar Megane2'), [megane2])).toMatchObject({ kind: 'covered' });
+  });
+
   it('una versión GNC de fábrica va en la línea de nafta, salvo que la ficha diga que no va', () => {
     const fire = (excludedVersions: string | null): TranslatedLine => ({
       ...amarok,

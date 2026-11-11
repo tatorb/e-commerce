@@ -301,14 +301,17 @@ export function judgeVehicle(v: LoadedVehicle, lines: TranslatedLine[]): Vehicle
   }
   // Una versión GNC de fábrica lleva el motor naftero con el equipo de gas: va en las líneas de nafta,
   // salvo que la ficha la deje afuera con "Gnc" en las versiones que no van.
-  const fuel = fuelOf(v.name);
+  // "Pack Electric" es el de vidrios eléctricos ("Palio 1.8 Hlx Pack Electric"), no un auto eléctrico.
+  const fuel = fuelOf(v.name.replace(/\bpack\s+el[eé]ctric[oa]?s?\b/gi, ' '));
   const displacement = displacementOf(v.name);
   const power = powerOf(v.name);
   let firstReason: string | null = null;
   let reviewReason: string | null = null;
   for (const l of lines) {
     const brand = brandOf(l);
-    const models = l.modelNames.length > 0 ? l.modelNames : l.rule.models;
+    // El modelo como lo llama el catálogo y como lo escribe la ficha: el canal a veces nombra igual
+    // de las dos formas ("Megane 2" en el catálogo, "1.9 Rn Expression Renault Ar Megane2" en el nombre).
+    const models = [...new Set([...l.modelNames, ...l.rule.models])];
     const model = brand && hasWords(v.name, brand) ? models.find((m) => hasWords(v.name, m)) : undefined;
     if (!model) continue;
     if (l.status === 'review') {
