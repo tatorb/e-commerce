@@ -335,6 +335,58 @@ export function judgeVehicle(v: LoadedVehicle, lines: TranslatedLine[]): Vehicle
   return { kind: 'extra', reason: firstReason ? `No sale de la ficha: ${firstReason}.` : 'No sale de la ficha: esa marca y ese modelo no están.' };
 }
 
+/** Un nombre del canal partido en marca y modelo, año y lo demás: "Chevrolet Corsa Classic", 2003, "1.7 D Gls". */
+export function splitVehicleName(name: string): { model: string; year: number | null; rest: string } {
+  const words = name.trim().split(/\s+/);
+  // El "AR" del final es el país del catálogo: no dice nada del vehículo.
+  if (words.length > 1 && words[words.length - 1] === 'AR') words.pop();
+  const year = yearOf(name);
+  const at = year === null ? -1 : words.findIndex((w, i) => i >= 2 && w === String(year));
+  if (at < 0) return { model: words.join(' '), year: null, rest: '' };
+  return { model: words.slice(0, at).join(' '), year, rest: words.slice(at + 1).join(' ') };
+}
+
+export type VehicleMark = 'covered' | 'extra' | 'review';
+
+/** Lo cargado de un modelo, para mostrarlo junto: cuántos van, sobran o hay que revisar, y de qué años. */
+export type ModelGroup = {
+  model: string;
+  total: number;
+  covered: number;
+  extra: number;
+  review: number;
+  from: number | null;
+  to: number | null;
+  // Los motivos distintos de lo que sobra o hay que revisar, sin el año, para no repetirlos.
+  reasons: string[];
+  vehicles: { name: string; year: number | null; rest: string; mark: VehicleMark; reason: string | null }[];
+};
+
+/** Lo cargado agrupado por marca y modelo, ordenado por marca y modelo, y adentro por año. */
+export function groupByModel(rows: { name: string; mark: VehicleMark; reason?: string | null }[]): ModelGroup[] {
+  const groups = new Map<string, ModelGroup>();
+  for (const r of rows) {
+    const { model, year, rest } = splitVehicleName(r.name);
+    const g = groups.get(model) ?? { model, total: 0, covered: 0, extra: 0, review: 0, from: null, to: null, reasons: [], vehicles: [] };
+    g.total++;
+    g[r.mark]++;
+    if (year !== null) {
+      g.from = g.from === null ? year : Math.min(g.from, year);
+      g.to = g.to === null ? year : Math.max(g.to, year);
+    }
+    const reason = r.reason?.replace(/^No sale de la ficha: /, '') ?? null;
+    if (reason) {
+      const general = reason.replace(/el año (19|20)\d\d/, 'el año');
+      if (!g.reasons.includes(general)) g.reasons.push(general);
+    }
+    g.vehicles.push({ name: r.name, year, rest, mark: r.mark, reason });
+    groups.set(model, g);
+  }
+  const list = [...groups.values()];
+  for (const g of list) g.vehicles.sort((a, b) => (a.year ?? 0) - (b.year ?? 0) || a.rest.localeCompare(b.rest));
+  return list.sort((a, b) => a.model.localeCompare(b.model));
+}
+
 /** Los grupos que se cuentan juntos: la misma línea de la ficha, el mismo año y la misma cilindrada. */
 export const groupKey = (g: Pick<TargetGroup, 'line' | 'year' | 'displacement'>) => `${g.line}|${g.year}|${g.displacement ?? ''}`;
 

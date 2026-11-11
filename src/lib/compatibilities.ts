@@ -15,6 +15,7 @@ import {
   FUEL_LABEL,
   fuelOf,
   groupKey,
+  groupByModel,
   groupLabel,
   isExcluded,
   judgeVehicle,
@@ -602,8 +603,23 @@ export type PublicationAuditReport = {
     cantidad: number;
     ejemplos: { vehiculo: string; motivo: string }[];
   };
+  // Cuando son más que los ejemplos: todo lo que sobra o queda a revisar, por marca y modelo.
+  sobran_por_modelo?: ModelSummary[];
+  a_revisar_por_modelo?: ModelSummary[];
   respuesta_del_canal?: Record<string, unknown>;
 };
+
+export type ModelSummary = { modelo: string; cantidad: number; anios: string; motivos: string[] };
+
+/** Lo de una lista, por marca y modelo, con los años y los motivos distintos. */
+export function byModel(list: { vehicle: LoadedVehicle; reason: string }[], mark: 'extra' | 'review'): ModelSummary[] {
+  return groupByModel(list.map((x) => ({ name: x.vehicle.name, mark, reason: x.reason }))).map((g) => ({
+    modelo: g.model,
+    cantidad: g.total,
+    anios: g.from === null ? 'sin año' : g.from === g.to ? `${g.from}` : `${g.from} a ${g.to}`,
+    motivos: g.reasons.slice(0, 3),
+  }));
+}
 
 export type CompatibilityAuditReport = {
   publicaciones: PublicationAuditReport[];
@@ -888,6 +904,8 @@ export async function auditAccountCompatibilities(
         cantidad: audit.review.length,
         ejemplos: audit.review.slice(0, EXAMPLES).map((x) => ({ vehiculo: x.vehicle.name, motivo: x.reason })),
       },
+      ...(audit.extra.length > EXAMPLES ? { sobran_por_modelo: byModel(audit.extra, 'extra') } : {}),
+      ...(audit.review.length > EXAMPLES ? { a_revisar_por_modelo: byModel(audit.review, 'review') } : {}),
       ...(read.raw ? { respuesta_del_canal: read.raw } : {}),
     };
     report.publicaciones.push(pub);

@@ -9,6 +9,7 @@ import {
   auditCompatibilities,
   excludedOf,
   fuelOf,
+  groupByModel,
   isExcluded,
   judgeVehicle,
   lineRule,
@@ -16,6 +17,7 @@ import {
   pickPower,
   pickYears,
   powerOf,
+  splitVehicleName,
   yearOf,
   type FichaCompatibility,
   type TranslatedLine,
@@ -149,6 +151,21 @@ describe('lo cargado contra lo que sale de la ficha', () => {
     expect(judgeVehicle(v('Fiat Siena 2006 1.3 Fire Suite Gnc AR'), [fire(null)])).toMatchObject({ kind: 'covered', year: 2006 });
     expect(judgeVehicle(v('Fiat Siena 2006 1.3 Fire Suite Gnc AR'), [fire('Gnc')])).toMatchObject({ kind: 'extra', reason: expect.stringContaining('deja afuera (Gnc)') });
     expect(judgeVehicle(v('Fiat Siena 2006 1.3 Jtd AR'), [fire(null)])).toMatchObject({ kind: 'extra', reason: expect.stringContaining('es diésel') });
+  });
+
+  it('lo cargado se agrupa por marca y modelo, con años, cuentas y motivos sin repetir', () => {
+    expect(splitVehicleName('Chevrolet Corsa Classic 2003 1.7 D Gls AR')).toEqual({ model: 'Chevrolet Corsa Classic', year: 2003, rest: '1.7 D Gls' });
+    expect(splitVehicleName('Peugeot 2008 2019 1.6 Allure AR')).toEqual({ model: 'Peugeot 2008', year: 2019, rest: '1.6 Allure' });
+    expect(splitVehicleName('Toyota')).toEqual({ model: 'Toyota', year: null, rest: '' });
+    const groups = groupByModel([
+      { name: 'Chevrolet Cruze 2019 1.8 Lt Mt AR', mark: 'extra', reason: 'No sale de la ficha: el año 2019 está fuera de la ficha (hasta 2016).' },
+      { name: 'Chevrolet Cruze 2015 1.8 Lt AR', mark: 'covered' },
+      { name: 'Chevrolet Cruze 2020 1.8 Ltz AR', mark: 'extra', reason: 'No sale de la ficha: el año 2020 está fuera de la ficha (hasta 2016).' },
+      { name: 'Chevrolet Astra 1998 1.7 Gls AR', mark: 'review', reason: 'Coincide con una línea a revisar.' },
+    ]);
+    expect(groups.map((g) => g.model)).toEqual(['Chevrolet Astra', 'Chevrolet Cruze']);
+    expect(groups[1]).toMatchObject({ total: 3, covered: 1, extra: 2, review: 0, from: 2015, to: 2020, reasons: ['el año está fuera de la ficha (hasta 2016).'] });
+    expect(groups[1].vehicles.map((v) => v.year)).toEqual([2015, 2019, 2020]);
   });
 
   it('un modelo que parece un año, como el Peugeot 2008, no se toma por el año', () => {
