@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
+import type { ChannelKind, ChannelStatus } from '@/generated/prisma/enums';
 import { stockSlots, unitParts } from '@/domain/stock';
 import { parseVariations, type VariantLike } from '@/domain/media';
 import { quantityKey } from '@/domain/quantities';
@@ -322,8 +323,14 @@ export type AlarmRow = {
   url: string | null;
   storeName: string;
   channelName: string;
+  channelKind: ChannelKind;
+  // Si está activa, pausada o cerrada en el canal.
+  channelStatus: ChannelStatus;
   productId: string;
   productName: string;
+  // La medida del stock y su SKU en la ficha.
+  stockKey: string;
+  sku: string | null;
   // La medida, si el producto tiene varias.
   measure: string | null;
   real: number;
@@ -402,8 +409,12 @@ export async function loadStockAlarms(db: Db, accountId: string): Promise<AlarmR
         url: pub.url,
         storeName: pub.store.name,
         channelName: getChannelAdapter(pub.store.channel.kind, pub.store.channel.name).name,
+        channelKind: pub.store.channel.kind,
+        channelStatus: pub.channelStatus,
         productId: pub.product.id,
         productName: pub.product.name,
+        stockKey: key,
+        sku: slots.find((s) => s.key === key)?.sku?.trim() || null,
         measure: slots.length > 1 ? (slots.find((s) => s.key === key)?.label ?? null) : null,
         real,
         shown,
@@ -418,4 +429,38 @@ export async function loadStockAlarms(db: Db, accountId: string): Promise<AlarmR
   }
   const rank = (r: AlarmRow) => (r.real <= 0 ? 0 : 1);
   return rows.sort((a, b) => rank(a) - rank(b) || (a.outSince?.getTime() ?? Infinity) - (b.outSince?.getTime() ?? Infinity) || a.real - b.real || a.productName.localeCompare(b.productName));
+}
+
+// ───────────────────────────── El resumen de pedido ─────────────────────────────
+
+export const ORDER_SUMMARY_TITLE = 'Productos sin stock pero activos en el canal Mercado Libre:';
+
+/** Una línea del resumen de pedido: el SKU de la ficha y el producto, con la medida si tiene varias. */
+export type OrderItem = { sku: string | null; name: string };
+
+/**
+ * Lo que hay que pedir: cada medida sin stock que tiene al menos una
+ * publicación activa en Mercado Libre, una sola vez aunque la vendan varias
+ * publicaciones. Las que todavía no se publicaron no cuentan. Ordenadas por
+ * SKU; las que no tienen SKU, al final.
+ */
+export function orderItems(rows: AlarmRow[]): OrderItem[] {
+  const items = new Map<string, OrderItem>();
+  for (const r of rows) {
+    if (r.real > 0 || r.channelKind !== 'MERCADOLIBRE' || r.channelStatus !== 'ACTIVE' || !r.externalId) continue;
+    const id = `${r.productId}:${r.stockKey}`;
+    if (!items.has(id)) items.set(id, { sku: r.sku, name: r.measure ? `${r.productName} · medida ${r.measure}` : r.productName });
+  }
+  return [...items.values()].sort(
+    (a, b) =>
+      Number(a.sku === null) - Number(b.sku === null) ||
+      (a.sku ?? '').localeCompare(b.sku ?? '', 'es', { numeric: true }) ||
+      a.name.localeCompare(b.name, 'es', { numeric: true }),
+  );
+}
+
+/** El resumen para copiar y pegar en el pedido. Vacío si no hay nada para pedir. */
+export function orderSummaryText(items: OrderItem[]): string {
+  if (items.length === 0) return '';
+  return [ORDER_SUMMARY_TITLE, '', ...items.map((i) => `* ${i.sku ?? 'sin SKU'} | ${i.name}`)].join('\n');
 }

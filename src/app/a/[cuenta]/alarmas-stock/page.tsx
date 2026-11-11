@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { AlertTriangle, BellRing, ExternalLink, ListTodo } from 'lucide-react';
+import { CopyButton } from '@/components/apply/CopyButton';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Card } from '@/components/ui/card';
@@ -9,12 +10,13 @@ import { owed, owedText, SHOWN_WHEN_SHORT } from '@/domain/stock-cushion';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { prisma } from '@/lib/db';
 import { formatDateTime, formatDuration, plural } from '@/lib/format';
-import { ALARM_FILTERS, alarmFilterOf, loadStockAlarms, parseAlarmFilter, type AlarmRow } from '@/lib/stock-alarms';
+import { ALARM_FILTERS, alarmFilterOf, loadStockAlarms, orderItems, orderSummaryText, parseAlarmFilter, type AlarmRow } from '@/lib/stock-alarms';
 import { cn } from '@/lib/utils/cn';
 
 // Alarmas de stock: las publicaciones que muestran más stock del que hay, con
 // "Mostrar más de 5" en su producto. De entrada, las que se quedaron sin stock
-// y hay que reponer; también las que tienen 1 o 2, y todas.
+// y hay que reponer; también las que tienen 1 o 2, y todas. Abajo, en todas
+// las pestañas, el resumen de pedido para copiar y pegar.
 
 export const dynamic = 'force-dynamic';
 
@@ -33,6 +35,7 @@ export default async function StockAlarmsPage({ params, searchParams }: { params
   const counts = Object.fromEntries(ALARM_FILTERS.map((f) => [f.key, rows.filter((r) => alarmFilterOf(r, f.key)).length]));
   const canProducts = can(user.access, 'productos', 'read');
   const canPublications = can(user.access, 'publicaciones', 'read');
+  const summary = orderSummaryText(orderItems(rows));
   const now = new Date();
 
   return (
@@ -84,8 +87,29 @@ export default async function StockAlarmsPage({ params, searchParams }: { params
             </Card>
           </>
         )}
+        <OrderSummary text={summary} />
       </PageBody>
     </>
+  );
+}
+
+/** El pedido para copiar y pegar: un SKU por línea, de lo que se quedó sin stock y sigue activo en Mercado Libre. */
+function OrderSummary({ text }: { text: string }) {
+  return (
+    <Card className="space-y-3 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 space-y-0.5">
+          <h2 className="text-base font-semibold">Resumen de pedido</h2>
+          <p className="text-sm text-muted-foreground">Los productos sin stock con alguna publicación activa en Mercado Libre, un SKU por línea, para copiar y pegar.</p>
+        </div>
+        {text ? <CopyButton value={text} label="el resumen de pedido" /> : null}
+      </div>
+      {text ? (
+        <pre className="overflow-x-auto whitespace-pre-wrap rounded-md border bg-muted/40 p-3 font-sans text-sm">{text}</pre>
+      ) : (
+        <p className="text-sm text-muted-foreground">Ningún producto sin stock tiene publicaciones activas en Mercado Libre: no hay nada para pedir.</p>
+      )}
+    </Card>
   );
 }
 
