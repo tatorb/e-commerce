@@ -197,7 +197,7 @@ export function LoadedCompatibilities({ data, fichaHref }: { data: LoadedCompati
       {missing > 0 ? (
         <details className="rounded-lg border px-3 py-2 text-sm">
           <summary className="cursor-pointer font-medium">
-            Faltan {plural(missing, 'grupo', 'grupos')} que salen de la ficha
+            {missing === 1 ? 'Falta 1 grupo que sale de la ficha' : `Faltan ${missing} grupos que salen de la ficha`}
           </summary>
           <ul className="mt-2 list-disc space-y-0.5 pl-4 text-xs">
             {data.missing.map((m) => (
