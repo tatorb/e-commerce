@@ -46,7 +46,7 @@ function taskOut(ctx: McpContext, account: AccountRef, t: TaskItem, now: Date) {
 }
 
 /** Las personas por nombre o email, entre las que pueden tener tareas en la cuenta. "yo" es quien conectó a Claude. */
-async function resolvePeople(ctx: McpContext, accountId: string, refs: string[]): Promise<string[]> {
+export async function resolvePeople(ctx: McpContext, accountId: string, refs: string[]): Promise<string[]> {
   const people = await assignablePeople(ctx.db, accountId);
   const names = () => people.map((p) => `${p.name} (${p.email})`).join(', ') || 'ninguna';
   return refs.map((ref) => {

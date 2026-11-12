@@ -69,6 +69,8 @@ import { titleOrUntitled } from '@/domain/publication-title';
 import { fieldLabel } from '@/domain/sync-log';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { PublicationTasksCard } from '@/components/tasks/PublicationTasksCard';
+import { NotesCard } from '@/components/pipeline/NotesCard';
+import { listNotes } from '@/lib/publication-notes';
 import { assignablePeople, tasksOfPublication } from '@/lib/tasks';
 import { followsStockOf, managedNote, plannedText, plansFor } from '@/lib/stock-plan';
 import { FollowStockSwitch } from '@/components/publication/FollowStockSwitch';
@@ -223,7 +225,7 @@ export default async function PublicationPage({
       />
     ) : null;
   const compat = face !== 'historial' ? await loadCompatibilityView(prisma, account.id, p.id) : null;
-  const [others, history, knowledge, qa, tasks, people, stockPlans, factsOf, family, covers] = await Promise.all([
+  const [others, history, knowledge, qa, tasks, people, stockPlans, factsOf, family, covers, notes] = await Promise.all([
     prisma.publication.findMany({
       where: { productId: p.product.id, id: { not: p.id } },
       orderBy: { createdAt: 'asc' },
@@ -241,7 +243,7 @@ export default async function PublicationPage({
     // Preguntas y respuestas: es de la publicación.
     face !== 'historial' ? loadQaStep(prisma, { accountId: account.id, publicationId: p.id }) : Promise.resolve(null),
     face !== 'historial' ? tasksOfPublication(prisma, { publicationId: p.id, viewer: user, timeZone: account.timezone }) : Promise.resolve([]),
-    face !== 'historial' && canTask ? assignablePeople(prisma, account.id) : Promise.resolve([]),
+    face !== 'historial' ? assignablePeople(prisma, account.id) : Promise.resolve([]),
     // Si la cantidad sale del stock del producto.
     plansFor(prisma, [p.id]),
     // El código, las medidas y la respuesta automática, para el encabezado.
@@ -250,6 +252,8 @@ export default async function PublicationPage({
     familyOf(prisma, p.id),
     // La portada del producto, si la publicación no tiene fotos leídas del canal.
     productCovers([p.product.id]),
+    // Las notas del equipo, de la familia.
+    face !== 'historial' ? listNotes(prisma, { accountId: account.id, publicationId: p.id }) : Promise.resolve([]),
   ]);
   const facts = factsOf.get(p.id) ?? null;
   const stockPlan = stockPlans.get(p.id) ?? null;
@@ -592,6 +596,15 @@ export default async function PublicationPage({
             </SectionBody>
           </SectionCard>
         ) : null}
+        <NotesCard
+          accountSlug={account.slug}
+          publicationId={p.id}
+          notes={notes}
+          people={people}
+          timeZone={tz}
+          family={(family?.members.length ?? 0) > 1}
+          task={{ meId: user.id, canCreate: canTask, publication: { id: p.id, title, externalId: p.externalId } }}
+        />
         <PublicationTasksCard
           accountSlug={account.slug}
           publication={{ id: p.id, title, externalId: p.externalId }}

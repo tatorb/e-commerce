@@ -22,6 +22,7 @@ import { unansweredSummary } from '@/lib/queries/questions';
 import { plural } from '@/lib/format';
 import { prisma } from '@/lib/db';
 import { openTasksByPublication } from '@/lib/tasks';
+import { notesByCard } from '@/lib/publication-notes';
 
 export const dynamic = 'force-dynamic';
 // Subir desde Por subir relee el canal antes y después de mandar.
@@ -56,7 +57,15 @@ export default async function PipelinePage({
   ]);
   const items = kinds.length > 0 ? all.filter((i) => kinds.includes(i.kind)) : all;
   // Cuántas tareas abiertas tiene cada tarjeta.
-  const tasks = Object.fromEntries(await openTasksByPublication(prisma, { publicationIds: items.map((i) => i.id), viewer: user }));
+  const [taskCounts, noteCounts] = await Promise.all([
+    openTasksByPublication(prisma, { publicationIds: items.map((i) => i.id), viewer: user }),
+    notesByCard(prisma, account.id, items.map((i) => i.id)),
+  ]);
+  const tasks = Object.fromEntries(taskCounts);
+  // Cuántas notas tiene cada tarjeta y la última, para leerla sin entrar.
+  const notes = Object.fromEntries(
+    Object.entries(noteCounts).map(([id, n]) => [id, { count: n.count, last: `${n.last.author}: ${n.last.text.length > 200 ? `${n.last.text.slice(0, 197)}…` : n.last.text}` }]),
+  );
   const catalogHref = `/a/${account.slug}/publicaciones?pipeline=UNTOUCHED,DISCARDED`;
 
   return (
@@ -153,7 +162,7 @@ export default async function PipelinePage({
                 En cada paso, las que esperan hace más tiempo van primero.
               </p>
             </div>
-            <PipelineBoard accountSlug={account.slug} items={items} showStore={stores.length > 1} openTasks={tasks} />
+            <PipelineBoard accountSlug={account.slug} items={items} showStore={stores.length > 1} openTasks={tasks} notes={notes} />
           </>
         )}
       </PageBody>

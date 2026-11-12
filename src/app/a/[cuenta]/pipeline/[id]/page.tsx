@@ -27,6 +27,8 @@ import { PriceWorkspace } from '@/components/pipeline/price/PriceWorkspace';
 import { familyMeasuresText, loadPublicationFacts } from '@/lib/publication-facts';
 import { firstPhoto, productCovers } from '@/lib/queries/products';
 import { PipelineHistory } from '@/components/pipeline/PipelineHistory';
+import { NotesCard } from '@/components/pipeline/NotesCard';
+import { listNotes } from '@/lib/publication-notes';
 import { AddToPipelineButton } from '@/components/pipeline/AddToPipelineButton';
 import { PublicationCodeCard } from '@/components/pipeline/PublicationCodeCard';
 import { PendingChangesCard } from '@/components/publication/PendingChangesCard';
@@ -148,7 +150,7 @@ export default async function PipelineStepPage({
   // Lo que usa el paso que se mira, pedido todo junto: con la base lejos, cada
   // consulta en fila suma una ida y vuelta.
   const canTask = can(user.access, 'tareas', 'write');
-  const [ctx, info, images, channel, faces, media, create, videos, description, qa, price, decision, tasks, people, stockPlans, factsOf, family, cover, textImage] = await Promise.all([
+  const [ctx, info, images, channel, faces, media, create, videos, description, qa, price, decision, tasks, people, stockPlans, factsOf, family, cover, textImage, notes] = await Promise.all([
     // Información y Título usan la ficha, la competencia y lo leído del buscador.
     viewing === 'INFO' || viewing === 'TITLE' ? loadTitleContext(prisma, account.id, pub.id) : null,
     viewing === 'INFO'
@@ -204,7 +206,8 @@ export default async function PipelineStepPage({
     viewing === 'PUBLISH' ? latestPriceDecision(prisma, pub.id) : null,
     // Las tareas de la publicación, en todos los pasos.
     tasksOfPublication(prisma, { publicationId: pub.id, viewer: user, timeZone: account.timezone }),
-    canTask ? assignablePeople(prisma, account.id) : [],
+    // Las personas: para asignar tareas y para mencionar en las notas.
+    assignablePeople(prisma, account.id),
     viewing === 'PUBLISH' || viewing === 'INFO' ? plansFor(prisma, [pub.id]) : null,
     // El código, las medidas y la respuesta automática, para el encabezado.
     loadPublicationFacts(prisma, [pub.id]),
@@ -216,6 +219,8 @@ export default async function PipelineStepPage({
       productCovers([pub.productId]),
     ]).then(([copy, covers]) => firstPhoto(copy?.photos) ?? covers.get(pub.productId) ?? null),
     viewing === 'TEXT_IMAGES' ? loadTextImageStep(prisma, { accountId: account.id, publicationId: pub.id, slot: textSlot }) : null,
+    // Las notas del equipo, de la familia, en todos los pasos.
+    listNotes(prisma, { accountId: account.id, publicationId: pub.id }),
   ]);
   const warranty = viewing === 'PUBLISH' ? await warrantyOverview(prisma, { accountId: account.id, publicationId: pub.id }) : null;
   const compat = viewing === 'COMPATIBILITIES' ? await loadCompatibilityView(prisma, account.id, pub.id) : null;
@@ -365,6 +370,15 @@ export default async function PipelineStepPage({
       </PageHeader>
       <PageBody>
         <RefreshArea>
+        <NotesCard
+          accountSlug={account.slug}
+          publicationId={pub.id}
+          notes={notes}
+          people={people}
+          timeZone={account.timezone}
+          family={(family?.members.length ?? 0) > 1}
+          task={{ meId: user.id, canCreate: canTask, publication: { id: pub.id, title: titleOrUntitled(pub.title), externalId: pub.externalId } }}
+        />
         {!inPipeline ? (
           <Card>
             <CardContent className="flex flex-wrap items-center justify-between gap-3 p-6">
@@ -616,6 +630,7 @@ export default async function PipelineStepPage({
             title={titleOrUntitled(pub.title)}
             step={current}
             completeBlocked={pub.externalId ? null : 'Para marcarla como corregida, cargá antes su ID.'}
+            people={people.map((p) => ({ id: p.id, name: p.name }))}
           />
         ) : null}
 

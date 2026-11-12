@@ -129,6 +129,8 @@ export function TaskDialog({
   meId,
   task,
   presetPublications = [],
+  preset,
+  trigger,
   size = 'sm',
   afterDelete,
 }: {
@@ -140,6 +142,10 @@ export function TaskDialog({
   task?: EditableTask;
   // Las publicaciones con que arranca una nueva, por ejemplo la de la página.
   presetPublications?: PublicationOption[];
+  // El título y la descripción con que arranca una nueva, por ejemplo desde una nota.
+  preset?: { title: string; description: string };
+  // Otro botón para abrirla, por ejemplo "Crear tarea" en una nota.
+  trigger?: { label: string; variant?: 'ghost' | 'outline' };
   size?: 'sm' | 'default';
   // Adónde ir después de borrarla. Sin esto, se queda en la pantalla.
   afterDelete?: string;
@@ -158,8 +164,8 @@ export function TaskDialog({
   const [pending, startTransition] = useTransition();
 
   function reset() {
-    setTitle(task?.title ?? '');
-    setDescription(task?.description ?? '');
+    setTitle(task?.title ?? preset?.title.slice(0, TASK_TITLE_MAX) ?? '');
+    setDescription(task?.description ?? preset?.description.slice(0, TASK_DESCRIPTION_MAX) ?? '');
     setRemindAt(toLocalInput(task?.remindAt ?? null, timeZone));
     setDueOn(task?.dueOn ? dueDay(task.dueOn) : '');
     // Una nueva arranca con quien la crea, si puede tenerla.
@@ -213,7 +219,12 @@ export function TaskDialog({
         if (!pending) setOpen(next);
       }}
     >
-      {editing ? (
+      {trigger && !editing ? (
+        <Button size={size} variant={trigger.variant ?? 'ghost'} access="tareas" onClick={start}>
+          <Plus className="h-4 w-4" />
+          {trigger.label}
+        </Button>
+      ) : editing ? (
         <Button size={size} variant="outline" access="tareas" onClick={start}>
           <Pencil className="h-4 w-4" />
           Editar

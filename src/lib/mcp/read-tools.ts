@@ -53,6 +53,27 @@ import { loadVisits } from '@/lib/visits';
 import { unitsLast90 } from '@/lib/sales/units';
 import { visitsForClaude } from '@/domain/visits';
 import { loadSaleOptions, type SaleOptions } from '@/lib/sale-options';
+import { listNotes, notesByCard, type NoteView } from '@/lib/publication-notes';
+
+// Las notas del equipo que se muestran en una publicación, las más nuevas.
+const NOTES_SHOWN = 30;
+
+/** Las notas del equipo, como las ve Claude: lo que pasó y lo que falta, de la familia. */
+function notesForClaude(notes: NoteView[], account: { timezone: string }) {
+  return {
+    que_son:
+      'Lo que el equipo anotó sobre esta publicación y su familia: qué pasó, qué falta o por qué se frenó. Leelas antes de trabajarla, para seguir donde quedó. Se escriben con add_note.',
+    notas: notes.map((n) => ({
+      id: n.id,
+      texto: n.text,
+      quien: n.author,
+      cuando: when(n.createdAt, account),
+      ...(n.stepLabel ? { en_el_paso: n.stepLabel } : {}),
+      ...(n.writtenOn ? { desde: n.writtenOn.externalId ?? n.writtenOn.title } : {}),
+      ...(n.editedBy ? { editada_por: n.editedBy, editada: when(n.editedAt, account) } : {}),
+    })),
+  };
+}
 import {
   McpToolError,
   accountArg,
@@ -317,7 +338,7 @@ const getPipelineBoard = defineTool({
     const now = new Date();
     const kinds = parseKinds(args.individual_o_combo?.join(','));
     const [board, completed] = await Promise.all([
-      listBoard(account.id, ctx.db),
+      listBoard(account.id, ctx.db).then(async (b) => ({ items: b, notes: await notesByCard(ctx.db, account.id, b.map((i) => i.id)) })),
       ctx.db.pipelineMovement.count({
         where: {
           exitKind: 'COMPLETED',
@@ -326,7 +347,7 @@ const getPipelineBoard = defineTool({
         },
       }),
     ]);
-    const items = kinds.length > 0 ? board.filter((i) => kinds.includes(i.kind)) : board;
+    const items = kinds.length > 0 ? board.items.filter((i) => kinds.includes(i.kind)) : board.items;
     return {
       cuenta: account.slug,
       en_el_pipeline: items.length,
@@ -341,6 +362,12 @@ const getPipelineBoard = defineTool({
             ...summary(ctx, account, i),
             en_el_paso_desde: when(i.stepSince, account),
             dias_en_el_paso: daysSince(i.stepSince, now),
+            ...(board.notes[i.id]
+              ? {
+                  notas_del_equipo: board.notes[i.id].count,
+                  ultima_nota: { texto: board.notes[i.id].last.text, quien: board.notes[i.id].last.author, cuando: when(board.notes[i.id].last.at, account) },
+                }
+              : {}),
           })),
         };
       }),
@@ -453,7 +480,7 @@ const getPublication = defineTool({
       loadCatalogData(ctx.db, id),
     ]);
     const product = pub.product;
-    const [combo, knowledge, plans, stock, buyers, visits, units] = await Promise.all([
+    const [combo, knowledge, plans, stock, buyers, visits, units, notes] = await Promise.all([
       loadCombo(ctx.db, product.id),
       loadKnowledge(ctx.db, product.id),
       plansFor(ctx.db, [id]),
@@ -464,6 +491,7 @@ const getPublication = defineTool({
       loadBuyerFacts(ctx.db, pub.buyerQuestions),
       loadVisits(ctx.db, id).catch(() => null),
       unitsLast90(ctx.db, [id]),
+      listNotes(ctx.db, { accountId: account.id, publicationId: id, take: NOTES_SHOWN }),
     ]);
     const plan = plans.get(id) ?? null;
     const r = research.research;
@@ -633,6 +661,7 @@ const getPublication = defineTool({
       ...(units.has(id) ? { unidades_vendidas_90d: units.get(id) } : {}),
       visitas: visitsForClaude(visits),
       titulo_bloqueado: lockValue(scored.titleLock),
+      notas_del_equipo: notesForClaude(notes, account),
       pipeline: {
         estado: PIPELINE_STATUS_LABEL[scored.pipelineStatus],
         paso: scored.pipelineStep ? PIPELINE_STEP_LABEL[scored.pipelineStep] : null,

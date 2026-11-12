@@ -15,6 +15,10 @@ import {
 import { PIPELINE_REMOVALS, PIPELINE_REMOVAL_LABEL, PIPELINE_STEP_LABEL } from '@/domain/pipeline';
 import type { PipelineRemoval, PipelineStep } from '@/generated/prisma/enums';
 import { removeFromPipelineAction } from '@/app/a/[cuenta]/pipeline/actions';
+import { addNoteAction } from '@/app/a/[cuenta]/pipeline/note-actions';
+import { mentionedIds, type MentionPerson } from '@/domain/note-mentions';
+import { Label } from '@/components/ui/label';
+import { NoteEditor } from './NotesCard';
 import { cn } from '@/lib/utils/cn';
 
 // Sacar una publicación del pipeline, con un motivo. No borra nada: si se
@@ -25,16 +29,21 @@ export function RemoveFromPipelineDialog({
   title,
   step,
   compact,
+  people = [],
 }: {
   accountSlug: string;
   publicationId: string;
   title: string;
   step: PipelineStep;
   compact?: boolean;
+  // Para mencionar en la nota.
+  people?: MentionPerson[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState<PipelineRemoval | null>(null);
+  const [note, setNote] = useState('');
+  const [picked, setPicked] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -42,6 +51,13 @@ export function RemoveFromPipelineDialog({
     if (!reason) return;
     setError(null);
     startTransition(async () => {
+      // La nota, antes: queda en el paso donde estaba.
+      if (note.trim()) {
+        const n = await addNoteAction(accountSlug, publicationId, note, mentionedIds(note, people, picked)).catch(() => null);
+        if (!n) return setError('Se cortó la conexión con la app.');
+        if (!n.ok) return setError(n.error);
+        setNote('');
+      }
       const r = await removeFromPipelineAction(accountSlug, publicationId, step, reason);
       if (!r.ok) {
         setError(r.error);
@@ -103,6 +119,10 @@ export function RemoveFromPipelineDialog({
             </label>
           ))}
         </fieldset>
+        <div className="space-y-1.5">
+          <Label htmlFor={`nota-sacar-${publicationId}`}>¿Querés dejar una nota? (opcional)</Label>
+          <NoteEditor id={`nota-sacar-${publicationId}`} value={note} onChange={setNote} people={people} picked={picked} onPick={setPicked} disabled={pending} placeholder="Por qué sale o qué quedó pendiente." />
+        </div>
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
         <DialogFooter className="gap-2 sm:gap-2">
           <Button variant="ghost" onClick={() => setOpen(false)} disabled={pending}>

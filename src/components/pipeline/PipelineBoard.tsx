@@ -20,6 +20,7 @@ export function PipelineBoard({
   items,
   showStore = false,
   openTasks = {},
+  notes = {},
 }: {
   accountSlug: string;
   items: BoardItem[];
@@ -27,6 +28,8 @@ export function PipelineBoard({
   showStore?: boolean;
   // Las tareas abiertas de cada publicación, por su id.
   openTasks?: Record<string, number>;
+  // Las notas de cada tarjeta, por su id: cuántas y la última.
+  notes?: Record<string, { count: number; last: string }>;
 }) {
   const cards: BoardCardData[] = items.flatMap((i) =>
     i.pipelineStep
@@ -48,6 +51,7 @@ export function PipelineBoard({
             productName: i.productName,
             skus: i.skus,
             familyCodes: i.familyCodes,
+            notes: notes[i.id] ?? null,
           },
         ]
       : [],

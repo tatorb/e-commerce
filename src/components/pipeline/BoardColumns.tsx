@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Clock, GripVertical, Layers, ListTodo, Lock } from 'lucide-react';
+import { Clock, GripVertical, Layers, ListTodo, Lock, MessageSquareText } from 'lucide-react';
 import { ScoreBadge } from '@/components/stages/ScoreBadge';
 import { KindBadge } from '@/components/products/KindBadge';
 import { codeOrUnpublished } from '@/domain/channel-status';
@@ -43,6 +43,8 @@ export type BoardCardData = {
   productName?: string | null;
   skus?: string[];
   familyCodes?: string[];
+  // Las notas del equipo: cuántas y la última, para leerla sin entrar.
+  notes?: { count: number; last: string } | null;
 };
 
 // Las medidas que entran en la tarjeta; las demás se cuentan.
@@ -266,6 +268,12 @@ function BoardCard({
             <span className="inline-flex items-center gap-1" title="Tiempo en este paso">
               <Clock className="h-3 w-3" />
               {formatDuration(new Date(card.stepSince), new Date(now))}
+            </span>
+          ) : null}
+          {card.notes ? (
+            <span className="inline-flex items-center gap-1 font-medium text-foreground" title={`${plural(card.notes.count, 'nota')}. La última: ${card.notes.last}`}>
+              <MessageSquareText className="h-3 w-3" />
+              {card.notes.count}
             </span>
           ) : null}
           {tasks > 0 ? (

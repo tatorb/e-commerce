@@ -51,6 +51,8 @@ model User {
   applications       ChannelApplication[]
   pipelineEntries    PipelineMovement[]   @relation("PipelineMovedIn")
   pipelineExits      PipelineMovement[]   @relation("PipelineMovedOut")
+  notesWritten       PublicationNote[]    @relation("NoteAuthor")
+  notesEdited        PublicationNote[]    @relation("NoteEditor")
   titleLockChoices   TitleWork[]
   titleApprovals     TitleApproval[]
   titleRuleSets      TitleRuleSet[]
@@ -222,6 +224,7 @@ model Account {
   activity            ActivityLog[]
   pricingSettings     PricingSettings?
   tasks               Task[]
+  publicationNotes    PublicationNote[]
   shootProtocols      ShootProtocol[]
   productOptions      ProductOption[]
   textImages          TextImage[]
@@ -591,6 +594,7 @@ model Publication {
   descriptionDraft  DescriptionDraft?
   tasks             TaskPublication[]
   stockMoves        StockMovement[]
+  notes             PublicationNote[]
 
   @@unique([storeId, externalId])
   @@index([pipelineStatus])
@@ -622,6 +626,7 @@ model ListingFamily {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
   members         Publication[] @relation("FamilyMembers")
+  notes           PublicationNote[]
 
   @@unique([storeId, channelFamilyId])
   @@index([productId])
@@ -2531,4 +2536,38 @@ model ChannelCatalogValue {
   fetchedAt DateTime
 
   @@map("channel_catalog_values")
+}
+
+// Notas del equipo sobre una publicación: qué pasó, por qué se frenó, qué
+// falta, para que el que sigue sepa dónde quedó. Son de la familia: se ven
+// desde todas sus medidas y formas de cobro (src/lib/publication-notes.ts).
+// Internas: nunca van al canal ni al bot de respuestas.
+model PublicationNote {
+  id            String        @id @default(cuid())
+  accountId     String
+  account       Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  // Donde se escribió. Las de su familia y sus formas de cobro se leen juntas.
+  publicationId String
+  publication   Publication   @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  familyId      String?
+  family        ListingFamily? @relation(fields: [familyId], references: [id], onDelete: SetNull)
+  text          String
+  // En qué paso del pipeline estaba al escribirla. Null: fuera del pipeline.
+  step          PipelineStep?
+  authorId      String?
+  author        User?         @relation("NoteAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  // La escribió Claude por pedido de la persona (author).
+  viaClaude     Boolean       @default(false)
+  editedById    String?
+  editedBy      User?         @relation("NoteEditor", fields: [editedById], references: [id], onDelete: SetNull)
+  editedAt      DateTime?
+  // Las personas mencionadas a las que ya les salió el mail.
+  mentionedIds  String[]      @default([])
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([publicationId])
+  @@index([familyId])
+  @@index([accountId, createdAt])
+  @@map("publication_notes")
 }
