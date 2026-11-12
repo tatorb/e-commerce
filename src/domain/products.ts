@@ -1,3 +1,4 @@
+import { settleProductCompetitors } from '@/lib/competitors';
 import { z } from 'zod';
 import { resolveProductOptions } from '@/lib/product-options';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
@@ -73,6 +74,9 @@ export const productInputSchema = z.object({
           // Vacíos o sin venir, se sacan del motor.
           displacement: optionalText(20),
           fuel: optionalText(40),
+          // Potencia, por ejemplo "115 cv", y las versiones que no van, por ejemplo "THP, VTi".
+          power: optionalText(20),
+          excludedVersions: optionalText(200),
           yearFrom: year,
           yearTo: year,
           note: text(500),
@@ -104,7 +108,7 @@ export function dropEmptyRows(input: ProductInput): ProductInput {
     specs: compactNameValues(input.specs.map((s) => ({ name: s.name.trim(), value: s.value.trim() }))),
     variants: input.variants.filter((v) => filled([v.measure, v.sku])),
     compatibilities: input.compatibilities.filter((c) =>
-      filled([c.vehicleBrand, c.model, c.engine, c.displacement, c.fuel, c.yearFrom, c.yearTo, c.note]),
+      filled([c.vehicleBrand, c.model, c.engine, c.displacement, c.fuel, c.power, c.excludedVersions, c.yearFrom, c.yearTo, c.note]),
     ),
     assets: input.assets.filter((a) => filled([a.url])),
   };
@@ -156,6 +160,8 @@ export async function writeProduct(tx: Tx, args: SaveArgs): Promise<{ id: string
     if (!existing) throw new Error('El producto no existe en esta cuenta.');
     id = existing.id;
     await tx.product.update({ where: { id }, data: fields });
+    // Con otro tipo, la competencia puede pasar a ser del producto o de cada publicación.
+    if (fields.productType !== undefined && fields.productType !== current?.productType) await settleProductCompetitors(tx, id);
     if (data.kind) await setProductKind(tx, { accountId, productId: id, kind: data.kind });
     before = await tx.productVariant.findMany({ where: { productId: id }, orderBy: { position: 'asc' }, select: { sku: true, measure: true } });
     await tx.productVariant.deleteMany({ where: { productId: id } });

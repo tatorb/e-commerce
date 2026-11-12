@@ -14,6 +14,8 @@ const row = (over: Partial<AlarmRow>): AlarmRow => ({
   url: null,
   storeName: 'TIENDA',
   channelName: 'Mercado Libre',
+  channelKind: 'MERCADOLIBRE',
+  channelStatus: 'ACTIVE',
   productId: 'p1',
   productName: 'Subconjunto SP-1',
   measure: 'STD',

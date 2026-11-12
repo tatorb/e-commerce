@@ -39,12 +39,14 @@ describe('herramientas de escritura en la lista', () => {
     expect(tools.get('create_in_channel')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('set_warranty')).toMatchObject({ readOnlyHint: false, destructiveHint: false });
     expect(tools.get('push_warranties')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+    expect(tools.get('push_compatibilities')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('push_media')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('read_visits')).toMatchObject({ readOnlyHint: false, destructiveHint: false });
     expect(tools.get('set_auto_answer')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('set_main_sale_option')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('reconcile_publications')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
-    expect(tools.size).toBe(78);
+    expect(tools.get('audit_compatibilities')).toMatchObject({ readOnlyHint: true });
+    expect(tools.size).toBe(80);
   });
 });
 
@@ -206,10 +208,13 @@ describe.skipIf(!url)('herramientas de escritura', () => {
 
     await call('update_product_info', {
       publicacion: 'MLA1110001',
-      compatibilidades: [{ marca: 'Volkswagen', modelo: 'Gol', motor: '1.6 8v', desde: 2010, hasta: 2015 }],
+      compatibilidades: [{ marca: 'Volkswagen', modelo: 'Gol', motor: '1.6 8v', potencia: '101 cv', versiones_que_no: 'GTi', desde: 2010, hasta: 2015 }],
     });
     const c = await db.compatibility.findFirstOrThrow({ where: { productId } });
-    expect(c).toMatchObject({ displacement: '1.6', yearFrom: 2010, yearTo: 2015 });
+    expect(c).toMatchObject({ displacement: '1.6', power: '101 cv', excludedVersions: 'GTi', yearFrom: 2010, yearTo: 2015 });
+    // Cambiar otra cosa de la ficha no borra la potencia ni las versiones que no van.
+    await call('update_product_info', { publicacion: 'MLA1110001', marca: 'Marca Dos' });
+    expect(await db.compatibility.findFirstOrThrow({ where: { productId } })).toMatchObject({ power: '101 cv', excludedVersions: 'GTi' });
     const bad = await call('update_product_info', { publicacion: 'MLA1110001', compatibilidades: [{ marca: 'VW', desde: 2015, hasta: 2010 }] });
     expect(bad).toMatchObject({ isError: true });
     expect(bad.text).toContain('año desde');
@@ -318,7 +323,7 @@ describe.skipIf(!url)('herramientas de escritura', () => {
 
     expect((await call('approve_title', { publicacion: 'MLA1110001', titulo: 'Kit Embrague Gol Oferta!' })).text).toContain('Para aprobar falta');
     const ok = await call('approve_title', { publicacion: 'MLA1110001', titulo: 'Kit Embrague Gol 1.6 8v', propuesta_elegida: 'Kit Embrague Gol 1.6 8v' });
-    expect(ok.data).toMatchObject({ listo: true, titulo: 'Kit Embrague Gol 1.6 8v', pipeline: 'En pipeline · Descripción' });
+    expect(ok.data).toMatchObject({ listo: true, titulo: 'Kit Embrague Gol 1.6 8v', pipeline: 'En pipeline · Compatibilidades' });
     expect(await db.titleApproval.findFirstOrThrow({ where: { publicationId: kitId } })).toMatchObject({
       outcome: 'WRITTEN',
       before: 'Kit Embrague Gol',
@@ -328,14 +333,14 @@ describe.skipIf(!url)('herramientas de escritura', () => {
     });
     // Desde otro paso también se aprueba, sin mover la publicación.
     const again = await call('approve_title', { publicacion: 'MLA1110001', titulo: 'Kit Embrague Gol 1.6 8v Sachs' });
-    expect(again.data).toMatchObject({ listo: true, pipeline: 'En pipeline · Descripción' });
+    expect(again.data).toMatchObject({ listo: true, pipeline: 'En pipeline · Compatibilidades' });
   });
 
   it('título bloqueado: no deja aprobar sin decidir; mantener completa el paso', async () => {
     await toTitle('MLA2220002');
     expect((await call('approve_title', { publicacion: 'MLA2220002', titulo: 'Bomba Agua Fiat Uno' })).text).toContain('bloqueado');
     const keep = await call('decide_title_lock', { publicacion: 'MLA2220002', decision: 'mantener' });
-    expect(keep.data).toMatchObject({ pipeline: 'En pipeline · Descripción', titulo: 'Bomba Agua Fiat' });
+    expect(keep.data).toMatchObject({ pipeline: 'En pipeline · Compatibilidades', titulo: 'Bomba Agua Fiat' });
     expect((await db.titleApproval.findFirstOrThrow({ where: { publicationId: bombaId } })).outcome).toBe('KEPT');
   });
 

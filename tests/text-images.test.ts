@@ -45,20 +45,21 @@ const VERSION_B: PieceContent = {
 };
 
 describe('el pipeline con el paso nuevo', () => {
-  it('tiene los 10 pasos en el orden nuevo, e Imágenes se muestra como Fotos', () => {
+  it('tiene los 11 pasos en el orden nuevo, e Imágenes se muestra como Fotos', () => {
     expect(PIPELINE_STEPS.map((s) => PIPELINE_STEP_LABEL[s])).toEqual([
       'Información',
       'Título',
+      'Compatibilidades',
       'Descripción',
+      'Preguntas y respuestas',
       'Precio',
       'Fotos',
       'Imágenes con texto',
       'Videos',
       'Organización de multimedia',
-      'Preguntas y respuestas',
       'Publicación',
     ]);
-    expect(nextStep('TITLE')).toBe('DESCRIPTION');
+    expect(nextStep('TITLE')).toBe('COMPATIBILITIES');
     expect(nextStep('IMAGES')).toBe('TEXT_IMAGES');
     expect(nextStep('TEXT_IMAGES')).toBe('VIDEOS');
   });

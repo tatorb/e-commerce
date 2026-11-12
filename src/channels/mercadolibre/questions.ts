@@ -196,6 +196,10 @@ export const mercadolibreQuestions: ChannelQuestions = {
     } catch (e) {
       // Una llave vencida o "demasiados pedidos" siguen como error de conexión.
       if (!(e instanceof MercadoLibreRequestError) || e.status === 401 || e.status === 429) throw e;
+      // Falló del lado de Mercado Libre: la respuesta puede haber quedado publicada.
+      if (e.changeUnknown) {
+        throw new AnswerError(`Mercado Libre falló (código ${e.status}) y no se sabe si publicó la respuesta. Fijate en Mercado Libre antes de volver a responder.`);
+      }
       throw new AnswerError(answerRejection(e.status, e.body));
     }
   },

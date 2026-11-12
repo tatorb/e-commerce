@@ -241,17 +241,19 @@ describe.skipIf(!url)('agrupar las opciones de venta en la base', () => {
     const product = await db.product.create({ data: { accountId, name: 'Subconjunto SP-8', variants: { create: [{ sku: 'SP-8-00', measure: 'STD', position: 0 }] } } });
     await setProductCosts(db, { accountId, productId: product.id, costs: { '': '100000' } });
     const pubs: Record<string, string> = {};
+    // La última está en revisión porque el canal pide corregirla: el precio se puede subir.
     const rows = [
-      ['MLA30', 0, 'ACTIVE', 0, false],
-      ['MLA31', 1, 'ACTIVE', 10, false],
-      ['MLA32', 6, 'UNDER_REVIEW', 0, false],
-      ['MLA33', 3, 'CLOSED', 0, false],
-      ['MLA34', 12, 'ACTIVE', 0, true],
+      ['MLA30', 0, 'ACTIVE', 0, false, false],
+      ['MLA31', 1, 'ACTIVE', 10, false, false],
+      ['MLA32', 6, 'UNDER_REVIEW', 0, false, false],
+      ['MLA33', 3, 'CLOSED', 0, false, false],
+      ['MLA34', 12, 'ACTIVE', 0, true, false],
+      ['MLA35', 9, 'UNDER_REVIEW', 0, false, true],
     ] as const;
-    for (const [code, installments, status, discount, blocked] of rows) {
+    for (const [code, installments, status, discount, blocked, needsFix] of rows) {
       const p = await db.publication.create({ data: { productId: product.id, storeId, externalId: code, title: 'Subconjunto' } });
       await db.channelCopy.create({
-        data: { publicationId: p.id, readAt: new Date(), status, installments, price: 1, discount, statusBlocked: blocked, channelProductId: 'UP-SP8' },
+        data: { publicationId: p.id, readAt: new Date(), status, installments, price: 1, discount, statusBlocked: blocked, statusNeedsFix: needsFix, channelProductId: 'UP-SP8' },
       });
       pubs[code] = p.id;
     }
@@ -263,11 +265,13 @@ describe.skipIf(!url)('agrupar las opciones de venta en la base', () => {
     expect(r.main).toMatchObject({ id: pubs.MLA30, listPrice: 250_000, plan: 0 });
     const low = optionPriceForProfit({ profit, cost: 100_000, params: PRICING_DEFAULTS, plan: 1, discountPct: 10 })!;
     const six = optionPriceForProfit({ profit, cost: 100_000, params: PRICING_DEFAULTS, plan: 6, discountPct: 0 })!;
+    const nine = optionPriceForProfit({ profit, cost: 100_000, params: PRICING_DEFAULTS, plan: 9, discountPct: 0 })!;
     expect(r.options).toEqual([
       expect.objectContaining({ externalId: 'MLA31', listPrice: low, reason: null, note: null }),
       expect.objectContaining({ externalId: 'MLA32', listPrice: six, reason: null, note: expect.stringContaining('revisando') }),
       expect.objectContaining({ externalId: 'MLA33', listPrice: null, reason: expect.stringContaining('finalizada') }),
       expect.objectContaining({ externalId: 'MLA34', listPrice: null, reason: expect.stringContaining('frenó') }),
+      expect.objectContaining({ externalId: 'MLA35', listPrice: nine, reason: null, note: null }),
     ]);
     // Con su descuento del 10 %, el comprador paga lo que deja la misma ganancia, unos pesos más por redondear para arriba.
     const paid = resultAt(low * 0.9, 100_000, PRICING_DEFAULTS, 1).profit;

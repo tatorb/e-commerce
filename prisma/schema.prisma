@@ -342,6 +342,8 @@ model Product {
   updatedAt        DateTime         @updatedAt
   variants         ProductVariant[]
   compatibilities  Compatibility[]
+  // La competencia compartida, cuando el tipo del producto la guarda en el producto.
+  competitors      CompetitorListing[]
   assets           Asset[]
   publications     Publication[]
   families         ListingFamily[]
@@ -415,6 +417,9 @@ model Compatibility {
   // Cilindrada, por ejemplo "1.9", y combustible, por ejemplo "Diesel".
   displacement String?
   fuel         String?
+  // Potencia, por ejemplo "115 cv", y las versiones que no van, por ejemplo "THP, VTi".
+  power            String?
+  excludedVersions String?
   yearFrom     Int?
   yearTo       Int?
   note         String?
@@ -577,6 +582,7 @@ model Publication {
   titleApprovals    TitleApproval[]
   positions         SearchPosition[]
   channelCopy       ChannelCopy?
+  compatibility     PublicationCompatibility?
   syncChanges       ChannelSyncChange[]
   buyerQuestions    BuyerQuestion[]
   priceDecisions    PriceDecision[]
@@ -862,9 +868,16 @@ model ChannelApplication {
 // ───────────────────────────── Pipeline ─────────────────────────────
 
 // Pasos del pipeline, en orden (src/domain/pipeline.ts).
+// Dónde se guarda la competencia de los productos de un tipo.
+enum CompetitorScope {
+  PUBLICATION // cada publicación tiene su lista
+  PRODUCT // una lista del producto, la misma en todas sus publicaciones
+}
+
 enum PipelineStep {
   INFO
   TITLE
+  COMPATIBILITIES
   IMAGES
   TEXT_IMAGES
   VIDEOS
@@ -923,10 +936,15 @@ model PipelineMovement {
 // Publicación de la competencia que vende mucho, cargada a mano. Sus títulos
 // suman palabras al mapa del paso Título, y su precio, descuento, cuotas y
 // envío sirven para comparar precios.
+// La competencia de una publicación, o la del producto cuando su tipo la
+// comparte entre todas sus publicaciones (competitorScope = PRODUCT): cada
+// fila es de una publicación o de un producto, nunca de los dos.
 model CompetitorListing {
-  id            String      @id @default(cuid())
-  publicationId String
-  publication   Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  id            String       @id @default(cuid())
+  publicationId String?
+  publication   Publication? @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  productId     String?
+  product       Product?     @relation(fields: [productId], references: [id], onDelete: Cascade)
   url           String?
   title         String
   soldQuantity  Int?
@@ -948,6 +966,7 @@ model CompetitorListing {
   updatedAt     DateTime    @updatedAt
 
   @@index([publicationId])
+  @@index([productId])
   @@map("competitor_listings")
 }
 
@@ -2409,6 +2428,8 @@ model ProductOption {
   account   Account           @relation(fields: [accountId], references: [id], onDelete: Cascade)
   kind      ProductOptionKind
   name      String
+  // Solo en los tipos: si la competencia es de cada publicación o del producto.
+  competitorScope CompetitorScope @default(PUBLICATION)
   createdAt DateTime          @default(now())
 
   @@unique([accountId, kind, name])
@@ -2478,4 +2499,36 @@ model PublicationTextImage {
   @@id([publicationId, textImageId])
   @@index([textImageId])
   @@map("publication_text_images")
+}
+
+// Las compatibilidades con vehículos de una publicación: lo que tiene cargado
+// el canal, leído en el momento, y la auditoría contra la ficha.
+model PublicationCompatibility {
+  publicationId String      @id
+  publication   Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  readAt        DateTime
+  // El canal pide informar los vehículos compatibles, o tiene sugerencias esperando.
+  needed        Boolean     @default(false)
+  suggested     Boolean     @default(false)
+  // Lo que tiene el canal: { listing: [...], product: [...] }, cada vehículo con su código y su nombre.
+  vehicles      Json
+  // La auditoría: cuántos faltan, sobran y quedan a revisar, y el detalle.
+  missing       Int         @default(0)
+  extra         Int         @default(0)
+  review        Int         @default(0)
+  // La ficha no tiene compatibilidades: no se puede corregir sin datos.
+  noData        Boolean     @default(false)
+  audit         Json?
+
+  @@map("publication_compatibilities")
+}
+
+// Las listas del catálogo de vehículos de cada canal (marcas, modelos, años...),
+// guardadas un tiempo para no pedirlas cada vez.
+model ChannelCatalogValue {
+  key       String   @id
+  values    Json
+  fetchedAt DateTime
+
+  @@map("channel_catalog_values")
 }

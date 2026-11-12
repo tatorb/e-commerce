@@ -20,7 +20,7 @@ vi.hoisted(() => {
 const { readStoreSales, handleSaleNotice } = await import('@/lib/sales/read');
 const { listSales, cashPage, shipmentGroups, dispatchDueCount, readerStatus, getSale, findSaleId } = await import('@/lib/sales/queries');
 const { saleAlarmPass } = await import('@/lib/sales/alarms');
-const { parsePeriod } = await import('@/domain/sales');
+const { parsePeriod, skusText } = await import('@/domain/sales');
 const { handleRpc } = await import('@/lib/mcp/server');
 
 const DAY = 86_400_000;
@@ -339,6 +339,17 @@ describe.skipIf(!url)('las ventas en la base', () => {
 
     const [status] = await readerStatus(db, accountId);
     expect(status).toMatchObject({ connected: true, sales: 5, incomplete: 0, history: { done: true, pct: 100 } });
+
+    // La SKU: la que mandó el canal con la venta, o la del producto si no mandó ninguna.
+    expect(a.lines[0].sku).toBe('SP-900-50');
+    expect(skusText(a.lines)).toBe('SKU SP-900-50');
+    expect(skusText(all.rows.find((r) => r.orderId === '2000000002')!.lines)).toBe('Sin SKU');
+    const bomba = await db.product.findFirstOrThrow({ where: { accountId, name: 'Bomba de agua BA-1' } });
+    await db.productVariant.create({ data: { productId: bomba.id, sku: 'BA-1', position: 0 } });
+    const again = await listSales(db, accountId, { period, state: 'todas', ship: 'todos', q: '' });
+    expect(skusText(again.rows.find((r) => r.orderId === '2000000002')!.lines)).toBe('SKU BA-1');
+    expect(skusText([{ sku: 'SP-900-00' }, { sku: null }])).toBe('SKU SP-900-00 · sin SKU');
+    await db.productVariant.deleteMany({ where: { productId: bomba.id } });
   });
 
   it('las tareas de despachar y de reclamos, que se cierran solas; y los avisos del envío y del pago', async () => {

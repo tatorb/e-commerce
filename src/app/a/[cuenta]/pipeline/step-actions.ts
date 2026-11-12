@@ -6,7 +6,8 @@ import { revalidatePath } from 'next/cache';
 import { prisma } from '@/lib/db';
 import { requireUser } from '@/lib/auth/session';
 import { todayIn } from '@/domain/applications';
-import { competitorsSchema, saveCompetitors, type CompetitorsInput } from '@/domain/competitors';
+import { competitorsSchema, type CompetitorsInput } from '@/domain/competitors';
+import { saveCompetitorsFrom } from '@/lib/competitors';
 import { productInfoSchema, updateProductInfo, type ProductInfoInput } from '@/domain/product-info';
 import {
   approveTitle,
@@ -69,7 +70,7 @@ export async function saveProductInfoAction(accountSlug: string, publicationId: 
       ...input,
       variants: (input.variants ?? []).filter((v) => filled([v.measure, v.sku])),
       compatibilities: (input.compatibilities ?? []).filter((c) =>
-        filled([c.vehicleBrand, c.model, c.engine, c.displacement, c.fuel, c.yearFrom, c.yearTo, c.note]),
+        filled([c.vehicleBrand, c.model, c.engine, c.displacement, c.fuel, c.power, c.excludedVersions, c.yearFrom, c.yearTo, c.note]),
       ),
     });
     if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Revisá los datos.' };
@@ -94,8 +95,9 @@ export async function saveCompetitorsAction(accountSlug: string, publicationId: 
       ),
     );
     if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Revisá los datos.' };
-    await prisma.$transaction((tx) => saveCompetitors(tx, publicationId, parsed.data, todayIn(t.account.timezone)));
-    return done(accountSlug, 'Competencia guardada.');
+    // En la publicación o, si su tipo la comparte, en el producto.
+    const owner = await prisma.$transaction((tx) => saveCompetitorsFrom(tx, publicationId, parsed.data, todayIn(t.account.timezone)));
+    return done(accountSlug, owner.scope === 'PRODUCT' ? 'Competencia guardada en el producto: la ven todas sus publicaciones.' : 'Competencia guardada.');
   });
 }
 

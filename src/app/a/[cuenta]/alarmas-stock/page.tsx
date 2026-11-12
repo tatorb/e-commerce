@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { AlertTriangle, BellRing, ExternalLink, ListTodo } from 'lucide-react';
+import { CopyButton } from '@/components/apply/CopyButton';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Card } from '@/components/ui/card';
@@ -9,7 +10,7 @@ import { owed, owedText, SHOWN_WHEN_SHORT } from '@/domain/stock-cushion';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { prisma } from '@/lib/db';
 import { formatDateTime, formatDuration, plural } from '@/lib/format';
-import { ALARM_FILTERS, alarmFilterOf, groupStockAlarms, loadStockAlarms, parseAlarmFilter, type AlarmMeasure, type AlarmProduct } from '@/lib/stock-alarms';
+import { ALARM_FILTERS, alarmFilterOf, groupStockAlarms, loadStockAlarms, orderItems, orderSummaryText, parseAlarmFilter, type AlarmMeasure, type AlarmProduct } from '@/lib/stock-alarms';
 import { stockTaskSettings } from '@/lib/stock-task-recipients';
 import { StockTaskRecipients } from '@/components/tasks/StockTaskRecipients';
 import { cn } from '@/lib/utils/cn';
@@ -18,7 +19,8 @@ import { cn } from '@/lib/utils/cn';
 // "Mostrar más de 5" en su producto, agrupadas por producto y con las
 // publicaciones que las venden. De entrada, las que se quedaron sin stock y
 // hay que reponer; también las que tienen 1 o 2, y todas. Arriba, a quién le
-// llegan las tareas de stock.
+// llegan las tareas de stock; abajo, en todas las pestañas, el resumen de
+// pedido para copiar y pegar.
 
 export const dynamic = 'force-dynamic';
 
@@ -41,6 +43,7 @@ export default async function StockAlarmsPage({ params, searchParams }: { params
   const measureCount = shown.reduce((n, g) => n + g.measures.length, 0);
   const canProducts = can(user.access, 'productos', 'read');
   const canPublications = can(user.access, 'publicaciones', 'read');
+  const summary = orderSummaryText(orderItems(rows));
   const now = new Date();
 
   return (
@@ -99,6 +102,7 @@ export default async function StockAlarmsPage({ params, searchParams }: { params
             ))}
           </>
         )}
+        <OrderSummary text={summary} />
       </PageBody>
     </>
   );
@@ -128,6 +132,26 @@ function ProductAlarms({ group: g, accountSlug, canProducts, ...rest }: Shared &
           <MeasureAlarm key={m.stockKey} measure={m} accountSlug={accountSlug} canProducts={canProducts} {...rest} />
         ))}
       </div>
+    </Card>
+  );
+}
+
+/** El pedido para copiar y pegar: un SKU por línea, de lo que se quedó sin stock y sigue activo en Mercado Libre. */
+function OrderSummary({ text }: { text: string }) {
+  return (
+    <Card className="space-y-3 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 space-y-0.5">
+          <h2 className="text-base font-semibold">Resumen de pedido</h2>
+          <p className="text-sm text-muted-foreground">Los productos sin stock con alguna publicación activa en Mercado Libre, un SKU por línea, para copiar y pegar.</p>
+        </div>
+        {text ? <CopyButton value={text} label="el resumen de pedido" /> : null}
+      </div>
+      {text ? (
+        <pre className="overflow-x-auto whitespace-pre-wrap rounded-md border bg-muted/40 p-3 font-sans text-sm">{text}</pre>
+      ) : (
+        <p className="text-sm text-muted-foreground">Ningún producto sin stock tiene publicaciones activas en Mercado Libre: no hay nada para pedir.</p>
+      )}
     </Card>
   );
 }

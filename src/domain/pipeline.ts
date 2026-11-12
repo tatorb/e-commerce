@@ -7,18 +7,19 @@ import { lockFamily } from '@/domain/family-members';
 
 // El código de cada paso no cambia aunque cambie el orden o el nombre que se ve:
 // IMAGES se muestra como Fotos.
-export const PIPELINE_STEPS: PipelineStep[] = ['INFO', 'TITLE', 'DESCRIPTION', 'PRICE', 'IMAGES', 'TEXT_IMAGES', 'VIDEOS', 'MEDIA', 'QA', 'PUBLISH'];
+export const PIPELINE_STEPS: PipelineStep[] = ['INFO', 'TITLE', 'COMPATIBILITIES', 'DESCRIPTION', 'QA', 'PRICE', 'IMAGES', 'TEXT_IMAGES', 'VIDEOS', 'MEDIA', 'PUBLISH'];
 
 export const PIPELINE_STEP_LABEL: Record<PipelineStep, string> = {
   INFO: 'Información',
   TITLE: 'Título',
+  COMPATIBILITIES: 'Compatibilidades',
   DESCRIPTION: 'Descripción',
+  QA: 'Preguntas y respuestas',
   PRICE: 'Precio',
   IMAGES: 'Fotos',
   TEXT_IMAGES: 'Imágenes con texto',
   VIDEOS: 'Videos',
   MEDIA: 'Organización de multimedia',
-  QA: 'Preguntas y respuestas',
   PUBLISH: 'Publicación',
 };
 
@@ -26,13 +27,14 @@ export const PIPELINE_STEP_LABEL: Record<PipelineStep, string> = {
 export const PIPELINE_STEP_SLUG: Record<PipelineStep, string> = {
   INFO: 'informacion',
   TITLE: 'titulo',
+  COMPATIBILITIES: 'compatibilidades',
   DESCRIPTION: 'descripcion',
+  QA: 'preguntas',
   PRICE: 'precio',
   IMAGES: 'imagenes',
   TEXT_IMAGES: 'imagenes-con-texto',
   VIDEOS: 'videos',
   MEDIA: 'multimedia',
-  QA: 'preguntas',
   PUBLISH: 'publicacion',
 };
 

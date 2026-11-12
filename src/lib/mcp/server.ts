@@ -15,6 +15,7 @@ import { STOCK_TOOLS } from './stock-tools';
 import { PRICE_TOOLS } from './price-tools';
 import { STATUS_TOOLS } from './status-tools';
 import { RECONCILE_TOOLS } from './reconcile-tools';
+import { COMPATIBILITY_TOOLS } from './compatibility-tools';
 import { SALE_OPTION_COPY_TOOLS } from './sale-option-copy-tools';
 import { MEDIA_TOOLS } from './media-tools';
 import { DESCRIPTION_TOOLS } from './description-tools';
@@ -36,7 +37,7 @@ import { logActivity } from '@/lib/activity';
 const SUPPORTED_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 const SERVER_INFO = { name: 'ecommerce-studio-mrb', title: 'E-commerce Studio MRB', version: '1.0.0' };
 
-export const TOOLS: McpTool[] = [...READ_TOOLS, ...WRITE_TOOLS, ...TASK_TOOLS, ...STOCK_TOOLS, ...STATUS_TOOLS, ...MEDIA_TOOLS, ...DESCRIPTION_TOOLS, ...PUSH_TOOLS, ...CREATE_TOOLS, ...PRICE_TOOLS, ...SALES_TOOLS, ...TEXT_IMAGE_TOOLS, ...PHOTO_MEASURE_TOOLS, ...WARRANTY_TOOLS, ...VISITS_TOOLS, ...RECONCILE_TOOLS, ...SALE_OPTION_COPY_TOOLS];
+export const TOOLS: McpTool[] = [...READ_TOOLS, ...WRITE_TOOLS, ...TASK_TOOLS, ...STOCK_TOOLS, ...STATUS_TOOLS, ...MEDIA_TOOLS, ...DESCRIPTION_TOOLS, ...PUSH_TOOLS, ...CREATE_TOOLS, ...PRICE_TOOLS, ...SALES_TOOLS, ...TEXT_IMAGE_TOOLS, ...PHOTO_MEASURE_TOOLS, ...WARRANTY_TOOLS, ...VISITS_TOOLS, ...RECONCILE_TOOLS, ...SALE_OPTION_COPY_TOOLS, ...COMPATIBILITY_TOOLS];
 
 export type RpcMessage = {
   jsonrpc?: string;

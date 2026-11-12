@@ -94,7 +94,7 @@ describe.skipIf(!url)('la tabla en la base', () => {
       [9, []],
       [12, []],
     ]);
-    expect(m.modes[1].options[0]).toMatchObject({ status: 'UNDER_REVIEW', blocked: true, main: false, priceNow: 500_000, discountNow: 10 });
+    expect(m.modes[1].options[0]).toMatchObject({ status: 'UNDER_REVIEW', needsFix: false, blocked: true, main: false, priceNow: 500_000, discountNow: 10 });
     // Hoy deja lo de 450.000 (500.000 con 10 % de descuento) con la cuota promocionada.
     expect(m.modes[1].options[0].now?.marginPct).toBeCloseTo(((450_000 * 0.584446 - 10_890 - 222_666.5) / 222_666.5) * 100, 1);
 

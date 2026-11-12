@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@/generated/prisma/client';
+import { mlGet } from '@/channels/mercadolibre/http';
 import { parseTokenResponse } from '@/channels/mercadolibre/oauth';
 import { decrypt, encrypt } from '@/lib/crypto';
 import {
@@ -81,6 +82,8 @@ describe.skipIf(!url)('conexión de una tienda', () => {
     bulk: true,
     paths: [] as string[],
     clientIds: [] as string[],
+    // Las llaves que dejaron de servir antes de vencer, por ejemplo porque se cambió la contraseña.
+    rejected: [] as string[],
   };
   let storeId = '';
   let accountId = '';
@@ -115,7 +118,7 @@ describe.skipIf(!url)('conexión de una tienda', () => {
           ml.refresh = `ref-${ml.n}`;
           return send(200, { access_token: `acc-${ml.n}`, refresh_token: ml.refresh, expires_in: 10800, user_id: ml.meId });
         }
-        if (!auth.startsWith('Bearer acc-')) return send(401, { message: 'invalid token' });
+        if (!auth.startsWith('Bearer acc-') || ml.rejected.includes(auth.slice(7))) return send(401, { message: 'invalid token' });
         if (u.pathname === '/users/me') return send(200, { id: Number(ml.meId), nickname: ml.meId === '363689851' ? 'INSURMOTOR' : 'OTRA' });
         if (u.pathname === '/items/bulk') {
           ml.paths.push(u.pathname);
@@ -155,6 +158,7 @@ describe.skipIf(!url)('conexión de una tienda', () => {
       bulk: true,
       paths: [],
       clientIds: [],
+      rejected: [],
     });
     const channel = await db.channel.create({ data: { kind: 'MERCADOLIBRE', name: 'Mercado Libre' } });
     accountId = (await db.account.create({ data: { slug: 'prueba', name: 'Prueba' } })).id;
@@ -276,6 +280,51 @@ describe.skipIf(!url)('conexión de una tienda', () => {
     await expect(withAccessToken(db, storeId, async (t) => t)).rejects.toThrow('volver a conectar');
     const row = await db.channelConnection.findUniqueOrThrow({ where: { storeId } });
     expect(row).toMatchObject({ status: 'NEEDS_REAUTH', accessToken: null, refreshToken: null });
+  });
+
+  it('si el canal rechaza la llave antes de que venza, la renueva en el momento y pide probar de nuevo, sin repetir lo que hacía', async () => {
+    await saveAppCredentials(db, { storeId, appId: '1234567890', appSecret: SECRET });
+    await connect();
+    ml.rejected = ['acc-1'];
+    let runs = 0;
+    const read = (t: string) => {
+      runs++;
+      return mlGet('/users/me', t);
+    };
+    await expect(withAccessToken(db, storeId, read)).rejects.toMatchObject({
+      message: 'Mercado Libre no aceptó la llave de la conexión y ya se renovó. Probá de nuevo.',
+      reauth: false,
+    });
+    expect(runs).toBe(1);
+    expect(ml.refreshCalls).toBe(1);
+    expect((await db.channelConnection.findUniqueOrThrow({ where: { storeId } })).status).toBe('ACTIVE');
+    // La próxima vez usa la llave nueva.
+    expect(await withAccessToken(db, storeId, read)).toMatchObject({ nickname: 'INSURMOTOR' });
+    expect(runs).toBe(2);
+  });
+
+  it('si el canal rechaza la llave y no se puede renovar, la tienda queda en el momento para volver a conectar', async () => {
+    await saveAppCredentials(db, { storeId, appId: '1234567890', appSecret: SECRET });
+    await connect();
+    ml.rejected = ['acc-1'];
+    // Con la contraseña cambiada, la llave de renovación tampoco sirve.
+    ml.refresh = 'otra';
+    await expect(withAccessToken(db, storeId, (t) => mlGet('/users/me', t))).rejects.toMatchObject({ reauth: true });
+    const row = await db.channelConnection.findUniqueOrThrow({ where: { storeId } });
+    expect(row).toMatchObject({ status: 'NEEDS_REAUTH', accessToken: null, refreshToken: null });
+    expect(row.lastError).toContain('volver a conectar');
+  });
+
+  it('si dos pedidos ven la llave rechazada a la vez, la renueva una sola vez', async () => {
+    await saveAppCredentials(db, { storeId, appId: '1234567890', appSecret: SECRET });
+    await connect();
+    ml.rejected = ['acc-1'];
+    const results = await Promise.allSettled([1, 2].map(() => withAccessToken(db, storeId, (t) => mlGet('/users/me', t))));
+    expect(results.map((r) => r.status)).toEqual(['rejected', 'rejected']);
+    expect(ml.refreshCalls).toBe(1);
+    const row = await db.channelConnection.findUniqueOrThrow({ where: { storeId } });
+    expect(row.status).toBe('ACTIVE');
+    expect(decrypt(row.accessToken!)).toBe('acc-2');
   });
 
   it('cada cuenta usa su propia aplicación', async () => {

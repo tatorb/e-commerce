@@ -599,6 +599,18 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     await expect(pushDrafts(db, { accountId: 'otra', publicationId: fresh.id, userId: null })).rejects.toThrow('no está en la cuenta');
   });
 
+  it('a una en revisión no se le sube nada, salvo que el canal pida corregirla', async () => {
+    const p = await pub('MLA1');
+    await saveDraft(db, { accountId, publicationId: p.id, field: 'title', value: 'Kit Embrague Ford Ka 1.6 Sachs' });
+    await db.channelCopy.update({ where: { publicationId: p.id }, data: { status: 'UNDER_REVIEW', statusNeedsFix: false } });
+    await expect(pushDrafts(db, { accountId, publicationId: p.id, userId: null })).rejects.toThrow('la está revisando');
+    expect(writes).toEqual([]);
+    // Pausada para que la corrijan: al subir la corrección, el canal la reactiva.
+    await db.channelCopy.update({ where: { publicationId: p.id }, data: { statusNeedsFix: true } });
+    expect(await pushDrafts(db, { accountId, publicationId: p.id, userId: null })).toMatchObject({ sent: ['title'], rejected: [] });
+    expect(writes.map((w) => `${w.method} ${w.path}`)).toEqual(['PUT /items/MLA1']);
+  });
+
   it('sube los datos de catálogo que cambiaron o son nuevos, con el código de cada campo', async () => {
     const p = await pub('MLA1');
     // La primera lectura trajo los datos de catálogo a la app.

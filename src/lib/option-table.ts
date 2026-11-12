@@ -23,6 +23,8 @@ export type TableOption = {
   url: string | null;
   status: ChannelStatus;
   statusReason: string | null;
+  // El canal pide corregirla para reactivarla: aunque esté en revisión, se le puede subir el precio.
+  needsFix: boolean;
   blocked: boolean;
   main: boolean;
   // Lo que tiene hoy en el canal: el precio publicado, el descuento propio y lo que deja con ese descuento.
@@ -88,7 +90,7 @@ export async function loadOptionTable(
       discount: true,
       customPrice: true,
       product: { select: { variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } } } },
-      channelCopy: { select: { installments: true, status: true, statusReason: true, statusBlocked: true, price: true, discount: true, url: true } },
+      channelCopy: { select: { installments: true, status: true, statusReason: true, statusNeedsFix: true, statusBlocked: true, price: true, discount: true, url: true } },
     },
   });
 
@@ -141,6 +143,7 @@ export async function loadOptionTable(
         url: r.channelCopy?.url ?? r.url,
         status: r.channelCopy?.status ?? r.channelStatus,
         statusReason: r.channelCopy?.statusReason ?? null,
+        needsFix: r.channelCopy?.statusNeedsFix ?? false,
         blocked: r.channelCopy?.statusBlocked ?? false,
         main: r.mainOptionId === null,
         priceNow,

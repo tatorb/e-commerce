@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { alarmItem, alarmItemText, alarmTaskText } from '@/lib/stock-alarms';
+import { alarmItem, alarmItemText, alarmTaskText, orderItems, orderSummaryText, type AlarmRow } from '@/lib/stock-alarms';
 import { linkParts, plainLinks } from '@/domain/text-links';
 import { taskMail } from '@/domain/task-mail';
 
@@ -69,5 +69,73 @@ describe('la tarea de una alarma de stock', () => {
     expect(mail.html).toContain(`<a href="${product}" style="color:#1c1917;font-weight:600">SP-900-50</a>`);
     expect(mail.html).toContain('>Ver en Mercado Libre</a>');
     expect(mail.text).toContain(`SKU: SP-900-50 (${product})`);
+  });
+});
+
+describe('el resumen de pedido', () => {
+  const alarm = (over: Partial<AlarmRow>): AlarmRow => ({
+    publicationId: 'pub1',
+    title: 'Subconjunto Pistón SP-900',
+    externalId: 'MLA9100001',
+    url: null,
+    storeName: 'TIENDA',
+    channelName: 'Mercado Libre',
+    channelKind: 'MERCADOLIBRE',
+    channelStatus: 'ACTIVE',
+    productId: 'p1',
+    productName: 'Subconjunto SP-900',
+    stockKey: '',
+    sku: 'SP-900',
+    measure: null,
+    real: 0,
+    shown: 6,
+    inChannel: 6,
+    level: 'out',
+    outSince: new Date('2026-11-02T12:00:00.000Z'),
+    remindedAt: null,
+    remindAt: null,
+    taskId: null,
+    ...over,
+  });
+
+  it('un SKU por línea, una sola vez aunque lo vendan varias publicaciones, ordenado por SKU', () => {
+    const rows = [
+      alarm({}),
+      // Otra opción de venta del mismo producto: no se repite.
+      alarm({ publicationId: 'pub2', externalId: 'MLA9100002' }),
+      // Vendido sin tener: también va.
+      alarm({ productId: 'p2', productName: 'Subconjunto SP-77', sku: 'SP-77', real: -2 }),
+      // Una medida de un producto con varias: con su medida.
+      alarm({ productId: 'p3', productName: 'Subconjunto SP-918', stockKey: 'sku:SP-918-50', sku: 'SP-918-50', measure: '0.50' }),
+      // Sin SKU en la ficha: al final.
+      alarm({ productId: 'p4', productName: 'Junta IN-5', sku: null }),
+    ];
+    expect(orderSummaryText(orderItems(rows))).toBe(
+      [
+        'Productos sin stock pero activos en el canal Mercado Libre:',
+        '',
+        '* SP-77 | Subconjunto SP-77',
+        '* SP-900 | Subconjunto SP-900',
+        '* SP-918-50 | Subconjunto SP-918 · medida 0.50',
+        '* sin SKU | Junta IN-5',
+      ].join('\n'),
+    );
+  });
+
+  it('solo lo que está sin stock y activo en Mercado Libre', () => {
+    const rows = [
+      // Queda 1: todavía no hay que pedirlo.
+      alarm({ real: 1, outSince: null }),
+      // Pausada a mano.
+      alarm({ productId: 'p2', sku: 'SP-2', channelStatus: 'PAUSED' }),
+      // En otro canal.
+      alarm({ productId: 'p3', sku: 'SP-3', channelKind: 'WEB_STORE', channelName: 'Tienda web' }),
+      // Todavía sin publicar.
+      alarm({ productId: 'p4', sku: 'SP-4', externalId: null }),
+    ];
+    expect(orderItems(rows)).toEqual([]);
+    expect(orderSummaryText([])).toBe('');
+    // Si una de sus publicaciones está pausada y otra activa, va.
+    expect(orderItems([alarm({ channelStatus: 'PAUSED' }), alarm({ publicationId: 'pub2' })])).toEqual([{ sku: 'SP-900', name: 'Subconjunto SP-900' }]);
   });
 });

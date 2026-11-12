@@ -29,19 +29,27 @@ export function CompetitorsCard({
   initial,
   today,
   shippingCost,
+  shared = null,
 }: {
   accountSlug: string;
   publicationId: string;
   initial: CompetitorRow[];
   today: string;
   shippingCost: number;
+  // "Compartida por las 6 publicaciones de este producto", cuando el tipo la guarda en el producto.
+  shared?: string | null;
 }) {
   const [open, setOpen] = useState(initial.length === 0);
   return (
     <SectionCard
       title="Competencia"
       count={initial.length}
-      description={`Las publicaciones de otros vendedores que más venden este producto, con su precio. Conviene cargar al menos 3. Sus títulos suman palabras al paso Título y sus precios se comparan en el paso Precio. El precio efectivo suma un envío de ${formatPrice(shippingCost)} si no es gratis.`}
+      description={
+        <>
+          {shared ? <strong className="block text-foreground">{shared}</strong> : null}
+          {`Las publicaciones de otros vendedores que más venden este producto, con su precio. Conviene cargar al menos 3. Sus títulos suman palabras al paso Título y sus precios se comparan en el paso Precio. El precio efectivo suma un envío de ${formatPrice(shippingCost)} si no es gratis.`}
+        </>
+      }
       action={
         initial.length > 0 ? (
           <Button access="view" type="button" size="sm" variant="outline" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
