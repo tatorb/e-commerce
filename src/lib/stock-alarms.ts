@@ -11,6 +11,7 @@ import { formatDateTime } from '@/lib/format';
 import { notifyAssigned, notifyTaskAgain } from '@/lib/task-mail';
 import { publicAppUrl } from '@/lib/public-url';
 import { textLink } from '@/domain/text-links';
+import { stockTaskRecipients } from '@/lib/stock-task-recipients';
 
 // Las alarmas de stock de los productos con "Mostrar más de 5"
 // (src/domain/stock-cushion.ts): una tarea por medida, para todos los
@@ -30,7 +31,9 @@ const KEY_PREFIX = 'stock:';
 export type StockChange = { productId: string; key: string; before: number; after: number; cause: 'sale' | 'cancel' | 'manual' | 'import' };
 
 /** Lo que hay que avisar después de guardar: qué medida y qué pasó. */
-export type AlarmEvent = { productId: string; key: string; kind: SaleAlarm | 'restock' | 'remind' | 'off' };
+// restock: se cargó stock y se regulariza, la tarea se cierra. keep: sigue igual,
+// la tarea abierta se actualiza sin avisar.
+export type AlarmEvent = { productId: string; key: string; kind: SaleAlarm | 'restock' | 'keep' | 'remind' | 'off' };
 
 /**
  * Dentro de la transacción que cambió el stock: deja anotado el estado de la
@@ -62,12 +65,16 @@ export async function markStockAlarms(tx: Tx, changes: StockChange[], now: Date)
     if (c.after === 1) {
       // Queda 1: el aviso temprano. Si venía sin stock, ya no falta.
       await tx.productStock.update({ where, data: { lowAt: state.lowAt ?? now, outSince: null, remindedAt: null, cutAt: null } });
-      events.push({ productId: c.productId, key: c.key, kind: alarm ?? 'restock' });
+      // Cargar stock a mano o importarlo, aunque suba solo a 1, regulariza: quien
+      // lo carga ya sabe que queda 1, la tarea se cierra. El aviso de "Queda 1"
+      // con tarea lo dan una venta, una cancelación o un ajuste que baja a 1.
+      const loaded = (c.cause === 'manual' || c.cause === 'import') && c.after > c.before;
+      events.push({ productId: c.productId, key: c.key, kind: loaded ? 'restock' : (alarm ?? 'keep') });
       continue;
     }
     // 0 o menos: desde cuándo falta.
     await tx.productStock.update({ where, data: { outSince: state.outSince ?? now, cutAt: null } });
-    events.push({ productId: c.productId, key: c.key, kind: alarm ?? 'restock' });
+    events.push({ productId: c.productId, key: c.key, kind: alarm ?? 'keep' });
   }
   return events;
 }
@@ -223,15 +230,15 @@ async function announceOne(db: Db, e: AlarmEvent, now: Date): Promise<void> {
   if (!row) return;
   const accountId = row.product.accountId;
   const autoKey = stockAlarmKey(e.productId, e.key);
-  // Se cierra al cargar stock (2 o más) o al apagar la opción sin nada que entregar.
+  // Se cierra al cargar stock (aunque sea 1) o al apagar la opción sin nada que entregar.
   const pubs = await taskPublications(db, e.productId, e.key);
-  const settled = e.kind === 'off' ? row.quantity >= 0 : e.kind === 'restock' && !row.outSince && row.quantity >= 2;
-  const notify = e.kind !== 'restock' && e.kind !== 'off';
+  const settled = e.kind === 'off' ? row.quantity >= 0 : e.kind === 'restock' && !row.outSince && row.quantity >= 1;
+  const notify = e.kind !== 'restock' && e.kind !== 'keep' && e.kind !== 'off';
 
   const taskId = await db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${autoKey}))`;
     const open = await tx.task.findFirst({ where: { accountId, autoKey, status: { in: [...OPEN_STATUSES] } }, select: { id: true } });
-    if (settled || (e.kind === 'restock' && !row.outSince && row.quantity === 1 && !open)) {
+    if (settled) {
       if (open) await tx.task.update({ where: { id: open.id }, data: { status: 'DONE', doneAt: now } });
       return null;
     }
@@ -249,14 +256,14 @@ async function announceOne(db: Db, e: AlarmEvent, now: Date): Promise<void> {
       return { id: open.id, created: false };
     }
     if (!notify) return null;
-    const admins = await tx.user.findMany({ where: { isAdmin: true, disabledAt: null }, select: { id: true } });
-    if (admins.length === 0) return null;
+    const recipients = await stockTaskRecipients(tx, accountId);
+    if (recipients.length === 0) return null;
     const created = await tx.task.create({
       data: {
         accountId,
         ...data,
         autoKey,
-        assignees: { create: admins.map((a) => ({ userId: a.id })) },
+        assignees: { create: recipients.map((userId) => ({ userId })) },
         publications: { create: pubs.ids.map((publicationId) => ({ publicationId })) },
       },
       select: { id: true },
@@ -324,8 +331,10 @@ export type AlarmRow = {
   channelName: string;
   productId: string;
   productName: string;
-  // La medida, si el producto tiene varias.
+  // La medida, si el producto tiene varias, su clave de stock y su SKU.
   measure: string | null;
+  stockKey: string;
+  sku: string | null;
   real: number;
   // Lo que le toca mostrar y lo que tiene ahora el canal.
   shown: number;
@@ -405,6 +414,8 @@ export async function loadStockAlarms(db: Db, accountId: string): Promise<AlarmR
         productId: pub.product.id,
         productName: pub.product.name,
         measure: slots.length > 1 ? (slots.find((s) => s.key === key)?.label ?? null) : null,
+        stockKey: key,
+        sku: slots.find((s) => s.key === key)?.sku ?? null,
         real,
         shown,
         inChannel: plan.channel?.find((l) => l.key === m.lineKey)?.quantity ?? null,
@@ -418,4 +429,44 @@ export async function loadStockAlarms(db: Db, accountId: string): Promise<AlarmR
   }
   const rank = (r: AlarmRow) => (r.real <= 0 ? 0 : 1);
   return rows.sort((a, b) => rank(a) - rank(b) || (a.outSince?.getTime() ?? Infinity) - (b.outSince?.getTime() ?? Infinity) || a.real - b.real || a.productName.localeCompare(b.productName));
+}
+
+/** Una medida con alarma y las publicaciones que la venden. */
+export type AlarmMeasure = Pick<AlarmRow, 'stockKey' | 'measure' | 'sku' | 'real' | 'level' | 'outSince' | 'remindedAt' | 'remindAt' | 'taskId'> & { listings: AlarmRow[] };
+
+/** Un producto con sus medidas con alarma. */
+export type AlarmProduct = { productId: string; productName: string; measures: AlarmMeasure[] };
+
+/**
+ * Las alarmas agrupadas por producto y, adentro, por medida: cada medida una
+ * sola vez, con sus publicaciones abajo. Respeta el orden de las filas: primero
+ * el producto de la medida que hace más que falta.
+ */
+export function groupStockAlarms(rows: AlarmRow[]): AlarmProduct[] {
+  const products = new Map<string, AlarmProduct>();
+  for (const r of rows) {
+    let p = products.get(r.productId);
+    if (!p) {
+      p = { productId: r.productId, productName: r.productName, measures: [] };
+      products.set(r.productId, p);
+    }
+    let m = p.measures.find((x) => x.stockKey === r.stockKey);
+    if (!m) {
+      m = {
+        stockKey: r.stockKey,
+        measure: r.measure,
+        sku: r.sku,
+        real: r.real,
+        level: r.level,
+        outSince: r.outSince,
+        remindedAt: r.remindedAt,
+        remindAt: r.remindAt,
+        taskId: r.taskId,
+        listings: [],
+      };
+      p.measures.push(m);
+    }
+    m.listings.push(r);
+  }
+  return [...products.values()];
 }

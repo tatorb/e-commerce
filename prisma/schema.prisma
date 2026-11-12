@@ -203,6 +203,9 @@ model Account {
   // La garantía de la cuenta, para las publicaciones nuevas y para cargarla en
   // todas: { type, amount, unit } (src/domain/warranty.ts). Null: sin definir.
   warranty            Json?
+  // A quién le llegan las tareas automáticas de stock (reponer y reactivar):
+  // ids de usuarios. Vacío: a todos los administradores.
+  stockTaskUserIds    String[]             @default([])
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
   stores              Store[]

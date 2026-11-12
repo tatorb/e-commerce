@@ -6,6 +6,7 @@ import { titleOrUntitled } from '@/domain/publication-title';
 import { OPEN_STATUSES, TASK_TITLE_MAX } from '@/domain/tasks';
 import { readOne } from '@/lib/channel-sync';
 import { notifyAssigned } from '@/lib/task-mail';
+import { stockTaskRecipients } from '@/lib/stock-task-recipients';
 
 // Cuando una publicación pausada o inactiva sin stock recibe stock: si el
 // canal no la reactiva solo, una tarea para los administradores. La tarea se
@@ -51,8 +52,8 @@ export async function afterRestock(
   const key = reactivationKey(args.publicationId);
   const open = await db.task.findFirst({ where: { accountId, autoKey: key, status: { in: [...OPEN_STATUSES] } }, select: { id: true } });
   if (open) return null;
-  const admins = await db.user.findMany({ where: { isAdmin: true, disabledAt: null }, select: { id: true } });
-  if (admins.length === 0) return null;
+  const recipients = await stockTaskRecipients(db, accountId);
+  if (recipients.length === 0) return null;
   const channelName = getChannelAdapter(p.store.channel.kind, p.store.channel.name).name;
   const title = `Reactivar en ${channelName}: ${titleOrUntitled(p.title)}`.slice(0, TASK_TITLE_MAX);
   const description = [
@@ -69,7 +70,7 @@ export async function afterRestock(
       remindAt: now,
       remindedAt: now,
       autoKey: key,
-      assignees: { create: admins.map((a) => ({ userId: a.id })) },
+      assignees: { create: recipients.map((userId) => ({ userId })) },
       publications: { create: [{ publicationId: args.publicationId }] },
     },
     select: { id: true },

@@ -602,6 +602,15 @@ describe.skipIf(!url)('el stock en la base', () => {
     await recordOrder(db, { storeId, order: sale('4202', [{ listingId: 'MLA1000001', variationId: null, sku: null, quantity: 1 }], { cancelled: true }) });
     expect(await task()).toMatchObject({ title: 'Queda 1: Bulón de tapa', status: 'PENDING' });
     expect((await alarm()).outSince).toBeNull();
+    // Sin stock, cargar a mano aunque sea 1 regulariza: la tarea se finaliza sola.
+    await sell('4203', 1);
+    expect((await task())!.title).toBe('Reponer: Bulón de tapa, sin stock');
+    await setProductStock(db, { accountId, productId: ids.bulon, userId: 'ana', stock: { '': 1 } });
+    expect(await task()).toMatchObject({ status: 'DONE' });
+    expect(await alarm()).toMatchObject({ quantity: 1, outSince: null, lowAt: expect.any(Date) });
+    // Volver a guardar 1 no abre otra.
+    await setProductStock(db, { accountId, productId: ids.bulon, userId: 'ana', stock: { '': 1 } });
+    expect(await db.task.count({ where: { autoKey: `stock:${ids.bulon}:`, status: { in: ['PENDING', 'IN_PROGRESS'] } } })).toBe(0);
 
     // Apagarla: se ve lo que hay, y la tarea se cierra.
     await setShowMore(db, { accountId, productId: ids.bulon, on: false, userId: 'ana' });
