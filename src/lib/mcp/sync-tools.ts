@@ -37,7 +37,7 @@ const statusTool = defineTool({
   section: 'sincronizacion',
   title: 'Ver cómo va la sincronización con el canal',
   description:
-    'La sección Sincronización: la app lee las publicaciones del canal cada hora y trae sola lo que cambió allá si en la app no se tocó. Muestra, por tienda, la última lectura (cuándo, si fue automática o pedida, cuántas leyó, cuántas trajeron cambios y sus avisos) y si hay una en curso; cuántas publicaciones están al día, cuántas tienen cambios de la app sin subir (borrador) y cuántas tienen datos para elegir (distintos en la app y en el canal: se ven con list_sync_choices); las que la lectura ya no encuentra en el canal (pueden estar borradas allá) y los últimos cambios. Las publicaciones del canal que no están en la app se traen desde Importar.',
+    'La sección Sincronización: la app lee las publicaciones del canal cada hora y trae sola lo que cambió allá si en la app no se tocó. Muestra, por tienda, la última lectura (cuándo, si fue automática o pedida, cuántas leyó, cuántas trajeron cambios y sus avisos) y si hay una en curso; cuántas publicaciones están al día, cuántas tienen cambios de la app sin subir (borrador) y cuántas tienen datos para elegir (distintos en la app y en el canal, sin contar las del pipeline, sus opciones de venta y su familia ni las finalizadas: se ven con list_sync_choices); las que la lectura ya no encuentra en el canal (pueden estar borradas allá) y los últimos cambios. Las publicaciones del canal que no están en la app se traen desde Importar.',
   input: z.object({ cuenta: accountArg }),
   readOnly: true,
   async run(ctx, args) {
@@ -80,7 +80,7 @@ const choicesTool = defineTool({
   section: 'sincronizacion',
   title: 'Ver los datos para elegir entre la app y el canal',
   description:
-    'Las publicaciones con datos distintos en la app y en el canal, cuando cambiaron en los dos lados: la app no pisa ninguno hasta que alguien elige. Por cada dato, lo que dice la app y lo que dice el canal, uno al lado del otro (los textos largos, recortados). De a 20, con pagina. Para elegir, choose_sync_side. Las que pasaron por el pipeline se marcan: ahí lo de la app suele ser lo trabajado.',
+    'Las publicaciones con datos distintos en la app y en el canal, cuando cambiaron en los dos lados: la app no pisa ninguno hasta que alguien elige. Por cada dato, lo que dice la app y lo que dice el canal, uno al lado del otro (los textos largos, recortados). De a 20, con pagina. Para elegir, choose_sync_side. No aparecen las que están en el pipeline o corregidas, ni sus opciones de venta ni las otras medidas de su familia (el equipo ya sabe que tienen diferencias), ni las finalizadas en el canal. Las descartadas del pipeline se marcan: ahí lo de la app suele ser lo trabajado.',
   input: z.object({ cuenta: accountArg, pagina: z.number().int().min(1).default(1) }),
   readOnly: true,
   async run(ctx, args) {
@@ -95,7 +95,7 @@ const choicesTool = defineTool({
         titulo: titleOrUntitled(r.title),
         codigo: r.externalId,
         tienda: `${r.channelName} · ${r.storeName}`,
-        paso_por_el_pipeline: r.worked,
+        descartada_del_pipeline: r.worked,
         link_app: link(ctx, account, r.id),
         datos: r.fields.map((f) => ({ dato: FACE_FIELD_LABEL[f.field].toLowerCase(), en_la_app: clip(f.app) || '(vacío)', en_el_canal: clip(f.channel) || '(vacío)' })),
       })),

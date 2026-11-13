@@ -67,7 +67,7 @@ export function ChoiceList({ accountSlug, rows }: { accountSlug: string; rows: C
         </button>
         {untouched.length > 0 && untouched.length < rows.length ? (
           <button type="button" className="underline-offset-4 hover:underline" onClick={() => setSelected(new Set(untouched))}>
-            las que no pasaron por el pipeline
+            las sin tocar
           </button>
         ) : null}
         {chosen.length > 0 ? (
@@ -111,7 +111,7 @@ export function ChoiceList({ accountSlug, rows }: { accountSlug: string; rows: C
                   {row.externalId ?? 'Sin código'} · {row.storeName}
                 </p>
               </div>
-              {row.worked ? <Badge variant="secondary">Pasó por el pipeline</Badge> : null}
+              {row.worked ? <Badge variant="secondary">Descartada del pipeline</Badge> : null}
             </div>
 
             {row.fields.map((f) => (

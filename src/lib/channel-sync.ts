@@ -33,6 +33,8 @@ import { listingAttributeIds, listingAttributes } from '@/importers/channel-list
 import { withAccessToken } from '@/lib/connections';
 import { fillFamilyCodes, joinKnownFamilies } from '@/lib/families';
 import { familyListing, readVariantListings, variantListingOwners } from '@/lib/variant-listings';
+import { choiceExclusion } from '@/domain/sync-choices';
+import { choiceExclusionSelect } from '@/lib/sync-choices';
 
 // La lectura automática del canal: recorre las publicaciones de cada tienda
 // conectada, guarda la cara del canal y trae a la app lo que cambió allá,
@@ -542,30 +544,30 @@ export async function runSyncStep(
   ]);
   await db.channelSync.update({
     where: { id: run.id },
-    data: { status: 'DONE', finishedAt: clock(), leaseUntil: null, toChoose: toChoose.all, newInChannel },
+    data: { status: 'DONE', finishedAt: clock(), leaseUntil: null, toChoose, newInChannel },
   });
-  await db.store.update({ where: { id: run.store.id }, data: { syncToChoose: toChoose.outsidePipeline } });
+  await db.store.update({ where: { id: run.store.id }, data: { syncToChoose: toChoose } });
   return progress('DONE', position);
 }
 
 /**
- * Cuántas publicaciones de la tienda tienen datos para elegir: todas, y las que
- * no están en el pipeline (en esas el equipo ya sabe que hay diferencias).
+ * Cuántas publicaciones de la tienda tienen datos para elegir. Con la misma
+ * regla que la pantalla: sin las del pipeline, sus opciones de venta y su
+ * familia, ni las finalizadas.
  */
-async function countToChoose(db: Db, storeId: string): Promise<{ all: number; outsidePipeline: number }> {
+async function countToChoose(db: Db, storeId: string): Promise<number> {
   const publications = await db.publication.findMany({
-    where: { storeId, channelCopy: { isNot: null } },
-    select: { pipelineStatus: true, title: true, description: true, attributes: true, media: true, price: true, installments: true, discount: true, quantities: true, warranty: true, channelCopy: { select: { fingerprints: true, agreed: true, missingSince: true, price: true, installments: true, discount: true } } },
+    where: { storeId, channelCopy: { is: { missingSince: null } } },
+    select: { ...choiceExclusionSelect, title: true, description: true, attributes: true, media: true, price: true, installments: true, discount: true, quantities: true, warranty: true, channelCopy: { select: { fingerprints: true, agreed: true, price: true, installments: true, discount: true } } },
   });
-  const pending = publications.filter((p) => !p.channelCopy?.missingSince && faceSummary(fingerprintsOf(faceValues(p)), p.channelCopy).choose.length > 0);
-  return { all: pending.length, outsidePipeline: pending.filter((p) => p.pipelineStatus !== 'IN_PIPELINE').length };
+  return publications.filter((p) => !choiceExclusion(p) && faceSummary(fingerprintsOf(faceValues(p)), p.channelCopy).choose.length > 0).length;
 }
 
 /** Vuelve a contar el globo de Sincronización de esas tiendas, por ejemplo después de elegir. */
 export async function refreshSyncBadge(db: Db, storeIds: string[]): Promise<void> {
   for (const storeId of [...new Set(storeIds)]) {
     const n = await countToChoose(db, storeId);
-    await db.store.update({ where: { id: storeId }, data: { syncToChoose: n.outsidePipeline } });
+    await db.store.update({ where: { id: storeId }, data: { syncToChoose: n } });
   }
 }
 

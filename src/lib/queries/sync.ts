@@ -5,6 +5,8 @@ import { photoVariants } from '@/domain/media';
 import { channelFaceValues, faceSummary, faceValues, fingerprintsOf, priceFaceText, type FaceField, type FaceValues } from '@/domain/channel-sync';
 import { quantityText, type QuantityLine } from '@/domain/quantities';
 import { warrantyLabel, type Warranty } from '@/domain/warranty';
+import { choiceExclusion } from '@/domain/sync-choices';
+import { choiceExclusionSelect } from '@/lib/sync-choices';
 import type { NameValue } from '@/domain/name-value';
 import { getChannelListings } from '@/channels/listings';
 import { getChannelPublisher } from '@/channels/publish';
@@ -22,6 +24,7 @@ export type ChoiceRow = {
   storeName: string;
   channelName: string;
   title: string | null;
+  // Descartada del pipeline: lo de la app puede ser lo trabajado.
   worked: boolean;
   fields: { field: FaceField; app: string; channel: string }[];
 };
@@ -81,7 +84,7 @@ export async function loadSyncOverview(accountId: string, db: PrismaClient = pri
         discount: true,
         quantities: true,
         warranty: true,
-        pipelineStatus: true,
+        ...choiceExclusionSelect,
         store: { select: { name: true, channel: { select: { name: true } } } },
         // Solo las huellas: lo leído entero se trae después, de las que hay que elegir.
         channelCopy: { select: { price: true, installments: true, discount: true, fingerprints: true, agreed: true, missingSince: true } },
@@ -109,7 +112,8 @@ export async function loadSyncOverview(accountId: string, db: PrismaClient = pri
     const summary = faceSummary(fingerprintsOf(faceValues(p)), copy);
     if (summary.draft.length > 0) drafts++;
     if (summary.draft.length === 0 && summary.choose.length === 0) upToDate++;
-    if (summary.choose.length > 0) pending.push({ p, choose: summary.choose });
+    // Las del pipeline (con sus opciones de venta y su familia) y las finalizadas no van para elegir.
+    if (summary.choose.length > 0 && !choiceExclusion(p)) pending.push({ p, choose: summary.choose });
   }
 
   // Lo leído del canal, solo de las que tienen algo para elegir.

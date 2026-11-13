@@ -142,7 +142,7 @@ export default async function SyncPage({ params }: { params: Promise<{ cuenta: s
         <SectionCard
           title="Para elegir"
           count={overview.toChoose.length}
-          description="El mismo dato es distinto en la app y en el canal. La app no pisa ninguno de los dos hasta que elijas."
+          description="El mismo dato es distinto en la app y en el canal. La app no pisa ninguno de los dos hasta que elijas. No aparecen las del pipeline o corregidas, con sus opciones de venta y su familia, ni las finalizadas en el canal."
         >
           {overview.toChoose.length > 0 ? (
             <ChoiceList accountSlug={account.slug} rows={overview.toChoose} />

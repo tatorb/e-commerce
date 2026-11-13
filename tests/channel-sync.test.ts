@@ -4,13 +4,34 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@/generated/prisma/client';
 import { DISCOUNT_GRACE_MS, discountText, faceSummary, faceValues, fieldState, fingerprint, fingerprintsOf, heldDiscount, installmentsText, planFaces, storedPrints } from '@/domain/channel-sync';
-import { chooseFaces, runSyncStep, startSync, syncAllStores } from '@/lib/channel-sync';
+import { chooseFaces, refreshSyncBadge, runSyncStep, startSync, syncAllStores } from '@/lib/channel-sync';
+import { choiceExclusion } from '@/domain/sync-choices';
 import type { McpContext } from '@/lib/mcp/tool';
 import { encrypt } from '@/lib/crypto';
 import { resetVisitsTogether } from '@/channels/mercadolibre/listings';
 
+// La consulta de la pantalla carga la base de la app: le alcanza con saber dónde está.
+process.env.DATABASE_URL ||= process.env.TEST_DATABASE_URL ?? 'postgresql://sin-base';
+const { loadSyncOverview } = await import('@/lib/queries/sync');
+
 // La lectura automática del canal y las caras de cada publicación, contra un
 // Mercado Libre simulado. Los datos son de prueba.
+
+describe('qué queda fuera de los datos para elegir', () => {
+  const p = (status: 'UNTOUCHED' | 'IN_PIPELINE' | 'CORRECTED' | 'DISCARDED', extra: object = {}) => ({ pipelineStatus: status, channelStatus: 'ACTIVE' as const, family: null, mainOption: null, ...extra });
+  const lead = (status: 'UNTOUCHED' | 'IN_PIPELINE' | 'CORRECTED') => ({ lead: { pipelineStatus: status } });
+  it('el pipeline, las opciones de venta y la familia de una principal en el pipeline, y las finalizadas', () => {
+    expect(choiceExclusion(p('IN_PIPELINE'))).toBe('pipeline');
+    expect(choiceExclusion(p('CORRECTED'))).toBe('pipeline');
+    expect(choiceExclusion(p('UNTOUCHED', { mainOption: { pipelineStatus: 'CORRECTED', family: null } }))).toBe('option');
+    // Una opción de venta de otra medida de una familia en el pipeline.
+    expect(choiceExclusion(p('UNTOUCHED', { mainOption: { pipelineStatus: 'UNTOUCHED', family: lead('IN_PIPELINE') } }))).toBe('option');
+    expect(choiceExclusion(p('UNTOUCHED', { family: lead('IN_PIPELINE') }))).toBe('family');
+    expect(choiceExclusion(p('DISCARDED', { channelStatus: 'CLOSED' }))).toBe('closed');
+    expect(choiceExclusion(p('DISCARDED'))).toBeNull();
+    expect(choiceExclusion(p('UNTOUCHED', { family: lead('UNTOUCHED'), mainOption: { pipelineStatus: 'DISCARDED', family: null } }))).toBeNull();
+  });
+});
 
 describe('de qué lado cambió cada dato', () => {
   it('compara sin fijarse en espacios, saltos de línea ni el orden de los datos de catálogo', () => {
@@ -348,6 +369,40 @@ describe.skipIf(!url)('la lectura automática en la base', () => {
     // La que no se pidió conserva la descripción que ya tenía la cara del canal.
     const copy = await db.channelCopy.findFirstOrThrow({ where: { publication: { externalId: 'MLA1' } } });
     expect(copy.description).toBe('Kit completo.');
+  });
+
+  it('los datos para elegir no muestran el pipeline, sus opciones de venta, su familia ni las finalizadas', async () => {
+    const lead = await publication('MLA1', { title: 'Título de la app 1' });
+    const option = await publication('MLA2', { title: 'Título de la app 2' });
+    const member = await publication('MLA3', { title: 'Título de la app 3' });
+    const closed = await publication('MLA4', { title: 'Título de la app 4' });
+    const discarded = await publication('MLA5', { title: 'Título de la app 5' });
+    const untouched = await publication('MLA6', { title: 'Título de la app 6' });
+    const corrected = await publication('MLA7', { title: 'Título de la app 7' });
+    items = { MLA1: item(), MLA2: item(), MLA3: item(), MLA4: item({ status: 'closed' }), MLA5: item(), MLA6: item(), MLA7: item() };
+    await pass();
+    // Antes de marcar nada, las siete tienen el título para elegir, salvo la finalizada.
+    expect((await loadSyncOverview(accountId, db)).toChoose).toHaveLength(6);
+    // La lectura agrupa las opciones de venta según el canal: se marcan después.
+    await db.publication.update({ where: { id: lead.id }, data: { pipelineStatus: 'IN_PIPELINE', pipelineStep: 'INFO' } });
+    await db.publication.update({ where: { id: option.id }, data: { mainOptionId: lead.id } });
+    const family = await db.listingFamily.create({ data: { storeId, productId, leadId: lead.id } });
+    await db.publication.updateMany({ where: { id: { in: [lead.id, member.id] } }, data: { familyId: family.id } });
+    await db.publication.update({ where: { id: discarded.id }, data: { pipelineStatus: 'DISCARDED', pipelineRemoval: 'NOT_WORTH' } });
+    await db.publication.update({ where: { id: corrected.id }, data: { pipelineStatus: 'CORRECTED' } });
+
+    expect((await loadSyncOverview(accountId, db)).toChoose.map((r) => r.externalId)).toEqual(['MLA5', 'MLA6']);
+    // El globo cuenta lo mismo que la pantalla y Claude.
+    await refreshSyncBadge(db, [storeId]);
+    expect((await db.store.findUniqueOrThrow({ where: { id: storeId } })).syncToChoose).toBe(2);
+    // Siguen teniendo sus datos para elegir: solo no se muestran.
+    expect((await state(option.id)).choose).toEqual(['title']);
+
+    // La principal sale del pipeline: vuelven sus opciones de venta y su familia.
+    await db.publication.update({ where: { id: lead.id }, data: { pipelineStatus: 'UNTOUCHED', pipelineStep: null } });
+    expect((await loadSyncOverview(accountId, db)).toChoose.map((r) => r.externalId)).toEqual(['MLA1', 'MLA2', 'MLA3', 'MLA5', 'MLA6']);
+    void closed;
+    void untouched;
   });
 
   it('elegir lo del canal lo trae a la app; elegir lo de la app lo deja como borrador', async () => {
