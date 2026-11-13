@@ -1,5 +1,6 @@
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@/generated/prisma/client';
+import { TRANSACTION_OPTIONS } from '@/lib/transaction-options';
 
 // Un solo cliente por proceso. En desarrollo Next recarga módulos y, sin
 // esto, cada recarga abriría conexiones nuevas.
@@ -11,7 +12,7 @@ function createClient(): PrismaClient {
   if (!connectionString) {
     throw new Error('Falta DATABASE_URL: la base de datos no está conectada.');
   }
-  return new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+  return new PrismaClient({ adapter: new PrismaPg({ connectionString }), transactionOptions: TRANSACTION_OPTIONS });
 }
 
 export const prisma: PrismaClient = globalForPrisma.prisma ?? createClient();
