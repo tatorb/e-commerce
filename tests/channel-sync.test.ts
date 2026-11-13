@@ -357,7 +357,19 @@ describe.skipIf(!url)('la lectura automática en la base', () => {
     await pass();
     expect((await state(a.id)).choose).toEqual(['title']);
 
+    // El globo de Sincronización: las dos, sin contar las del pipeline.
+    const badge = async () => (await db.store.findUniqueOrThrow({ where: { id: storeId } })).syncToChoose;
+    expect(await badge()).toBe(2);
+    await db.publication.update({ where: { id: b.id }, data: { pipelineStatus: 'IN_PIPELINE', pipelineStep: 'INFO' } });
+    await pass();
+    expect(await badge()).toBe(1);
+    await db.publication.update({ where: { id: b.id }, data: { pipelineStatus: 'UNTOUCHED', pipelineStep: null } });
+    await pass();
+    expect(await badge()).toBe(2);
+
     expect(await chooseFaces(db, { accountId, publicationIds: [a.id], side: 'channel', userId: null })).toEqual({ publications: 1, fields: 1 });
+    // Al elegir, el globo baja al momento.
+    expect(await badge()).toBe(1);
     expect((await db.publication.findUniqueOrThrow({ where: { id: a.id } })).title).toBe('Kit Embrague Ford Ka');
     expect(await state(a.id)).toEqual({ draft: [], choose: [] });
 

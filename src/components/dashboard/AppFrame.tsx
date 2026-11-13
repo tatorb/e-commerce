@@ -8,6 +8,7 @@ import { AccessProvider } from '@/components/access/AccessProvider';
 import { prisma } from '@/lib/db';
 import { attentionCount } from '@/lib/tasks';
 import { outOfStockCount } from '@/lib/stock-alarms';
+import { syncBadgeCount } from '@/lib/channel-sync';
 import { dispatchDueCount } from '@/lib/sales/queries';
 
 // Arma la pantalla con sesión: menú lateral con la cuenta y el área central.
@@ -31,13 +32,15 @@ export async function AppFrame({
   // Y sus tareas que ya llegaron al aviso o vencieron.
   // Y las medidas que se quedaron sin stock con "Mostrar más de 5".
   // Y los envíos que hay que despachar hoy o ya vencidos.
-  const [questions, tasks, alarms, shipments] = await Promise.all([
+  // Y las publicaciones con datos para elegir entre la app y el canal, fuera del pipeline.
+  const [questions, tasks, alarms, shipments, sync] = await Promise.all([
     account && can(user.access, 'preguntas', 'read')
       ? prisma.buyerQuestion.count({ where: { status: 'UNANSWERED', store: { accountId: account.id } } })
       : 0,
     account ? attentionCount(prisma, { accountId: account.id, userId: user.id, timeZone: account.timezone }) : 0,
     account && can(user.access, 'alarmas', 'read') ? outOfStockCount(prisma, account.id) : 0,
     account && can(user.access, 'ventas', 'read') ? dispatchDueCount(prisma, account.id, new Date(), account.timezone) : 0,
+    account && can(user.access, 'sincronizacion', 'read') ? syncBadgeCount(prisma, account.id) : 0,
   ]);
   const sidebar = (
     <Sidebar
@@ -48,6 +51,7 @@ export async function AppFrame({
       tasks={tasks}
       alarms={alarms}
       shipments={shipments}
+      sync={sync}
     />
   );
   return (

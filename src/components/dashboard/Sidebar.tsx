@@ -25,6 +25,7 @@ export async function Sidebar({
   tasks = 0,
   alarms = 0,
   shipments = 0,
+  sync = 0,
   className,
 }: {
   user: CurrentUser;
@@ -39,6 +40,8 @@ export async function Sidebar({
   alarms?: number;
   // Envíos que hay que despachar hoy o ya vencidos.
   shipments?: number;
+  // Publicaciones con datos para elegir entre la app y el canal, fuera del pipeline.
+  sync?: number;
   className?: string;
 }) {
   const accountHome = account ? `/a/${account.slug}` : null;
@@ -112,7 +115,7 @@ export async function Sidebar({
             </NavLink>
           ) : null}
           {sees('sincronizacion') ? (
-            <NavLink href={`${accountHome}/sincronizacion`} label="Sincronización">
+            <NavLink href={`${accountHome}/sincronizacion`} label="Sincronización" badge={sync}>
               <RefreshCw className="h-4 w-4" />
             </NavLink>
           ) : null}

@@ -542,18 +542,37 @@ export async function runSyncStep(
   ]);
   await db.channelSync.update({
     where: { id: run.id },
-    data: { status: 'DONE', finishedAt: clock(), leaseUntil: null, toChoose, newInChannel },
+    data: { status: 'DONE', finishedAt: clock(), leaseUntil: null, toChoose: toChoose.all, newInChannel },
   });
+  await db.store.update({ where: { id: run.store.id }, data: { syncToChoose: toChoose.outsidePipeline } });
   return progress('DONE', position);
 }
 
-async function countToChoose(db: Db, storeId: string): Promise<number> {
+/**
+ * Cuántas publicaciones de la tienda tienen datos para elegir: todas, y las que
+ * no están en el pipeline (en esas el equipo ya sabe que hay diferencias).
+ */
+async function countToChoose(db: Db, storeId: string): Promise<{ all: number; outsidePipeline: number }> {
   const publications = await db.publication.findMany({
     where: { storeId, channelCopy: { isNot: null } },
-    select: { title: true, description: true, attributes: true, media: true, price: true, installments: true, discount: true, quantities: true, warranty: true, channelCopy: { select: { fingerprints: true, agreed: true, missingSince: true, price: true, installments: true, discount: true } } },
+    select: { pipelineStatus: true, title: true, description: true, attributes: true, media: true, price: true, installments: true, discount: true, quantities: true, warranty: true, channelCopy: { select: { fingerprints: true, agreed: true, missingSince: true, price: true, installments: true, discount: true } } },
   });
-  return publications.filter((p) => !p.channelCopy?.missingSince && faceSummary(fingerprintsOf(faceValues(p)), p.channelCopy).choose.length > 0)
-    .length;
+  const pending = publications.filter((p) => !p.channelCopy?.missingSince && faceSummary(fingerprintsOf(faceValues(p)), p.channelCopy).choose.length > 0);
+  return { all: pending.length, outsidePipeline: pending.filter((p) => p.pipelineStatus !== 'IN_PIPELINE').length };
+}
+
+/** Vuelve a contar el globo de Sincronización de esas tiendas, por ejemplo después de elegir. */
+export async function refreshSyncBadge(db: Db, storeIds: string[]): Promise<void> {
+  for (const storeId of [...new Set(storeIds)]) {
+    const n = await countToChoose(db, storeId);
+    await db.store.update({ where: { id: storeId }, data: { syncToChoose: n.outsidePipeline } });
+  }
+}
+
+/** El número del globo de Sincronización de la cuenta. */
+export async function syncBadgeCount(db: Db, accountId: string): Promise<number> {
+  const r = await db.store.aggregate({ where: { accountId }, _sum: { syncToChoose: true } });
+  return r._sum.syncToChoose ?? 0;
 }
 
 /** Las activas y pausadas del canal que la app no tiene. */
@@ -699,6 +718,11 @@ export async function chooseFaces(
       publications++;
       changed += n;
     }
+  }
+  // El globo de Sincronización, al momento.
+  if (changed > 0) {
+    const stores = await db.publication.findMany({ where: { id: { in: args.publicationIds }, product: { accountId: args.accountId } }, select: { storeId: true } });
+    await refreshSyncBadge(db, stores.map((s) => s.storeId)).catch((e) => console.error('No se pudo contar el globo de Sincronización', e instanceof Error ? e.message : e));
   }
   return { publications, fields: changed };
 }

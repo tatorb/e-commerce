@@ -290,6 +290,10 @@ model Store {
   salesCheckedAt DateTime?
   // Por qué no se pueden leer, por ejemplo porque falta el permiso.
   salesError     String?
+  // Cuántas publicaciones tienen datos para elegir entre la app y el canal,
+  // sin contar las que están en el pipeline: el globo de Sincronización. Se
+  // cuenta al terminar cada lectura y cada vez que alguien elige.
+  syncToChoose   Int                  @default(0)
   sales          ChannelSale[]
   families       ListingFamily[]
   ledger         Sale[]
