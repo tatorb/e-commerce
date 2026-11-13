@@ -30,6 +30,7 @@ import { BY_BROWSER, setClips } from '@/lib/videos';
 import { photoFileHref } from '@/lib/photo-rules';
 import { readStored } from '@/lib/stored-files';
 import { markState } from '@/domain/photo-measures';
+import { channelTextMarks, channelTextNote } from '@/lib/text-images/channel-codes';
 import { textImageHref, textImagePng } from '@/lib/text-images/files';
 
 // Las fotos de una publicación: de dónde se pueden tomar (las que ya están en
@@ -347,16 +348,26 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
   const edits = await finishedEdits(db, p.productId);
   const editName = new Map(edits.map((e, i) => [e.id, editLabel(e, i + 1)]));
 
-  const channel: MediaItem[] = channelPhotos(copy?.photos, copy?.photoIds, copy?.variations).map((ref, i) => {
-    const from = origins[ref.kind === 'channel' ? ref.id : ''];
+  const channelRefs = channelPhotos(copy?.photos, copy?.photoIds, copy?.variations);
+  // Cuál de las del canal es cada imagen con texto, por el código que le dio el canal.
+  const textMarks = await channelTextMarks(db, { productId: p.productId, photoIds: channelRefs.flatMap((r) => (r.kind === 'channel' ? [r.id] : [])) });
+  const channel: MediaItem[] = channelRefs.map((ref, i) => {
+    const id = ref.kind === 'channel' ? ref.id : '';
+    const from = origins[id];
+    const text = textMarks.get(id);
     return {
       ref,
       key: photoKey(ref),
       thumb: ref.kind === 'channel' ? ref.url || null : null,
       label: `En ${channelName}, foto ${i + 1}`,
-      note: from && editName.has(from) ? `Es ${editName.get(from)!.startsWith('Original') ? 'el' : 'la'} ${editName.get(from)!.toLowerCase()}` : null,
+      note: text
+        ? channelTextNote(text)
+        : from && editName.has(from)
+          ? `Es ${editName.get(from)!.startsWith('Original') ? 'el' : 'la'} ${editName.get(from)!.toLowerCase()}`
+          : null,
     };
   });
+  const textInChannel = new Map([...textMarks.values()].map((m) => [m.textImageId, channelRefs.findIndex((r) => r.kind === 'channel' && r.id === m.photoId) + 1]));
   const inChannel = new Set(channel.map((c) => (c.ref.kind === 'channel' ? origins[c.ref.id] : undefined)).filter(Boolean));
   const placed = edits.map((e, i): MediaItem & { place: ProtocolPlace } => {
     // La que se usa tal cual tiene que poder ir al canal como está.
@@ -400,9 +411,11 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
             thumb: textImageHref(ti.id, ti.pngAt),
             // Las subidas a mano a la carpeta del Drive, por su nombre.
             label: ti.fromDrive ? `Imagen con texto del Drive: ${ti.fileName ?? 'sin nombre'}` : `Imagen con texto ${ti.slot}`,
-            note: ti.fromDrive
-              ? 'Subida a la carpeta Imágenes con texto del Drive'
-              : `Generada el ${ti.pngAt.toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })}${ti.mediaPlace ? `. Va en el lugar ${ti.mediaPlace}` : ''}`,
+            note:
+              (ti.fromDrive
+                ? 'Subida a la carpeta Imágenes con texto del Drive'
+                : `Generada el ${ti.pngAt.toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })}${ti.mediaPlace ? `. Va en el lugar ${ti.mediaPlace}` : ''}`) +
+              (textInChannel.get(ti.id) ? `. En ${channelName} es la foto ${textInChannel.get(ti.id)}` : ''),
           },
         ]
       : [],
@@ -440,6 +453,13 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
     protocol: protocolMedia(corrected, sole ? [sole.key] : allMeasures.map((m) => m.key), allMeasures, textFixed),
     // Las imágenes con texto con lugar fijo, que le ganan al orden del protocolo.
     textPlaces: textFixed,
+    // Las imágenes con texto que ya están entre las fotos del canal, por su código allá.
+    textInChannel: [...textMarks.values()].map((m) => ({
+      ...m,
+      externalId: p.externalId,
+      position: textInChannel.get(m.textImageId) ?? null,
+      fixedPlace: pieces.find((x) => x.id === m.textImageId)?.mediaPlace ?? null,
+    })),
     current,
     available: { channel: plain(channel), corrected, text, assets },
     // Las medidas que se pueden marcar: con menos de dos, no hay nada que elegir.
@@ -584,6 +604,8 @@ export async function picturesFor(
   const chosen = sole ? soleMeasurePhotos(refs, allMeasures, sole) : refs;
   const pictures: ChannelPicture[] = [];
   const origins: (string | null)[] = [];
+  // De qué imagen con texto es cada una, en el mismo orden.
+  const texts: (string | null)[] = [];
   const problems: string[] = [];
   const sent: PhotoRef[] = [];
   for (const ref of chosen) {
@@ -605,6 +627,7 @@ export async function picturesFor(
       pictures.push({ kind: 'file', ...file });
     }
     origins.push(ref.kind === 'edit' ? ref.editId : null);
+    texts.push(ref.kind === 'text' ? ref.id : null);
     sent.push(ref);
   }
   // Cada foto con las medidas que valen, y su lugar en la lista.
@@ -615,5 +638,5 @@ export async function picturesFor(
     general: placed.filter((r) => photoVariants(r).length === 0).map((r) => r.at),
   };
   // sent: las fotos que van, con las medidas con que van, en el mismo orden que pictures.
-  return { pictures, origins, problems, layout, sent: marked };
+  return { pictures, origins, texts, problems, layout, sent: marked };
 }

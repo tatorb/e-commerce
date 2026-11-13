@@ -11,6 +11,7 @@ import { readSales, reconcileStock, startStock } from '@/lib/stock';
 import { stockAlarmPass } from '@/lib/stock-alarms';
 import { settleReactivations } from '@/lib/restock';
 import { placeAllShotPhotos } from '@/lib/shoot';
+import { findTextImagesInChannel } from '@/lib/text-images/channel-codes';
 import { readAllSales } from '@/lib/sales/read';
 import { saleAlarmPass } from '@/lib/sales/alarms';
 import { readAllVisits } from '@/lib/visits';
@@ -58,6 +59,7 @@ const VISITS_BUDGET_MS = 6_000;
 const TOTAL_MS = 45_000;
 // Las publicaciones vendidas que no están en la app: se traen del canal.
 const SOLD_BUDGET_MS = 5_000;
+const TEXT_CODES_BUDGET_MS = 10_000;
 
 const digest = (s: string) => createHash('sha256').update(s).digest();
 
@@ -88,6 +90,11 @@ export async function GET(request: Request) {
   // Con lo recién leído: las tareas de reactivar de las que ya están activas se cierran.
   const reactivated = await settleReactivations(prisma);
   const shots = await placeAllShotPhotos(prisma, { budgetMs: budget(SHOTS_BUDGET_MS) });
+  // Con las fotos del canal recién leídas: cuál es cada imagen con texto que ya estaba subida.
+  const texts = await findTextImagesInChannel(prisma, { budgetMs: budget(TEXT_CODES_BUDGET_MS) }).catch((e) => {
+    console.error('No se pudieron buscar las imágenes con texto en el canal.', e);
+    return { pending: false };
+  });
   const ledger = await readAllSales(prisma, { budgetMs: budget(LEDGER_BUDGET_MS) });
   const saleTasks = await saleAlarmPass(prisma);
   const sold = await importSoldListings(prisma, { budgetMs: budget(SOLD_BUDGET_MS) });
@@ -103,6 +110,7 @@ export async function GET(request: Request) {
       started.pending ||
       stock.pending ||
       shots.pending ||
+      texts.pending ||
       ledger.pending ||
       visits.pending ||
       sold.pending,

@@ -70,6 +70,7 @@ function mediaOut(
     elegida: chosen.has(m.key),
     ...origin(m),
     ...(m.blocked ? { no_se_puede_usar: m.blocked } : {}),
+    ...(m.note && m.ref.kind === 'channel' ? { nota: m.note } : {}),
   });
   const ready = new Set(sources.available.corrected.map((m) => m.key));
   const clipOrder = new Map(sources.clipIds.map((id, i) => [id, i + 1]));
@@ -81,6 +82,20 @@ function mediaOut(
     ...(sources.soleMeasure ? { vende_solo_la_medida: sources.soleMeasure.label } : {}),
     ...(sources.channelWithoutVariants ? { aviso: 'En el canal la publicación no tiene medidas: todas las fotos se ven juntas.' } : {}),
     ...(sources.sharedWith.length > 0 ? { comparten_las_fotos_en_el_canal: sources.sharedWith } : {}),
+    ...(sources.textInChannel.length > 0
+      ? {
+          imagenes_con_texto_en_el_canal: sources.textInChannel.map((t) => ({
+            imagen: t.fromDrive ? `del Drive: ${t.fileName ?? 'sin nombre'}` : t.slot,
+            publicacion: t.externalId,
+            foto_en_el_canal: t.position,
+            codigo_en_el_canal: t.photoId,
+            lugar_fijo_en_multimedia: t.fixedPlace,
+            ...(t.fixedPlace && t.position && t.fixedPlace !== t.position ? { aviso: `En el canal está en el lugar ${t.position}, no en su lugar fijo (${t.fixedPlace}).` } : {}),
+            ...(t.outdated ? { png_anterior: true } : {}),
+            ...(t.found ? { reconocida_comparando: true } : {}),
+          })),
+        }
+      : {}),
     elegidas: sources.current.map((m, i) => ({
       orden: i + 1,
       foto: m.key,

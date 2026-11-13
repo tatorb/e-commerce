@@ -422,6 +422,27 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     return faceSummary(fingerprintsOf(faceValues(p)), p.channelCopy);
   };
 
+  it('al subir una imagen con texto guarda el código que le dio el canal en esa publicación', async () => {
+    const pub = await db.publication.create({ data: { productId, storeId, externalId: 'MLA1', title: 'Kit Embrague Ford Ka' } });
+    await readAll();
+    const pngAt = new Date('2026-11-01T10:00:00Z');
+    const text = await db.textImage.create({ data: { accountId, content: {}, slot: 1, mediaPlace: 1, pngRef: 'https://deposito/texto.png', pngAt, publications: { create: { publicationId: pub.id } } } });
+    // En el lugar 2, aunque su lugar fijo sea el 1.
+    await saveMedia(db, { accountId, publicationId: pub.id, refs: [{ kind: 'channel', id: 'P1', url: '' }, { kind: 'text', id: text.id }, { kind: 'channel', id: 'P2', url: '' }] });
+    expect((await pushDrafts(db, { accountId, publicationId: pub.id, userId: null })).sent).toEqual(['photos']);
+    const link = await db.publicationTextImage.findUniqueOrThrow({ where: { publicationId_textImageId: { publicationId: pub.id, textImageId: text.id } } });
+    expect(link).toMatchObject({ channelPhotoId: 'SUBIDA-1', channelPngAt: pngAt, channelFound: false });
+    expect(link.channelPhotoAt).toBeInstanceOf(Date);
+    // En las fotos del canal se marca cuál es.
+    const sources = await loadMediaSources(db, accountId, pub.id);
+    expect(sources.available.channel.map((m) => [m.key, m.note])).toEqual([
+      ['canal:P1', null],
+      ['canal:SUBIDA-1', 'Es la imagen con texto 1'],
+      ['canal:P2', null],
+    ]);
+    expect(sources.textInChannel).toEqual([expect.objectContaining({ slot: 1, position: 2, fixedPlace: 1, photoId: 'SUBIDA-1', externalId: 'MLA1' })]);
+  });
+
   it('ordena las fotos, suma una corregida y una del producto, y las sube en ese orden', async () => {
     const pub = await db.publication.create({ data: { productId, storeId, externalId: 'MLA1', title: 'Kit Embrague Ford Ka' } });
     const editId = await correctedPhoto('frente.jpg');

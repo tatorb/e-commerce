@@ -27,6 +27,7 @@ import { brandLogoHref, brandsForPiece, listBrands } from './brands';
 import { textImageHref } from './files';
 import type { PieceFit } from './piece-html';
 import { renderPiece, type PieceRenderer } from './render';
+import { draftsForTextImage, findTextImagesInChannel, type FoundCode, type TextDraftsResult } from './channel-codes';
 import { placeTextImages } from './place';
 
 // El paso Imágenes con texto: las piezas de una publicación, o de toda su
@@ -273,7 +274,7 @@ function problemOf(e: { issues: { path: PropertyKey[]; message: string }[] }): s
 
 // ───────────────────────────── El PNG ─────────────────────────────
 
-export type GenerateResult = { fit: PieceFit; at: Date; version: PieceVersion };
+export type GenerateResult = { fit: PieceFit; at: Date; version: PieceVersion; found: FoundCode[]; drafts: TextDraftsResult };
 
 /** Lo que el servidor le pasa a la pieza para armar el PNG: todo adentro, como data:. */
 async function paintFor(db: Db, content: PieceContent, file: { url: string; type: string; viaPreview: boolean; preview: string | null } | null) {
@@ -311,6 +312,9 @@ export async function generateTextImage(
   const photo = (await photoOptions(db, pub.productId)).find((p) => p.editId === row.photoEditId) ?? null;
   const missing = pieceMissing(content);
   if (missing.length > 0) throw new TextImageError(missing.join(' '));
+  const { ids } = await sharing(db, pub.id);
+  // Antes de cambiar el PNG: en las que no tienen el código, cuál de las fotos del canal es la anterior.
+  const found = row.pngRef ? await findOld(db, ids) : [];
   const { png, fit } = await render(await paintFor(db, content, photo?.file ?? null));
   if (!fit.fits) throw new TextImageError('No entra todo ni achicando los ítems al 55 %. Juntá ítems de la misma marca y el mismo motor, o acortá los textos.');
   const hash = await pieceHash(db, content, photo?.version ?? null);
@@ -325,9 +329,37 @@ export async function generateTextImage(
   await db.textImage.update({ where: { id: row.id }, data: { pngRef: ref, pngAt: at, pngHash: hash, updatedById: args.userId } });
   // El anterior, a la papelera del Drive. Si no se puede, queda ahí.
   if (old && old !== ref) await removeStored(db, old).catch((e) => console.error('No se pudo sacar el PNG anterior del Drive.', e));
-  // Con lugar fijo, queda en su lugar en Organización de multimedia.
-  if (row.mediaPlace) await placeTextImages(db, (await sharing(db, pub.id)).ids);
-  return { fit, at, version: fit.version };
+  // Donde el canal tiene la anterior, la nueva va en su lugar: el borrador con las mismas fotos del canal, en el mismo orden.
+  const drafts = await draftsForTextImage(db, { textImageId: row.id, publicationIds: ids });
+  // Las demás, como siempre: con lugar fijo, queda en su lugar en Organización de multimedia.
+  if (row.mediaPlace && drafts.withoutCode.length > 0) await placeTextImages(db, drafts.withoutCode);
+  return { fit, at, version: fit.version, found, drafts };
+}
+
+/** Busca entre las fotos del canal la imagen con texto que todavía no tiene código. Si no se puede, sigue sin ella. */
+async function findOld(db: Db, ids: string[]): Promise<FoundCode[]> {
+  try {
+    return (await findTextImagesInChannel(db, { publicationIds: ids, budgetMs: 15_000 })).found;
+  } catch (e) {
+    console.error('No se pudo buscar la imagen con texto entre las fotos del canal.', e);
+    return [];
+  }
+}
+
+/**
+ * Qué pasaría al volver a generar el PNG, sin generarlo: en qué lugar del
+ * borrador de cada publicación queda. Antes busca entre las fotos del canal
+ * las que todavía no tienen el código.
+ */
+export async function previewTextImageDrafts(db: Db, args: { accountId: string; publicationId: string; slot?: number }): Promise<{ found: FoundCode[]; drafts: TextDraftsResult; mediaPlace: number | null }> {
+  const slot = args.slot ?? 1;
+  checkSlot(slot);
+  const pub = await publicationFor(db, args.accountId, args.publicationId);
+  const row = await pieceOf(db, pub.id, slot);
+  if (!row) throw new TextImageError('Todavía no hay nada cargado en la imagen con texto.');
+  const { ids } = await sharing(db, pub.id);
+  const found = row.pngRef ? await findOld(db, ids) : [];
+  return { found, drafts: await draftsForTextImage(db, { textImageId: row.id, publicationIds: ids, dryRun: true }), mediaPlace: row.mediaPlace };
 }
 
 // ───────────────────────────── Completar con IA ─────────────────────────────

@@ -63,6 +63,8 @@ export async function loadFamilyMedia(db: Db, accountId: string, publicationId: 
     protocol: lost.length > 0 ? null : protocolMedia(lead.available.corrected, measures.map((m) => m.key), all, lead.textPlaces),
     current,
     available: { ...lead.available, channel: [...channel.values()] },
+    // En cada medida, cuál de sus fotos del canal es cada imagen con texto.
+    textInChannel: sources.flatMap((s) => s.textInChannel),
     measures: measures.length >= 2 ? measures : [],
     channelWithoutVariants: false,
     measureIssue:

@@ -4,7 +4,8 @@ import { storageError } from '@/lib/stored-files';
 import { brandUsage, listBrands } from '@/lib/text-images/brands';
 import { RenderError } from '@/lib/text-images/render';
 import { mergeTextImageFolders } from '@/lib/text-images/drive-files';
-import { generateTextImage, loadTextImageStep, MAX_MEDIA_PLACE, MAX_TEXT_IMAGES, saveTextImage, TextImageError } from '@/lib/text-images/step';
+import { generateTextImage, loadTextImageStep, MAX_MEDIA_PLACE, MAX_TEXT_IMAGES, previewTextImageDrafts, saveTextImage, TextImageError } from '@/lib/text-images/step';
+import type { FoundCode, TextDraft, TextDraftsResult } from '@/lib/text-images/channel-codes';
 import { McpToolError, accountArg, appLink, defineTool, publicationArg, resolveAccount, resolvePublication, type McpContext } from './tool';
 
 // El paso Imágenes con texto para Claude: ver la pieza, cargarla o cambiar una
@@ -120,11 +121,20 @@ const generateTool = defineTool({
   section: ['pipeline', 'publicaciones'],
   title: 'Generar el PNG de la imagen con texto',
   description:
-    'Arma el PNG de 1200 × 1200 de una imagen con texto en el servidor (imagen 1, 2...), igual a la vista previa de la app, y lo guarda en el Drive. Si la imagen tiene lugar fijo, queda sola en ese lugar en Organización de multimedia de las publicaciones que ya tienen fotos elegidas; si no, queda para elegirla como una foto más (set_publication_media). No se sube solo al canal. Si no entra todo ni achicando los ítems, no lo arma y dice por qué. Tarda unos segundos.',
-  input: z.object({ cuenta: accountArg, publicacion: publicationArg, imagen: slotArg }),
+    'Arma el PNG de 1200 × 1200 de una imagen con texto en el servidor (imagen 1, 2...), igual a la vista previa de la app, y lo guarda en el Drive. En cada publicación donde la app sabe el código de la imagen anterior en el canal (lo guarda al subirla, o lo reconoce comparando las fotos del canal con el PNG), arma el borrador de multimedia con las mismas fotos del canal en el mismo orden y la nueva en lugar de la anterior; si ese código ya no está en el canal, la pone en su lugar fijo y lo avisa. Las otras opciones de venta comparten las fotos en el canal: no llevan borrador, y si tenían uno se saca, para que se suba solo desde la principal. Donde no sabe el código, con lugar fijo queda en ese lugar en las publicaciones que ya tienen fotos elegidas; sin lugar fijo, queda para elegirla (set_publication_media). No se sube solo al canal. Con vista_previa no genera nada: dice en qué lugar quedaría en cada publicación. Si no entra todo ni achicando los ítems, no lo arma y dice por qué. Tarda unos segundos.',
+  input: z.object({
+    cuenta: accountArg,
+    publicacion: publicationArg,
+    imagen: slotArg,
+    vista_previa: z.boolean().default(false).describe('Solo decir dónde quedaría en el borrador de cada publicación, sin generar el PNG.'),
+  }),
   readOnly: false,
   async run(ctx, args) {
     const { account, id } = await target(ctx, args);
+    if (args.vista_previa) {
+      const r = await asToolError(() => previewTextImageDrafts(ctx.db, { accountId: account.id, publicationId: id, slot: args.imagen }));
+      return { vista_previa: true, lugar_fijo_en_multimedia: r.mediaPlace, ...draftsOut(r.found, r.drafts, true), link_app: appLink(ctx, account, id) };
+    }
     const r = await asToolError(() => generateTextImage(ctx.db, { accountId: account.id, publicationId: id, slot: args.imagen, userId: ctx.userId }));
     return {
       listo: true,
@@ -132,11 +142,45 @@ const generateTool = defineTool({
       dudas_que_entraron: r.fit.doubts,
       tamano_de_los_items: `${Math.round(r.fit.scale * 100)} %`,
       generado: r.at.toISOString(),
-      nota: 'Ya está en Organización de multimedia: con lugar fijo, en su lugar; si no, en Imágenes con texto, para elegirla.',
+      ...draftsOut(r.found, r.drafts, false),
       link_app: appLink(ctx, account, id),
     };
   },
 });
+
+const HOW: Record<TextDraft['how'], string> = {
+  replaced: 'en lugar de la anterior, en el mismo lugar que tiene en el canal',
+  placed: 'en su lugar fijo, porque la anterior ya no está en el canal',
+  kept: 'el borrador ya la tenía',
+  missing: 'sin lugar: la anterior ya no está en el canal y no tiene lugar fijo',
+};
+
+/** Lo que pasó (o pasaría) con el borrador de multimedia de cada publicación. */
+function draftsOut(found: FoundCode[], d: TextDraftsResult, preview: boolean) {
+  return {
+    ...(found.length > 0
+      ? { reconocidas_en_el_canal: found.map((f) => ({ publicacion: f.externalId, imagen: f.slot, foto_en_el_canal: f.position, codigo_en_el_canal: f.photoId })) }
+      : {}),
+    borradores: d.drafts.map((x) => ({
+      publicacion: x.externalId,
+      queda: HOW[x.how],
+      lugar_en_el_borrador: x.position,
+      ...(x.note ? { aviso: x.note } : {}),
+    })),
+    ...(d.cleared.length > 0
+      ? {
+          borradores_sacados: d.cleared.map((c) => ({
+            publicacion: c.externalId,
+            motivo: `Comparte las fotos en el canal con ${c.from ?? 'la principal'}: ${preview ? 'se sacaría' : 'se sacó'} su borrador para que se suba solo desde ahí.`,
+          })),
+        }
+      : {}),
+    ...(d.withoutCode.length > 0
+      ? { sin_codigo: `${d.withoutCode.length} sin el código de la anterior en el canal: con lugar fijo queda en ese lugar en las que ya tienen fotos elegidas; si no, para elegirla.` }
+      : {}),
+    nota: preview ? 'No se generó nada.' : 'No se subió nada al canal: queda en el borrador de multimedia, para subir con push_media.',
+  };
+}
 
 const brandsTool = defineTool({
   name: 'list_vehicle_brands',

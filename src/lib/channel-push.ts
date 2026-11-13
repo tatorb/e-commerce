@@ -44,6 +44,7 @@ import { checkTitle } from '@/domain/titles';
 import { readOne } from '@/lib/channel-sync';
 import { sendPendingSku, type SkuOutcome } from '@/lib/publication-measure';
 import { photoOriginsOf, photoSiblings, picturesFor } from '@/lib/media';
+import { saveSentTextCodes, sentTextCodes } from '@/lib/text-images/channel-codes';
 import { withAccessToken } from '@/lib/connections';
 import { listingTargets } from '@/lib/variant-listings';
 import { loadTitleRules } from '@/lib/title-rules';
@@ -575,7 +576,7 @@ async function pushPhotos(
   },
 ): Promise<void> {
   const { p, refs } = args;
-  const { pictures, origins, problems, layout, sent } = await picturesFor(db, p.productId, refs, p.channelCopy, p.variantKey);
+  const { pictures, origins, texts, problems, layout, sent } = await picturesFor(db, p.productId, refs, p.channelCopy, p.variantKey);
   if (problems.length > 0 || pictures.length === 0) return args.reject('photos', problems.join(' ') || 'Elegí al menos una foto.');
   let ids: string[] | null;
   // Si el canal guarda cada medida aparte, cada una lleva lo que ve el comprador en esa medida.
@@ -629,6 +630,8 @@ async function pushPhotos(
         agreed: { ...parseFingerprints(current.agreed), photos: print },
         photoOrigins: { ...photoOriginsOf(current.photoOrigins), ...added },
       });
+      // El código de cada imagen con texto en esta publicación: al regenerarla se reemplaza esa foto.
+      await saveSentTextCodes(tx, p.id, sentTextCodes(texts, ids), new Date());
     }
     await tx.channelCopy.update({ where: { publicationId: p.id }, data });
     await tx.publication.update({ where: { id: p.id }, data: { media: Prisma.DbNull } });

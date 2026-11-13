@@ -74,7 +74,11 @@ export async function generateTextImageAction(accountSlug: string, publicationId
       const how = [`versión ${r.version}`, r.version === 'A' ? `${r.fit.doubts} dudas` : null, r.fit.scale < 1 ? `ítems al ${Math.round(r.fit.scale * 100)} %` : null]
         .filter(Boolean)
         .join(', ');
-      return `PNG generado (${how}). Ya está en Organización de multimedia: si tiene lugar fijo, en su lugar; si no, para elegirlo.`;
+      const replaced = r.drafts.drafts.filter((d) => d.how === 'replaced' || d.how === 'placed');
+      const where = replaced.length > 0 ? ` En ${replaced.map((d) => `${d.externalId ?? 'la publicación'} va en el lugar ${d.position}`).join(', ')} del borrador, en lugar de la anterior.` : '';
+      const notes = r.drafts.drafts.flatMap((d) => (d.note ? [d.note] : []));
+      const cleared = r.drafts.cleared.length > 0 ? ` Se sacó el borrador de ${r.drafts.cleared.map((c) => c.externalId ?? 'una opción de venta').join(', ')}: comparte las fotos y se sube desde la principal.` : '';
+      return `PNG generado (${how}).${where}${notes.length > 0 ? ` ${notes.join(' ')}` : ''}${cleared} Lo demás, en Organización de multimedia: si tiene lugar fijo, en su lugar; si no, para elegirlo.`;
     });
   });
 }

@@ -2507,6 +2507,15 @@ model PublicationTextImage {
   publication   Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
   textImageId   String
   textImage     TextImage   @relation(fields: [textImageId], references: [id], onDelete: Cascade)
+  // El código de la foto que el canal le dio al subirla a esta publicación (en
+  // Mercado Libre, una por medida), cuándo se guardó y de qué PNG era. Con
+  // channelFound, se reconoció comparando las fotos del canal con el PNG.
+  channelPhotoId    String?
+  channelPhotoAt    DateTime?
+  channelPngAt      DateTime?
+  channelFound      Boolean   @default(false)
+  // Lo que ya se comparó, para no volver a bajar las mismas fotos.
+  channelCheckedKey String?
 
   @@id([publicationId, textImageId])
   @@index([textImageId])

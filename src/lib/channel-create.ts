@@ -14,6 +14,7 @@ import { readOne } from '@/lib/channel-sync';
 import { withAccessToken } from '@/lib/connections';
 import { familyByMeasure, fillFamilyCode } from '@/lib/families';
 import { measuresOf, picturesFor, soleMeasurePhotos, type Measure } from '@/lib/media';
+import { saveSentTextCodes, sentTextCodes } from '@/lib/text-images/channel-codes';
 import { available, isManaged } from '@/domain/stock';
 import { SOURCE_SELECT, sourceOf } from '@/lib/stock-plan';
 import { loadTitleRules } from '@/lib/title-rules';
@@ -386,6 +387,7 @@ async function create(db: Db, args: CreateArgs, info: CreateInfo): Promise<Creat
   // Las fotos de todas en una sola lista, y las de cada una por su lugar en la lista.
   const pictures: ChannelPicture[] = [];
   const origins: (string | null)[] = [];
+  const texts: (string | null)[] = [];
   const at = new Map<string, number>();
   const own: number[][] = [];
   for (const t of targets) {
@@ -400,6 +402,7 @@ async function create(db: Db, args: CreateArgs, info: CreateInfo): Promise<Creat
           at.set(key, pictures.length);
           pictures.push(picture);
           origins.push(sent.origins[i]);
+          texts.push(sent.texts[i]);
         }
         return at.get(key)!;
       }),
@@ -482,6 +485,8 @@ async function create(db: Db, args: CreateArgs, info: CreateInfo): Promise<Creat
         agreed: channelPrints,
       };
       await tx.channelCopy.upsert({ where: { publicationId: t.id! }, create: { publicationId: t.id!, ...copy }, update: copy });
+      // El código de cada imagen con texto en esta publicación.
+      if (ids.length > 0) await saveSentTextCodes(tx, t.id!, sentTextCodes(own[i].map((k) => texts[k]), ids), now);
       await tx.channelSyncChange.create({
         data: { publicationId: t.id!, field: 'publication', kind: 'CREATED', after: { externalId: c.externalId }, userId: args.userId },
       });

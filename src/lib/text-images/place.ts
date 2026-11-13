@@ -11,15 +11,15 @@ type Db = PrismaClient;
 type Tx = Prisma.TransactionClient;
 
 /** Las imágenes con texto con PNG y lugar fijo de cada publicación. */
-export async function fixedTextPlaces(db: Db | Tx, publicationIds: string[]): Promise<Map<string, { ref: PhotoRef; place: number }[]>> {
+export async function fixedTextPlaces(db: Db | Tx, publicationIds: string[]): Promise<Map<string, { ref: PhotoRef; place: number; channelPhotoId: string | null }[]>> {
   const links = await db.publicationTextImage.findMany({
     where: { publicationId: { in: publicationIds }, textImage: { pngRef: { not: null }, mediaPlace: { not: null } } },
-    select: { publicationId: true, textImage: { select: { id: true, mediaPlace: true } } },
+    select: { publicationId: true, channelPhotoId: true, textImage: { select: { id: true, mediaPlace: true } } },
   });
-  const out = new Map<string, { ref: PhotoRef; place: number }[]>();
+  const out = new Map<string, { ref: PhotoRef; place: number; channelPhotoId: string | null }[]>();
   for (const l of links) {
     const list = out.get(l.publicationId) ?? [];
-    list.push({ ref: { kind: 'text', id: l.textImage.id }, place: l.textImage.mediaPlace! });
+    list.push({ ref: { kind: 'text', id: l.textImage.id }, place: l.textImage.mediaPlace!, channelPhotoId: l.channelPhotoId });
     out.set(l.publicationId, list);
   }
   return out;
@@ -44,8 +44,14 @@ export async function placeTextImages(db: Db, publicationIds: string[], opts: { 
         const current = parseMedia(row.media);
         if (!current) return;
         const fixed = ((await fixedTextPlaces(tx, [p.id])).get(p.id) ?? []).filter((f) => !removed.has(photoKey(f.ref)));
-        const kept = current.filter((r) => !removed.has(photoKey(r)));
-        const next = placeFixedPhotos(kept, fixed, view.measures.sole ? [] : view.measures.measures);
+        // La versión que ya está en el canal, por su código, no queda repetida al lado de la nueva.
+        const old = new Set(fixed.flatMap((f) => (f.channelPhotoId ? [f.channelPhotoId] : [])));
+        const kept = current.filter((r) => !removed.has(photoKey(r)) && !(r.kind === 'channel' && old.has(r.id)));
+        const next = placeFixedPhotos(
+          kept,
+          fixed.map((f) => ({ ref: f.ref, place: f.place })),
+          view.measures.sole ? [] : view.measures.measures,
+        );
         if (JSON.stringify(next) === JSON.stringify(current)) return;
         await tx.publication.update({ where: { id: p.id }, data: { media: next as Prisma.InputJsonValue } });
       });

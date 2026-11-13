@@ -668,7 +668,10 @@ export async function placeShotPhotos(db: Db, productId: string, now = new Date(
       const windows = pub.measures.sole ? [] : pub.measures.measures;
       // Las imágenes con texto con lugar fijo le ganan al orden del protocolo: quedan en su lugar.
       const fixed = (await fixedTextPlaces(tx, [pub.id])).get(pub.id) ?? [];
-      const media = placeFixedPhotos([...addInOrder(current, inOrder, placeOf, windows), ...atEnd], fixed, windows);
+      // La versión que ya está en el canal, por su código, no queda repetida al lado de la nueva.
+      const old = new Set(fixed.flatMap((f) => (f.channelPhotoId ? [f.channelPhotoId] : [])));
+      const base = addInOrder(current, inOrder, placeOf, windows).filter((r) => !(r.kind === 'channel' && old.has(r.id)));
+      const media = placeFixedPhotos([...base, ...atEnd], fixed, windows);
       await tx.publication.update({ where: { id: pub.id }, data: { media: media as Prisma.InputJsonValue } });
     }
     return mine.length;
