@@ -45,6 +45,8 @@ describe('lista de herramientas', () => {
       'check_photo_measures',
       'audit_compatibilities',
       'list_notes',
+      'get_sync_status',
+      'list_sync_choices',
     ]);
     for (const t of tools) {
       expect(t.inputSchema.type).toBe('object');

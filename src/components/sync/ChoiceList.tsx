@@ -5,7 +5,7 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { FACE_FIELD_LABEL } from '@/domain/channel-sync';
+import { FACE_FIELD_LABEL, type FaceField } from '@/domain/channel-sync';
 import { titleOrUntitled } from '@/domain/publication-title';
 import type { ChoiceRow } from '@/lib/queries/sync';
 import { plural } from '@/lib/format';
@@ -28,18 +28,20 @@ export function ChoiceList({ accountSlug, rows }: { accountSlug: string; rows: C
   const untouched = useMemo(() => rows.filter((r) => !r.worked).map((r) => r.id), [rows]);
   const channelName = rows[0]?.channelName ?? 'el canal';
 
-  async function choose(ids: string[], side: Side, key: string) {
+  async function choose(ids: string[], side: Side, key: string, field?: FaceField) {
     if (ids.length === 0) return;
     setBusy(key);
     setMessage(null);
-    const r = await chooseFacesAction(accountSlug, { publicationIds: ids, side }).catch(() => null);
+    const r = await chooseFacesAction(accountSlug, { publicationIds: ids, side, field }).catch(() => null);
     setBusy(null);
     if (!r) return setMessage({ kind: 'error', text: 'Se cortó la conexión con la app. Probá de nuevo.' });
     if (!r.ok) return setMessage({ kind: 'error', text: r.error });
-    setSelected((prev) => new Set([...prev].filter((id) => !ids.includes(id))));
+    if (!field) setSelected((prev) => new Set([...prev].filter((id) => !ids.includes(id))));
     setMessage({
       kind: 'ok',
-      text:
+      text: field
+        ? `Listo: ${FACE_FIELD_LABEL[field].toLowerCase()} ${side === 'channel' ? `quedó con lo de ${channelName}` : 'quedó con lo de la app, como borrador para subir'}.`
+        :
         side === 'channel'
           ? `Listo: ${plural(r.publications, 'publicación', 'publicaciones')} tomaron lo de ${channelName}.`
           : `Listo: ${plural(r.publications, 'publicación', 'publicaciones')} quedaron con lo de la app, como borrador para subir.`,
@@ -114,7 +116,34 @@ export function ChoiceList({ accountSlug, rows }: { accountSlug: string; rows: C
 
             {row.fields.map((f) => (
               <div key={f.field} className="overflow-hidden rounded-md border sm:ml-7">
-                <div className="border-b bg-muted/50 px-3 py-1.5 text-xs font-semibold">{FACE_FIELD_LABEL[f.field]}</div>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b bg-muted/50 px-3 py-1.5">
+                  <span className="text-xs font-semibold">{FACE_FIELD_LABEL[f.field]}</span>
+                  {/* Con más de un dato distinto, se puede elegir cada uno por separado. */}
+                  {row.fields.length > 1 ? (
+                    <span className="ml-auto flex flex-wrap gap-1">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 px-2 text-xs"
+                        disabled={busy !== null}
+                        pending={busy === `${row.id}-${f.field}-channel`}
+                        onClick={() => choose([row.id], 'channel', `${row.id}-${f.field}-channel`, f.field)}
+                      >
+                        Este, de {row.channelName}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 px-2 text-xs"
+                        disabled={busy !== null}
+                        pending={busy === `${row.id}-${f.field}-app`}
+                        onClick={() => choose([row.id], 'app', `${row.id}-${f.field}-app`, f.field)}
+                      >
+                        Este, de la app
+                      </Button>
+                    </span>
+                  ) : null}
+                </div>
                 <div className="grid gap-px bg-border sm:grid-cols-2">
                   <Side label="En la app" text={f.app} />
                   <Side label={`En ${row.channelName}`} text={f.channel} />
@@ -130,10 +159,10 @@ export function ChoiceList({ accountSlug, rows }: { accountSlug: string; rows: C
                 pending={busy === `${row.id}-channel`}
                 onClick={() => choose([row.id], 'channel', `${row.id}-channel`)}
               >
-                Usar lo de {row.channelName}
+                {row.fields.length > 1 ? `Todo de ${row.channelName}` : `Usar lo de ${row.channelName}`}
               </Button>
               <Button size="sm" variant="outline" disabled={busy !== null} pending={busy === `${row.id}-app`} onClick={() => choose([row.id], 'app', `${row.id}-app`)}>
-                Mantener lo de la app
+                {row.fields.length > 1 ? 'Todo de la app' : 'Mantener lo de la app'}
               </Button>
             </div>
           </li>

@@ -45,21 +45,29 @@ function preview(field: FaceField, value: FaceValues[FaceField], other: FaceValu
     .join('\n');
 }
 
-export async function loadSyncOverview(accountId: string) {
+/** Una publicación que la lectura no encontró en el canal: puede estar borrada allá o ser de otra cuenta. */
+export type MissingRow = { id: string; externalId: string | null; title: string | null; storeName: string; channelName: string; since: Date };
+
+/**
+ * Lo que muestra Sincronización. Para no traer todos los textos del canal de
+ * todas las publicaciones, primero compara las huellas y después trae lo leído
+ * del canal solo de las que tienen algo para elegir.
+ */
+export async function loadSyncOverview(accountId: string, db: PrismaClient = prisma) {
   const [stores, runs, publications, changes] = await Promise.all([
     // Las que tienen conexión, aunque haya que volver a conectarlas.
-    prisma.store.findMany({
+    db.store.findMany({
       where: { accountId, connection: { isNot: null } },
       select: { id: true, name: true, channel: { select: { kind: true, name: true } }, connection: { select: { status: true } } },
       orderBy: { createdAt: 'asc' },
     }),
-    prisma.channelSync.findMany({
+    db.channelSync.findMany({
       where: { store: { accountId } },
       orderBy: { startedAt: 'desc' },
       take: RECENT_RUNS,
       include: { user: { select: { name: true } }, store: { select: { name: true } } },
     }),
-    prisma.publication.findMany({
+    db.publication.findMany({
       where: { product: { accountId }, channelCopy: { isNot: null } },
       select: {
         id: true,
@@ -75,13 +83,12 @@ export async function loadSyncOverview(accountId: string) {
         warranty: true,
         pipelineStatus: true,
         store: { select: { name: true, channel: { select: { name: true } } } },
-        channelCopy: {
-          select: { title: true, description: true, attributes: true, photos: true, photoIds: true, variations: true, price: true, installments: true, discount: true, quantity: true, warranty: true, fingerprints: true, agreed: true, missingSince: true },
-        },
+        // Solo las huellas: lo leído entero se trae después, de las que hay que elegir.
+        channelCopy: { select: { price: true, installments: true, discount: true, fingerprints: true, agreed: true, missingSince: true } },
       },
       orderBy: { externalId: 'asc' },
     }),
-    prisma.channelSyncChange.findMany({
+    db.channelSyncChange.findMany({
       where: { publication: { product: { accountId } } },
       orderBy: { createdAt: 'desc' },
       take: RECENT_CHANGES,
@@ -89,32 +96,48 @@ export async function loadSyncOverview(accountId: string) {
     }),
   ]);
 
-  const toChoose: ChoiceRow[] = [];
+  const pending: { p: (typeof publications)[number]; choose: FaceField[] }[] = [];
+  const missing: MissingRow[] = [];
   let drafts = 0;
   let upToDate = 0;
   for (const p of publications) {
     const copy = p.channelCopy!;
-    if (copy.missingSince) continue;
-    const app = faceValues(p);
-    const channel = channelFaceValues(copy);
-    const summary = faceSummary(fingerprintsOf(app), copy);
+    if (copy.missingSince) {
+      missing.push({ id: p.id, externalId: p.externalId, title: p.title, storeName: p.store.name, channelName: p.store.channel.name, since: copy.missingSince });
+      continue;
+    }
+    const summary = faceSummary(fingerprintsOf(faceValues(p)), copy);
     if (summary.draft.length > 0) drafts++;
     if (summary.draft.length === 0 && summary.choose.length === 0) upToDate++;
-    if (summary.choose.length === 0) continue;
-    toChoose.push({
-      id: p.id,
-      externalId: p.externalId,
-      storeName: p.store.name,
-      channelName: p.store.channel.name,
-      title: p.title,
-      worked: p.pipelineStatus !== 'UNTOUCHED',
-      fields: summary.choose.map((field) => ({
-        field,
-        app: preview(field, app[field], channel[field]),
-        channel: preview(field, channel[field], app[field]),
-      })),
-    });
+    if (summary.choose.length > 0) pending.push({ p, choose: summary.choose });
   }
+
+  // Lo leído del canal, solo de las que tienen algo para elegir.
+  const copies = pending.length
+    ? await db.channelCopy.findMany({
+        where: { publicationId: { in: pending.map((x) => x.p.id) } },
+        select: { publicationId: true, title: true, description: true, attributes: true, photos: true, photoIds: true, variations: true, price: true, installments: true, discount: true, quantity: true, warranty: true },
+      })
+    : [];
+  const copyOf = new Map(copies.map((c) => [c.publicationId, c]));
+  const toChoose: ChoiceRow[] = pending.flatMap(({ p, choose }) => {
+    const copy = copyOf.get(p.id);
+    if (!copy) return [];
+    const app = faceValues(p);
+    const channel = channelFaceValues(copy);
+    return [
+      {
+        id: p.id,
+        externalId: p.externalId,
+        storeName: p.store.name,
+        channelName: p.store.channel.name,
+        title: p.title,
+        worked: p.pipelineStatus !== 'UNTOUCHED',
+        fields: choose.map((field) => ({ field, app: preview(field, app[field], channel[field]), channel: preview(field, channel[field], app[field]) })),
+      },
+    ];
+  });
+  missing.sort((a, b) => b.since.getTime() - a.since.getTime());
 
   return {
     stores: stores
@@ -132,6 +155,7 @@ export async function loadSyncOverview(accountId: string) {
       }),
     runs,
     toChoose,
+    missing,
     drafts,
     upToDate,
     copies: publications.length,

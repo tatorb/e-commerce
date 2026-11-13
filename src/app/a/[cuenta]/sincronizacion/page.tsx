@@ -153,6 +153,30 @@ export default async function SyncPage({ params }: { params: Promise<{ cuenta: s
           )}
         </SectionCard>
 
+        {overview.missing.length > 0 ? (
+          <SectionCard
+            title={`Ya no están en ${channels}`}
+            count={overview.missing.length}
+            description="La lectura no las encontró en el canal: pueden estar borradas allá o ser de otra cuenta. La app no les cambia nada mientras tanto. Si vuelven a aparecer, se leen como siempre."
+            collapsible
+            defaultOpen
+          >
+            <ul className="divide-y text-sm">
+              {overview.missing.map((m) => (
+                <li key={m.id} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 px-4 py-2.5">
+                  <Link href={`/a/${account.slug}/publicaciones/${m.id}`} className="font-medium underline-offset-4 hover:underline">
+                    {titleOrUntitled(m.title)}
+                  </Link>
+                  <span className="text-xs text-muted-foreground">
+                    {m.externalId ?? 'Sin código'} · {m.storeName}
+                  </span>
+                  <span className="basis-full text-xs text-muted-foreground sm:ml-auto sm:basis-auto">No aparece desde el {formatDateTime(m.since, tz)}</span>
+                </li>
+              ))}
+            </ul>
+          </SectionCard>
+        ) : null}
+
         <SectionCard
           title="Lo que cambió por la sincronización"
           collapsible

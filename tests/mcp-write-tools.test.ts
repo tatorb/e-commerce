@@ -48,7 +48,8 @@ describe('herramientas de escritura en la lista', () => {
     expect(tools.get('audit_compatibilities')).toMatchObject({ readOnlyHint: true });
     expect(tools.get('add_note')).toMatchObject({ readOnlyHint: false, destructiveHint: false });
     expect(tools.get('delete_note')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
-    expect(tools.size).toBe(84);
+    expect(tools.get('choose_sync_side')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+    expect(tools.size).toBe(88);
   });
 });
 

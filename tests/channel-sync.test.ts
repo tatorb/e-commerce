@@ -5,6 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@/generated/prisma/client';
 import { DISCOUNT_GRACE_MS, discountText, faceSummary, faceValues, fieldState, fingerprint, fingerprintsOf, heldDiscount, installmentsText, planFaces, storedPrints } from '@/domain/channel-sync';
 import { chooseFaces, runSyncStep, startSync, syncAllStores } from '@/lib/channel-sync';
+import type { McpContext } from '@/lib/mcp/tool';
 import { encrypt } from '@/lib/crypto';
 import { resetVisitsTogether } from '@/channels/mercadolibre/listings';
 
@@ -89,6 +90,10 @@ describe('de qué lado cambió cada dato', () => {
     ]);
   });
 });
+
+// Las herramientas de Claude usan la base de la app: en las pruebas, la de prueba.
+process.env.DATABASE_URL ??= process.env.TEST_DATABASE_URL ?? 'postgresql://sin-base@localhost/sin-base';
+const { SYNC_TOOLS } = await import('@/lib/mcp/sync-tools');
 
 const url = process.env.TEST_DATABASE_URL;
 
@@ -361,6 +366,37 @@ describe.skipIf(!url)('la lectura automática en la base', () => {
     expect(await state(b.id)).toEqual({ draft: ['title'], choose: [] });
     // Otra cuenta no puede elegir.
     expect(await chooseFaces(db, { accountId: 'otra', publicationIds: [b.id], side: 'channel', userId: null })).toEqual({ publications: 0, fields: 0 });
+  });
+
+  it('Claude ve cómo va, lo que hay para elegir y las que ya no están; elige dato por dato y pide leer', async () => {
+    const a = await publication('MLA1', { title: 'Título de la app', description: 'Descripción de la app.' });
+    const b = await publication('MLA2');
+    await publication('MLA9');
+    items = { MLA1: item(), MLA2: item(), MLA9: item() };
+    await pass();
+    // La segunda lectura ya no encuentra MLA9.
+    delete items.MLA9;
+    const ctx = { db, userId: null, access: { isAdmin: true, permissions: {}, accountIds: [] }, baseUrl: 'https://app' } as unknown as McpContext;
+    const tool = (name: string) => SYNC_TOOLS.find((t) => t.name === name)!;
+    const call = (name: string, args: Record<string, unknown> = {}) => tool(name).run(ctx, tool(name).input.parse({ cuenta: 'prueba', ...args })) as Promise<Record<string, unknown>>;
+
+    const read = await call('sync_now');
+    expect(read).toMatchObject({ estado: 'terminó', leidas: 2 });
+    const status = await call('get_sync_status');
+    expect(status).toMatchObject({ para_elegir: 1, al_dia: 1 });
+    expect(status.ya_no_estan_en_el_canal).toEqual([expect.objectContaining({ codigo: 'MLA9' })]);
+    expect((status.tiendas as { ultima_lectura: { leyo: string } }[])[0].ultima_lectura.leyo).toBe('2 de 3');
+
+    const choices = await call('list_sync_choices');
+    const datos = (choices.publicaciones as { datos: { dato: string }[] }[])[0].datos.map((d) => d.dato);
+    expect(datos.sort()).toEqual(['descripción', 'título']);
+    // Solo el título, del canal: la descripción queda para elegir.
+    expect(await call('choose_sync_side', { publicaciones: [a.id], lado: 'canal', dato: 'título' })).toMatchObject({ cambio: true, datos: 1 });
+    expect((await db.publication.findUniqueOrThrow({ where: { id: a.id } })).title).toBe('Kit Embrague Ford Ka');
+    expect((await state(a.id)).choose).toEqual(['description']);
+    expect(await call('choose_sync_side', { publicaciones: [a.id], lado: 'app' })).toMatchObject({ cambio: true, datos: 1 });
+    expect(await state(a.id)).toEqual({ draft: ['description'], choose: [] });
+    expect(await call('choose_sync_side', { publicaciones: [b.id], lado: 'canal' })).toMatchObject({ cambio: false });
   });
 
   it('sigue donde quedó si se acaba el tiempo, y nadie más la toma mientras corre', async () => {
