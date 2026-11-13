@@ -42,6 +42,7 @@ import { LIVE_OPTION } from '@/domain/sale-options';
 import { WARRANTY_TYPE_LABEL, type Warranty } from '@/domain/warranty';
 import { checkTitle } from '@/domain/titles';
 import { readOne } from '@/lib/channel-sync';
+import { sendPendingSku, type SkuOutcome } from '@/lib/publication-measure';
 import { photoOriginsOf, photoSiblings, picturesFor } from '@/lib/media';
 import { withAccessToken } from '@/lib/connections';
 import { listingTargets } from '@/lib/variant-listings';
@@ -280,6 +281,8 @@ export type PushResult = {
   confirmed: boolean;
   // Las campañas pedidas desde el Pipeline: a cuáles se sumó o de cuáles salió, o por qué no.
   campaigns: CampaignOutcome[];
+  // El SKU de la medida, si estaba en Por subir: si se mandó o por qué no.
+  sku?: SkuOutcome;
 };
 
 /**
@@ -289,7 +292,8 @@ export type PushResult = {
 export async function pushDrafts(
   db: Db,
   // campaigns: si también van las campañas pedidas; sin decirlo, van cuando se sube todo.
-  args: { accountId: string; publicationId: string; fields?: FaceField[]; campaigns?: boolean; userId: string | null; now?: Date },
+  // sku: si también va el SKU de la medida que quedó para mandar; sin decirlo, va cuando se sube todo.
+  args: { accountId: string; publicationId: string; fields?: FaceField[]; campaigns?: boolean; sku?: boolean; userId: string | null; now?: Date },
 ): Promise<PushResult> {
   const now = args.now ?? new Date();
   const p = await loadForPush(db, args.accountId, args.publicationId);
@@ -529,6 +533,12 @@ export async function pushDrafts(
       if (!(e instanceof CampaignError)) throw e;
       result.campaigns = [{ ref: '', name: 'Campañas', kind: 'Campañas', action: 'join', price: null, ok: false, message: e.message }];
     }
+  }
+
+  // El SKU de la medida, si estaba para mandar: va con todo lo demás.
+  if (args.sku ?? !args.fields) {
+    const sku = await sendPendingSku(db, { accountId: args.accountId, publicationId: p.id });
+    if (sku) result.sku = sku;
   }
 
   if (result.sent.length > 0) {

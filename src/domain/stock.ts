@@ -35,7 +35,28 @@ export function stockSlots(variants: VariantLike[]): StockSlot[] {
   return variants.map((v, i) => ({ key: quantityKey(v, i), label: v.measure ?? v.sku ?? `Medida ${i + 1}`, sku: v.sku, measure: v.measure }));
 }
 
-const skuText = (sku: string | null | undefined) => sku?.trim().toUpperCase() || null;
+export const skuText = (sku: string | null | undefined) => sku?.trim().toUpperCase() || null;
+
+/**
+ * Si el SKU del canal es el del producto sin la medida: el número de pieza o
+ * lo que comparten los SKU de todas sus medidas (SP-413 de SP-413-00 y
+ * SP-413-50). Solo en productos con varias medidas y cuando no coincide con
+ * ninguna: entonces hay que elegirle la medida a mano.
+ */
+export function skuWithoutMeasure(skus: string[], variants: VariantLike[], partNumber: string | null = null): boolean {
+  const own = variants.map((v) => skuText(v.sku)).filter((s): s is string => s !== null);
+  if (new Set(variants.map((v) => variantKey(v)).filter(Boolean)).size < 2) return false;
+  const wanted = skus.map(skuText).filter((s): s is string => s !== null);
+  if (wanted.length === 0 || wanted.some((s) => own.includes(s))) return false;
+  const bases = new Set<string>();
+  if (skuText(partNumber)) bases.add(skuText(partNumber)!);
+  if (own.length === variants.length && own.length >= 2) {
+    // Lo que comparten todos antes del último separador.
+    const heads = own.map((s) => s.replace(/[-_ .\/]+[^-_ .\/]*$/, ''));
+    if (heads.every((h) => h && h === heads[0] && h !== own[0])) bases.add(heads[0]);
+  }
+  return wanted.some((s) => bases.has(s));
+}
 
 /**
  * Qué medida del producto es una del canal: la misma clave, si no el mismo SKU

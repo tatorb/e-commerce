@@ -15,6 +15,7 @@ import {
   type UpdateMode,
 } from '@/domain/content';
 import { parseMetrics } from '@/domain/measurements';
+import { skuWithoutMeasure } from '@/domain/stock';
 import { writeProduct } from '@/domain/products';
 import { insertPublication, publicationDataSchema } from '@/domain/publications';
 import { isFieldKey, type FieldKey } from './fields';
@@ -121,6 +122,18 @@ async function findExisting(
 }
 
 const isConflict = (f: Existing | SkuConflict | null): f is SkuConflict => f !== null && 'conflict' in f;
+
+/** El aviso de una fila cuyo SKU es el del producto sin la medida, en un producto con varias. Null si no. */
+export function measurelessSkuNote(sku: string): string {
+  return `SKU sin medida, elegila en la publicación: en el canal tiene ${sku}, que no dice de qué medida de la ficha es.`;
+}
+
+async function measurelessSku(db: Prisma.TransactionClient | PrismaClient, productId: string, skus: string[]): Promise<string | null> {
+  if (skus.length === 0) return null;
+  const product = await db.product.findUnique({ where: { id: productId }, select: { partNumber: true, variants: { select: { sku: true, measure: true } } } });
+  if (!product || !skuWithoutMeasure(skus, product.variants, product.partNumber)) return null;
+  return measurelessSkuNote(skus[0]);
+}
 
 /** El aviso de una fila con SKU de productos distintos. */
 export function skuConflictNote(names: string[]): string {
@@ -381,6 +394,10 @@ export async function previewRows(
       replaceChanges.push(...onlyAttributes('REPLACE'));
     }
     const fillAfter = new Map(fillChanges.map((c) => [c.field, c.after]));
+    const notes = sameListing ? [] : [otherPublicationNote(found.productName)];
+    // Un SKU que es el del producto sin la medida: la app no sabe cuál vende.
+    const missing = await measurelessSku(db, found.productId, record.skus);
+    if (missing) notes.push(missing);
     previews.push({
       rowNumber: record.rowNumber,
       fill: fillChanges.map((c) => c.field),
@@ -388,7 +405,7 @@ export async function previewRows(
         .filter((c) => !fillAfter.has(c.field) || !sameValue(fillAfter.get(c.field), c.after))
         .map((c) => c.field),
       warnings: replace.warnings,
-      notes: sameListing ? [] : [otherPublicationNote(found.productName)],
+      notes,
       newProduct: false,
     });
   }

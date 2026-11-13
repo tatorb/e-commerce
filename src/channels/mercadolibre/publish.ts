@@ -763,6 +763,11 @@ export const mercadolibrePublisher: ChannelPublisher = {
     }
   },
 
+  async setSku(accessToken, externalId, sku) {
+    // El SKU del vendedor es un dato más de la publicación: se cambia solo ese.
+    await send('PUT', `/items/${encodeURIComponent(externalId)}`, accessToken, { attributes: [{ id: 'SELLER_SKU', value_name: sku }] });
+  },
+
   async updateAttributes(accessToken, externalId, attributes) {
     // Mercado Libre cambia los que llegan y deja los demás como están.
     await send('PUT', `/items/${encodeURIComponent(externalId)}`, accessToken, { attributes: attributes.map(attributeBody) });

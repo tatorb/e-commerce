@@ -30,7 +30,7 @@ export function ToPushList({ accountSlug, rows }: { accountSlug: string; rows: T
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [outcomes, setOutcomes] = useState<Record<string, Outcome>>({});
   const stop = useRef(false);
-  const canPushRow = (r: ToPushRow) => !r.blocked && (r.draft.length > 0 || r.campaigns.length > 0);
+  const canPushRow = (r: ToPushRow) => !r.blocked && (r.draft.length > 0 || r.campaigns.length > 0 || r.sku !== null);
   const pushable = rows.filter(canPushRow);
 
   async function push(ids: string[]) {
@@ -43,15 +43,17 @@ export function ToPushList({ accountSlug, rows }: { accountSlug: string; rows: T
       const done = [
         r && r.ok && r.sent.length > 0 ? labels(r.sent) : null,
         ...campaignsDone.map((c) => `${c.action === 'join' ? 'se sumó a' : 'salió de'} ${c.name}`),
+        r && r.ok && r.sku?.ok ? `SKU ${r.sku.sku}` : null,
       ].filter(Boolean);
+      const skuFailed = r && r.ok && r.sku && !r.sku.ok ? `SKU ${r.sku.sku}: ${r.sku.message}` : null;
       const outcome: Outcome = !r
         ? { kind: 'error', text: 'Se cortó la conexión con la app.' }
         : !r.ok
           ? { kind: 'error', text: r.error }
-          : r.rejected.length > 0 || campaignsFailed.length > 0
+          : r.rejected.length > 0 || campaignsFailed.length > 0 || skuFailed
             ? {
                 kind: 'error',
-                text: [...r.rejected.map((x) => `${FACE_FIELD_LABEL[x.field]}: ${x.message}`), ...campaignsFailed.map((c) => `${c.name}: ${c.message}`)].join(' '),
+                text: [...r.rejected.map((x) => `${FACE_FIELD_LABEL[x.field]}: ${x.message}`), ...campaignsFailed.map((c) => `${c.name}: ${c.message}`), ...(skuFailed ? [skuFailed] : [])].join(' '),
               }
             : { kind: 'ok', text: `Subido: ${done.join(', ')}.` };
       setOutcomes((prev) => ({ ...prev, [ids[i]]: outcome }));
@@ -132,6 +134,7 @@ export function ToPushList({ accountSlug, rows }: { accountSlug: string; rows: T
                 <div className="flex flex-wrap gap-1.5 text-xs">
                   {row.draft.length > 0 ? <Badge variant="secondary">Sin subir: {labels(row.draft)}</Badge> : null}
                   {row.choose.length > 0 ? <Badge variant="destructive">Para elegir: {labels(row.choose)}</Badge> : null}
+                  {row.sku ? <Badge variant="secondary">SKU de la medida: {row.sku}</Badge> : null}
                   {row.campaigns.map((c) => (
                     <Badge key={c.text} variant="secondary">
                       Campaña: {c.text.charAt(0).toLowerCase() + c.text.slice(1)}

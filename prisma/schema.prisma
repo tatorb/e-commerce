@@ -559,6 +559,9 @@ model Publication {
   // La medida que vende, cuando vende una sola: la clave de src/domain/media.ts
   // (variantKey). Null: vende todas, o todavía no se sabe.
   variantKey        String?
+  // El SKU de su medida para mandar al canal, desde Por subir, cuando en el
+  // canal tiene otro (por ejemplo sin la medida). Null: nada para mandar.
+  skuToPush         String?
   // En una familia: la medida tiene su propio precio y no sigue al de la familia.
   ownPrice          Boolean               @default(false)
   // Una opción de venta con precio personalizado: no se recalcula desde el precio sin cuotas.

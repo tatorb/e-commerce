@@ -180,6 +180,8 @@ export type ToPushRow = {
   rejected: { field: FaceField; message: string }[];
   // Sumarse a una campaña o salir, pedido desde el Pipeline, y por qué no se pudo la última vez.
   campaigns: { text: string; rejection: string | null }[];
+  // El SKU de su medida para mandar al canal.
+  sku: string | null;
   // Por qué no se puede subir desde la app, si no se puede.
   blocked: string | null;
   pipeline: { pipelineStatus: PipelineStatus; pipelineStep: PipelineStep | null; pipelineRemoval: PipelineRemoval | null };
@@ -201,6 +203,7 @@ export async function listToPush(accountId: string, db: PrismaClient = prisma): 
       discount: true,
       quantities: true,
       warranty: true,
+      skuToPush: true,
       pipelineStatus: true,
       pipelineStep: true,
       pipelineRemoval: true,
@@ -213,7 +216,7 @@ export async function listToPush(accountId: string, db: PrismaClient = prisma): 
   const rows: ToPushRow[] = [];
   for (const p of publications) {
     const summary = faceSummary(fingerprintsOf(faceValues(p)), p.channelCopy);
-    if (summary.draft.length === 0 && summary.choose.length === 0 && p.campaignRequests.length === 0) continue;
+    if (summary.draft.length === 0 && summary.choose.length === 0 && p.campaignRequests.length === 0 && !p.skuToPush) continue;
     const channelName = p.store.channel.name;
     rows.push({
       id: p.id,
@@ -228,6 +231,7 @@ export async function listToPush(accountId: string, db: PrismaClient = prisma): 
         text: campaignText({ action: c.action === 'JOIN' ? 'join' : 'leave', name: c.name, kind: c.kind, price: c.price === null ? null : Number(c.price) }),
         rejection: c.rejection,
       })),
+      sku: p.skuToPush,
       blocked: !getChannelPublisher(p.store.channel.kind)
         ? `Todavía no se pueden subir cambios a ${channelName}.`
         : p.store.connection?.status !== 'ACTIVE'

@@ -35,6 +35,8 @@ import { PendingChangesCard } from '@/components/publication/PendingChangesCard'
 import { campaignText, pendingCampaigns } from '@/lib/channel-campaigns';
 import { MediaOrganizer } from '@/components/publication/MediaOrganizer';
 import { MeasureCheckCard } from '@/components/pipeline/MeasureCheckCard';
+import { MeasurePickerCard, measurePickerNeeded } from '@/components/publication/MeasurePickerCard';
+import { loadMeasureChoice } from '@/lib/publication-measure';
 import { measureCheck } from '@/lib/photo-measures';
 import { TextImagesStep } from '@/components/text-images/TextImagesStep';
 import { loadTextImageStep, MAX_TEXT_IMAGES } from '@/lib/text-images/step';
@@ -233,6 +235,8 @@ export default async function PipelineStepPage({
       : null;
   // Fotos y Organización de multimedia: las fotos o publicaciones de la familia con una medida que ya no está.
   const measures = viewing === 'IMAGES' || viewing === 'MEDIA' ? await measureCheck(prisma, pub.productId) : null;
+  // La medida que vende, si su SKU en el canal no la dice.
+  const measureChoice = pub.externalId ? await loadMeasureChoice(prisma, { accountId: account.id, publicationId: pub.id }) : null;
   // Con varias medidas y fotos marcadas, Fotos las muestra separadas por medida: las de una no se mezclan con las de otra.
   const photoGroups =
     images && measures && measures.measures.length >= 2 && images[0].some((e) => e.variantKey)
@@ -370,6 +374,7 @@ export default async function PipelineStepPage({
       </PageHeader>
       <PageBody>
         <RefreshArea>
+        {measureChoice && measurePickerNeeded(measureChoice) ? <MeasurePickerCard accountSlug={account.slug} publicationId={pub.id} choice={measureChoice} /> : null}
         <NotesCard
           accountSlug={account.slug}
           publicationId={pub.id}

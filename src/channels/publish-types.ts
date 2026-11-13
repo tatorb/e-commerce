@@ -216,6 +216,11 @@ export interface ChannelPublisher {
    * queda como está. Lanza PublishError si el canal no lo acepta.
    */
   setWarranty(accessToken: string, externalId: string, warranty: Warranty): Promise<void>;
+  /**
+   * Deja ese SKU del vendedor en una publicación sin medidas en el canal. Lo
+   * demás queda como está. Lanza PublishError si el canal no lo acepta.
+   */
+  setSku?(accessToken: string, externalId: string, sku: string): Promise<void>;
   /** Cambia esos datos de catálogo; los demás quedan como están. Lanza PublishError si el canal no lo acepta. */
   updateAttributes(accessToken: string, externalId: string, attributes: ChannelAttributeUpdate[]): Promise<void>;
   /** Pausa, reactiva, finaliza o elimina. Lanza PublishError si el canal no lo acepta. */

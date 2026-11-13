@@ -76,6 +76,8 @@ import { followsStockOf, managedNote, plannedText, plansFor } from '@/lib/stock-
 import { FollowStockSwitch } from '@/components/publication/FollowStockSwitch';
 import { SharedPhotosNote } from '@/components/publication/SharedPhotosNote';
 import { PublicationFactsRow } from '@/components/publication/PublicationFactsRow';
+import { MeasurePickerCard, measurePickerNeeded } from '@/components/publication/MeasurePickerCard';
+import { loadMeasureChoice } from '@/lib/publication-measure';
 import { loadPublicationFacts } from '@/lib/publication-facts';
 import { can } from '@/domain/access';
 import { formatDateTime, plural } from '@/lib/format';
@@ -225,7 +227,7 @@ export default async function PublicationPage({
       />
     ) : null;
   const compat = face !== 'historial' ? await loadCompatibilityView(prisma, account.id, p.id) : null;
-  const [others, history, knowledge, qa, tasks, people, stockPlans, factsOf, family, covers, notes] = await Promise.all([
+  const [others, history, knowledge, qa, tasks, people, stockPlans, factsOf, family, covers, notes, measureChoice] = await Promise.all([
     prisma.publication.findMany({
       where: { productId: p.product.id, id: { not: p.id } },
       orderBy: { createdAt: 'asc' },
@@ -254,6 +256,8 @@ export default async function PublicationPage({
     productCovers([p.product.id]),
     // Las notas del equipo, de la familia.
     face !== 'historial' ? listNotes(prisma, { accountId: account.id, publicationId: p.id }) : Promise.resolve([]),
+    // La medida que vende, si su SKU en el canal no la dice.
+    face !== 'historial' && p.externalId ? loadMeasureChoice(prisma, { accountId: account.id, publicationId: p.id }) : Promise.resolve(null),
   ]);
   const facts = factsOf.get(p.id) ?? null;
   const stockPlan = stockPlans.get(p.id) ?? null;
@@ -596,6 +600,7 @@ export default async function PublicationPage({
             </SectionBody>
           </SectionCard>
         ) : null}
+        {measureChoice && measurePickerNeeded(measureChoice) ? <MeasurePickerCard accountSlug={account.slug} publicationId={p.id} choice={measureChoice} /> : null}
         <NotesCard
           accountSlug={account.slug}
           publicationId={p.id}
