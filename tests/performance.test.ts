@@ -227,6 +227,10 @@ describe.skipIf(!url)('rendimiento en la base', () => {
       ['MLA1000000002', 80, 0, 0, 'orange'],
       ['MLA1000000001', 12, 2, 16.7, 'green'],
     ]);
+    // El período anterior: sin todas sus visitas leídas, solo las ventas.
+    expect(d.rows[1].previous).toEqual({ visits: null, sales: 1, conversion: null });
+    // Las últimas 8 semanas de visitas, la actual al final.
+    expect(d.rows[1].weeks?.map((w) => w.visits)).toEqual([40, null, null, null, null, 5, null, 7]);
     expect(d.rows[1].lastCorrection).toEqual({ at: ago(5), fields: expect.arrayContaining(['title', 'price']) });
     expect(d.rows[1].lastCorrection?.fields).toHaveLength(2);
     expect(d.rows[0].lastCorrection).toBeNull();
@@ -234,6 +238,9 @@ describe.skipIf(!url)('rendimiento en la base', () => {
     expect(d.updatedAt).toEqual(ago(0.1));
     expect(d.options.brands).toEqual(['Otra marca', 'Persan']);
 
+    // Con el período anterior leído entero: visitas, ventas y conversión para comparar.
+    await visit(a.id, 59, 0);
+    expect((await load()).rows.find((r) => r.id === a.id)?.previous).toEqual({ visits: 40, sales: 1, conversion: 2.5 });
     // 60 días: entran las visitas y la venta de hace 45 y 50 días.
     const d60 = await load({ periodo: '60' });
     expect(d60.rows.find((r) => r.externalId === 'MLA1000000001')).toMatchObject({ visits: 52, sales: 3 });

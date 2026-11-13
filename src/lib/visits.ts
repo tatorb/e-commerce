@@ -2,11 +2,12 @@ import type { PrismaClient } from '@/generated/prisma/client';
 import { ConnectError } from '@/channels/connect';
 import { getChannelListings } from '@/channels/listings';
 import { withAccessToken } from '@/lib/connections';
-import { VISIT_HISTORY_DAYS, visitsSummary, type VisitDay, type VisitsSummary } from '@/domain/visits';
+import { VISIT_FIRST_READ_DAYS, VISIT_HISTORY_DAYS, VISIT_KEEP_DAYS, visitsSummary, type VisitDay, type VisitsSummary } from '@/domain/visits';
 
 // Las visitas de cada publicación día por día, leídas del canal una vez por
-// día. La primera vez se traen los últimos 90 días; después, la última
-// semana, porque el canal puede corregir los días recientes. Recibe la base
+// día. La primera vez se traen los últimos 150 días, lo más que da el canal;
+// después, la última semana, porque el canal puede corregir los días
+// recientes. Se guarda un año, para comparar períodos en Rendimiento. Recibe la base
 // por parámetro para poder probarlo con una base de prueba y un canal simulado.
 
 type Db = PrismaClient;
@@ -27,8 +28,8 @@ async function saveDays(db: Db, publicationId: string, days: VisitDay[], now: Da
       await tx.publicationVisitDay.deleteMany({ where: { publicationId, day: { gte: dayDate(days[0].day) } } });
       await tx.publicationVisitDay.createMany({ data: days.map((d) => ({ publicationId, day: dayDate(d.day), visits: d.visits })), skipDuplicates: true });
     }
-    // Lo de más de 90 días ya no se muestra.
-    await tx.publicationVisitDay.deleteMany({ where: { publicationId, day: { lt: new Date(now.getTime() - (VISIT_HISTORY_DAYS + 7) * DAY) } } });
+    // Lo de más de un año ya no se usa.
+    await tx.publicationVisitDay.deleteMany({ where: { publicationId, day: { lt: new Date(now.getTime() - VISIT_KEEP_DAYS * DAY) } } });
     await tx.publication.update({ where: { id: publicationId }, data: { visitsReadAt: now } });
   });
 }
@@ -83,6 +84,15 @@ export async function readAllVisits(
       select: { id: true, externalId: true, visitsReadAt: true },
     });
     if (due.length === 0) continue;
+    // Las que se leyeron cuando solo se traían 90 días: se completan una vez hasta lo que da el canal.
+    const first = await db.publicationVisitDay.groupBy({ by: ['publicationId'], where: { publicationId: { in: due.map((p) => p.id) } }, _min: { day: true } });
+    const firstOf = new Map(first.map((r) => [r.publicationId, r._min.day]));
+    const backfillBefore = new Date(clock().getTime() - (VISIT_HISTORY_DAYS + 14) * DAY);
+    const daysFor = (p: { id: string; visitsReadAt: Date | null }) => {
+      if (!p.visitsReadAt) return VISIT_FIRST_READ_DAYS;
+      const f = firstOf.get(p.id);
+      return f && f > backfillBefore ? VISIT_FIRST_READ_DAYS : RECENT_DAYS;
+    };
     try {
       await withAccessToken(db, store.id, async (token) => {
         for (let i = 0; i < due.length; i += BATCH) {
@@ -92,7 +102,7 @@ export async function readAllVisits(
           }
           await Promise.all(
             due.slice(i, i + BATCH).map(async (p) => {
-              const days = await readDailyVisits(token, p.externalId!, p.visitsReadAt ? RECENT_DAYS : VISIT_HISTORY_DAYS).catch((e) => {
+              const days = await readDailyVisits(token, p.externalId!, daysFor(p)).catch((e) => {
                 const message = e instanceof Error ? e.message : String(e);
                 console.error('No se pudieron leer las visitas', p.externalId, message);
                 out.failed.push({ externalId: p.externalId!, message });

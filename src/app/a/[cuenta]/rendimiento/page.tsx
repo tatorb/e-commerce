@@ -6,7 +6,7 @@ import { Card } from '@/components/ui/card';
 import { FilterSelect } from '@/components/performance/FilterSelect';
 import { ReadVisitsButton } from '@/components/performance/ReadVisitsButton';
 import { CHANNEL_STATUS_LABEL } from '@/domain/channel-status';
-import { correctionText, lightHelp, LIGHT_LABEL, LIGHT_ORDER, PERIODS, type Light } from '@/domain/performance';
+import { correctionText, countChange, lightHelp, LIGHT_LABEL, LIGHT_ORDER, PERIODS, pointsChange, TREND_WEEKS, type Change, type Light } from '@/domain/performance';
 import { titleOrUntitled } from '@/domain/publication-title';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { prisma } from '@/lib/db';
@@ -57,6 +57,48 @@ function Header({ href, active, dir, children, className }: { href: string; acti
         {active ? dir === 'asc' ? <ArrowUp className="h-3 w-3" aria-hidden /> : <ArrowDown className="h-3 w-3" aria-hidden /> : null}
       </Link>
     </th>
+  );
+}
+
+/** Debajo de un número: cómo cambió contra el período anterior, con flecha verde o roja. */
+function Delta({ change, previous }: { change: Change | null; previous: string }) {
+  if (!change) return <p className="mt-0.5 text-[11px] leading-tight text-muted-foreground" title="No hay datos del período anterior para comparar.">sin dato</p>;
+  const up = change.dir === 'up';
+  const down = change.dir === 'down';
+  return (
+    <p
+      className={cn('mt-0.5 inline-flex items-center gap-0.5 text-[11px] font-medium leading-tight', up && 'text-emerald-600 dark:text-emerald-400', down && 'text-red-600 dark:text-red-400', !up && !down && 'text-muted-foreground')}
+      title={`Período anterior: ${previous}`}
+    >
+      {up ? <ArrowUp className="h-3 w-3" aria-label="subió" /> : down ? <ArrowDown className="h-3 w-3" aria-label="bajó" /> : null}
+      {change.text}
+    </p>
+  );
+}
+
+/** Las visitas de las últimas semanas, en una línea chica. */
+function Sparkline({ weeks }: { weeks: { from: string; visits: number | null }[] | null }) {
+  const known = (weeks ?? []).filter((w) => w.visits !== null);
+  if (!weeks || known.length < 2) return <span className="text-xs text-muted-foreground">Sin datos</span>;
+  const W = 96;
+  const H = 28;
+  const pad = 3;
+  const max = Math.max(...known.map((w) => w.visits ?? 0), 1);
+  const x = (i: number) => pad + (i * (W - 2 * pad)) / (weeks.length - 1);
+  const y = (v: number) => H - pad - (v / max) * (H - 2 * pad);
+  const points = weeks.flatMap((w, i) => (w.visits === null ? [] : [[x(i), y(w.visits)] as const]));
+  const last = points[points.length - 1];
+  const first = known[0].visits ?? 0;
+  const end = known[known.length - 1].visits ?? 0;
+  const tone = end > first ? 'text-emerald-600 dark:text-emerald-400' : end < first ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground';
+  const day = (iso: string) => new Intl.DateTimeFormat('es-AR', { timeZone: 'UTC', day: '2-digit', month: '2-digit' }).format(new Date(`${iso}T00:00:00Z`));
+  const label = weeks.map((w) => `Semana del ${day(w.from)}: ${w.visits === null ? 'sin dato' : `${num(w.visits)} visitas`}`).join('\n');
+  return (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className={cn('overflow-visible', tone)} role="img" aria-label={`Visitas de las últimas ${TREND_WEEKS} semanas. ${label}`}>
+      <title>{label}</title>
+      <polyline points={points.map(([a, b]) => `${a.toFixed(1)},${b.toFixed(1)}`).join(' ')} fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinejoin="round" strokeLinecap="round" />
+      <circle cx={last[0]} cy={last[1]} r={2.25} fill="currentColor" />
+    </svg>
   );
 }
 
@@ -158,7 +200,7 @@ export default async function PerformancePage({ params, searchParams }: { params
           {data.rows.length === 0 ? (
             <p className="p-6 text-sm text-muted-foreground">No hay publicaciones con estos filtros.</p>
           ) : (
-            <table className="w-full min-w-[720px] text-sm">
+            <table className="w-full min-w-[840px] text-sm">
               <thead className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
                 <tr>
                   <Header {...head('luz')} className="w-12">
@@ -175,6 +217,9 @@ export default async function PerformancePage({ params, searchParams }: { params
                     Conversión
                   </Header>
                   <Header {...head('correccion')}>Última corrección</Header>
+                  <th scope="col" className="px-3 py-2 font-medium" title={`Las visitas de cada semana, las últimas ${TREND_WEEKS} hasta ayer, sea cual sea el período elegido. Verde si la última semana está arriba de la primera; rojo si está abajo.`}>
+                    Visitas, {TREND_WEEKS} semanas
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -210,9 +255,18 @@ export default async function PerformancePage({ params, searchParams }: { params
                         {r.channelStatus !== 'ACTIVE' ? <span className="font-medium text-amber-700">· {CHANNEL_STATUS_LABEL[r.channelStatus]}</span> : null}
                       </p>
                     </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums">{r.visits === null ? '—' : num(r.visits)}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums">{num(r.sales)}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums">{pct(r.conversion)}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">
+                      <p>{r.visits === null ? '—' : num(r.visits)}</p>
+                      <Delta change={countChange(r.visits, r.previous.visits)} previous={r.previous.visits === null ? 'sin dato' : `${num(r.previous.visits)} visitas`} />
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">
+                      <p>{num(r.sales)}</p>
+                      <Delta change={countChange(r.sales, r.previous.sales)} previous={`${num(r.previous.sales)} ${r.previous.sales === 1 ? 'venta' : 'ventas'}`} />
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">
+                      <p>{pct(r.conversion)}</p>
+                      <Delta change={pointsChange(r.conversion, r.previous.conversion)} previous={pct(r.previous.conversion)} />
+                    </td>
                     <td className="px-3 py-2.5">
                       {r.lastCorrection ? (
                         <>
@@ -222,6 +276,9 @@ export default async function PerformancePage({ params, searchParams }: { params
                       ) : (
                         <span className="text-muted-foreground">Sin corrección</span>
                       )}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <Sparkline weeks={r.weeks} />
                     </td>
                   </tr>
                 ))}

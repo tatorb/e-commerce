@@ -120,7 +120,7 @@ describe.skipIf(!url)('visitas y ventas en la base', () => {
 
   const pub = (externalId: string | null) => db.publication.create({ data: { productId, storeId, externalId, title: `Publicación ${externalId}` } });
 
-  it('la primera vez trae 90 días; al día siguiente, la última semana', async () => {
+  it('la primera vez trae 150 días; al día siguiente, la última semana; las leídas con solo 90 días se completan una vez', async () => {
     const a = await pub('MLA1');
     await pub(null);
     const broken = await pub('MLA9');
@@ -132,8 +132,8 @@ describe.skipIf(!url)('visitas y ventas en la base', () => {
       failed: [{ externalId: 'MLA9', message: expect.stringContaining('internal') }],
       left: 1,
     });
-    expect(asked).toEqual([{ id: 'MLA1', last: 90 }]);
-    expect(await db.publicationVisitDay.count({ where: { publicationId: a.id } })).toBe(90);
+    expect(asked).toEqual([{ id: 'MLA1', last: 150 }]);
+    expect(await db.publicationVisitDay.count({ where: { publicationId: a.id } })).toBe(150);
     // La que falló queda para la próxima lectura.
     expect((await db.publication.findUniqueOrThrow({ where: { id: broken.id } })).visitsReadAt).toBeNull();
 
@@ -145,7 +145,12 @@ describe.skipIf(!url)('visitas y ventas en la base', () => {
     const tomorrow = () => new Date(NOW.getTime() + DAY);
     await readAllVisits(db, { budgetMs: 10_000, now: tomorrow });
     expect(asked).toEqual([{ id: 'MLA1', last: 7 }]);
-    expect(await db.publicationVisitDay.count({ where: { publicationId: a.id } })).toBe(90);
+    expect(await db.publicationVisitDay.count({ where: { publicationId: a.id } })).toBe(150);
+    // Una leída cuando solo se traían 90 días: al otro día se completa hasta 150.
+    await db.publicationVisitDay.deleteMany({ where: { publicationId: a.id, day: { lt: new Date(NOW.getTime() - 90 * DAY) } } });
+    asked.length = 0;
+    await readAllVisits(db, { budgetMs: 10_000, now: () => new Date(NOW.getTime() + 2 * DAY) });
+    expect(asked).toEqual([{ id: 'MLA1', last: 150 }]);
 
     // El resumen, con el día en que se terminó de corregir.
     await db.pipelineMovement.create({ data: { publicationId: a.id, step: 'PUBLISH', enteredAt: new Date(NOW.getTime() - 11 * DAY), exitedAt: new Date(NOW.getTime() - 10 * DAY), exitKind: 'COMPLETED' } });

@@ -4,7 +4,7 @@ import type { ChannelStatus } from '@/generated/prisma/enums';
 import { latestMetrics } from '@/domain/measurements';
 import { copySkus } from '@/domain/stock';
 import { singleMeasure } from '@/lib/stock-plan';
-import { conversionPct, CORRECTION_FIELDS, lightOf, LIGHT_ORDER, PERIODS, type Light, type Period } from '@/domain/performance';
+import { conversionPct, CORRECTION_FIELDS, lightOf, LIGHT_ORDER, PERIODS, TREND_WEEKS, weeklyVisits, type Light, type Period } from '@/domain/performance';
 
 // Lo que muestra Rendimiento de publicaciones: por publicación, las visitas y
 // las ventas del período, la conversión, el semáforo y la última corrección.
@@ -65,28 +65,56 @@ export type PerformanceRow = {
   visits: number | null;
   sales: number;
   conversion: number | null;
+  // Lo mismo en el período anterior del mismo largo. Visitas null si no están leídas todas las de ese período.
+  previous: { visits: number | null; sales: number; conversion: number | null };
+  // Las visitas por semana de las últimas 8 semanas, de la más vieja a la actual. Null sin visitas por día leídas.
+  weeks: { from: string; visits: number | null }[] | null;
   light: Light;
   lastCorrection: { at: Date; fields: string[] } | null;
 };
 
 const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
-/** Las unidades pagadas de cada código del canal desde una fecha. */
-async function paidUnits(db: Db, storeIds: string[], from: Date): Promise<Map<string, number>> {
+/** Las unidades pagadas de cada código del canal desde una fecha y, con to, hasta otra (sin incluirla). */
+async function paidUnits(db: Db, storeIds: string[], from: Date, to: Date = new Date(8.64e15)): Promise<Map<string, number>> {
   if (storeIds.length === 0) return new Map();
   const rows = await db.$queryRaw<{ storeId: string; listingId: string; units: unknown }[]>`
     SELECT s."storeId", l->>'listingId' AS "listingId", SUM(COALESCE((l->>'quantity')::numeric, 0)) AS units
     FROM sales s, jsonb_array_elements(s.lines) l
-    WHERE s."storeId" = ANY(${storeIds}) AND s.state = 'PAID' AND s."orderedAt" >= ${from}::timestamp
+    WHERE s."storeId" = ANY(${storeIds}) AND s.state = 'PAID' AND s."orderedAt" >= ${from}::timestamp AND s."orderedAt" < ${to}::timestamp
     GROUP BY 1, 2`;
   return new Map(rows.map((r) => [`${r.storeId}:${r.listingId}`, Number(r.units ?? 0)]));
 }
 
-/** Las visitas de cada publicación desde un día, sumando los días leídos. */
-async function periodVisits(db: Db, ids: string[], fromDay: Date): Promise<Map<string, number>> {
+/** Las visitas de cada publicación entre dos días (el último sin incluir), sumando los días leídos. */
+async function periodVisits(db: Db, ids: string[], fromDay: Date, toDay?: Date): Promise<Map<string, number>> {
   if (ids.length === 0) return new Map();
-  const rows = await db.publicationVisitDay.groupBy({ by: ['publicationId'], where: { publicationId: { in: ids }, day: { gte: fromDay } }, _sum: { visits: true } });
+  const rows = await db.publicationVisitDay.groupBy({
+    by: ['publicationId'],
+    where: { publicationId: { in: ids }, day: { gte: fromDay, ...(toDay ? { lt: toDay } : {}) } },
+    _sum: { visits: true },
+  });
   return new Map(rows.map((r) => [r.publicationId, r._sum.visits ?? 0]));
+}
+
+/** El primer día con visitas leídas de cada publicación: si es posterior al inicio del período anterior, ese período no está completo. */
+async function firstVisitDays(db: Db, ids: string[]): Promise<Map<string, Date>> {
+  if (ids.length === 0) return new Map();
+  const rows = await db.publicationVisitDay.groupBy({ by: ['publicationId'], where: { publicationId: { in: ids } }, _min: { day: true } });
+  return new Map(rows.flatMap((r) => (r._min.day ? [[r.publicationId, r._min.day] as const] : [])));
+}
+
+/** Las visitas por día de las últimas semanas, para el gráfico. */
+async function recentVisitDays(db: Db, ids: string[], fromDay: Date): Promise<Map<string, { day: string; visits: number }[]>> {
+  const out = new Map<string, { day: string; visits: number }[]>();
+  if (ids.length === 0) return out;
+  const rows = await db.publicationVisitDay.findMany({ where: { publicationId: { in: ids }, day: { gte: fromDay } }, select: { publicationId: true, day: true, visits: true } });
+  for (const r of rows) {
+    const list = out.get(r.publicationId) ?? [];
+    list.push({ day: r.day.toISOString().slice(0, 10), visits: r.visits });
+    out.set(r.publicationId, list);
+  }
+  return out;
 }
 
 /** La última corrección de cada publicación y lo que se cambió en las 24 horas anteriores a ella. */
@@ -121,6 +149,13 @@ export async function loadPerformance(db: Db, accountId: string, f: PerformanceF
   const from = new Date(now.getTime() - f.period * DAY);
   // Los días se guardan a la medianoche: el período empieza el día de hace N-1 días.
   const fromDay = new Date(`${new Date(now.getTime() - (f.period - 1) * DAY).toISOString().slice(0, 10)}T00:00:00Z`);
+  // El período anterior, del mismo largo, justo antes.
+  const prevFrom = new Date(from.getTime() - f.period * DAY);
+  const prevFromDay = new Date(fromDay.getTime() - f.period * DAY);
+  // El gráfico: las últimas 8 semanas, sea cual sea el período, hasta ayer: hoy
+  // todavía no terminó y haría caer siempre la última semana.
+  const yesterday = new Date(now.getTime() - DAY);
+  const trendFromDay = new Date(`${new Date(yesterday.getTime() - (TREND_WEEKS * 7 - 1) * DAY).toISOString().slice(0, 10)}T00:00:00Z`);
   const publications = await db.publication.findMany({
     where: {
       product: {
@@ -149,12 +184,16 @@ export async function loadPerformance(db: Db, accountId: string, f: PerformanceF
   });
   const ids = publications.map((p) => p.id);
   const storeIds = [...new Set(publications.map((p) => p.storeId))];
-  const [units, visits, corrections, opts, readers] = await Promise.all([
+  const [units, visits, corrections, opts, readers, prevUnits, prevVisits, firstDays, trend] = await Promise.all([
     paidUnits(db, storeIds, from),
     periodVisits(db, ids, fromDay),
     lastCorrections(db, ids),
     options(db, accountId),
     db.saleReader.findMany({ where: { storeId: { in: storeIds } }, select: { readAt: true } }),
+    paidUnits(db, storeIds, prevFrom, from),
+    periodVisits(db, ids, prevFromDay, fromDay),
+    firstVisitDays(db, ids),
+    recentVisitDays(db, ids, trendFromDay),
   ]);
 
   const correctedSince = new Date(now.getTime() - 30 * DAY);
@@ -162,6 +201,10 @@ export async function loadPerformance(db: Db, accountId: string, f: PerformanceF
     const fallback = f.period === 90 ? latestMetrics(p.measurements).visits_90d : undefined;
     const v = p.visitsReadAt ? (visits.get(p.id) ?? 0) : typeof fallback === 'number' ? fallback : null;
     const sales = units.get(`${p.storeId}:${p.externalId}`) ?? 0;
+    const prevSales = prevUnits.get(`${p.storeId}:${p.externalId}`) ?? 0;
+    // Las visitas del período anterior cuentan solo si están leídos todos sus días.
+    const first = firstDays.get(p.id);
+    const pv = p.visitsReadAt && first && first <= prevFromDay ? (prevVisits.get(p.id) ?? 0) : null;
     return {
       id: p.id,
       title: p.title,
@@ -173,6 +216,8 @@ export async function loadPerformance(db: Db, accountId: string, f: PerformanceF
       visits: v,
       sales,
       conversion: conversionPct(v, sales),
+      previous: { visits: pv, sales: prevSales, conversion: conversionPct(pv, prevSales) },
+      weeks: p.visitsReadAt ? weeklyVisits(trend.get(p.id) ?? [], yesterday) : null,
       light: lightOf(v, sales),
       lastCorrection: corrections.get(p.id) ?? null,
     };

@@ -5,8 +5,12 @@
 export type VisitDay = { day: string; visits: number };
 
 const DAY = 24 * 60 * 60 * 1000;
-/** Cuántos días se guardan y se muestran. */
+/** Cuántos días se muestran en la publicación. */
 export const VISIT_HISTORY_DAYS = 90;
+/** Cuántos días se guardan: un año y algo, para comparar cualquier período de Rendimiento con el anterior. */
+export const VISIT_KEEP_DAYS = 400;
+/** Cuántos días se piden la primera vez: lo más que da el canal hacia atrás. */
+export const VISIT_FIRST_READ_DAYS = 150;
 /** Cuántos días se comparan antes y después de corregirla. */
 export const COMPARE_DAYS = 30;
 
