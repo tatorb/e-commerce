@@ -13,7 +13,7 @@ const measureTool = defineTool({
   section: ['publicaciones', 'pipeline'],
   title: 'Elegir la medida que vende una publicación',
   description:
-    'Para una publicación ya publicada, de un producto con varias medidas, cuya medida la app no sabe porque su SKU en el canal no la dice (get_publication muestra en cantidad_disponible que su SKU no dice de cuál es, o la familia la muestra como "sin elegir"). Elige la medida de la ficha (la fuente de verdad) para la publicación y todas sus opciones de venta (la misma medida con otra forma de cobro), aunque pases una sola. Con eso su cantidad sale del stock de esa medida, el paso Precio toma su costo y la familia la muestra. No deja elegir una medida que ya vende otra publicación de la familia. medida: la medida (por ejemplo "STD") o su SKU (por ejemplo "SP-413-00"). Con subir_sku, deja el SKU de la medida en Por subir en las que tienen otro en el canal: se manda con push_skus. Si la cantidad sigue al stock, al guardar se sube al canal la de esa medida: primero llamá con vista_previa en true, mostrale a la persona la medida, las opciones de venta y cómo cambia la cantidad, y esperá que confirme.',
+    'Para una publicación ya publicada, de un producto con varias medidas, cuya medida la app no sabe porque su SKU en el canal no la dice (get_publication muestra en cantidad_disponible que su SKU no dice de cuál es, o la familia la muestra como "sin elegir"). Elige la medida de la ficha (la fuente de verdad) para la publicación y sus opciones de venta (la misma medida con otra forma de cobro), aunque pases una sola. Las opciones de venta que tienen las medidas adentro en el canal ya saben las suyas: no se tocan y se avisa. Con eso su cantidad sale del stock de esa medida, el paso Precio toma su costo y la familia la muestra. No deja elegir una medida que ya vende otra publicación de la familia. medida: la medida (por ejemplo "STD") o su SKU (por ejemplo "SP-413-00"). Con subir_sku, deja el SKU de la medida en Por subir en las que tienen otro en el canal: se manda con push_skus. Si la cantidad sigue al stock, al guardar se sube al canal la de esa medida: primero llamá con vista_previa en true, mostrale a la persona la medida, las opciones de venta y cómo cambia la cantidad, y esperá que confirme.',
   input: z.object({
     cuenta: accountArg,
     publicacion: z.string().min(1).describe('Cualquiera de sus opciones de venta: su id en la app, su código en el canal o su link.'),
@@ -52,6 +52,7 @@ const measureTool = defineTool({
             ...(args.subir_sku && m.sku && o.externalId && skuDiffers(o.channelSku) ? { sku_queda_en_por_subir: m.sku } : {}),
           };
         }),
+        ...(choice.withMeasuresInside.length > 0 ? { no_se_tocan: `${choice.withMeasuresInside.join(', ')}: tienen las medidas adentro en el canal, ya saben las suyas.` } : {}),
         ...(m.quantityNote ? { cantidad: `No cambia sola: ${m.quantityNote}` } : { cantidad: 'Al guardar se sube al canal la cantidad de esa medida en las que cambia.' }),
       };
     }
@@ -61,6 +62,7 @@ const measureTool = defineTool({
         cambio: true,
         medida: r.measure.label,
         opciones_de_venta: r.publications.map((p) => p.externalId ?? p.id),
+        ...(r.withMeasuresInside.length > 0 ? { no_se_tocaron: `${r.withMeasuresInside.join(', ')}: tienen las medidas adentro en el canal.` } : {}),
         cantidad_subida_al_canal: r.stock.sent,
         ...(r.stock.failed.length > 0 ? { cantidad_no_subida: r.stock.failed.map((f) => f.error) } : {}),
         ...(r.skuToPush > 0 ? { sku_en_por_subir: `${r.measure.sku} en ${r.skuToPush}: se manda con push_skus, con la confirmación de la persona.` } : {}),

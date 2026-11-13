@@ -10,6 +10,7 @@ process.env.DATABASE_URL ||= process.env.TEST_DATABASE_URL ?? 'postgresql://sin-
 const { loadMeasureChoice, setPublicationMeasure, sendPendingSku, MeasureError } = await import('@/lib/publication-measure');
 const { listToPush } = await import('@/lib/queries/sync');
 const { setProductStock } = await import('@/lib/stock');
+const { PLAN_SELECT, planFor } = await import('@/lib/stock-plan');
 const { MEASURE_TOOLS } = await import('@/lib/mcp/measure-tools');
 const { measurelessSkuNote } = await import('@/importers/apply');
 
@@ -118,5 +119,33 @@ describe.skipIf(!url)('la medida de una publicación', () => {
     expect(done.sku_en_por_subir).toBeUndefined();
     const pushed = (await run('push_skus', {})) as Record<string, unknown>;
     expect(pushed).toMatchObject({ aviso: 'No hay SKU por subir en la cuenta.' });
+  });
+
+  it('una opción de venta con las medidas adentro no frena a las demás, y otra del producto tampoco', async () => {
+    // Como el SP-413: la de 3 cuotas tiene STD y 0,50 adentro en el canal.
+    const both = variants.map((v, i) => ({ id: `V${i}`, sku: v.sku, measure: v.measure, quantity: 6 }));
+    const inside = (externalId: string, extra: object = {}) =>
+      db.publication.create({
+        data: { productId, storeId, externalId, title: `Subconjunto ${externalId}`, channelCopy: { create: { readAt: new Date(), status: 'ACTIVE', quantity: 12, variations: both, details: { skus: ['SP-1-00', 'SP-1-50'] } } }, ...extra },
+        select: { id: true },
+      });
+    ids.withBoth = (await inside('MLA4', { mainOptionId: ids.main })).id;
+    // Otra publicación del producto, fuera del grupo, también con las medidas adentro.
+    await inside('MLA5');
+
+    // Lo mismo que dice la cantidad: la principal no sabe su medida.
+    const plan = (await db.publication.findUniqueOrThrow({ where: { id: ids.main }, select: PLAN_SELECT }));
+    expect(planFor(plan)).toMatchObject({ managed: false, reason: expect.stringContaining('su SKU no dice de cuál es') });
+
+    for (const from of [ids.main, ids.option, ids.withBoth]) {
+      const choice = (await loadMeasureChoice(db, { accountId, publicationId: from }))!;
+      expect(choice).toMatchObject({ mainId: ids.main, unknown: true, withMeasuresInside: ['MLA4'] });
+      expect(choice.options.map((o) => o.externalId)).toEqual(['MLA1', 'MLA2']);
+    }
+    const r = await setPublicationMeasure(db, { accountId, publicationId: ids.withBoth, measure: 'STD', userId: 'ana' });
+    expect(r.publications.map((p) => p.externalId)).toEqual(['MLA1', 'MLA2']);
+    expect(r.withMeasuresInside).toEqual(['MLA4']);
+    expect((await db.publication.findUniqueOrThrow({ where: { id: ids.withBoth } })).variantKey).toBeNull();
+    expect(planFor(await db.publication.findUniqueOrThrow({ where: { id: ids.main }, select: PLAN_SELECT }))).toMatchObject({ managed: true, measure: { label: 'STD' } });
   });
 });

@@ -48,6 +48,8 @@ export type MeasureChoice = {
   })[];
   // Las opciones de venta, la principal primero, con el SKU que tienen en el canal.
   options: { id: string; externalId: string | null; channelSku: string | null; skuToPush: string | null }[];
+  // Opciones de venta con las medidas adentro en el canal: ya saben las suyas y no se tocan.
+  withMeasuresInside: string[];
 };
 
 const total = (lines: { quantity: number }[] | null) => (lines ? lines.reduce((s, l) => s + l.quantity, 0) : null);
@@ -60,18 +62,27 @@ async function loadGroup(db: Db, accountId: string, publicationId: string): Prom
   return rows.sort((a, b) => Number(a.id !== mainId) - Number(b.id !== mainId));
 }
 
-/** Si se le puede elegir la medida: publicada sola, sin medidas en el canal, de un producto con varias. */
-function choosable(rows: GroupRow[]): boolean {
-  const main = rows[0];
-  if (measuresOf(main.product.variants).length < 2) return false;
-  return rows.every((r) => parseVariations(r.channelCopy?.variations).length === 0);
+const hasVariations = (r: GroupRow) => parseVariations(r.channelCopy?.variations).length > 0;
+
+/**
+ * A cuáles del grupo se les elige la medida: a las publicadas solas, sin
+ * medidas adentro en el canal, de un producto con varias. Las opciones de
+ * venta que tienen las medidas adentro ya saben las suyas: quedan afuera, sin
+ * frenar a las demás. Null si no se le elige medida a ninguna.
+ */
+function targetsOf(rows: GroupRow[]): { main: GroupRow; targets: GroupRow[]; inside: GroupRow[] } | null {
+  if (measuresOf(rows[0].product.variants).length < 2) return null;
+  const targets = rows.filter((r) => !hasVariations(r));
+  if (targets.length === 0) return null;
+  // La principal, si está entre ellas: de ahí sale la medida de todas.
+  return { main: targets[0], targets, inside: rows.filter(hasVariations) };
 }
 
 /** La medida de la publicación y las que se pueden elegir. Null si no se le elige medida. */
 export async function loadMeasureChoice(db: Db, args: { accountId: string; publicationId: string }): Promise<MeasureChoice | null> {
-  const rows = await loadGroup(db, args.accountId, args.publicationId);
-  if (!choosable(rows)) return null;
-  const main = rows[0];
+  const group = targetsOf(await loadGroup(db, args.accountId, args.publicationId));
+  if (!group) return null;
+  const { main, targets: rows } = group;
   const measures = measuresOf(main.product.variants);
   const others = main.familyId
     ? await db.publication.findMany({
@@ -99,6 +110,7 @@ export async function loadMeasureChoice(db: Db, args: { accountId: string; publi
       return { ...m, takenBy: others.find((o) => o.variantKey === m.key)?.externalId ?? (others.some((o) => o.variantKey === m.key) ? 'otra publicación' : null), quantities: changes, quantityNote: note };
     }),
     options: rows.map((r) => ({ id: r.id, externalId: r.externalId, channelSku: copySkus(r.channelCopy?.details)[0] ?? null, skuToPush: r.skuToPush })),
+    withMeasuresInside: group.inside.map((r) => r.externalId ?? r.id),
   };
 }
 
@@ -119,6 +131,8 @@ export type SetMeasureResult = {
   measure: Measure;
   // Las opciones de venta a las que se les puso la medida.
   publications: { id: string; externalId: string | null }[];
+  // Las que quedaron afuera porque tienen las medidas adentro en el canal.
+  withMeasuresInside: string[];
   // Las que quedaron con el SKU para mandar desde Por subir.
   skuToPush: number;
   // La cantidad que se subió al canal con el stock de esa medida.
@@ -134,11 +148,11 @@ export async function setPublicationMeasure(
   db: Db,
   args: { accountId: string; publicationId: string; measure: string; sendSku?: boolean; userId: string | null },
 ): Promise<SetMeasureResult> {
-  const rows = await loadGroup(db, args.accountId, args.publicationId);
-  if (!choosable(rows)) {
-    throw new MeasureError('A esta publicación no se le elige medida: su producto tiene una sola, o tiene las medidas adentro en el canal.');
+  const group = targetsOf(await loadGroup(db, args.accountId, args.publicationId));
+  if (!group) {
+    throw new MeasureError('A esta publicación no se le elige medida: su producto tiene una sola, o ella y sus opciones de venta tienen las medidas adentro en el canal.');
   }
-  const main = rows[0];
+  const { main, targets: rows } = group;
   const measure = findMeasure(measuresOf(main.product.variants), args.measure);
   if (!measure) {
     throw new MeasureError(`Esa medida no está en la ficha del producto. Las que hay: ${measuresOf(main.product.variants).map((m) => (m.sku ? `${m.label} (${m.sku})` : m.label)).join(', ')}.`);
@@ -163,7 +177,7 @@ export async function setPublicationMeasure(
     }
   });
   const stock = await syncStock(db, { publicationIds: rows.map((r) => r.id), userId: args.userId, note: `Se eligió la medida ${measure.label}` });
-  return { measure, publications: rows.map((r) => ({ id: r.id, externalId: r.externalId })), skuToPush, stock };
+  return { measure, publications: rows.map((r) => ({ id: r.id, externalId: r.externalId })), withMeasuresInside: group.inside.map((r) => r.externalId ?? r.id), skuToPush, stock };
 }
 
 export type SkuOutcome = { sku: string; ok: true } | { sku: string; ok: false; message: string };

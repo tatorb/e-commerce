@@ -54,7 +54,7 @@ export function MeasurePickerCard({ accountSlug, publicationId, choice }: { acco
       id="medida"
       title="Medida"
       icon={<Ruler />}
-      description={`La medida de la ficha que vende esta publicación${n > 1 ? ` y sus ${n - 1} otras opciones de venta` : ''}. De ahí sale su cantidad, su costo y su lugar en la familia.`}
+      description={`La medida de la ficha que vende esta publicación${n > 1 ? ` y ${n - 1} de sus opciones de venta` : ''}. De ahí sale su cantidad, su costo y su lugar en la familia.`}
     >
       <SectionBody className="space-y-3 text-sm">
         {known ? (
@@ -73,6 +73,11 @@ export function MeasurePickerCard({ accountSlug, publicationId, choice }: { acco
             {channelSku ? `: su SKU en ${choice.channelName} es ${channelSku}, sin la medida` : ''}. Elegila de la ficha.
           </p>
         )}
+        {choice.withMeasuresInside.length > 0 ? (
+          <p className="text-muted-foreground">
+            {choice.withMeasuresInside.join(', ')} {choice.withMeasuresInside.length === 1 ? 'tiene' : 'tienen'} las medidas adentro en {choice.channelName}: ya {choice.withMeasuresInside.length === 1 ? 'sabe las suyas y no se toca' : 'saben las suyas y no se tocan'}.
+          </p>
+        ) : null}
         {pendingSku ? <p className="text-muted-foreground">El SKU {pendingSku} está en Por subir: se manda a {choice.channelName} desde ahí.</p> : null}
 
         {!known ? (
