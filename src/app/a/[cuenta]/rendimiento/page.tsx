@@ -88,9 +88,12 @@ function Sparkline({ weeks }: { weeks: { from: string; visits: number | null }[]
   const y = (v: number) => H - pad - (v / max) * (H - 2 * pad);
   const points = weeks.flatMap((w, i) => (w.visits === null ? [] : [[x(i), y(w.visits)] as const]));
   const last = points[points.length - 1];
-  const first = known[0].visits ?? 0;
-  const end = known[known.length - 1].visits ?? 0;
-  const tone = end > first ? 'text-emerald-600 dark:text-emerald-400' : end < first ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground';
+  // El color: las últimas 4 semanas contra las 4 anteriores, la tendencia y no una semana suelta.
+  const half = Math.floor(weeks.length / 2);
+  const sum = (list: typeof weeks) => list.reduce((t, w) => t + (w.visits ?? 0), 0);
+  const before = sum(weeks.slice(0, half));
+  const after = sum(weeks.slice(half));
+  const tone = after > before ? 'text-emerald-600 dark:text-emerald-400' : after < before ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground';
   const day = (iso: string) => new Intl.DateTimeFormat('es-AR', { timeZone: 'UTC', day: '2-digit', month: '2-digit' }).format(new Date(`${iso}T00:00:00Z`));
   const label = weeks.map((w) => `Semana del ${day(w.from)}: ${w.visits === null ? 'sin dato' : `${num(w.visits)} visitas`}`).join('\n');
   return (
@@ -200,7 +203,15 @@ export default async function PerformancePage({ params, searchParams }: { params
           {data.rows.length === 0 ? (
             <p className="p-6 text-sm text-muted-foreground">No hay publicaciones con estos filtros.</p>
           ) : (
-            <table className="w-full min-w-[840px] text-sm">
+            <table className="w-full min-w-[960px] table-fixed text-sm">
+              {/* Publicación, ancha; las demás, del mismo ancho. */}
+              <colgroup>
+                <col className="w-12" />
+                <col />
+                {Array.from({ length: 5 }, (_, i) => (
+                  <col key={i} className="w-[12%]" />
+                ))}
+              </colgroup>
               <thead className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
                 <tr>
                   <Header {...head('luz')} className="w-12">
@@ -217,7 +228,7 @@ export default async function PerformancePage({ params, searchParams }: { params
                     Conversión
                   </Header>
                   <Header {...head('correccion')}>Última corrección</Header>
-                  <th scope="col" className="px-3 py-2 font-medium" title={`Las visitas de cada semana, las últimas ${TREND_WEEKS} hasta ayer, sea cual sea el período elegido. Verde si la última semana está arriba de la primera; rojo si está abajo.`}>
+                  <th scope="col" className="px-3 py-2 font-medium" title={`Las visitas de cada semana, las últimas ${TREND_WEEKS} hasta ayer, sea cual sea el período elegido. Verde si las últimas 4 semanas suman más que las 4 anteriores; rojo si suman menos.`}>
                     Visitas, {TREND_WEEKS} semanas
                   </th>
                 </tr>
@@ -235,7 +246,7 @@ export default async function PerformancePage({ params, searchParams }: { params
                         </span>
                       </span>
                     </td>
-                    <td className="max-w-md px-3 py-2.5">
+                    <td className="px-3 py-2.5">
                       <Link href={`/a/${account.slug}/publicaciones/${r.id}`} className="font-medium leading-snug underline-offset-4 hover:underline" title="Ver la publicación en la app">
                         {titleOrUntitled(r.title)}
                       </Link>
