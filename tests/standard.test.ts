@@ -43,6 +43,13 @@ describe('medidas sin ambigüedad', () => {
   );
   it.each(['0.5', '050', '+1', '0,25', 'medida 1', ''])('%s no pasa', (m) => expect(isUnambiguousMeasure(m)).toBe(false));
 
+  it.each(['-0,030 pulgadas', '-0,50 mm', '+0,50 mm', '0,020 pulgadas', 'STD'])('con signo y unidad, %s pasa', (m) =>
+    expect(isUnambiguousMeasure(m)).toBe(true),
+  );
+  it.each(['-0,30', '+0,50', '-', '--0,50 mm', '+-0,50 mm'])('sin unidad o con el signo mal, %s no pasa', (m) =>
+    expect(isUnambiguousMeasure(m)).toBe(false),
+  );
+
   it('no aplica con una sola variante sin medida', () => {
     expect(result(input({ product: { variants: [{ measure: null }] } }), 'Medidas sin ambigüedad').status).toBe('na');
   });

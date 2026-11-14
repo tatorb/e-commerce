@@ -170,13 +170,14 @@ function dateLabel(d: Date): string {
 }
 
 /**
- * Una medida sin ambigüedad: STD, o un número con unidad. "0,50 mm",
- * "0.020 pulg", "1 mm" pasan; "0.5", "050" o "+1" no.
+ * Una medida sin ambigüedad: STD, o un número con unidad, con un signo + o -
+ * opcional delante. "0,50 mm", "0.020 pulg", "1 mm" y "-0,030 pulgadas"
+ * pasan; "0.5", "050", "+1" o "-0,30" no.
  */
 export function isUnambiguousMeasure(raw: string): boolean {
   const m = raw.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
   if (/^(std|standard|estandar)$/.test(m)) return true;
-  return /^\+?\d+([.,]\d+)?\s*(mm|milimetros?|pulg\.?|pulgadas?|plg\.?|in|")$/.test(m);
+  return /^[+-]?\d+([.,]\d+)?\s*(mm|milimetros?|pulg\.?|pulgadas?|plg\.?|in|")$/.test(m);
 }
 
 type Outcome = { status: RuleStatus; detail: string | null; fromMeasurement: boolean };
