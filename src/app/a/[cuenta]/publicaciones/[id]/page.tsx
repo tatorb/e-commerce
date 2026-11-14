@@ -76,7 +76,8 @@ import { followsStockOf, managedNote, plannedText, plansFor } from '@/lib/stock-
 import { FollowStockSwitch } from '@/components/publication/FollowStockSwitch';
 import { SharedPhotosNote } from '@/components/publication/SharedPhotosNote';
 import { PublicationFactsRow } from '@/components/publication/PublicationFactsRow';
-import { MeasurePickerCard, measurePickerNeeded } from '@/components/publication/MeasurePickerCard';
+import { MeasurePickerCard } from '@/components/publication/MeasurePickerCard';
+import { measurePickerNeeded } from '@/domain/measure-picker';
 import { loadMeasureChoice } from '@/lib/publication-measure';
 import { loadPublicationFacts } from '@/lib/publication-facts';
 import { can } from '@/domain/access';

@@ -8,21 +8,12 @@ import { SectionBody, SectionCard } from '@/components/ui/section-card';
 import { choosePublicationMeasureAction } from '@/app/a/[cuenta]/pipeline/measure-actions';
 import type { MeasureChoice } from '@/lib/publication-measure';
 import { cn } from '@/lib/utils/cn';
+import { skuOf } from '@/domain/measure-picker';
 
 // La medida que vende una publicación publicada sola, cuando su SKU en el
 // canal no dice cuál es. Se elige una vez para todas sus opciones de venta.
 // Antes de guardar dice qué cantidad va a quedar en el canal, porque si sigue
 // al stock se sube al guardar.
-
-const skuOf = (sku: string | null) => (sku ?? '').trim().toUpperCase();
-
-/** Si hay algo para mostrar: sin medida, o con un SKU en el canal que no es el de su medida. */
-export function measurePickerNeeded(choice: MeasureChoice | null): boolean {
-  if (!choice) return false;
-  if (choice.unknown) return true;
-  const sku = choice.current?.sku;
-  return Boolean(sku && choice.options.some((o) => o.skuToPush || (o.externalId && skuOf(o.channelSku) !== skuOf(sku))));
-}
 
 export function MeasurePickerCard({ accountSlug, publicationId, choice }: { accountSlug: string; publicationId: string; choice: MeasureChoice }) {
   const router = useRouter();

@@ -35,7 +35,8 @@ import { PendingChangesCard } from '@/components/publication/PendingChangesCard'
 import { campaignText, pendingCampaigns } from '@/lib/channel-campaigns';
 import { MediaOrganizer } from '@/components/publication/MediaOrganizer';
 import { MeasureCheckCard } from '@/components/pipeline/MeasureCheckCard';
-import { MeasurePickerCard, measurePickerNeeded } from '@/components/publication/MeasurePickerCard';
+import { MeasurePickerCard } from '@/components/publication/MeasurePickerCard';
+import { measurePickerNeeded } from '@/domain/measure-picker';
 import { loadMeasureChoice } from '@/lib/publication-measure';
 import { measureCheck } from '@/lib/photo-measures';
 import { TextImagesStep } from '@/components/text-images/TextImagesStep';
