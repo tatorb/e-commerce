@@ -25,7 +25,7 @@ import {
   unansweredPhotosOfAccount,
   type JobDeps,
 } from '@/lib/photo-queue';
-import { addChannelPhotos, addDriveOriginal } from '@/lib/photos';
+import { addChannelPhotos, addDriveOriginal, countChannelPhotos } from '@/lib/photos';
 import { loadPhotoSettings, PhotoSettingsError, savePhotoSettings } from '@/lib/photo-settings';
 import { createWorkerKey, revokeWorkerKey, verifyWorkerRequest, workerState } from '@/lib/image-worker';
 
@@ -677,6 +677,38 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
       ['CHANNEL', 'image/webp', 1],
     ]);
     const again = await addChannelPhotos(db, { productId, userId }, channelDeps);
+    expect([again.added, again.already]).toEqual([0, 2]);
+  });
+
+  it('sin fotos en la ficha, baja las que la publicación tiene en el canal, salvo las que subió la app', async () => {
+    const channel = await db.channel.create({ data: { kind: 'MERCADOLIBRE', name: 'Mercado Libre' } });
+    const storeId = (await db.store.create({ data: { accountId, channelId: channel.id, name: 'TIENDA' } })).id;
+    const copy = (ids: string[], origins: Record<string, string> = {}) => ({
+      readAt: new Date(),
+      status: 'ACTIVE' as const,
+      photos: ids.map((id) => `https://http2.mlstatic.com/D_${id}-O.jpg`),
+      photoIds: ids,
+      photoOrigins: origins,
+      variations: [],
+    });
+    // La principal y su opción de venta comparten las fotos: no se repiten.
+    const mainId = (
+      await db.publication.create({ data: { productId, storeId, externalId: 'MLA1', title: 'Kit', channelCopy: { create: copy(['111-MLA1_012024', '333-MLA3_012024', '222-MLA2_012024'], { '333-MLA3_012024': 'una-corregida' }) } } })
+    ).id;
+    await db.publication.create({ data: { productId, storeId, externalId: 'MLA2', title: 'Kit', mainOptionId: mainId, channelCopy: { create: copy(['111-MLA1_012024', '222-MLA2_012024']) } } });
+    const asked: string[] = [];
+    const deps = {
+      fetch: (async (u: string) => {
+        asked.push(u);
+        return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/jpeg' } });
+      }) as typeof fetch,
+      put: async (name: string) => ({ url: `drive:${name}` }),
+    };
+    expect(await countChannelPhotos(db, productId, mainId)).toBe(2);
+    const r = await addChannelPhotos(db, { productId, userId, publicationId: mainId }, deps);
+    expect(r).toEqual({ added: 2, already: 0, failed: [] });
+    expect(asked).toEqual(['https://http2.mlstatic.com/D_111-MLA1_012024-F.jpg', 'https://http2.mlstatic.com/D_222-MLA2_012024-F.jpg']);
+    const again = await addChannelPhotos(db, { productId, userId, publicationId: mainId }, deps);
     expect([again.added, again.already]).toEqual([0, 2]);
   });
 });

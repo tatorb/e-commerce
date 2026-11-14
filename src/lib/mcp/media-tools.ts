@@ -278,7 +278,7 @@ const addChannelPhotosTool = defineTool({
   async run(ctx, args) {
     const { account, id } = await target(ctx, args);
     const pub = await ctx.db.publication.findUniqueOrThrow({ where: { id }, select: { productId: true } });
-    const message = await asToolError(() => addChannelPhotosOf(ctx.db, { productId: pub.productId, userId: ctx.userId }));
+    const message = await asToolError(() => addChannelPhotosOf(ctx.db, { productId: pub.productId, userId: ctx.userId, publicationId: id }));
     return { listo: true, resultado: message, link_app: appLink(ctx, account, id) };
   },
 });

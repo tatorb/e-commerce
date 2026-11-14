@@ -34,13 +34,13 @@ export async function tidyCorrected(db: PrismaClient, productId: string) {
 }
 
 /** Suma al paso Fotos las fotos que el producto tiene publicadas en el canal, en su tamaño más grande. */
-export async function addChannelPhotosOf(db: PrismaClient, args: { productId: string; userId: string | null }): Promise<string> {
+export async function addChannelPhotosOf(db: PrismaClient, args: { productId: string; userId: string | null; publicationId?: string | null }): Promise<string> {
   const owner = await photoOwner(db, args.productId);
   const r = await withDriveToken(db, async (token, email) => {
     const folderId = await photoFolderId(db, token, email, owner, 'originales');
     return addChannelPhotos(
       db,
-      { productId: args.productId, userId: args.userId },
+      { productId: args.productId, userId: args.userId, publicationId: args.publicationId },
       {
         fetch,
         put: async (name, body, contentType) => ({

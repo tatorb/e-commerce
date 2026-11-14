@@ -169,7 +169,7 @@ export default async function PipelineStepPage({
       ? Promise.all([
           loadPhotoLine(prisma, pub.productId),
           workerState(prisma),
-          countChannelPhotos(prisma, pub.productId),
+          countChannelPhotos(prisma, pub.productId, pub.id),
           prisma.publication.count({ where: { productId: pub.productId } }),
           driveEmail(prisma).then(async (email) => ({
             ready: email !== null,

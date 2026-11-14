@@ -185,32 +185,80 @@ async function downloadPhoto(f: typeof fetch, url: string): Promise<{ body: Arra
  * más grande. Las baja del canal y las guarda como original.
  * Las que ya están en la línea no se repiten.
  */
+/** Lo que guarda el canal de una publicación del producto: sus fotos y cuáles subió la app. */
+type CopyPhotos = { photos: unknown; photoIds: unknown; photoOrigins: unknown };
+
+const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+
+/**
+ * Las fotos publicadas del producto, sin repetir: las de su ficha y las que
+ * tienen sus publicaciones en el canal, primero las de la publicación pedida.
+ * Las que subió la app (corregidas e imágenes con texto) ya son de la app: no
+ * se vuelven a bajar como originales.
+ */
+async function publishedPhotos(db: PrismaClient, args: { productId: string; publicationId?: string | null }): Promise<string[]> {
+  const [assets, pubs] = await Promise.all([
+    db.asset.findMany({ where: { productId: args.productId, kind: 'PHOTO' }, orderBy: [{ position: 'asc' }, { createdAt: 'asc' }], select: { url: true } }),
+    db.publication.findMany({
+      where: { productId: args.productId, channelCopy: { isNot: null } },
+      orderBy: { createdAt: 'asc' },
+      select: {
+        id: true,
+        channelCopy: { select: { photos: true, photoIds: true, photoOrigins: true } },
+        textImages: { select: { channelPhotoId: true } },
+      },
+    }),
+  ]);
+  const ordered = [...pubs.filter((p) => p.id === args.publicationId), ...pubs.filter((p) => p.id !== args.publicationId)];
+  const fromChannel = ordered.flatMap((p) => {
+    const copy = p.channelCopy as CopyPhotos;
+    const ids = strings(copy.photoIds);
+    const origins = copy.photoOrigins && typeof copy.photoOrigins === 'object' ? Object.keys(copy.photoOrigins as object) : [];
+    const ours = new Set([...origins, ...p.textImages.map((t) => t.channelPhotoId).filter((x): x is string => Boolean(x))]);
+    return strings(copy.photos).filter((_, i) => !ids[i] || !ours.has(ids[i]));
+  });
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const url of [...assets.map((a) => a.url), ...fromChannel]) {
+    const key = channelPhotoUrl(url) ?? url;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(url);
+  }
+  return out;
+}
+
+/**
+ * Suma a la línea las fotos publicadas del producto, en su tamaño más grande:
+ * las de su ficha y las que tienen sus publicaciones en el canal.
+ */
 export async function addChannelPhotos(
   db: PrismaClient,
-  args: { productId: string; userId: string | null },
+  args: { productId: string; userId: string | null; publicationId?: string | null },
   deps: ChannelPhotoDeps,
 ): Promise<{ added: number; already: number; failed: string[] }> {
-  const [assets, edits] = await Promise.all([
-    db.asset.findMany({ where: { productId: args.productId, kind: 'PHOTO' }, orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] }),
+  const [urls, edits] = await Promise.all([
+    publishedPhotos(db, args),
     db.photoEdit.findMany({ where: { productId: args.productId, archivedAt: null, channelUrl: { not: null } }, select: { channelUrl: true } }),
   ]);
-  const taken = new Set(edits.map((e) => e.channelUrl));
+  // La misma foto puede estar guardada con otro tamaño en el link.
+  const taken = new Set(edits.map((e) => channelPhotoUrl(e.channelUrl!) ?? e.channelUrl!));
   let added = 0;
   let already = 0;
   const failed: string[] = [];
-  for (const [i, asset] of assets.entries()) {
-    const full = channelPhotoUrl(asset.url);
+  for (const [i, url] of urls.entries()) {
+    const full = channelPhotoUrl(url);
     if (!full) {
       failed.push(`Foto ${i + 1}: no es un link de un canal conocido.`);
       continue;
     }
-    if (taken.has(asset.url)) {
+    if (taken.has(full)) {
       already++;
       continue;
     }
     try {
       // Si la versión grande no está, vale la que está publicada.
-      const photo = (await downloadPhoto(deps.fetch, full)) ?? (full !== asset.url ? await downloadPhoto(deps.fetch, asset.url) : null);
+      const photo = (await downloadPhoto(deps.fetch, full)) ?? (full !== url ? await downloadPhoto(deps.fetch, url) : null);
       if (!photo) throw new PhotoError('El canal no la entregó.');
       const name = `publicada-${i + 1}.${CHANNEL_TYPES[photo.type]}`;
       const stored = await deps.put(name, photo.body, photo.type);
@@ -221,10 +269,10 @@ export async function addChannelPhotos(
         originalName: name,
         originalType: photo.type,
         originalSize: photo.body.byteLength,
-        channelUrl: asset.url,
+        channelUrl: url,
         createdById: args.userId,
       });
-      taken.add(asset.url);
+      taken.add(full);
       added++;
     } catch (e) {
       failed.push(`Foto ${i + 1}: ${e instanceof PhotoError ? e.message : 'no se pudo bajar.'}`);
@@ -247,7 +295,6 @@ export async function loadPhotoLine(db: PrismaClient, productId: string) {
   });
 }
 
-export async function countChannelPhotos(db: PrismaClient, productId: string) {
-  const assets = await db.asset.findMany({ where: { productId, kind: 'PHOTO' }, select: { url: true } });
-  return assets.filter((a) => channelPhotoUrl(a.url) !== null).length;
+export async function countChannelPhotos(db: PrismaClient, productId: string, publicationId?: string | null) {
+  return (await publishedPhotos(db, { productId, publicationId })).filter((url) => channelPhotoUrl(url) !== null).length;
 }

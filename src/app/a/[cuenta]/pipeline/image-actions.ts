@@ -158,7 +158,7 @@ export async function addChannelPhotosAction(accountSlug: string, publicationId:
     const user = await requireUser();
     const productId = await productOf(accountSlug, publicationId);
     if (!productId) return NOT_FOUND;
-    return guard(accountSlug, () => addChannelPhotosOf(prisma, { productId, userId: user.id }));
+    return guard(accountSlug, () => addChannelPhotosOf(prisma, { productId, userId: user.id, publicationId }));
   });
 }
 
