@@ -280,6 +280,9 @@ async function tokenFor(
       where: { storeId },
       data: { status: 'NEEDS_REAUTH', lastError: token.message, accessToken: null, refreshToken: null, expiresAt: null },
     });
+    // Se importa acá para no armar un círculo entre los módulos.
+    const { notifyConnectionCut } = await import('@/lib/notification-events');
+    await notifyConnectionCut(db, storeId, now()).catch(() => undefined);
     throw new ConnectError(token.message, true);
   }
   return token;

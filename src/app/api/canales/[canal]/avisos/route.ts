@@ -6,6 +6,7 @@ import { prisma } from '@/lib/db';
 import { handleNotice } from '@/lib/answers';
 import { handleSalesNotice } from '@/lib/stock';
 import { handleSaleNotice } from '@/lib/sales/read';
+import { notifyNewSales, notifyPendingQuestions } from '@/lib/notification-events';
 
 // Avisos del canal. Mercado Libre pide esta dirección al crear la aplicación.
 // La app usa los de las preguntas de los compradores, los de las ventas y los
@@ -14,7 +15,9 @@ import { handleSaleNotice } from '@/lib/sales/read';
 // canal vuelve a mandar el aviso. Lo que trae el aviso no se registra ni se
 // cree: la pregunta o la venta se le pide al canal con la conexión de la
 // tienda. Si la pregunta es nueva, Claude propone la respuesta en ese momento;
-// si es una venta, se descuenta del stock y se sube la cantidad nueva.
+// si es una venta, se descuenta del stock y se sube la cantidad nueva. Al
+// final, las notificaciones de la pregunta que espera a una persona y de la
+// venta nueva.
 
 export const dynamic = 'force-dynamic';
 // Antes de mandar sola una respuesta se espera lo que pide la cuenta, hasta 4 minutos.
@@ -48,6 +51,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ can
     } catch (e) {
       console.error('No se pudo procesar el aviso', e instanceof Error ? e.message : e);
     }
+    // Al celular: la pregunta que espera a una persona y la venta nueva.
+    await notifyPendingQuestions(prisma).catch(() => 0);
+    await notifyNewSales(prisma).catch(() => 0);
   });
   return new NextResponse(null, { status: 200 });
 }

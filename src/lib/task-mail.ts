@@ -5,6 +5,8 @@ import { taskMail, type TaskMailKind } from '@/domain/task-mail';
 import { isEmailConfigured, sendEmail } from '@/lib/email';
 import { publicAppUrl } from '@/lib/public-url';
 import { publicationLabel } from '@/lib/tasks';
+import { notify } from '@/lib/notifications';
+import { parsePrefs, type NotificationKind } from '@/domain/notifications';
 
 // Cuándo sale cada mail de las tareas: al asignarla, al llegar la fecha de
 // aviso y al vencer sin terminar. Cada uno sale una vez; lo que no pudo salir
@@ -21,13 +23,16 @@ const BATCH = 50;
 
 const MAIL_SELECT = {
   id: true,
+  accountId: true,
+  autoKey: true,
+  createdAt: true,
   title: true,
   description: true,
   status: true,
   remindAt: true,
   dueOn: true,
   account: { select: { slug: true, name: true, timezone: true } },
-  assignees: { orderBy: { createdAt: 'asc' }, select: { userId: true, user: { select: { name: true, email: true, disabledAt: true } } } },
+  assignees: { orderBy: { createdAt: 'asc' }, select: { userId: true, user: { select: { name: true, email: true, disabledAt: true, notificationPrefs: true } } } },
   publications: { select: { publication: { select: { title: true, externalId: true } } } },
 } satisfies Prisma.TaskSelect;
 
@@ -50,12 +55,41 @@ function mailFor(kind: TaskMailKind, t: MailTask, person: { name: string; email:
   });
 }
 
+// El tipo de notificación de cada mail de tareas.
+const NOTICE_KIND: Record<TaskMailKind, NotificationKind> = { ASSIGNED: 'tarea', REMINDER: 'tarea_aviso', OVERDUE: 'tarea_vencida' };
+
+// Las tareas de ventas avisan con su propio tipo: despachar y reclamo.
+const ownNotice = (autoKey: string | null) => Boolean(autoKey && (autoKey.startsWith('despachar:') || autoKey.startsWith('reclamo:')));
+
+/** La notificación de la tarea a sus personas activas, en la campanita y al celular. */
+async function taskNotice(db: Db, kind: TaskMailKind, t: MailTask, stamp: string): Promise<void> {
+  if (ownNotice(t.autoKey)) return;
+  const userIds = t.assignees.filter((a) => !a.user.disabledAt).map((a) => a.userId);
+  const lead = kind === 'ASSIGNED' ? 'Te asignaron' : kind === 'REMINDER' ? 'Aviso de tarea' : 'Venció la tarea';
+  const pubs = t.publications.map((p) => publicationLabel({ title: titleOrUntitled(p.publication.title), externalId: p.publication.externalId }));
+  await notify(db, {
+    userIds,
+    accountId: t.accountId,
+    kind: NOTICE_KIND[kind],
+    title: `${lead}: ${t.title}`,
+    body: t.description || pubs.join(', '),
+    link: `/a/${t.account.slug}/tareas/${t.id}`,
+    key: `${NOTICE_KIND[kind]}:${t.id}:${stamp}`,
+    mail: false,
+  });
+}
+
+/** Si la persona quiere el mail de este tipo de tarea. */
+const wantsTaskMail = (kind: TaskMailKind, prefs: unknown) => parsePrefs(prefs)[NOTICE_KIND[kind]].mail;
+
 /** A las personas activas de la tarea. True si salió a todas. */
 async function sendToAll(kind: TaskMailKind, t: MailTask, stamp: string, baseUrl: string): Promise<{ all: boolean; sent: number }> {
   let sent = 0;
   let all = true;
   for (const a of t.assignees) {
     if (a.user.disabledAt) continue;
+    // Eligió no recibir este mail: cuenta como salido.
+    if (!wantsTaskMail(kind, a.user.notificationPrefs)) continue;
     const r = await sendEmail({ to: a.user.email, ...mailFor(kind, t, a.user, baseUrl), key: `tarea-${t.id}-${kind}-${a.userId}-${stamp}` });
     if (r.ok) sent++;
     else {
@@ -71,9 +105,10 @@ async function sendToAll(kind: TaskMailKind, t: MailTask, stamp: string, baseUrl
  * cambió una alarma de stock. stamp: qué cambió, para no mandar dos veces lo mismo.
  */
 export async function notifyTaskAgain(db: Db, taskId: string, stamp: string, baseUrl: string = publicAppUrl()): Promise<number> {
-  if (!isEmailConfigured()) return 0;
   const t = await db.task.findUnique({ where: { id: taskId }, select: MAIL_SELECT });
   if (!t || !OPEN_STATUSES.includes(t.status)) return 0;
+  await taskNotice(db, 'REMINDER', t, stamp);
+  if (!isEmailConfigured()) return 0;
   return (await sendToAll('REMINDER', t, stamp, baseUrl)).sent;
 }
 
@@ -81,13 +116,20 @@ export type TaskMailResult = { configured: boolean; sent: number; pending: boole
 
 /** El mail de que se la asignaron, a las personas de una tarea que todavía no lo recibieron. */
 export async function notifyAssigned(db: Db, taskId: string, baseUrl: string = publicAppUrl()): Promise<number> {
+  // La notificación a cada persona va una sola vez por tarea, aunque no haya mail.
+  const t = await db.task.findUnique({ where: { id: taskId }, select: MAIL_SELECT });
+  if (t && OPEN_STATUSES.includes(t.status)) await taskNotice(db, 'ASSIGNED', t, 'asignada');
   if (!isEmailConfigured()) return 0;
   const rows = await db.taskAssignee.findMany({
     where: { taskId, notifiedAt: null, user: { disabledAt: null }, task: { status: { in: [...OPEN_STATUSES] } } },
-    select: { userId: true, createdAt: true, user: { select: { name: true, email: true } }, task: { select: MAIL_SELECT } },
+    select: { userId: true, createdAt: true, user: { select: { name: true, email: true, notificationPrefs: true } }, task: { select: MAIL_SELECT } },
   });
   let sent = 0;
   for (const r of rows) {
+    if (!wantsTaskMail('ASSIGNED', r.user.notificationPrefs)) {
+      await db.taskAssignee.updateMany({ where: { taskId, userId: r.userId }, data: { notifiedAt: new Date() } });
+      continue;
+    }
     const out = await sendEmail({
       to: r.user.email,
       ...mailFor('ASSIGNED', r.task, r.user, baseUrl),
@@ -165,4 +207,34 @@ export async function sendTaskMail(db: Db, opts: { budgetMs: number; now?: Date;
   pending ||= overdue.length > BATCH;
 
   return { configured: true, sent, pending };
+}
+
+/**
+ * En la tarea programada: las notificaciones de los avisos que llegaron y de
+ * las tareas que vencieron, haya o no mail. Cada una sale una vez por persona.
+ */
+export async function taskNoticePass(db: Db, opts: { now?: Date } = {}): Promise<number> {
+  const now = opts.now ?? new Date();
+  const late = new Date(now.getTime() - LATE_MS);
+  const open = { status: { in: [...OPEN_STATUSES] } };
+  let sent = 0;
+  const reminders = await db.task.findMany({ where: { ...open, remindAt: { lte: now, gte: late } }, orderBy: { remindAt: 'asc' }, take: BATCH, select: MAIL_SELECT });
+  for (const t of reminders) {
+    // El aviso puesto al crearla ya fue la notificación de que se la asignaron.
+    if (t.remindAt!.getTime() - t.createdAt.getTime() < 60_000) continue;
+    await taskNotice(db, 'REMINDER', t, String(t.remindAt!.getTime()));
+    sent++;
+  }
+  const overdue = await db.task.findMany({
+    where: { ...open, dueOn: { lte: dueDate(dayIn(now, 'UTC'))!, gte: dueDate(dayIn(late, 'UTC'))! } },
+    orderBy: { dueOn: 'asc' },
+    take: BATCH,
+    select: MAIL_SELECT,
+  });
+  for (const t of overdue) {
+    if (dueDay(t.dueOn!) >= dayIn(now, t.account.timezone)) continue;
+    await taskNotice(db, 'OVERDUE', t, dueDay(t.dueOn!));
+    sent++;
+  }
+  return sent;
 }

@@ -37,6 +37,17 @@ model User {
   disabledAt         DateTime?
   // Entró con una contraseña que le dieron: tiene que cambiarla.
   mustChangePassword Boolean              @default(false)
+  // Qué notificaciones recibe y por dónde (src/domain/notifications.ts):
+  // { "<tipo>": { "push": bool, "mail": bool } }. Lo que falta va por defecto.
+  notificationPrefs  Json                 @default("{}")
+  // Horario de silencio, en minutos desde la medianoche de su zona horaria.
+  // Sin los dos, no hay silencio.
+  quietFrom          Int?
+  quietTo            Int?
+  // En el silencio, también se calla lo urgente.
+  quietUrgent        Boolean              @default(false)
+  // La zona horaria de la persona, para el horario de silencio.
+  timeZone           String               @default("America/Argentina/Buenos_Aires")
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @default(now()) @updatedAt
   accounts           UserAccount[]
@@ -81,6 +92,8 @@ model User {
   campaignRequests   CampaignRequest[]    @relation("CampaignRequestedBy")
   tasksCreated       Task[]               @relation("TaskCreatedBy")
   tasks              TaskAssignee[]
+  notifications      Notification[]
+  pushSubscriptions  PushSubscription[]
   stockMoves         StockMovement[]
   shootProtocols     ShootProtocol[]      @relation("ShootProtocolCreatedBy")
   shootChecks        ShootCheck[]         @relation("ShootCheckDoneBy")
@@ -224,6 +237,7 @@ model Account {
   activity            ActivityLog[]
   pricingSettings     PricingSettings?
   tasks               Task[]
+  notifications       Notification[]
   publicationNotes    PublicationNote[]
   shootProtocols      ShootProtocol[]
   productOptions      ProductOption[]
@@ -2586,4 +2600,56 @@ model PublicationNote {
   @@index([familyId])
   @@index([accountId, createdAt])
   @@map("publication_notes")
+}
+
+// Lo que se le avisó a cada persona. Se ve en la campanita, y sale al celular,
+// al navegador y por mail según lo que eligió.
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId String?
+  account   Account?  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  // El tipo (src/domain/notifications.ts).
+  kind      String
+  title     String
+  body      String    @default("")
+  // Lo que se abre al tocarla, una dirección de la app.
+  link      String?
+  // Lo mismo no se le avisa dos veces a la misma persona.
+  key       String
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@unique([userId, key])
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+// Cada celular o navegador en que la persona activó las notificaciones.
+model PushSubscription {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint   String    @unique
+  p256dh     String
+  auth       String
+  // Qué es, para reconocerlo en la lista: "iPhone · Safari".
+  label      String    @default("")
+  createdAt  DateTime  @default(now())
+  lastSentAt DateTime?
+
+  @@index([userId])
+  @@map("push_subscriptions")
+}
+
+// Las claves con que la app firma las notificaciones al celular y al navegador.
+// Se crean solas la primera vez. La privada se guarda cifrada.
+model PushKeys {
+  id         String   @id
+  publicKey  String
+  privateKey String
+  createdAt  DateTime @default(now())
+
+  @@map("push_keys")
 }

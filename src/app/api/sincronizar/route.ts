@@ -16,6 +16,9 @@ import { readAllSales } from '@/lib/sales/read';
 import { saleAlarmPass } from '@/lib/sales/alarms';
 import { readAllVisits } from '@/lib/visits';
 import { importSoldListings } from '@/lib/sold-listings';
+import { dailySummaryPass, notifyNewSales, notifyPendingQuestions } from '@/lib/notification-events';
+import { pruneNotifications } from '@/lib/notifications';
+import { taskNoticePass } from '@/lib/task-mail';
 
 // La tarea programada: lee las preguntas de los compradores y las
 // publicaciones de las tiendas conectadas, responde las preguntas de las
@@ -26,7 +29,7 @@ import { importSoldListings } from '@/lib/sold-listings';
 // publicaciones las fotos de Registro de productos que quedaron listas, y al
 // final trae las ventas para la sección Ventas, con su envío y su pago, abre
 // las tareas de despachar y de reclamos, trae las publicaciones vendidas que
-// no están en la app. Las visitas de cada día se leen temprano, después de las preguntas. La llaman Vercel una vez por día
+// no están en la app, y manda las notificaciones. Las visitas de cada día se leen temprano, después de las preguntas. La llaman Vercel una vez por día
 // (vercel.json) y GitHub cada hora (.github/workflows/leer-canales.yml), con
 // la clave CRON_SECRET. Cada pedido lee lo que alcanza en su tiempo; pending
 // dice si conviene llamar otra vez.
@@ -60,6 +63,8 @@ const TOTAL_MS = 45_000;
 // Las publicaciones vendidas que no están en la app: se traen del canal.
 const SOLD_BUDGET_MS = 5_000;
 const TEXT_CODES_BUDGET_MS = 10_000;
+// Las notificaciones: las de las tareas, las que no salieron al instante y el resumen del día.
+const NOTICES_BUDGET_MS = 4_000;
 
 const digest = (s: string) => createHash('sha256').update(s).digest();
 
@@ -98,6 +103,8 @@ export async function GET(request: Request) {
   const ledger = await readAllSales(prisma, { budgetMs: budget(LEDGER_BUDGET_MS) });
   const saleTasks = await saleAlarmPass(prisma);
   const sold = await importSoldListings(prisma, { budgetMs: budget(SOLD_BUDGET_MS) });
+  // Las notificaciones que no salieron al instante, las de las tareas y el resumen del día.
+  const notices = await notificationPass(budget(NOTICES_BUDGET_MS));
   return NextResponse.json({
     pending:
       result.pending ||
@@ -129,5 +136,22 @@ export async function GET(request: Request) {
     saleTasksOpened: saleTasks.opened,
     visitsRead: visits.read,
     soldListingsImported: sold.imported.length,
+    notifications: notices,
   });
+}
+
+/** Ninguna notificación frena la tarea: lo que falla se prueba en la próxima. */
+async function notificationPass(budgetMs: number): Promise<number> {
+  try {
+    let n = 0;
+    n += await taskNoticePass(prisma);
+    n += await notifyPendingQuestions(prisma);
+    n += await notifyNewSales(prisma);
+    n += await dailySummaryPass(prisma, { budgetMs });
+    await pruneNotifications(prisma);
+    return n;
+  } catch (e) {
+    console.error('No salieron las notificaciones.', e instanceof Error ? e.message : e);
+    return 0;
+  }
 }

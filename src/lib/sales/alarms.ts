@@ -3,6 +3,7 @@ import { dueDate, dayIn, OPEN_STATUSES, TASK_TITLE_MAX } from '@/domain/tasks';
 import { formatDateTime } from '@/lib/format';
 import { notifyAssigned } from '@/lib/task-mail';
 import { parseLines } from './read';
+import { notifySaleAlarm } from '@/lib/notification-events';
 
 // Las tareas que crea la sección Ventas sola, para los administradores: un
 // envío que hay que despachar antes de que venza la hora límite, y un reclamo
@@ -43,7 +44,7 @@ function what(lines: unknown): string {
 
 async function openTask(
   db: Db,
-  args: { accountId: string; autoKey: string; title: string; description: string; dueOn: Date | null; publicationIds: string[]; now: Date },
+  args: { accountId: string; autoKey: string; title: string; description: string; dueOn: Date | null; publicationIds: string[]; now: Date; saleId: string },
 ): Promise<string | null> {
   const open = await db.task.findFirst({ where: { accountId: args.accountId, autoKey: args.autoKey, status: { in: [...OPEN_STATUSES] } }, select: { id: true } });
   if (open) return null;
@@ -68,6 +69,17 @@ async function openTask(
     select: { id: true },
   });
   await notifyAssigned(db, task.id).catch((e) => console.error('No salió el mail de la tarea de la venta', e instanceof Error ? e.message : e));
+  // Al celular de quienes ven Ventas, no solo de los administradores.
+  const [kind] = args.autoKey.split(':');
+  await notifySaleAlarm(db, {
+    kind: kind === 'reclamo' ? 'reclamo' : 'despachar',
+    saleId: args.saleId,
+    accountId: args.accountId,
+    title: args.title,
+    body: args.description,
+    key: args.autoKey,
+    now: args.now,
+  });
   return task.id;
 }
 
@@ -101,6 +113,7 @@ export async function saleAlarmPass(db: Db, opts: { now?: Date; accountId?: stri
       dueOn: dueDate(dayIn(s.dispatchBy!, tz)),
       publicationIds: parseLines(s.lines).flatMap((l) => (l.publicationId ? [l.publicationId] : [])),
       now,
+      saleId: s.id,
     });
     if (id) opened++;
   }
@@ -115,6 +128,7 @@ export async function saleAlarmPass(db: Db, opts: { now?: Date; accountId?: stri
       dueOn: null,
       publicationIds: parseLines(s.lines).flatMap((l) => (l.publicationId ? [l.publicationId] : [])),
       now,
+      saleId: s.id,
     });
     if (id) opened++;
   }

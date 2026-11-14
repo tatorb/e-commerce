@@ -3,6 +3,7 @@ import type { PipelineStep } from '@/generated/prisma/enums';
 import { PIPELINE_STEP_LABEL } from '@/domain/pipeline';
 import { titleOrUntitled } from '@/domain/publication-title';
 import { isEmailConfigured, sendEmail } from '@/lib/email';
+import { notify, wantsMail } from '@/lib/notifications';
 import { publicAppUrl } from '@/lib/public-url';
 
 // Las notas del equipo sobre una publicación: qué pasó, por qué se frenó, qué
@@ -259,7 +260,7 @@ async function mailMentions(db: Db, noteId: string, people: { id: string; name: 
       viaClaude: true,
       mentionedIds: true,
       author: { select: { name: true } },
-      account: { select: { slug: true, name: true } },
+      account: { select: { id: true, slug: true, name: true } },
       publication: { select: { id: true, title: true, externalId: true, family: { select: { leadId: true } } } },
     },
   });
@@ -268,9 +269,24 @@ async function mailMentions(db: Db, noteId: string, people: { id: string; name: 
   const target = n.publication.family?.leadId ?? n.publication.id;
   const link = `${baseUrl}/a/${n.account.slug}/pipeline/${target}`;
   const publication = [titleOrUntitled(n.publication.title), n.publication.externalId].filter(Boolean).join(' · ');
+  await notify(db, {
+    userIds: pending.map((p) => p.id),
+    accountId: n.account.id,
+    kind: 'nota',
+    title: `${noteAuthor(n)} te mencionó en ${publication}`,
+    body: n.text,
+    link: `/a/${n.account.slug}/pipeline/${target}`,
+    key: `nota:${noteId}`,
+    mail: false,
+  });
   const sent: string[] = [];
   for (const p of pending) {
     if (!isEmailConfigured()) break;
+    // Eligió no recibir el mail de las menciones.
+    if (!(await wantsMail(db, p.id, 'nota'))) {
+      sent.push(p.id);
+      continue;
+    }
     const mail = noteMentionMail({
       person: p.name,
       author: noteAuthor(n),

@@ -345,6 +345,11 @@ export async function submitResult(
   }).then(async (r) => {
     // Lista: pasa a Organización de multimedia de sus publicaciones, en el lugar de su paso.
     if (r.aceptado && 'placed' in r && r.placed) await placeShotPhotosQuietly(db, run.edit.productId);
+    if (r.aceptado) {
+      // Si no le quedan fotos en cola, avisa que terminó.
+      const { notifyPhotosDone } = await import('@/lib/notification-events');
+      await notifyPhotosDone(db, { productId: run.edit.productId, runId: run.id }).catch(() => 0);
+    }
     return r.aceptado ? { aceptado: true as const } : r;
   });
 }

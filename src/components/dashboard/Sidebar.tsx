@@ -26,6 +26,7 @@ export async function Sidebar({
   alarms = 0,
   shipments = 0,
   sync = 0,
+  unread = 0,
   className,
 }: {
   user: CurrentUser;
@@ -42,6 +43,8 @@ export async function Sidebar({
   shipments?: number;
   // Publicaciones con datos para elegir entre la app y el canal, fuera del pipeline.
   sync?: number;
+  // Notificaciones sin leer, para la campanita.
+  unread?: number;
   className?: string;
 }) {
   const accountHome = account ? `/a/${account.slug}` : null;
@@ -223,7 +226,7 @@ export async function Sidebar({
 
       {/* PIE fijo: la persona y cerrar sesión. */}
       <div className="shrink-0">
-        <SessionFooter name={user.name} email={user.email} />
+        <SessionFooter name={user.name} email={user.email} unread={unread} />
       </div>
     </SidebarShell>
   );
