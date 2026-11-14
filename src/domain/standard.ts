@@ -41,7 +41,7 @@ export const CHECKS: CheckDef[] = [
   {
     key: 'measures_unambiguous',
     label: 'Medidas sin ambigüedad',
-    help: 'Cada medida tiene que ser STD o llevar unidad, mm o pulgadas. Si el producto tiene varias variantes, todas tienen que tener medida.',
+    help: 'Cada medida tiene que ser STD, una sobremedida o bajomedida con coma como -0,30, +0,50 o 0,25, o llevar unidad, mm o pulgadas. Si el producto tiene varias variantes, todas tienen que tener medida.',
     params: [],
   },
   { key: 'warranty', label: 'Garantía declarada', help: 'Pide que la ficha diga la garantía.', params: [] },
@@ -91,7 +91,7 @@ export const SUGGESTED_RULES: Omit<RuleConfig, 'id'>[] = [
   { name: 'Mínimo 6 fotos', description: 'Las publicaciones con 6 fotos o más convierten mejor.', check: 'min_photos', params: { min: 6 }, weight: 20, active: true },
   { name: 'Video presente', description: 'Un video o clip que muestre el producto.', check: 'has_video', params: {}, weight: 10, active: true },
   { name: 'Compatibilidades completas', description: 'Marca, modelo y motor de cada vehículo compatible.', check: 'compat_complete', params: {}, weight: 20, active: true },
-  { name: 'Medidas sin ambigüedad', description: 'STD o con unidad, para que nadie dude entre 0.5, 050, mm o pulgadas.', check: 'measures_unambiguous', params: {}, weight: 15, active: true },
+  { name: 'Medidas sin ambigüedad', description: 'STD, sobremedida o bajomedida con coma (-0,30, +0,50, 0,25) o con unidad, para que nadie dude entre 0.5, 050, mm o pulgadas.', check: 'measures_unambiguous', params: {}, weight: 15, active: true },
   { name: 'Garantía declarada', description: 'La garantía escrita en la ficha.', check: 'warranty', params: {}, weight: 10, active: true },
   { name: 'Contenido del kit declarado', description: 'Qué trae y qué no trae el kit.', check: 'kit_contents', params: {}, weight: 10, active: true },
   { name: 'Ficha técnica completa', description: 'Datos técnicos suficientes para elegir sin preguntar.', check: 'specs_complete', params: { min: 10 }, weight: 15, active: true },
@@ -170,13 +170,17 @@ function dateLabel(d: Date): string {
 }
 
 /**
- * Una medida sin ambigüedad: STD, o un número con unidad, con un signo + o -
- * opcional delante. "0,50 mm", "0.020 pulg", "1 mm" y "-0,030 pulgadas"
- * pasan; "0.5", "050", "+1" o "-0,30" no.
+ * Una medida sin ambigüedad: STD; la sobremedida o bajomedida de los
+ * repuestos de motor, como en la etiqueta del fabricante: un signo + o -
+ * opcional y un decimal con coma, sin unidad ("-0,30", "+0,50", "0,25"); o un
+ * número con unidad, también con signo opcional ("0,50 mm", "-0,030 pulgadas").
+ * "0.5", "050", "+1", "-" o "--0,30" no pasan.
  */
 export function isUnambiguousMeasure(raw: string): boolean {
   const m = raw.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
   if (/^(std|standard|estandar)$/.test(m)) return true;
+  // Sobremedida o bajomedida sin unidad: la coma decimal la distingue de 0.5 o 050.
+  if (/^[+-]?\d+,\d+$/.test(m)) return true;
   return /^[+-]?\d+([.,]\d+)?\s*(mm|milimetros?|pulg\.?|pulgadas?|plg\.?|in|")$/.test(m);
 }
 
@@ -238,7 +242,7 @@ function runCheck(check: CheckKey, params: Record<string, number>, input: ScoreI
       const unmeasured = variants.length - measured.length;
       const ambiguous = measured.map((v) => v.measure!.trim()).filter((v) => !isUnambiguousMeasure(v));
       const problems: string[] = [];
-      if (ambiguous.length) problems.push(`Medidas sin unidad: ${ambiguous.join(', ')}. Escribilas como STD, 0,50 mm o 0,020 pulgadas.`);
+      if (ambiguous.length) problems.push(`Medidas ambiguas: ${ambiguous.join(', ')}. Escribilas como STD, -0,30, 0,50 mm o 0,020 pulgadas.`);
       if (unmeasured) problems.push(`${unmeasured === 1 ? 'Una variante no tiene' : `${unmeasured} variantes no tienen`} medida.`);
       return problems.length ? fail(problems.join(' ')) : pass();
     }

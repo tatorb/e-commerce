@@ -41,13 +41,18 @@ describe('medidas sin ambigüedad', () => {
     '%s pasa',
     (m) => expect(isUnambiguousMeasure(m)).toBe(true),
   );
-  it.each(['0.5', '050', '+1', '0,25', 'medida 1', ''])('%s no pasa', (m) => expect(isUnambiguousMeasure(m)).toBe(false));
+  it.each(['0.5', '050', '+1', '1', 'medida 1', ''])('%s no pasa', (m) => expect(isUnambiguousMeasure(m)).toBe(false));
 
-  it.each(['-0,030 pulgadas', '-0,50 mm', '+0,50 mm', '0,020 pulgadas', 'STD'])('con signo y unidad, %s pasa', (m) =>
+  it.each(['-0,030 pulgadas', '-0,50 mm', '+0,50 mm', '0,50 mm', '0,020 pulgadas', 'STD'])('con signo y unidad, %s pasa', (m) =>
     expect(isUnambiguousMeasure(m)).toBe(true),
   );
-  it.each(['-0,30', '+0,50', '-', '--0,50 mm', '+-0,50 mm'])('sin unidad o con el signo mal, %s no pasa', (m) =>
-    expect(isUnambiguousMeasure(m)).toBe(false),
+  // La sobremedida y la bajomedida de los repuestos de motor, como en la etiqueta del fabricante.
+  it.each(['-0,30', '-0,60', '+0,50', '0,25', '-0,030', ' -0,30 '])('sobremedida o bajomedida sin unidad, %s pasa', (m) =>
+    expect(isUnambiguousMeasure(m)).toBe(true),
+  );
+  it.each(['-', '+', '--0,30', '+-0,30', '-+0,50', '--0,50 mm', '+-0,50 mm', '-0,', ',30', '-,30', '-0.30', '- 0,30', '-0,30x', 'sobremedida'])(
+    'sin número reconocible o con el signo mal, %s no pasa',
+    (m) => expect(isUnambiguousMeasure(m)).toBe(false),
   );
 
   it('no aplica con una sola variante sin medida', () => {
@@ -57,13 +62,20 @@ describe('medidas sin ambigüedad', () => {
     const r = result(input({ product: { variants: [{ measure: null }, { measure: null }] } }), 'Medidas sin ambigüedad');
     expect(r).toMatchObject({ status: 'fail', detail: 'Tiene 2 variantes y ninguna medida declarada.' });
   });
-  it('dice cuáles medidas no tienen unidad', () => {
+  it('pasa con las medidas de la etiqueta del fabricante', () => {
+    const r = result(
+      input({ product: { variants: [{ measure: 'STD' }, { measure: '-0,30' }, { measure: '-0,60' }, { measure: '+0,50' }] } }),
+      'Medidas sin ambigüedad',
+    );
+    expect(r.status).toBe('pass');
+  });
+  it('dice cuáles medidas son ambiguas', () => {
     const r = result(
       input({ product: { variants: [{ measure: 'STD' }, { measure: '050' }, { measure: null }] } }),
       'Medidas sin ambigüedad',
     );
     expect(r.status).toBe('fail');
-    expect(r.detail).toContain('Medidas sin unidad: 050.');
+    expect(r.detail).toContain('Medidas ambiguas: 050.');
     expect(r.detail).toContain('Una variante no tiene medida.');
   });
 });
