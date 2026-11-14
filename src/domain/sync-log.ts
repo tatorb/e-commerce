@@ -143,6 +143,7 @@ export function fieldLabel(field: string): string {
   if (isFaceField(field)) return FACE_FIELD_LABEL[field];
   if (field === 'status') return 'Estado';
   if (field === 'campaign') return 'Campaña';
+  if (field === 'category') return 'Categoría';
   return field === 'publication' ? 'Publicación' : field === 'question' ? 'Pregunta de un comprador' : field;
 }
 

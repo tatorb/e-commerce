@@ -1,3 +1,4 @@
+import { clashText, productChannelCategories } from '@/lib/channel-category';
 import { Prisma, type PrismaClient } from '@/generated/prisma/client';
 import type { ChannelStatus } from '@/generated/prisma/enums';
 import { getChannelAdapter } from '@/channels';
@@ -237,8 +238,12 @@ export async function createSaleOption(
   const description = source.description?.trim() || source.channelCopy?.description?.trim() || null;
   const warranty = parseWarranty(source.warranty) ?? parseWarranty(source.channelCopy?.warranty);
 
-  // La categoría es la de la buena: la pide el canal aunque el producto ya la tenga.
-  const categoryId = source.channelCopy?.categoryId ?? main.channelCopy?.categoryId ?? null;
+  // La categoría es la que el canal ya eligió para el producto: la de sus otras opciones activas, en
+  // todas sus medidas. El canal finaliza las que quedan en otra. Si ya hay en dos, no se crea otra.
+  const product = await db.publication.findUniqueOrThrow({ where: { id: main.id }, select: { productId: true } });
+  const inChannel = await productChannelCategories(db, { productId: product.productId, storeId: store.id });
+  if (inChannel.length > 1) throw new SaleOptionCopyError(clashText(inChannel, channelName));
+  const categoryId = inChannel[0]?.categoryId ?? source.channelCopy?.categoryId ?? main.channelCopy?.categoryId ?? null;
   if (!categoryId) throw new SaleOptionCopyError('Todavía no se leyó la categoría de la buena en el canal: leela de nuevo antes de crear.');
 
   // La medida en el canal: la nueva se suma a ella. Sin leerla, el canal armaría un producto aparte.

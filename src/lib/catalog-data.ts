@@ -13,6 +13,7 @@ import {
 } from '@/domain/catalog-data';
 import { parseNameValueList } from '@/domain/name-value';
 import { lockFamily } from '@/domain/family-members';
+import { categoryLabel, clashText, productChannelCategories, type ChannelCategoryGroup } from '@/lib/channel-category';
 
 // Los datos de catálogo de una publicación: busca el canal de su tienda y la
 // categoría que le toca, y lee o guarda los valores. Recibe la base por
@@ -29,13 +30,16 @@ async function load(db: Db, publicationId: string) {
       storeId: true,
       attributes: true,
       channelCategory: true,
+      productId: true,
+      channelCopy: { select: { categoryId: true, details: true, missingSince: true } },
       store: { select: { channel: { select: { kind: true, name: true } } } },
       product: { select: { productType: true, brand: true, partNumber: true, origin: true } },
     },
   });
   if (!pub) throw new CatalogError('La publicación no existe.');
   const channel = pub.store.channel;
-  return { pub, channelName: channel.name, catalog: getChannelAdapter(channel.kind, channel.name).catalog };
+  const adapter = getChannelAdapter(channel.kind, channel.name);
+  return { pub, adapter, channelName: channel.name, catalog: adapter.catalog };
 }
 
 const ref = (c: CategoryRef | null): CategoryRef | null => (c ? { id: c.id, name: c.name } : null);
@@ -59,6 +63,12 @@ export type CatalogData = {
    * valor de la mayoría de las publicaciones de la tienda, y de cuántas.
    */
   fromStore: Record<string, { value: string; count: number; total: number }>;
+  /** La categoría que tiene la publicación en el canal, como se leyó. Null si todavía no se leyó. */
+  inChannel: CategoryRef | null;
+  /** En qué categorías tiene el canal las publicaciones activas del producto en la tienda. */
+  productInChannel: ChannelCategoryGroup[];
+  /** El aviso si la categoría de la app no es la del canal, o el producto está en varias. Null si coinciden. */
+  categoryWarning: string | null;
 };
 
 /**
@@ -86,8 +96,11 @@ async function storeValues(db: Db, storeId: string, fields: CatalogField[]): Pro
 
 /** Lo que muestra la tarjeta de datos de catálogo. Null si el canal no tiene categorías. */
 export async function loadCatalogData(db: Db, publicationId: string): Promise<CatalogData | null> {
-  const { pub, channelName, catalog } = await load(db, publicationId);
+  const { pub, adapter, channelName, catalog } = await load(db, publicationId);
   if (!catalog) return null;
+  const copy = pub.channelCopy && !pub.channelCopy.missingSince ? pub.channelCopy : null;
+  const inChannel = copy?.categoryId ? { id: copy.categoryId, name: categoryLabel(adapter, copy.categoryId, copy.details) } : null;
+  const productInChannel = await productChannelCategories(db, { productId: pub.productId, storeId: pub.storeId });
   const family = pub.product.productType?.trim() || null;
   const { category, source, familyCategory } = resolveCatalog(catalog, family, pub.channelCategory);
   const fields = category ? editableFields(category) : [];
@@ -106,7 +119,18 @@ export async function loadCatalogData(db: Db, publicationId: string): Promise<Ca
       .map((field) => ({ field, value: pub.product[field.fromProduct!]?.trim() || null })),
     values,
     fromStore,
+    inChannel,
+    productInChannel,
+    categoryWarning: warningOf(channelName, ref(category), inChannel, productInChannel),
   };
+}
+
+/** Si la app y el canal no coinciden en la categoría. */
+function warningOf(channelName: string, app: CategoryRef | null, inChannel: CategoryRef | null, groups: ChannelCategoryGroup[]): string | null {
+  if (groups.length > 1) return clashText(groups, channelName);
+  const theirs = inChannel ?? (groups[0] ? { id: groups[0].categoryId, name: groups[0].name } : null);
+  if (!theirs || !app || theirs.id === app.id) return null;
+  return `En la app la categoría es ${app.name} (${app.id}) y en ${channelName} es ${theirs.name} (${theirs.id}). Cada producto va en la categoría que eligió ${channelName}: cambiala en Datos de catálogo antes de crear otra opción o medida.`;
 }
 
 /**

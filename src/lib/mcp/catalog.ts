@@ -21,6 +21,11 @@ export function catalogForClaude(data: CatalogData | null) {
     canal: data.channelName,
     categoria: data.category ? name(data.category) : null,
     categoria_elegida: data.source ? SOURCE_LABEL[data.source] : 'falta elegirla',
+    categoria_en_el_canal: data.inChannel ? name(data.inChannel) : 'todavía no se leyó',
+    ...(data.productInChannel.length > 1
+      ? { categorias_del_producto_en_el_canal: data.productInChannel.map((g) => ({ categoria: `${g.name} (${g.categoryId})`, publicaciones_activas: g.externalIds })) }
+      : {}),
+    ...(data.categoryWarning ? { aviso_de_categoria: data.categoryWarning } : {}),
     ...(data.category ? {} : { categorias_para_elegir: data.categories.map(name) }),
     de_la_ficha: data.fromProduct.map(({ field, value }) => ({ nombre: field.label, valor: value })),
     campos: data.fields.map((f) => ({

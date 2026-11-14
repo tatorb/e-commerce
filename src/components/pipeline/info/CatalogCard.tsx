@@ -107,6 +107,12 @@ export function CatalogCard({
                 ? `El tipo de producto «${family}» no tiene una categoría asignada: elegila acá.`
                 : 'El producto no tiene tipo de producto en la ficha: elegí la categoría acá.'}
         </p>
+        {data.inChannel ? (
+          <p className="text-xs text-muted-foreground">
+            En {data.channelName}: {data.inChannel.name} ({data.inChannel.id}).
+          </p>
+        ) : null}
+        {data.categoryWarning ? <p className="text-xs text-amber-700 dark:text-amber-400">{data.categoryWarning}</p> : null}
       </div>
 
       {category ? (

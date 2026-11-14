@@ -422,6 +422,18 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     return faceSummary(fingerprintsOf(faceValues(p)), p.channelCopy);
   };
 
+  it('si el canal le cambia la categoría, la lectura la guarda y la app la toma', async () => {
+    const pub = await db.publication.create({ data: { productId, storeId, externalId: 'MLA1', title: 'Kit Embrague Ford Ka' } });
+    await readAll();
+    expect((await db.channelCopy.findUniqueOrThrow({ where: { publicationId: pub.id } })).categoryId).toBe('MLA999');
+    items.MLA1.category_id = 'MLA47093';
+    await readAll();
+    expect((await db.channelCopy.findUniqueOrThrow({ where: { publicationId: pub.id } })).categoryId).toBe('MLA47093');
+    expect((await db.publication.findUniqueOrThrow({ where: { id: pub.id } })).channelCategory).toBe('MLA47093');
+    const log = await db.channelSyncChange.findFirstOrThrow({ where: { publicationId: pub.id, field: 'category' } });
+    expect(log.message).toContain('cambió la categoría a Pistones (MLA47093)');
+  });
+
   it('al subir una imagen con texto guarda el código que le dio el canal en esa publicación', async () => {
     const pub = await db.publication.create({ data: { productId, storeId, externalId: 'MLA1', title: 'Kit Embrague Ford Ka' } });
     await readAll();

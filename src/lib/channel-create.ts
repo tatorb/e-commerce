@@ -14,6 +14,7 @@ import { readOne } from '@/lib/channel-sync';
 import { withAccessToken } from '@/lib/connections';
 import { familyByMeasure, fillFamilyCode } from '@/lib/families';
 import { measuresOf, picturesFor, soleMeasurePhotos, type Measure } from '@/lib/media';
+import { categoryText, clashText } from '@/lib/channel-category';
 import { saveSentTextCodes, sentTextCodes } from '@/lib/text-images/channel-codes';
 import { available, isManaged } from '@/domain/stock';
 import { SOURCE_SELECT, sourceOf } from '@/lib/stock-plan';
@@ -215,6 +216,24 @@ export async function createChecks(db: Db, args: { accountId: string; publicatio
     detail: category ? category.name : 'Elegila en Datos de catálogo, en el paso Información o en la página de la publicación.',
     blocking: true,
   });
+  // La categoría que el canal ya eligió para el producto: las otras opciones y medidas activas. El canal
+  // finaliza las que quedan en otra, así que se crea en esa, y con el producto en dos no se crea.
+  const inChannel = catalog?.productInChannel ?? [];
+  if (inChannel.length > 0) {
+    const theirs = inChannel[0];
+    const same = inChannel.length === 1 && category?.id === theirs.categoryId;
+    checks.push({
+      label: `Categoría en ${channelName}`,
+      ok: same,
+      detail:
+        inChannel.length > 1
+          ? clashText(inChannel, channelName)
+          : same
+            ? `La misma que las otras del producto en ${channelName} (${theirs.externalIds.join(', ')}).`
+            : `${channelName} tiene las otras del producto (${theirs.externalIds.join(', ')}) en ${categoryText(theirs)}. Elegí esa en Datos de catálogo antes de crear.`,
+      blocking: true,
+    });
+  }
   const missing = [
     ...(catalog?.fromProduct.filter((f) => f.field.required && !f.value).map((f) => `${f.field.label} (de la ficha)`) ?? []),
     ...(catalog?.fields.filter((f) => f.required && !catalog.values[f.id] && !catalog.fromStore[f.id]).map((f) => f.label) ?? []),

@@ -1,3 +1,4 @@
+import { adoptChannelCategory } from '@/lib/channel-category';
 import { assignSaleOptions } from '@/lib/sale-options';
 import { Prisma, type PrismaClient } from '@/generated/prisma/client';
 import type { SyncTrigger } from '@/generated/prisma/enums';
@@ -204,6 +205,7 @@ async function applyListing(
           discountUntil: true,
           discountSentAt: true,
           details: true,
+          categoryId: true,
         },
       },
     },
@@ -343,6 +345,15 @@ async function applyListing(
     agreed,
   };
   await tx.channelCopy.upsert({ where: { publicationId }, create: { publicationId, ...copy }, update: copy });
+  // Si el canal le cambió la categoría, la app la toma en toda la familia y sus opciones de venta.
+  await adoptChannelCategory(tx, {
+    publicationId,
+    before: p.channelCopy?.categoryId ?? null,
+    after: listing.categoryId ?? null,
+    adapter: ctx.adapter,
+    details: copy.details,
+    syncId: ctx.syncId,
+  });
 
   // La medición del día: se suma a la que ya había, que puede traer datos de una planilla.
   const where = { publicationId_takenAt: { publicationId, takenAt: ctx.day } };
