@@ -4,7 +4,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@/generated/prisma/client';
 import { DISCOUNT_GRACE_MS, discountText, faceSummary, faceValues, fieldState, fingerprint, fingerprintsOf, heldDiscount, installmentsText, planFaces, storedPrints } from '@/domain/channel-sync';
-import { chooseFaces, refreshSyncBadge, runSyncStep, startSync, syncAllStores } from '@/lib/channel-sync';
+import { chooseFaces, forgetSyncBadges, refreshSyncBadge, runSyncStep, startSync, syncAllStores, syncBadgeCount } from '@/lib/channel-sync';
 import { choiceExclusion } from '@/domain/sync-choices';
 import type { McpContext } from '@/lib/mcp/tool';
 import { encrypt } from '@/lib/crypto';
@@ -403,6 +403,29 @@ describe.skipIf(!url)('la lectura automática en la base', () => {
     expect((await loadSyncOverview(accountId, db)).toChoose.map((r) => r.externalId)).toEqual(['MLA1', 'MLA2', 'MLA3', 'MLA5', 'MLA6']);
     void closed;
     void untouched;
+  });
+
+  it('el globo se cuenta en el momento, aunque ninguna lectura termine y lo guardado haya quedado viejo', async () => {
+    const a = await publication('MLA1', { title: 'Título de la app 1' });
+    const b = await publication('MLA2', { title: 'Título de la app 2' });
+    items = { MLA1: item(), MLA2: item() };
+    await pass();
+    forgetSyncBadges();
+    const now = Date.now();
+    expect(await syncBadgeCount(db, accountId, now)).toBe(2);
+
+    // Lo guardado quedó en 91 y la lectura siguiente no termina: el globo no lo usa.
+    await db.store.update({ where: { id: storeId }, data: { syncToChoose: 91 } });
+    await startSync(db, { storeId, trigger: 'SCHEDULE' });
+    await db.publication.update({ where: { id: a.id }, data: { pipelineStatus: 'IN_PIPELINE', pipelineStep: 'INFO' } });
+    // Pasado el rato en que se guarda el número, vuelve a contar.
+    expect(await syncBadgeCount(db, accountId, now + 60_000)).toBe(1);
+    expect(await syncBadgeCount(db, accountId, now + 60_000)).toBe((await loadSyncOverview(accountId, db)).toChoose.length);
+
+    // Elegir lo borra en el momento, sin esperar.
+    await chooseFaces(db, { accountId, publicationIds: [b.id], side: 'channel', userId: null });
+    expect(await syncBadgeCount(db, accountId, now + 61_000)).toBe(0);
+    expect((await loadSyncOverview(accountId, db)).toChoose).toHaveLength(0);
   });
 
   it('elegir lo del canal lo trae a la app; elegir lo de la app lo deja como borrador', async () => {

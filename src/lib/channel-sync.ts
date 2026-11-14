@@ -418,7 +418,7 @@ export async function runSyncStep(
   });
   const run = await db.channelSync.findUniqueOrThrow({
     where: { id: syncId },
-    include: { store: { select: { id: true, channel: { select: { kind: true, name: true } }, account: { select: { timezone: true } } } } },
+    include: { store: { select: { id: true, accountId: true, channel: { select: { kind: true, name: true } }, account: { select: { timezone: true } } } } },
   });
   const progress = (status: SyncProgress['status'], position: number, busy?: boolean): SyncProgress => ({
     id: run.id,
@@ -550,7 +550,7 @@ export async function runSyncStep(
   // Con todo leído: las opciones de venta de cada medida.
   await assignSaleOptions(db, run.store.id).catch((e) => console.error('Error al agrupar las opciones de venta', e instanceof Error ? e.message : e));
   const [toChoose, newInChannel] = await Promise.all([
-    countToChoose(db, run.store.id),
+    countToChoose(db, { storeId: run.store.id }),
     countNewInChannel(db, run.store.id, listings).catch(() => null),
   ]);
   await db.channelSync.update({
@@ -558,34 +558,54 @@ export async function runSyncStep(
     data: { status: 'DONE', finishedAt: clock(), leaseUntil: null, toChoose, newInChannel },
   });
   await db.store.update({ where: { id: run.store.id }, data: { syncToChoose: toChoose } });
+  badgeCache.delete(run.store.accountId);
   return progress('DONE', position);
 }
 
 /**
- * Cuántas publicaciones de la tienda tienen datos para elegir. Con la misma
- * regla que la pantalla: sin las del pipeline, sus opciones de venta y su
- * familia, ni las finalizadas.
+ * Cuántas publicaciones tienen datos para elegir, contadas en el momento. Con
+ * la misma regla que la pantalla y list_sync_choices: las que siguen en el
+ * canal, sin las del pipeline, sus opciones de venta y su familia, ni las
+ * finalizadas.
  */
-async function countToChoose(db: Db, storeId: string): Promise<number> {
+async function countToChoose(db: Db, where: Prisma.PublicationWhereInput): Promise<number> {
   const publications = await db.publication.findMany({
-    where: { storeId, channelCopy: { is: { missingSince: null } } },
+    where: { ...where, channelCopy: { is: { missingSince: null } } },
     select: { ...choiceExclusionSelect, title: true, description: true, attributes: true, media: true, price: true, installments: true, discount: true, quantities: true, warranty: true, channelCopy: { select: { fingerprints: true, agreed: true, price: true, installments: true, discount: true } } },
   });
   return publications.filter((p) => !choiceExclusion(p) && faceSummary(fingerprintsOf(faceValues(p)), p.channelCopy).choose.length > 0).length;
 }
 
+// El globo se pide en cada pantalla: el número se guarda unos segundos para no
+// contar todo de nuevo en cada clic. Elegir lo borra en el momento.
+const BADGE_TTL_MS = 30_000;
+const badgeCache = new Map<string, { n: number; at: number }>();
+
 /** Vuelve a contar el globo de Sincronización de esas tiendas, por ejemplo después de elegir. */
 export async function refreshSyncBadge(db: Db, storeIds: string[]): Promise<void> {
-  for (const storeId of [...new Set(storeIds)]) {
-    const n = await countToChoose(db, storeId);
-    await db.store.update({ where: { id: storeId }, data: { syncToChoose: n } });
+  const stores = await db.store.findMany({ where: { id: { in: [...new Set(storeIds)] } }, select: { id: true, accountId: true } });
+  for (const s of stores) {
+    badgeCache.delete(s.accountId);
+    const n = await countToChoose(db, { storeId: s.id });
+    await db.store.update({ where: { id: s.id }, data: { syncToChoose: n } });
   }
 }
 
-/** El número del globo de Sincronización de la cuenta. */
-export async function syncBadgeCount(db: Db, accountId: string): Promise<number> {
-  const r = await db.store.aggregate({ where: { accountId }, _sum: { syncToChoose: true } });
-  return r._sum.syncToChoose ?? 0;
+/**
+ * El número del globo de Sincronización de la cuenta, contado en el momento
+ * con la misma regla que la pantalla. No depende de que termine una lectura.
+ */
+export async function syncBadgeCount(db: Db, accountId: string, now = Date.now()): Promise<number> {
+  const hit = badgeCache.get(accountId);
+  if (hit && now - hit.at < BADGE_TTL_MS) return hit.n;
+  const n = await countToChoose(db, { product: { accountId } });
+  badgeCache.set(accountId, { n, at: now });
+  return n;
+}
+
+/** Para las pruebas: olvida los números guardados del globo. */
+export function forgetSyncBadges(): void {
+  badgeCache.clear();
 }
 
 /** Las activas y pausadas del canal que la app no tiene. */
