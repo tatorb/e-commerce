@@ -54,6 +54,8 @@ import { loadMediaSources } from '@/lib/media';
 import { createChecks } from '@/lib/channel-create';
 import { CreateInChannelCard } from '@/components/publication/CreateInChannelCard';
 import { ChannelStatusCard } from '@/components/publication/ChannelStatusCard';
+import { FlexCard } from '@/components/publication/FlexCard';
+import { getChannelFlex } from '@/channels/flex';
 import { relistInfo } from '@/lib/channel-status';
 import { FACE_FIELDS, FACE_FIELD_LABEL, priceFaceText, SYNC_CHANGE_LABEL, type FaceField, type FaceValues } from '@/domain/channel-sync';
 import { quantityText, type QuantityLine } from '@/domain/quantities';
@@ -349,6 +351,9 @@ export default async function PublicationPage({
         ) : null}
         {p.externalId ? (
           <ChannelStatusCard accountSlug={account.slug} publicationId={p.id} status={p.channelStatus} needsFix={copy?.statusNeedsFix ?? false} channelName={channelName} relist={relist} />
+        ) : null}
+        {p.externalId && getChannelFlex(p.store.channel.kind) ? (
+          <FlexCard accountSlug={account.slug} publicationId={p.id} channelName={channelName} flex={copy?.flex ?? null} familySize={family?.members.length ?? 0} />
         ) : null}
 
         {/* Las dos caras de la publicación, y su puntaje e historial. */}

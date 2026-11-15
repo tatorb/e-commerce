@@ -36,6 +36,8 @@ import { campaignText, pendingCampaigns } from '@/lib/channel-campaigns';
 import { MediaOrganizer } from '@/components/publication/MediaOrganizer';
 import { MeasureCheckCard } from '@/components/pipeline/MeasureCheckCard';
 import { MeasurePickerCard } from '@/components/publication/MeasurePickerCard';
+import { FlexCard } from '@/components/publication/FlexCard';
+import { getChannelFlex } from '@/channels/flex';
 import { measurePickerNeeded } from '@/domain/measure-picker';
 import { loadMeasureChoice } from '@/lib/publication-measure';
 import { measureCheck } from '@/lib/photo-measures';
@@ -610,6 +612,9 @@ export default async function PipelineStepPage({
               stock={stockPlans?.get(pub.id) ? { plan: stockPlans.get(pub.id)!, productHref: `/a/${account.slug}/productos/${pub.productId}?seccion=stock` } : null}
             />
             {warranty ? <WarrantyCard accountSlug={account.slug} publicationId={pub.id} channelName={pub.channelName} w={warranty} /> : null}
+            {pub.externalId && getChannelFlex(channel.kind) ? (
+              <FlexCard accountSlug={account.slug} publicationId={pub.id} channelName={pub.channelName} flex={faces?.copy?.flex ?? null} familySize={family?.members.length ?? 0} />
+            ) : null}
             {create ? <CreateInChannelCard accountSlug={account.slug} publicationId={pub.id} info={create} /> : null}
             <PublicationCodeCard
               accountSlug={account.slug}

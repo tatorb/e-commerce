@@ -167,6 +167,14 @@ function discountOf(item: Obj): number | null {
 /** Si está en Full: el stock lo maneja Mercado Libre en su depósito. */
 export const inFull = (item: Obj): boolean => isObj(item.shipping) && item.shipping.logistic_type === 'fulfillment';
 
+/** Si ofrece Envíos Flex, por sus etiquetas. Null si no tiene ninguna de las dos: la cuenta no usa Flex. */
+export function flexOfItem(item: Obj): boolean | null {
+  const tags = tagsOf(item);
+  if (tags.includes('self_service_in')) return true;
+  if (tags.includes('self_service_out')) return false;
+  return null;
+}
+
 /** Una publicación de Mercado Libre en el formato neutro. Sin la descripción ni las visitas, que se piden aparte. */
 export function parseItem(item: Obj): ChannelListing {
   const attributes: ChannelListing['attributes'] = [];
@@ -221,6 +229,8 @@ export function parseItem(item: Obj): ChannelListing {
     sold: num(item.sold_quantity),
     quantity: num(item.available_quantity),
     stockInChannel: inFull(item),
+    // Solo si vinieron las etiquetas: sin pedirlas, no se sabe.
+    ...('tags' in item ? { flex: flexOfItem(item) } : {}),
     visits90d: null,
     photos,
     photoIds: pictures.map((p) => p.id),

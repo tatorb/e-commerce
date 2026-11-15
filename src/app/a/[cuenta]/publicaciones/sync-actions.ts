@@ -15,6 +15,7 @@ import { photoRefSchema } from '@/domain/media';
 import { MediaError, saveMedia } from '@/lib/media';
 import { CreateError, createInChannel } from '@/lib/channel-create';
 import { changeStatus, relistInChannel, StatusError, type StatusResult } from '@/lib/channel-status';
+import { readPublicationFlex, setPublicationsFlex, type FlexResult } from '@/lib/flex';
 import { MAX_QUANTITY } from '@/domain/quantities';
 import { saveQuantities, type QuantitiesResult } from '@/lib/quantities';
 import { setFollowsStock, syncStock } from '@/lib/stock';
@@ -339,6 +340,40 @@ export async function changeStatusAction(
       const result = await changeStatus(prisma, { accountId: account.id, publicationIds: ids.data, action: parsed.data, userId: user.id });
       for (const p of result.done) refresh(accountSlug, p.id);
       return { ok: true, ...result };
+    } catch (e) {
+      return failure(e);
+    }
+  });
+}
+
+/**
+ * Prende o apaga Envíos Flex en esas publicaciones (en una familia, en todas sus
+ * medidas). Lo decide la persona: la app no lo hace sola.
+ */
+export async function setFlexAction(accountSlug: string, publicationIds: string[], on: boolean): Promise<Result<FlexResult>> {
+  const one = Array.isArray(publicationIds) && publicationIds.length === 1;
+  const detail = Array.isArray(publicationIds) && publicationIds.length > 1 ? `${publicationIds.length} publicaciones` : null;
+  return act(accountSlug, { section: 'subir', does: on ? 'Prendió Envíos Flex' : 'Apagó Envíos Flex', publicationId: one ? publicationIds[0] : null, detail }, async ({ user, account }) => {
+    const ids = z.array(idSchema).min(1).max(200).safeParse(publicationIds);
+    if (!ids.success || typeof on !== 'boolean') return { ok: false, error: 'El pedido no tiene la forma esperada.' };
+    try {
+      const result = await setPublicationsFlex(prisma, { accountId: account.id, publicationIds: ids.data, on, userId: user.id });
+      for (const p of result.done) refresh(accountSlug, p.id);
+      return { ok: true, ...result };
+    } catch (e) {
+      return failure(e);
+    }
+  });
+}
+
+/** Si la publicación ofrece Envíos Flex, leído ahora del canal. */
+export async function readFlexAction(accountSlug: string, publicationId: string): Promise<Result<{ flex: boolean | null }>> {
+  return act(accountSlug, { section: 'publicaciones', level: 'read' }, async ({ account }) => {
+    if (!idSchema.safeParse(publicationId).success) return { ok: false, error: 'El pedido no tiene la forma esperada.' };
+    try {
+      const flex = await readPublicationFlex(prisma, { accountId: account.id, publicationId });
+      refresh(accountSlug, publicationId);
+      return { ok: true, flex };
     } catch (e) {
       return failure(e);
     }

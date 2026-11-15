@@ -89,6 +89,7 @@ export async function listScoredPublications(
             warranty: true,
             variations: true,
             stockInChannel: true,
+            flex: true,
           },
         },
         product: {
@@ -165,6 +166,8 @@ export async function listScoredPublications(
       // Cómo está frente a lo que se leyó del canal.
       sync: { read: copy !== null, draft: faces.draft.length > 0, choose: faces.choose.length > 0, rejected: faces.rejected.length > 0 },
       stock: copy?.quantity ?? null,
+      // Si ofrece Envíos Flex. Null: el canal no lo dice.
+      flex: copy?.flex ?? null,
       // La cantidad: la del canal, la que falta subir y en cuántas medidas.
       quantity: {
         channel: copy?.quantity ?? null,

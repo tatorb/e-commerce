@@ -18,7 +18,8 @@ import { KindBadge } from '@/components/products/KindBadge';
 import { plural } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
 import { addToPipelineAction } from '@/app/a/[cuenta]/publicaciones/pipeline-actions';
-import { changeStatusAction, pushDraftsAction, saveQuantitiesAction } from '@/app/a/[cuenta]/publicaciones/sync-actions';
+import { changeStatusAction, pushDraftsAction, saveQuantitiesAction, setFlexAction } from '@/app/a/[cuenta]/publicaciones/sync-actions';
+import { flexConfirm } from '@/domain/flex';
 import { Input } from '@/components/ui/input';
 import { useAddToPipeline } from './useAddToPipeline';
 import { titleOrUntitled } from '@/domain/publication-title';
@@ -47,6 +48,8 @@ export type CatalogRow = PipelineState & {
   familySize: number;
   // Si es otra opción de venta de una medida: el código de la principal.
   mainOptionCode?: string | null;
+  // Si ofrece Envíos Flex. Null: el canal no lo dice.
+  flex?: boolean | null;
 };
 
 /** La marca de una medida de una familia: se trabaja junta con las demás. */
@@ -56,6 +59,16 @@ function OptionChip({ main }: { main: string | null | undefined }) {
   return (
     <Badge variant="outline" title="La misma medida que otra publicación, con otra forma de cobro y su propio precio">
       Opción de venta de {main}
+    </Badge>
+  );
+}
+
+/** La marca de las que ofrecen Envíos Flex. */
+function FlexChip({ flex }: { flex: boolean | null | undefined }) {
+  if (flex !== true) return null;
+  return (
+    <Badge variant="outline" title="Ofrece Envíos Flex: la entregás vos, en el día o al día siguiente">
+      Flex
     </Badge>
   );
 }
@@ -281,12 +294,44 @@ function useBulkStatus(accountSlug: string, onDone: () => void) {
   return { run, progress, outcomes, clear: () => setOutcomes(null) };
 }
 
+/** Prende o apaga Flex en varias publicaciones, de a una, contando el avance. */
+function useBulkFlex(accountSlug: string, onDone: () => void) {
+  const router = useRouter();
+  const [progress, setProgress] = useState<{ on: boolean; done: number; total: number } | null>(null);
+  const [outcomes, setOutcomes] = useState<{ on: boolean; list: PushOutcome[] } | null>(null);
+  async function run(on: boolean, rows: CatalogRow[]) {
+    setOutcomes(null);
+    setProgress({ on, done: 0, total: rows.length });
+    const out: PushOutcome[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      const title = titleOrUntitled(rows[i].title);
+      const r = await setFlexAction(accountSlug, [rows[i].id], on).catch(() => null);
+      out.push(
+        !r
+          ? { title, kind: 'error', text: 'Se cortó la conexión con la app.' }
+          : !r.ok
+            ? { title, kind: 'error', text: r.error }
+            : r.failed.length > 0
+              ? { title, kind: 'error', text: r.failed[0].message }
+              : { title, kind: 'ok', text: on ? 'Con Flex' : 'Sin Flex' },
+      );
+      setProgress({ on, done: i + 1, total: rows.length });
+    }
+    setOutcomes({ on, list: out });
+    setProgress(null);
+    onDone();
+    router.refresh();
+  }
+  return { run, progress, outcomes, clear: () => setOutcomes(null) };
+}
+
 export function CatalogTable({ accountSlug, rows, channelName }: { accountSlug: string; rows: CatalogRow[]; channelName: string }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const add = useAddToPipeline(() => setSelected(new Set()));
   const push = useBulkPush(accountSlug, () => setSelected(new Set()));
   const status = useBulkStatus(accountSlug, () => setSelected(new Set()));
   const quantity = useBulkQuantity(accountSlug, () => setSelected(new Set()));
+  const flex = useBulkFlex(accountSlug, () => setSelected(new Set()));
   const [quantityText, setQuantityText] = useState('');
 
   // Solo cuentan las que se ven ahora: si un filtro esconde una elegida, no se toca.
@@ -295,7 +340,7 @@ export function CatalogTable({ accountSlug, rows, channelName }: { accountSlug: 
   const allChosen = eligible.length > 0 && chosen.length === eligible.length;
   const toPipeline = chosen.filter(canEnter);
   const toPush = chosen.filter(canPush);
-  const busy = add.pending || push.progress !== null || status.progress !== null || quantity.pending;
+  const busy = add.pending || push.progress !== null || status.progress !== null || quantity.pending || flex.progress !== null;
   const toQuantity = chosen.filter((r) => Boolean(r.externalId) && !r.quantity.inChannel && r.quantity.channel !== null);
 
   function toggle(id: string, on: boolean) {
@@ -309,6 +354,7 @@ export function CatalogTable({ accountSlug, rows, channelName }: { accountSlug: 
     push.clear();
     status.clear();
     quantity.clear();
+    flex.clear();
   }
 
   function toggleAll(on: boolean) {
@@ -317,6 +363,7 @@ export function CatalogTable({ accountSlug, rows, channelName }: { accountSlug: 
     push.clear();
     status.clear();
     quantity.clear();
+    flex.clear();
   }
 
   function setQuantity() {
@@ -333,6 +380,18 @@ export function CatalogTable({ accountSlug, rows, channelName }: { accountSlug: 
     if (confirm && !window.confirm(confirm)) return;
     status.run(action, list);
   }
+  // Flex: las publicadas, para prender las que no lo tienen y apagar las que sí.
+  const toFlexOn = chosen.filter((r) => Boolean(r.externalId) && r.flex !== true);
+  const toFlexOff = chosen.filter((r) => Boolean(r.externalId) && r.flex === true);
+  function changeFlex(value: string) {
+    const on = value === 'on';
+    const list = on ? toFlexOn : toFlexOff;
+    if (list.length === 0) return;
+    if (!window.confirm(flexConfirm(on, channelName, list.length))) return;
+    flex.run(on, list);
+  }
+  const flexDone = flex.outcomes?.list.filter((o) => o.kind === 'ok').length ?? 0;
+  const flexFailed = flex.outcomes?.list.filter((o) => o.kind === 'error') ?? [];
   const statusDone = status.outcomes?.list.filter((o) => o.kind === 'ok').length ?? 0;
   const statusFailed = status.outcomes?.list.filter((o) => o.kind === 'error') ?? [];
 
@@ -342,7 +401,7 @@ export function CatalogTable({ accountSlug, rows, channelName }: { accountSlug: 
 
   return (
     <>
-      {chosen.length > 0 || add.message || push.progress || push.outcomes.length > 0 || status.progress || status.outcomes || quantity.outcome ? (
+      {chosen.length > 0 || add.message || push.progress || push.outcomes.length > 0 || status.progress || status.outcomes || quantity.outcome || flex.progress || flex.outcomes ? (
         <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
           {chosen.length > 0 ? (
             <>
@@ -378,6 +437,21 @@ export function CatalogTable({ accountSlug, rows, channelName }: { accountSlug: 
                     </option>
                   );
                 })}
+              </select>
+              <select
+                aria-label="Envíos Flex"
+                className="h-8 rounded-md border border-input bg-background px-2 text-sm shadow-sm disabled:opacity-50"
+                value=""
+                disabled={busy || (toFlexOn.length === 0 && toFlexOff.length === 0)}
+                onChange={(e) => changeFlex(e.target.value)}
+              >
+                <option value="">Envíos Flex…</option>
+                <option value="on" disabled={toFlexOn.length === 0}>
+                  Prender Flex ({toFlexOn.length})
+                </option>
+                <option value="off" disabled={toFlexOff.length === 0}>
+                  Apagar Flex ({toFlexOff.length})
+                </option>
               </select>
               <form
                 className="flex items-center gap-1.5"
@@ -433,6 +507,30 @@ export function CatalogTable({ accountSlug, rows, channelName }: { accountSlug: 
               {statusFailed.length > 0 ? (
                 <ul className="list-disc space-y-0.5 pl-5 text-destructive">
                   {statusFailed.slice(0, 10).map((o, i) => (
+                    <li key={i}>
+                      <span className="font-medium">{o.title}:</span> {o.text}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
+          {flex.progress ? (
+            <span className="tabular-nums text-muted-foreground" aria-live="polite">
+              {flex.progress.on ? 'Prendiendo Flex' : 'Apagando Flex'} {flex.progress.done} de {flex.progress.total}
+            </span>
+          ) : null}
+          {flex.outcomes ? (
+            <div className="basis-full space-y-1" role="status">
+              <p>
+                {flexDone > 0
+                  ? `Listo, ${plural(flexDone, 'publicación', 'publicaciones')} ${flex.outcomes.on ? 'con' : 'sin'} Envíos Flex en ${channelName}.`
+                  : 'No cambió ninguna.'}
+                {flexFailed.length > 0 ? ` ${plural(flexFailed.length, 'no se pudo', 'no se pudieron')}:` : ''}
+              </p>
+              {flexFailed.length > 0 ? (
+                <ul className="list-disc space-y-0.5 pl-5 text-destructive">
+                  {flexFailed.slice(0, 10).map((o, i) => (
                     <li key={i}>
                       <span className="font-medium">{o.title}:</span> {o.text}
                     </li>
@@ -527,6 +625,7 @@ export function CatalogTable({ accountSlug, rows, channelName }: { accountSlug: 
                   <ChannelStatusBadge status={p.channelStatus} />
                   <SyncBadges sync={p.sync} />
                   <FamilyChip size={p.familySize} />
+                  <FlexChip flex={p.flex} />
                   <OptionChip main={p.mainOptionCode} />
                 </div>
                 <div className="text-xs text-muted-foreground truncate">
@@ -589,6 +688,7 @@ export function CatalogTable({ accountSlug, rows, channelName }: { accountSlug: 
                       </span>
                       <KindBadge kind={p.kind} className="mt-0.5" />
                       <FamilyChip size={p.familySize} />
+                      <FlexChip flex={p.flex} />
                     </div>
                     <div className="text-xs text-muted-foreground truncate">
                       {[codeOrUnpublished(p.externalId), p.skus.join(' / ')].filter(Boolean).join(' · ')}

@@ -144,6 +144,7 @@ export function fieldLabel(field: string): string {
   if (field === 'status') return 'Estado';
   if (field === 'campaign') return 'Campaña';
   if (field === 'category') return 'Categoría';
+  if (field === 'flex') return 'Envíos Flex';
   return field === 'publication' ? 'Publicación' : field === 'question' ? 'Pregunta de un comprador' : field;
 }
 
@@ -223,6 +224,10 @@ export function changeSides(field: string, before: unknown, after: unknown): { b
       return w ? warrantyLabel(w) : '';
     };
     return { before: label(before), after: label(after) || 'La del canal' };
+  }
+  if (field === 'flex') {
+    const label = (v: unknown) => (v === true ? 'Con Flex' : v === false ? 'Sin Flex' : 'Sin dato');
+    return { before: label(before), after: label(after) };
   }
   if (field === 'status') {
     const label = (v: unknown) => (typeof v === 'string' && v in CHANNEL_STATUS_LABEL ? CHANNEL_STATUS_LABEL[v as ChannelStatus] : '');

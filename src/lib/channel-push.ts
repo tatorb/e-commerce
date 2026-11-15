@@ -135,6 +135,7 @@ async function loadForPush(db: Db, accountId: string, publicationId: string) {
           quantity: true,
           warranty: true,
           stockInChannel: true,
+          flex: true,
           statusNeedsFix: true,
           statusBlocked: true,
         },

@@ -1,3 +1,4 @@
+import { flexLabel } from '@/domain/flex';
 import { competitorOwner, loadCompetitors } from '@/lib/competitors';
 import { z } from 'zod';
 import { parseWarranty, warrantyLabel } from '@/domain/warranty';
@@ -423,7 +424,7 @@ const getPublication = defineTool({
             take: LOG_SHOWN,
             select: { createdAt: true, field: true, kind: true, message: true, user: { select: { name: true } } },
           },
-          channelCopy: { select: { readAt: true, photos: true, price: true, discount: true, installments: true, warranty: true, missingSince: true } },
+          channelCopy: { select: { readAt: true, photos: true, price: true, discount: true, installments: true, warranty: true, missingSince: true, flex: true } },
           warranty: true,
           price: true,
           discount: true,
@@ -548,6 +549,8 @@ const getPublication = defineTool({
       descripcion: pub.description,
       atributos_en_el_canal: safeList(parseNameValueList(pub.attributes)),
       datos_de_catalogo: catalogForClaude(catalog),
+      // Si ofrece Envíos Flex, como lo leyó la app del canal. Se cambia con set_publication_flex.
+      envios_flex: pub.channelCopy ? flexLabel(pub.channelCopy.flex) : 'Sin leer del canal',
       fotos_en_el_canal: pub.channelCopy ? { cantidad: Array.isArray(pub.channelCopy.photos) ? pub.channelCopy.photos.length : 0, leidas: when(pub.channelCopy.readAt, account) } : null,
       registro: pub.syncChanges.map((c) => ({
         fecha: when(c.createdAt, account),

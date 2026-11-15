@@ -14,6 +14,7 @@ import { BulkProposalDialog } from '@/components/proposals/BulkProposalDialog';
 import { AI_NOT_CONFIGURED, isAiConfigured } from '@/ai/claude';
 import { needsProposal } from '@/domain/proposals';
 import { CHANNEL_STATUS_LABEL } from '@/domain/channel-status';
+import { FLEX_OPTIONS } from '@/domain/flex';
 import { PIPELINE_STATUSES, PIPELINE_STATUS_LABEL } from '@/domain/pipeline';
 import { channelInfo } from '@/channels';
 import { contentSheetInstructions } from '@/importers/content-sheet';
@@ -107,6 +108,7 @@ export default async function PublicationsPage({
     quantity: p.quantity,
     familySize: p.familySize,
     mainOptionCode: p.mainOptionCode,
+    flex: p.flex,
   }));
   const ready = items.filter((p) => needsProposal(p.stage));
   const toReview = all.filter((p) => p.stage === 'PROPOSAL_GENERATED' || p.stage === 'IN_REVIEW').length;
@@ -241,6 +243,12 @@ export default async function PublicationsPage({
             paramKey="stock"
             options={STOCK_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
             selected={filters.stock}
+          />
+          <UrlFilterDropdown
+            label="Envíos Flex"
+            paramKey="flex"
+            options={FLEX_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+            selected={filters.flex}
           />
           <UrlFilterDropdown
             label="Estado"

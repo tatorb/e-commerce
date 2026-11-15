@@ -31,6 +31,8 @@ describe('lista de herramientas', () => {
       'get_title_workspace',
       'check_title',
       'list_tasks',
+      'get_flex_today',
+      'get_flex_config',
       'get_publication_media',
       'get_description_step',
       'get_create_step',

@@ -41,6 +41,8 @@ export type ChannelListing = {
   quantity: number | null;
   // El canal maneja el stock, como en Full: la cantidad no se puede cambiar desde la app.
   stockInChannel: boolean;
+  // Si ofrece Envíos Flex. Null: el canal no lo dice. Sin el campo, no se leyó.
+  flex?: boolean | null;
   visits90d: number | null;
   photos: string[];
   // El código de cada foto en el canal, en el mismo orden, si lo informa.

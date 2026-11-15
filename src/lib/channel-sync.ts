@@ -313,6 +313,7 @@ async function applyListing(
     discount: listing.discount,
     quantity: listing.quantity,
     stockInChannel: listing.stockInChannel,
+    ...(listing.flex !== undefined ? { flex: listing.flex } : {}),
     warranty: asJson(listing.warranty ?? null),
     // Un descuento que llegó del canal no es de la app: no se renueva.
     ...(taken.includes('discount') ? { discountUntil: null, discountSentAt: null } : {}),

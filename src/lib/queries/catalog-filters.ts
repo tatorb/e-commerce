@@ -3,6 +3,7 @@ import { PIPELINE_STATUSES } from '@/domain/pipeline';
 import { scoreBand } from '@/domain/standard';
 import type { TitleLock } from '@/domain/title-lock';
 import type { ChannelStatus, PipelineStatus, ProductKind, Stage } from '@/generated/prisma/enums';
+import { FLEX_OPTIONS, flexOption } from '@/domain/flex';
 
 // Filtros y orden de Publicaciones (la lista de publicaciones). Los usan la
 // pantalla y la descarga de la planilla de contenido, así bajás exactamente
@@ -21,6 +22,7 @@ export type PublicationSearch = {
   propuesta?: string;
   sincro?: string;
   stock?: string;
+  flex?: string;
   orden?: string;
 };
 
@@ -132,6 +134,7 @@ export type CatalogFilters = {
   proposal: keyof typeof PROPOSAL_SHORTCUTS | '';
   sync: string[];
   stock: string[];
+  flex: string[];
   sort: string;
   q: string;
 };
@@ -157,6 +160,7 @@ export function parsePublicationSearch(search: PublicationSearch): CatalogFilter
     proposal: search.propuesta && search.propuesta in PROPOSAL_SHORTCUTS ? (search.propuesta as 'revisar' | 'aplicar') : '',
     sync: list(search.sincro, SYNC_OPTIONS.map((o) => o.value)),
     stock: list(search.stock, STOCK_OPTIONS.map((o) => o.value)),
+    flex: list(search.flex, FLEX_OPTIONS.map((o) => o.value)),
     sort: SORTS.some((s) => s.value === search.orden) ? search.orden! : 'puntaje',
     q: search.q?.trim().toLowerCase() ?? '',
   };
@@ -175,6 +179,7 @@ export function isFiltered(f: CatalogFilters): boolean {
       f.proposal ||
       f.sync.length ||
       f.stock.length ||
+      f.flex.length ||
       f.q,
   );
 }
@@ -196,6 +201,8 @@ export type Filterable = {
   sync: SyncState;
   // La cantidad disponible en el canal, en total.
   stock: number | null;
+  // Si ofrece Envíos Flex. Null: el canal no lo dice.
+  flex?: boolean | null;
 };
 
 function visitRange(visits: number | null): string {
@@ -216,7 +223,7 @@ function lockOption(lock: TitleLock): string {
 }
 
 export function filterPublications<T extends Filterable>(all: T[], f: CatalogFilters): T[] {
-  const { band, statuses, pipeline, productTypes, kinds, visits, sales, locked, proposal, sync, stock, sort, q } = f;
+  const { band, statuses, pipeline, productTypes, kinds, visits, sales, locked, proposal, sync, stock, flex, sort, q } = f;
   const proposalStages = proposal ? PROPOSAL_SHORTCUTS[proposal].stages : null;
   const typeSet = new Set(productTypes.map((x) => x.toLowerCase()));
   return all
@@ -232,6 +239,7 @@ export function filterPublications<T extends Filterable>(all: T[], f: CatalogFil
     .filter((p) => !proposalStages || proposalStages.includes(p.stage))
     .filter((p) => sync.length === 0 || syncOptions(p.sync).some((o) => sync.includes(o)))
     .filter((p) => stock.length === 0 || stock.includes(stockOption(p.stock)))
+    .filter((p) => flex.length === 0 || flex.includes(flexOption(p.flex)))
     .filter(
       (p) =>
         !q ||

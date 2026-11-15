@@ -51,7 +51,8 @@ describe('herramientas de escritura en la lista', () => {
     expect(tools.get('choose_sync_side')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('set_publication_measure')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('push_skus')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
-    expect(tools.size).toBe(91);
+    expect(tools.get('set_publication_flex')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+    expect(tools.size).toBe(94);
   });
 });
 

@@ -1504,6 +1504,9 @@ model ChannelCopy {
   quantity          Int?
   // El canal maneja el stock, como en Full: la cantidad no se cambia desde la app.
   stockInChannel    Boolean       @default(false)
+  // Si ofrece Envíos Flex en el canal. Null: el canal no lo dice, por ejemplo
+  // porque la cuenta no tiene Flex.
+  flex              Boolean?
   // La garantía como la informa el canal: { type, amount, unit }. Null: no se leyó.
   warranty          Json?
   status            ChannelStatus
