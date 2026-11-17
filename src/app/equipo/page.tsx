@@ -19,6 +19,9 @@ import { ChangePasswordForm } from '@/components/team/ChangePasswordForm';
 import { ClaudeConnections } from '@/components/team/ClaudeConnections';
 import { CopyButton } from '@/components/apply/CopyButton';
 import { ImageWorkerCard } from '@/components/team/ImageWorkerCard';
+import { VideoEditorCard } from '@/components/team/VideoEditorCard';
+import { loadEditorSettings, pendingEdits } from '@/lib/video-edits';
+import { DEFAULT_EDITOR_SETTINGS } from '@/domain/video-edit';
 import { WorkerStatusLine } from '@/components/pipeline/images/WorkerStatusLine';
 import { workerState } from '@/lib/image-worker';
 import { DriveCard } from '@/components/team/DriveCard';
@@ -48,6 +51,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
     admin ? vercelLeft(prisma) : Promise.resolve(0),
     visibleAccounts(me.access),
   ]);
+  const [editorSettings, editsWaiting] = admin ? await Promise.all([loadEditorSettings(prisma), pendingEdits(prisma)]) : [DEFAULT_EDITOR_SETTINGS, 0];
   const storeConnected = isBlobConfigured();
   // Lo que dijo la vuelta de Google al conectar el Drive.
   const driveBack = back.drive === 'ok' || back.drive === 'error' ? { ok: back.drive === 'ok', text: back.detalle ?? '' } : null;
@@ -307,6 +311,18 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
                   </p>
                 ) : null}
                 <ImageWorkerCard hasKey={worker.kind !== 'none'} keyHint={worker.kind !== 'none' ? worker.keyHint : null} />
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>Editor de videos</CardTitle>
+                <CardDescription>
+                  El mismo trabajador de la Mac arma los clips verticales del paso Videos: gira el video, corrige la luz y
+                  el color y lo acelera. Acá se elige cuándo puede hacerlo, porque editar video exige a la Mac.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <VideoEditorCard settings={editorSettings} waiting={editsWaiting} />
               </CardContent>
             </Card>
           </>

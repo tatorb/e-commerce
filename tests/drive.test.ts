@@ -290,6 +290,27 @@ describe.skipIf(!url)('el Drive y los videos en la base', () => {
     expect((await db.productVideo.findUniqueOrThrow({ where: { id: row.id } })).goneAt).toBeNull();
   });
 
+  it('la copia liviana de la cámara no es un video más: se anota en el suyo', async () => {
+    await connect();
+    const { folderId } = await syncProductVideos(db, { accountId, productId });
+    const video = google.addFile({ name: 'DJI_0073_D.MP4', mimeType: 'video/mp4', parents: [folderId], data: Buffer.alloc(5000) });
+    const light = google.addFile({ name: 'DJI_0073_D.LRF', mimeType: 'video/mp4', parents: [folderId], data: Buffer.alloc(700) });
+    google.addFile({ name: 'DJI_0099_D.LRF', mimeType: 'video/mp4', parents: [folderId], data: Buffer.alloc(300) });
+    expect(await syncProductVideos(db, { accountId, productId })).toMatchObject({ added: 1, gone: 0 });
+    const rows = await db.productVideo.findMany({ where: { productId } });
+    expect(rows.map((r) => r.name)).toEqual(['DJI_0073_D.MP4']);
+    expect(rows[0]).toMatchObject({ driveFileId: video.id, lightFileId: light.id, lightSize: BigInt(700) });
+    const step = await loadVideosStep(db, { accountId, publicationId });
+    expect(step.videos[0]).toMatchObject({ hasLightCopy: true, editedFrom: null });
+    expect(step.edits).toEqual([]);
+    expect(step.editor).toMatchObject({ summary: 'Apagado: la Mac no edita videos.', connected: false, hasKey: false });
+
+    // Se borró la copia liviana: el video queda sin ella.
+    light.trashed = true;
+    await syncProductVideos(db, { accountId, productId });
+    expect(await db.productVideo.findUniqueOrThrow({ where: { driveFileId: video.id } })).toMatchObject({ lightFileId: null, lightSize: null });
+  });
+
   it('sube un video por partes, con el origen de la app, y lo anota con las medidas del navegador', async () => {
     await connect();
     const data = Buffer.alloc(600 * 1024, 7);

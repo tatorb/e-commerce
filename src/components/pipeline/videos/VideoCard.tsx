@@ -9,6 +9,8 @@ import { cn } from '@/lib/utils/cn';
 import { formatSeconds, type ClipCheck } from '@/domain/videos';
 import { chooseClipAction, saveVideoMeasureAction, trashVideoAction } from '@/app/a/[cuenta]/pipeline/video-actions';
 import type { VideoRow } from '@/lib/videos';
+import type { EditRow } from '@/lib/video-edits';
+import { VideoEditPanel, type EditorInfo } from './VideoEditPanel';
 
 // Un video del producto: su miniatura, sus medidas, si sirve como clip y lo
 // que se puede hacer con él. Se puede ver en la app aunque no se tenga el Drive.
@@ -113,6 +115,10 @@ export function VideoCard({
   clipName,
   isClip,
   timeLabel,
+  edit,
+  editedClip,
+  editor,
+  range,
 }: {
   accountSlug: string;
   publicationId: string;
@@ -122,6 +128,11 @@ export function VideoCard({
   clipName: string;
   isClip: boolean;
   timeLabel: string;
+  // La última edición de este video y el clip que dejó, si tiene.
+  edit: EditRow | null;
+  editedClip: VideoRow | null;
+  editor: EditorInfo;
+  range: { min: number; max: number };
 }) {
   const router = useRouter();
   const [playing, setPlaying] = useState(false);
@@ -161,6 +172,12 @@ export function VideoCard({
             {video.origin === 'APP' ? `Subido desde la app${video.uploadedBy ? ` por ${video.uploadedBy}` : ''}` : 'Agregado desde el Drive'}, {timeLabel}
           </p>
           {video.shot ? <p className="text-xs text-muted-foreground">{video.shot}</p> : null}
+          {video.editedFrom ? (
+            <p className="text-xs text-muted-foreground">
+              Clip editado de {video.editedFrom.name}
+              {video.editedFrom.approved ? '' : ', todavía sin aprobar'}.
+            </p>
+          ) : null}
           {video.gone ? (
             <p className="text-xs text-destructive">Ya no está en la carpeta del Drive: se borró o se movió.</p>
           ) : check ? (
@@ -183,7 +200,7 @@ export function VideoCard({
               variant="outline"
               onClick={() => run('clip', () => chooseClipAction(accountSlug, publicationId, video.id))}
               pending={pending && which === 'clip'}
-              disabled={pending || check.problems.length > 0 || check.pending}
+              disabled={pending || check.problems.length > 0 || check.pending || video.editedFrom?.approved === false}
             >
               <Clapperboard />
               Usar como {clipName}
@@ -232,6 +249,7 @@ export function VideoCard({
           {error}
         </p>
       ) : null}
+      {!video.gone && !video.editedFrom ? <VideoEditPanel accountSlug={accountSlug} video={video} edit={edit} clip={editedClip} editor={editor} range={range} /> : null}
     </li>
   );
 }

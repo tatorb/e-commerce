@@ -1,6 +1,9 @@
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { videoUploadType } from '@/domain/videos';
 import { shotText } from '@/domain/shoot';
+import { editorSummary, isLightCopy, pairKey } from '@/domain/video-edit';
+import { workerState } from '@/lib/image-worker';
+import { editsOfProduct, loadEditorSettings } from '@/lib/video-edits';
 import {
   DriveError,
   driveEmail,
@@ -67,7 +70,11 @@ export async function syncProductVideos(db: PrismaClient, args: { accountId: str
   const product = await productFor(db, args.accountId, args.productId);
   return withDriveToken(db, async (token, email) => {
     const folderId = await ensureFolder(db, token, email, videosFolder(product.account, product));
-    const files = await listFiles(token, videosQuery(folderId));
+    const inFolder = await listFiles(token, videosQuery(folderId));
+    // La copia liviana que la cámara graba al lado de cada video no es un
+    // video más: se anota en el suyo, para que el editor mire y mida rápido.
+    const light = new Map(inFolder.filter((f) => isLightCopy(f.name)).map((f) => [pairKey(f.name), f]));
+    const files = inFolder.filter((f) => !isLightCopy(f.name));
     const known = await db.productVideo.findMany({
       where: { OR: [{ productId: product.id }, { driveFileId: { in: files.map((f) => f.id) } }] },
     });
@@ -125,6 +132,15 @@ export async function syncProductVideos(db: PrismaClient, args: { accountId: str
         },
       });
       updated++;
+    }
+
+    // Cada video con su copia liviana, o sin ella si ya no está.
+    const mine = await db.productVideo.findMany({ where: { driveFileId: { in: files.map((f) => f.id) } }, select: { id: true, name: true, lightFileId: true, lightSize: true } });
+    for (const v of mine) {
+      const copy = light.get(pairKey(v.name));
+      const size = copy?.size && /^\d+$/.test(copy.size) ? BigInt(copy.size) : null;
+      if ((copy?.id ?? null) === v.lightFileId && size === v.lightSize) continue;
+      await db.productVideo.update({ where: { id: v.id }, data: { lightFileId: copy?.id ?? null, lightSize: size } });
     }
 
     const listed = new Set(files.map((f) => f.id));
@@ -347,6 +363,10 @@ export type VideoRow = {
   gone: boolean;
   // Grabado en Registro de productos: la medida y el paso.
   shot: string | null;
+  // Si es un clip que armó el editor: de qué video salió y si ya se aprobó.
+  editedFrom: { name: string; approved: boolean } | null;
+  // Si tiene al lado la copia liviana de la cámara.
+  hasLightCopy: boolean;
 };
 
 /** Lo que muestra el paso Videos: los videos del producto, el clip de la publicación y la conexión con el Drive. */
@@ -374,10 +394,15 @@ export async function loadVideosStep(db: PrismaClient, args: { accountId: string
     db.productVideo.findMany({
       where: { productId: pub.productId, OR: [{ goneAt: null }, { clips: { some: { publicationId: args.publicationId } } }] },
       orderBy: [{ driveCreatedAt: 'asc' }, { createdAt: 'asc' }],
-      include: { uploadedBy: { select: { name: true } }, shootStep: { select: { title: true } } },
+      include: {
+        uploadedBy: { select: { name: true } },
+        shootStep: { select: { title: true } },
+        editedBy: { select: { status: true, video: { select: { name: true } } } },
+      },
     }),
     db.publication.count({ where: { productId: pub.productId } }),
   ]);
+  const [edits, editor, worker] = await Promise.all([editsOfProduct(db, pub.productId), loadEditorSettings(db), workerState(db)]);
   const folderId = email ? await knownFolderId(db, `videos:${pub.productId}`, email) : null;
   const videos: VideoRow[] = rows.map((v) => ({
     id: v.id,
@@ -394,6 +419,8 @@ export async function loadVideosStep(db: PrismaClient, args: { accountId: string
     createdAt: v.driveCreatedAt ?? v.createdAt,
     gone: v.goneAt !== null,
     shot: v.shot ? shotText(v.variantLabel, v.shootStep?.title ?? null) : null,
+    editedFrom: v.editedBy ? { name: v.editedBy.video.name, approved: v.editedBy.status === 'APPROVED' } : null,
+    hasLightCopy: v.lightFileId !== null,
   }));
   return {
     productId: pub.productId,
@@ -412,6 +439,9 @@ export async function loadVideosStep(db: PrismaClient, args: { accountId: string
     // Lo que dijo el canal en la última lectura.
     channelHasVideo: pub.channelCopy ? pub.channelCopy.hasVideo : null,
     sharedWith,
+    // El editor de videos: la última edición de cada video, cuándo edita la Mac y si está conectada.
+    edits,
+    editor: { settings: editor, summary: editorSummary(editor), connected: worker.kind === 'connected', hasKey: worker.kind !== 'none' },
   };
 }
 

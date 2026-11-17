@@ -84,6 +84,8 @@ model User {
   driveConnections   DriveConnection[]    @relation("DriveConnectedBy")
   driveAttempts      DriveConnection[]    @relation("DriveAttemptBy")
   uploadedVideos     ProductVideo[]
+  videoEditsAsked    VideoEdit[]          @relation("VideoEditAskedBy")
+  videoEditsReviewed VideoEdit[]          @relation("VideoEditReviewedBy")
   clipChoices        PublicationClip[]    @relation("ClipChosenBy")
   clipUploads        PublicationClip[]    @relation("ClipUploadedBy")
   descriptionDrafts  DescriptionDraft[]
@@ -1342,6 +1344,7 @@ model ImageWorker {
   lastSeenAt  DateTime?
   info        Json?
   runs        PhotoStepRun[]
+  videoEdits  VideoEdit[]
 
   @@map("image_workers")
 }
@@ -1897,9 +1900,91 @@ model ProductVideo {
   shootStep      ShootStep?        @relation(fields: [shootStepId], references: [id], onDelete: SetNull)
   variantKey     String?
   variantLabel   String?
+  // La copia liviana que la cámara graba al lado del video (el .LRF de DJI):
+  // el editor la usa para mirar y medir rápido. No se muestra como un video.
+  lightFileId    String?
+  lightSize      BigInt?
+  // Las ediciones que se le pidieron, y la edición de la que salió, si es un clip editado.
+  edits          VideoEdit[]       @relation("VideoEditSource")
+  editedBy       VideoEdit?        @relation("VideoEditClip")
 
   @@index([productId])
   @@map("product_videos")
+}
+
+// ───────────────────────────── Editor de videos ─────────────────────────────
+
+enum VideoEditStatus {
+  QUEUED // en cola, esperando a la Mac
+  PROCESSING // la Mac lo está editando
+  REVIEW // el clip está listo y espera la aprobación
+  APPROVED
+  DISCARDED // se pidió de nuevo o se descartó
+  FAILED
+}
+
+// Una edición de un video del producto: la Mac del estudio toma el original,
+// lo gira a vertical, lo corrige, pasa cada tramo a su velocidad y deja el
+// clip en la carpeta de videos del producto. El plan es lo que propuso Claude
+// o pidió la persona; el clip queda como otro video del producto.
+model VideoEdit {
+  id            String          @id @default(cuid())
+  videoId       String
+  video         ProductVideo    @relation("VideoEditSource", fields: [videoId], references: [id], onDelete: Cascade)
+  status        VideoEditStatus @default(QUEUED)
+  // El id del video mientras la edición está abierta: en cola, en proceso,
+  // esperando aprobación o fallida. Así hay una sola abierta por video.
+  openFor       String?         @unique
+  // Cuántos segundos tiene que durar el clip.
+  targetSeconds Int             @default(45)
+  // La indicación puntual de la persona para esta edición.
+  note          String?
+  // El plan que pidió la persona, para aplicarlo tal cual. Sin pedido, propone Claude.
+  requested     Json?
+  // El plan que se usó, lo que midió el código y lo que explicó Claude.
+  plan          Json?
+  measures      Json?
+  proposal      Json?
+  // El clip: el video del producto que dejó la edición.
+  clipId        String?         @unique
+  clip          ProductVideo?   @relation("VideoEditClip", fields: [clipId], references: [id], onDelete: SetNull)
+  aiUsage       Json?
+  seconds       Int?
+  // La cola: quién lo tiene, el turno, los intentos y hasta cuándo es suyo.
+  workerId      String?
+  worker        ImageWorker?    @relation(fields: [workerId], references: [id], onDelete: SetNull)
+  lease         Int             @default(0)
+  attempts      Int             @default(0)
+  leaseUntil    DateTime?
+  error         String?
+  askedById     String?
+  askedBy       User?           @relation("VideoEditAskedBy", fields: [askedById], references: [id], onDelete: SetNull)
+  reviewedById  String?
+  reviewedBy    User?           @relation("VideoEditReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt    DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@index([videoId, createdAt])
+  @@index([status, createdAt])
+  @@map("video_edits")
+}
+
+// Cuándo puede editar videos la Mac del estudio. Es una sola fila para todo
+// el estudio: la Mac también se usa para trabajar, y editar video la exige.
+model VideoEditorSettings {
+  id          String   @id @default("estudio")
+  // OFF: no edita. ON: edita cuando haya. SCHEDULE: solo entre las dos horas.
+  mode        String   @default("OFF")
+  // Minutos desde la medianoche, en la hora de la Mac. Si "desde" es mayor que "hasta", cruza la medianoche.
+  fromMinute  Int      @default(1320)
+  toMinute    Int      @default(420)
+  // Solo con la Mac enchufada.
+  pluggedOnly Boolean  @default(true)
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("video_editor_settings")
 }
 
 // Un clip elegido para una publicación, y la marca de que ya se subió a mano

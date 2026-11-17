@@ -7,7 +7,8 @@ import { prisma } from '@/lib/db';
 import { requireUser } from '@/lib/auth/session';
 import { getAccountBySlug } from '@/lib/queries/accounts';
 import { CryptoError } from '@/lib/crypto';
-import { DriveError } from '@/lib/drive';
+import { DriveError, trashFile, withDriveToken } from '@/lib/drive';
+import { approveEdit, discardEdit, redoEdit, requestEdit, VideoEditError } from '@/lib/video-edits';
 import { publicAppUrl } from '@/lib/public-url';
 import {
   chooseClip,
@@ -152,5 +153,75 @@ export async function markClipUploadedAction(accountSlug: string, publicationId:
     return simple(accountSlug, (accountId, userId) =>
       markClipUploaded(prisma, { accountId, publicationId: String(publicationId), videoId: String(videoId), uploaded: Boolean(uploaded), userId }),
     );
+  });
+}
+
+// ───────────────────────────── Editor de videos ─────────────────────────────
+
+async function guardEdit<T extends object>(run: () => Promise<T>): Promise<({ ok: true } & T) | Fail> {
+  try {
+    return { ok: true, ...(await run()) };
+  } catch (e) {
+    if (e instanceof VideoEditError || e instanceof VideoError || e instanceof DriveError || e instanceof CryptoError) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
+/** El clip descartado va a la papelera del Drive. Si no se puede, queda ahí: ya salió de la lista. */
+async function trashClipFile(fileId: string | null): Promise<void> {
+  if (!fileId) return;
+  await withDriveToken(prisma, (token) => trashFile(token, fileId)).catch(() => undefined);
+}
+
+/** Pone un video en la cola del editor: la Mac del estudio lo edita cuando puede. */
+export async function requestVideoEditAction(accountSlug: string, videoId: string, ask: { targetSeconds?: number; note?: string }): Promise<Result> {
+  return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Pidió editar un video' }, async () => {
+    const user = await requireUser();
+    const accountId = await accountIdOf(accountSlug);
+    if (!accountId) return NO_ACCOUNT;
+    const r = await guardEdit(() => requestEdit(prisma, { accountId, videoId: String(videoId), targetSeconds: ask?.targetSeconds, note: ask?.note, userId: user.id }));
+    revalidatePath(`/a/${accountSlug}/pipeline`, 'layout');
+    return r.ok ? { ok: true } : r;
+  });
+}
+
+/** Aprueba el clip que armó la Mac. */
+export async function approveVideoEditAction(accountSlug: string, editId: string): Promise<Result> {
+  return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Aprobó un clip editado' }, async () => {
+    const user = await requireUser();
+    const accountId = await accountIdOf(accountSlug);
+    if (!accountId) return NO_ACCOUNT;
+    const r = await guardEdit(async () => {
+      await approveEdit(prisma, { accountId, editId: String(editId), userId: user.id });
+      return {};
+    });
+    revalidatePath(`/a/${accountSlug}/pipeline`, 'layout');
+    return r;
+  });
+}
+
+/** Pide la edición de nuevo, con otra duración o con una indicación para el editor. */
+export async function redoVideoEditAction(accountSlug: string, editId: string, ask: { targetSeconds?: number; note?: string }): Promise<Result> {
+  return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Pidió de nuevo la edición de un video' }, async () => {
+    const user = await requireUser();
+    const accountId = await accountIdOf(accountSlug);
+    if (!accountId) return NO_ACCOUNT;
+    const r = await guardEdit(() => redoEdit(prisma, { accountId, editId: String(editId), targetSeconds: ask?.targetSeconds, note: ask?.note, userId: user.id }));
+    if (r.ok) await trashClipFile(r.clipFileId);
+    revalidatePath(`/a/${accountSlug}/pipeline`, 'layout');
+    return r.ok ? { ok: true } : r;
+  });
+}
+
+/** Descarta la edición: sale de la cola, o su clip va a la papelera del Drive. */
+export async function discardVideoEditAction(accountSlug: string, editId: string): Promise<Result> {
+  return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Descartó la edición de un video' }, async () => {
+    const user = await requireUser();
+    const accountId = await accountIdOf(accountSlug);
+    if (!accountId) return NO_ACCOUNT;
+    const r = await guardEdit(() => discardEdit(prisma, { accountId, editId: String(editId), userId: user.id }));
+    if (r.ok) await trashClipFile(r.clipFileId);
+    revalidatePath(`/a/${accountSlug}/pipeline`, 'layout');
+    return r.ok ? { ok: true } : r;
   });
 }

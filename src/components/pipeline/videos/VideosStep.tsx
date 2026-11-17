@@ -43,6 +43,10 @@ export function VideosStep({
     return c && !c.pending && c.problems.length === 0;
   });
   const toMeasure = active.filter((v) => !v.measuredByBrowser).map((v) => v.id);
+  // El editor de videos: la última edición de cada video y cuándo edita la Mac.
+  const editOf = new Map(data.edits.map((e) => [e.videoId, e]));
+  const editor = { summary: data.editor.summary, connected: data.editor.connected, hasKey: data.editor.hasKey, off: data.editor.settings.mode === 'OFF' };
+  const range = { min: clipRules?.minSeconds ?? 10, max: clipRules?.maxSeconds ?? 60 };
 
   if (!data.driveEmail) {
     return (
@@ -118,7 +122,7 @@ export function VideosStep({
         title="Videos del producto"
         count={active.length}
         description={withSharedNote(
-          'Se guardan en la carpeta del producto en el Google Drive del estudio. Lo que copies o borres en esa carpeta desde la Mac aparece acá.',
+          'Se guardan en la carpeta del producto en el Google Drive del estudio. Lo que copies o borres en esa carpeta desde la Mac aparece acá. Con Editar para clip, la Mac del estudio arma el clip vertical y lo deja en la misma carpeta.',
           data.sharedWith,
         )}
       >
@@ -143,6 +147,10 @@ export function VideosStep({
                   clipName={clipRules?.name ?? 'clip'}
                   isClip={clipIds.has(v.id)}
                   timeLabel={formatRelativeDate(v.createdAt, timeZone)}
+                  edit={editOf.get(v.id) ?? null}
+                  editedClip={active.find((c) => c.id === editOf.get(v.id)?.clipId) ?? null}
+                  editor={editor}
+                  range={range}
                 />
               ))}
             </ul>

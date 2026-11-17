@@ -8,6 +8,7 @@ import { logActivity } from '@/lib/activity';
 import { TEAM_SECTION } from '@/domain/access';
 import { revokeAllConnections, revokeConnection } from '@/lib/mcp/oauth';
 import { createWorkerKey, revokeWorkerKey } from '@/lib/image-worker';
+import { saveEditorSettings, VideoEditError } from '@/lib/video-edits';
 import { CryptoError } from '@/lib/crypto';
 import { DriveError, disconnectDrive, saveDriveCredentials, startDriveAuthorization } from '@/lib/drive';
 import { deleteVercelBatch, moveBatch, type MoveResult } from '@/lib/move-to-drive';
@@ -54,6 +55,23 @@ export async function revokeWorkerKeyAction(): Promise<Result> {
     const done = await revokeWorkerKey(prisma);
     revalidatePath('/equipo');
     return done ? { ok: true } : { ok: false, error: 'No había ninguna llave activa.' };
+  });
+}
+
+// ───────────────────────────── Editor de videos ─────────────────────────────
+
+/** Guarda cuándo puede editar videos la Mac del estudio: apagado, prendido o con horario. */
+export async function saveVideoEditorAction(values: { mode: string; fromMinute: number; toMinute: number; pluggedOnly: boolean }): Promise<Result> {
+  return actAsAdmin({ does: 'Cambió cuándo edita videos la Mac' }, async () => {
+    const user = await requireUser();
+    try {
+      await saveEditorSettings(prisma, values, user.id);
+    } catch (e) {
+      if (e instanceof VideoEditError) return { ok: false, error: e.message };
+      throw e;
+    }
+    revalidatePath('/equipo');
+    return { ok: true };
   });
 }
 
