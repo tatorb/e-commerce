@@ -1,0 +1,16 @@
+{
+  "protocolo": 1,
+  "id": "edicion1",
+  "turno": 1,
+  "ok": true,
+  "plan": {
+    "imagen": { "cuartos": 1, "enderezado": 0.0, "zoom": 1.0, "centro_x": 0.5, "centro_y": 0.5, "rojo": 1.11, "verde": 1.08, "azul": 1.06, "contraste": 1.0, "saturacion": 1.0 },
+    "tramos": [{ "inicio": 0.0, "fin": 106.6, "velocidad": 2.665, "nombre": "Todo" }],
+    "cierre": 0.0
+  },
+  "medidas": { "fondo": [0.635, 0.653, 0.667], "cambio_de_luz": 0.09, "sugeridos": { "rojo": 1.11, "verde": 1.08, "azul": 1.06 }, "avisos": [] },
+  "propuesta": { "razon": "Girado un cuarto para que la etiqueta se lea derecha.", "origen": "claude", "avisos": [], "uso": { "costo_usd": 0.0123 } },
+  "clip": { "ancho": 1080, "alto": 1920, "segundos": 40.0, "bytes": 45500000 },
+  "avisos": ["La cámara fue cambiando la luz sola durante la grabación."],
+  "segundos": 170
+}

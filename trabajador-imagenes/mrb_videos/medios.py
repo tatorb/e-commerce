@@ -7,8 +7,11 @@ Python: se instalan una vez en la Mac con `brew install ffmpeg`.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
+import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,16 +29,48 @@ class VideoIlegible(RuntimeError):
     pass
 
 
+# Donde lo deja Homebrew. Cuando macOS arranca el trabajador solo, no siempre
+# le pasa esas carpetas: se buscan aparte.
+CARPETAS_DE_HOMEBREW = ("/opt/homebrew/bin", "/usr/local/bin")
+
+
 def programa(nombre: str) -> str:
-    ruta = shutil.which(nombre)
+    ruta = shutil.which(nombre) or shutil.which(nombre, path=os.pathsep.join(CARPETAS_DE_HOMEBREW))
     if not ruta:
         raise FaltaFfmpeg()
     return ruta
 
 
-def correr(args: list[str], *, entrada: bytes | None = None) -> subprocess.CompletedProcess:
-    """Corre ffmpeg o ffprobe y, si falla, cuenta el final de lo que dijo."""
-    res = subprocess.run(args, input=entrada, capture_output=True)
+def hay_ffmpeg() -> bool:
+    try:
+        return bool(programa("ffmpeg") and programa("ffprobe"))
+    except FaltaFfmpeg:
+        return False
+
+
+class Cancelado(Exception):
+    """La app avisó que la edición ya no es de este intento, o que se apagó la edición de videos."""
+
+
+def correr(args: list[str], *, entrada: bytes | None = None, cancelado: Callable[[], bool] | None = None) -> subprocess.CompletedProcess:
+    """Corre ffmpeg o ffprobe y, si falla, cuenta el final de lo que dijo. Con `cancelado`, lo corta apenas se pide."""
+    if cancelado is None:
+        res = subprocess.run(args, input=entrada, capture_output=True)
+    else:
+        # Lo que dice va a un archivo: una exportación larga no tiene que trabarse por llenar la salida.
+        with tempfile.TemporaryFile() as dicho:
+            proceso = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=dicho)
+            while True:
+                try:
+                    proceso.wait(timeout=1)
+                    break
+                except subprocess.TimeoutExpired:
+                    if cancelado():
+                        proceso.kill()
+                        proceso.wait()
+                        raise Cancelado() from None
+            dicho.seek(0)
+            res = subprocess.CompletedProcess(args, proceso.returncode, b"", dicho.read())
     if res.returncode != 0:
         cola = res.stderr.decode("utf-8", "replace").strip().splitlines()[-6:]
         raise VideoIlegible("ffmpeg no pudo con el video: " + " | ".join(cola))

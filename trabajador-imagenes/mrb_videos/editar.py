@@ -10,6 +10,7 @@ from __future__ import annotations
 import platform
 from dataclasses import dataclass
 from functools import cache
+from collections.abc import Callable
 from pathlib import Path
 
 from .filtros import cuadros_por_segundo, grafo
@@ -69,7 +70,7 @@ def comando(fuente: Fuente, plan: Plan, salida: Path, codificador: str, reglas: 
     ]
 
 
-def exportar(fuente: Fuente, plan: Plan, salida: Path | str, *, codificador: str | None = None, reglas: ReglasDelClip = MERCADOLIBRE) -> Clip:
+def exportar(fuente: Fuente, plan: Plan, salida: Path | str, *, codificador: str | None = None, reglas: ReglasDelClip = MERCADOLIBRE, cancelado: Callable[[], bool] | None = None) -> Clip:
     salida = Path(salida)
     problemas = revisar(plan, fuente, reglas)
     if problemas:
@@ -78,7 +79,12 @@ def exportar(fuente: Fuente, plan: Plan, salida: Path | str, *, codificador: str
         raise PlanInvalido("El clip no puede guardarse encima del original.")
     salida.parent.mkdir(parents=True, exist_ok=True)
     codificador = codificador or elegir_codificador()
-    correr(comando(fuente, plan, salida, codificador, reglas))
+    try:
+        correr(comando(fuente, plan, salida, codificador, reglas), cancelado=cancelado)
+    except BaseException:
+        # Un clip a medio hacer no queda en el disco.
+        salida.unlink(missing_ok=True)
+        raise
     hecho = leer(salida)
     peso = salida.stat().st_size
     avisos = []

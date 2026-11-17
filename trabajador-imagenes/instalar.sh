@@ -22,6 +22,10 @@ from mrb_imagenes.pasos.fondo import elegir_modelo, memoria_gb, preparar_modelo
 print(f'Memoria de esta Mac: {memoria_gb():.0f} GB. Modelo: {elegir_modelo()}.')
 preparar_modelo()
 "
+if ! command -v ffmpeg >/dev/null 2>&1 && [ ! -x /opt/homebrew/bin/ffmpeg ] && [ ! -x /usr/local/bin/ffmpeg ]; then
+  echo "Aviso: falta ffmpeg, el programa que edita los videos. Sin él se corrigen las fotos pero no se editan videos."
+  echo "       Se instala con: brew install ffmpeg"
+fi
 if [ "$(uname)" = "Darwin" ]; then
   bash "$CARPETA/prender.sh"
 fi

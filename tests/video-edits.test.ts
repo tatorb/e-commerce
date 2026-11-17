@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@/generated/prisma/client';
@@ -149,6 +150,25 @@ describe('los mensajes con la Mac', () => {
   });
 });
 
+describe('el contrato con la Mac', () => {
+  // Los mismos ejemplos que prueba el trabajador (trabajador-imagenes/tests/test_videos_conexion.py).
+  const example = (name: string) => JSON.parse(readFileSync(new URL(`../trabajador-imagenes/contrato/${name}`, import.meta.url), 'utf8'));
+
+  it('acepta el resultado y el fallo de ejemplo', () => {
+    expect(example('video_resultado.json').protocolo).toBe(VIDEO_PROTOCOL);
+    expect(videoResultSchema.safeParse(example('video_resultado.json')).success).toBe(true);
+    expect(videoResultSchema.safeParse(example('video_fallo.json')).success).toBe(true);
+  });
+
+  it('el trabajo de ejemplo tiene las partes que arma la app', () => {
+    const job = example('video_trabajo.json').trabajo;
+    expect(Object.keys(job).sort()).toEqual(
+      ['id', 'indicacion', 'liviana', 'objetivo_segundos', 'original', 'plan', 'producto', 'reglas', 'subidas', 'turno', 'video', 'video_del_protocolo'].sort(),
+    );
+    expect(Object.keys(job.original).sort()).toEqual(['bajar', 'bytes', 'carpeta', 'nombre', 'pedazo']);
+  });
+});
+
 const url = process.env.TEST_DATABASE_URL;
 
 describe.skipIf(!url)('la cola del editor de videos en la base', () => {
@@ -276,6 +296,7 @@ describe.skipIf(!url)('la cola del editor de videos en la base', () => {
       liviana: { nombre: 'DJI_0073_D.LRF', bytes: 89_485_333 },
       subidas: { clip: { metodo: 'PUT', url: `https://subir.example/?edicion=${first.editId}&turno=1` } },
     });
+    expect(Object.keys(job).sort()).toEqual(Object.keys(JSON.parse(readFileSync(new URL('../trabajador-imagenes/contrato/video_trabajo.json', import.meta.url), 'utf8')).trabajo).sort());
     expect(job.original.bajar.url).toContain(`video=${a.id}&cual=original`);
     expect(job.liviana?.bajar.url).toContain('cual=liviana');
 
