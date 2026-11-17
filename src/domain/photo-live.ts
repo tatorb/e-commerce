@@ -756,10 +756,37 @@ export function pieceBox(a: Gray): Box | null {
   return x1 < 0 ? null : { x0, y0, x1: x1 + 1, y1: y1 + 1 };
 }
 
-/** encuadre: el cuadrado con la pieza al centro y el mismo margen de cada lado. */
-export function framing(b: Box, margin: number): { side: number; x0: number; y0: number } {
-  const side = Math.ceil(Math.max(b.x1 - b.x0, b.y1 - b.y0) / (1 - (2 * margin) / 100));
-  return { side, x0: roundHalfEven((b.x0 + b.x1) / 2 - side / 2), y0: roundHalfEven((b.y0 + b.y1) / 2 - side / 2) };
+// lados_cortados: la pieza toca el borde de la foto si queda a esto o menos.
+const TOUCH_PX = 2;
+const TOUCH_PCT = 0.4;
+
+export type CutSides = { left: boolean; top: boolean; right: boolean; bottom: boolean };
+
+/** lados_cortados: los lados en que la foto corta la pieza, porque la silueta llega al borde. */
+export function cutSides(b: Box, w: number, h: number): CutSides {
+  const tx = Math.max(TOUCH_PX, roundHalfEven((w * TOUCH_PCT) / 100));
+  const ty = Math.max(TOUCH_PX, roundHalfEven((h * TOUCH_PCT) / 100));
+  return { left: b.x0 <= tx, top: b.y0 <= ty, right: w - b.x1 <= tx, bottom: h - b.y1 <= ty };
+}
+
+/**
+ * encuadre: el cuadrado con la pieza al centro y el mismo margen de cada lado.
+ * Con el tamaño de la foto, los lados en que la foto corta la pieza van sin
+ * margen: el cuadrado empieza o termina justo en ese borde.
+ */
+export function framing(b: Box, margin: number, photo?: { w: number; h: number }): { side: number; x0: number; y0: number } {
+  const cut: CutSides = photo ? cutSides(b, photo.w, photo.h) : { left: false, top: false, right: false, bottom: false };
+  const x0 = cut.left ? 0 : b.x0;
+  const y0 = cut.top ? 0 : b.y0;
+  const x1 = photo && cut.right ? photo.w : b.x1;
+  const y1 = photo && cut.bottom ? photo.h : b.y1;
+  const p = margin / 100;
+  const marginsH = Number(!cut.left) + Number(!cut.right);
+  const marginsV = Number(!cut.top) + Number(!cut.bottom);
+  const side = Math.ceil(Math.max((x1 - x0) / (1 - marginsH * p), (y1 - y0) / (1 - marginsV * p)));
+  const start = (a0: number, a1: number, cutStart: boolean, cutEnd: boolean) =>
+    cutStart && !cutEnd ? a0 : cutEnd && !cutStart ? a1 - side : roundHalfEven((a0 + a1) / 2 - side / 2);
+  return { side, x0: start(x0, x1, cut.left, cut.right), y0: start(y0, y1, cut.top, cut.bottom) };
 }
 
 export function hexColor(hex: string): [number, number, number] {
@@ -959,7 +986,7 @@ export function compose(
   if (!alpha) return img;
   const frame = margin === null ? null : (() => {
     const b = pieceBox(alpha);
-    return b ? framing(b, margin) : null;
+    return b ? framing(b, margin, { w: alpha.w, h: alpha.h }) : null;
   })();
   const w = frame ? frame.side : img.w;
   const h = frame ? frame.side : img.h;

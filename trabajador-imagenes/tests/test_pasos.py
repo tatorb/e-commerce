@@ -228,6 +228,47 @@ def test_recorte_cuadrado_con_margen_parejo_y_lienzo_vacio():
     assert r.foto.alfa[alto // 2, -2] == 0
 
 
+def _margenes(r):
+    alto, ancho = r.foto.alfa.shape
+    filas = np.where((r.foto.alfa >= 0.5).any(axis=1))[0]
+    cols = np.where((r.foto.alfa >= 0.5).any(axis=0))[0]
+    return {"izquierda": int(cols[0]), "arriba": int(filas[0]), "derecha": int(ancho - 1 - cols[-1]), "abajo": int(alto - 1 - filas[-1])}
+
+
+def test_recorte_sin_margen_en_los_lados_que_corta_la_foto():
+    # Como la camisa de la foto: la foto la corta a la izquierda y abajo.
+    foto = _con_fondo_quitado(caja=(0, 150, 420, 600))
+    medicion, r = correr(Recorte(), foto, {"margen": 10})
+    assert medicion.medidas["cortada_por_la_foto"] == ["izquierda", "abajo"]
+    m = _margenes(r)
+    assert m["izquierda"] == 0 and m["abajo"] == 0
+    # Arriba y a la derecha, el margen pedido.
+    lado = r.foto.ancho
+    assert m["arriba"] >= int(lado * 0.1) - 1 and m["derecha"] >= int(lado * 0.1) - 1
+    # El lado cortado no agrega lienzo: lo que llega al borde es foto.
+    assert not r.medidas["lienzo_agregado"]
+    assert r.medidas["sin_margen"] == ["izquierda", "abajo"]
+    assert "sin margen" in r.nota
+
+
+def test_recorte_casi_pegada_al_borde_cuenta_como_cortada():
+    # La silueta a 1 px del borde izquierdo y a 2 del de abajo: la foto la corta igual, y ese fondo queda en el cuadrado.
+    foto = _con_fondo_quitado(caja=(1, 150, 420, 598))
+    _, r = correr(Recorte(), foto, {"margen": 10})
+    m = _margenes(r)
+    assert m["izquierda"] == 1 and m["abajo"] == 2
+
+
+def test_recorte_cortada_de_un_solo_lado_queda_centrada_en_el_otro_eje():
+    # Cortada solo arriba: sin margen arriba, y centrada de izquierda a derecha.
+    foto = _con_fondo_quitado(caja=(300, 0, 500, 300))
+    _, r = correr(Recorte(), foto, {"margen": 10})
+    m = _margenes(r)
+    assert m["arriba"] == 0
+    assert abs(m["izquierda"] - m["derecha"]) <= 1
+    assert m["abajo"] >= int(r.foto.alto * 0.1) - 1
+
+
 def test_recorte_solo_copia_pixeles():
     foto = _con_fondo_quitado(caja=(300, 200, 500, 380))
     _, r = correr(Recorte(), foto, {"margen": 8})

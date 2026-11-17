@@ -15,6 +15,8 @@ La Mac hace los 9 de corrido y frena una sola vez, al final, para que lo apruebe
 
 **Regla de oro:** solo se corrige la foto original. Nada se genera, rellena ni inventa, y el original nunca se toca. La única excepción es la sombra, que se agrega solo sobre el fondo y nunca toca la pieza.
 
+**Piezas que no salen enteras:** en el Recorte, si la foto corta la pieza de un lado, ese lado va sin margen y la pieza llega hasta el borde, como en la foto. Los demás lados llevan el margen de siempre.
+
 El trabajador se conecta con la app y arranca solo cada vez que iniciás sesión en la Mac. Él le pregunta a la app si hay algo para hacer, así que en la Mac no hay que abrir nada.
 
 ## Qué necesitás

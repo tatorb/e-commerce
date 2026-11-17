@@ -134,6 +134,12 @@ def armar() -> dict:
     caja = caja_de_la_pieza(alfa)
     lado, x0, y0 = encuadre(caja, 8.0)
     salida["recorte"] = {"ancho": 60, "alto": 40, "alfa": _plana(alfa, 2), "margen": 8.0, "caja": list(caja), "lado": lado, "x0": x0, "y0": y0}
+    # La foto corta la pieza: esos lados van sin margen.
+    cortadas = []
+    for caja in [(0, 150, 420, 600), (1, 150, 420, 598), (300, 0, 500, 300), (0, 0, 800, 380), (500, 200, 780, 400)]:
+        lado, x0, y0 = encuadre(caja, 10.0, (800, 600))
+        cortadas.append({"caja": list(caja), "lado": lado, "x0": x0, "y0": y0})
+    salida["recorte_cortado"] = {"ancho": 800, "alto": 600, "margen": 10.0, "casos": cortadas}
     return salida
 
 

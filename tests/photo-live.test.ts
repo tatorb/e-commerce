@@ -9,6 +9,7 @@ import {
   cellsFor,
   curve,
   framing,
+  cutSides,
   geometryOf,
   halfSource,
   invert3,
@@ -131,6 +132,21 @@ describe('editar en vivo: las mismas cuentas que la Mac', () => {
     expect([box!.x0, box!.y0, box!.x1, box!.y1]).toEqual(caja);
     expect(framing(box!, margen)).toEqual({ side: lado, x0, y0 });
     expect(pieceBox({ w: 2, h: 2, d: new Float32Array(4) })).toBeNull();
+  });
+
+  it('recorte: los lados en que la foto corta la pieza van sin margen, igual que en la Mac', () => {
+    const { ancho, alto, margen, casos } = ref.recorte_cortado as {
+      ancho: number;
+      alto: number;
+      margen: number;
+      casos: { caja: [number, number, number, number]; lado: number; x0: number; y0: number }[];
+    };
+    for (const c of casos) {
+      const [x0, y0, x1, y1] = c.caja;
+      expect(framing({ x0, y0, x1, y1 }, margen, { w: ancho, h: alto })).toEqual({ side: c.lado, x0: c.x0, y0: c.y0 });
+    }
+    // Cortada a la izquierda y abajo: el cuadrado arranca en el borde izquierdo y termina en el de abajo.
+    expect(cutSides({ x0: 0, y0: 150, x1: 420, y1: 600 }, ancho, alto)).toEqual({ left: true, top: false, right: false, bottom: true });
   });
 
   it('sombra: el mismo degradado que dibuja la Mac', () => {
