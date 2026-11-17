@@ -244,3 +244,87 @@ def test_las_hojas_muestran_el_video_girado_con_su_segundo(video, tmp_path):
     with Image.open(armadas[0]) as hoja:
         assert hoja.size == (4 * 90, 2 * 160)
     assert hojas.reloj(75.5) == "1:15.5"
+
+
+# ───────────────────────────── Claude ─────────────────────────────
+
+import json  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+from mrb_videos.inspector import ESQUEMA, Contexto, InspectorDeVideo, limitar, mosaico  # noqa: E402
+
+BUENOS = {"cuartos": 1, "enderezado": 0.5, "zoom": 1.0, "centro_x": 0.5, "centro_y": 0.5, "rojo": 1.2, "verde": 1.15, "azul": 1.1, "contraste": 1.05, "saturacion": 1.0}
+
+
+class ClienteFalso:
+    def __init__(self, respuesta=None, error=None):
+        self.pedidos = []
+        self.respuesta = respuesta
+        self.error = error
+        self.beta = SimpleNamespace(messages=SimpleNamespace(create=self._crear))
+
+    def _crear(self, **pedido):
+        self.pedidos.append(pedido)
+        if self.error:
+            raise self.error
+        return self.respuesta
+
+
+def respuesta(texto, stop="end_turn"):
+    return SimpleNamespace(
+        stop_reason=stop,
+        model="claude-opus-5-5",
+        content=[SimpleNamespace(type="text", text=texto)],
+        usage=SimpleNamespace(input_tokens=2000, output_tokens=150, cache_creation_input_tokens=0, cache_read_input_tokens=0),
+    )
+
+
+def medidas_de_prueba():
+    return medir(cuadros_con_fondo([0.60, 0.66, 0.72]))
+
+
+def test_claude_propone_la_imagen_y_ve_las_indicaciones():
+    cliente = ClienteFalso(respuesta(json.dumps({"valores": BUENOS, "razon": "Girado un cuarto,  las manos entran de abajo."})))
+    contexto = Contexto(producto="Camisas de cilindro", paso="Unboxing", indicaciones="Que se lea la etiqueta.")
+    p = InspectorDeVideo(cliente=cliente).proponer(b"jpg", medidas_de_prueba(), contexto)
+    assert p.origen == "claude" and p.avisos == ()
+    assert p.imagen.cuartos == 1 and p.imagen.rojo == 1.2
+    assert p.razon == "Girado un cuarto, las manos entran de abajo."
+    assert p.uso["costo_usd"] > 0
+    pedido = cliente.pedidos[0]
+    assert pedido["output_config"]["format"]["schema"] == ESQUEMA
+    assert pedido["fallbacks"] == "default"
+    contenido = pedido["messages"][0]["content"]
+    assert contenido[0]["source"]["media_type"] == "image/jpeg"
+    texto = contenido[1]["text"]
+    assert "Producto: Camisas de cilindro." in texto and "Que se lea la etiqueta." in texto
+    assert "Lo que midió el código" in texto and "precio" not in texto.lower()
+
+
+def test_lo_que_propone_claude_se_limita_a_los_topes():
+    imagen, avisos = limitar({**BUENOS, "rojo": 3.0, "enderezado": -20, "cuartos": 5})
+    assert imagen.rojo == 1.6 and imagen.enderezado == -8 and imagen.cuartos == 3
+    assert avisos == ["enderezado: se pidió -20 y el tope es -8.", "rojo: se pidió 3 y el tope es 1.6."]
+
+
+def test_si_claude_no_responde_se_usa_lo_medido_con_el_giro_pedido():
+    medidas = medidas_de_prueba()
+    for cliente in (ClienteFalso(error=RuntimeError("sin conexión")), ClienteFalso(respuesta("no es json")), ClienteFalso(respuesta("{}", stop="refusal"))):
+        p = InspectorDeVideo(cliente=cliente).proponer(b"jpg", medidas, cuartos=1)
+        assert p.origen == "medido" and p.avisos
+        assert p.imagen.cuartos == 1 and p.imagen.rojo == medidas.sugeridos["rojo"]
+
+
+def test_simulado_no_consulta_a_claude():
+    p = InspectorDeVideo(simulado=True).proponer(b"jpg", medidas_de_prueba(), cuartos=3)
+    assert p.origen == "simulado" and p.imagen.cuartos == 3
+
+
+@con_ffmpeg
+def test_el_mosaico_es_una_sola_imagen_con_los_cuadros_sin_girar(video):
+    import io
+
+    from PIL import Image
+
+    with Image.open(io.BytesIO(mosaico(leer(video), cantidad=6, columnas=3, ancho=160))) as hoja:
+        assert hoja.format == "JPEG" and hoja.size == (3 * 160, 2 * 90)

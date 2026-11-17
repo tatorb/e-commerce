@@ -1,11 +1,13 @@
 """Prueba en la terminal: edita un video de unboxing y deja todo en una carpeta.
 
 Uso:
-    ./probar_video.sh VIDEO [--cuartos 1] [--objetivo 45] [--plan plan.json] [--salida CARPETA]
+    ./probar_video.sh VIDEO [--sin-claude] [--cuartos 1] [--producto "Camisas de cilindro"] [--objetivo 45] [--plan plan.json] [--salida CARPETA]
 
-Sin --plan, pasa todo el video a una sola velocidad para que dure lo pedido,
-con la luz y el color que midió el código. Con --plan, aplica ese plan tal
-cual: sirve para probar cortes y velocidades a mano.
+Sin --plan, Claude mira unos cuadros y propone cómo girar y corregir la
+imagen, y todo el video pasa a una sola velocidad para que dure lo pedido.
+Con --sin-claude se usan la luz y el color que midió el código y el giro de
+--cuartos. Con --plan se aplica ese plan tal cual: sirve para probar cortes
+y velocidades a mano.
 
 En la carpeta quedan las hojas de cuadros, lo que se midió, el plan usado y
 el clip. El original no se toca.
@@ -21,15 +23,18 @@ from pathlib import Path
 
 from mrb_videos import VERSION, hojas
 from mrb_videos.editar import PlanInvalido, exportar
+from mrb_videos.inspector import Contexto, InspectorDeVideo, mosaico
 from mrb_videos.medios import FaltaFfmpeg, VideoIlegible, es_copia_liviana, leer, para_mirar
 from mrb_videos.medir import cuadros, medir
-from mrb_videos.plan import Imagen, Plan, plan_parejo
+from mrb_videos.plan import Plan, plan_parejo
 
 
 def main() -> int:
     p = argparse.ArgumentParser(description="Edita un video de unboxing para probarlo.")
     p.add_argument("video", type=Path)
-    p.add_argument("--cuartos", type=int, default=0, choices=[0, 1, 2, 3], help="Cuartos de vuelta en sentido horario para dejarlo vertical.")
+    p.add_argument("--cuartos", type=int, default=0, choices=[0, 1, 2, 3], help="Cuartos de vuelta en sentido horario para dejarlo vertical, si no lo decide Claude.")
+    p.add_argument("--sin-claude", action="store_true", help="No consultar a Claude: usar lo que midió el código.")
+    p.add_argument("--producto", help="Qué es el producto, para contárselo a Claude.")
     p.add_argument("--objetivo", type=float, default=45.0, help="Cuántos segundos tiene que durar el clip.")
     p.add_argument("--plan", type=Path, help="Un plan guardado, para aplicarlo tal cual.")
     p.add_argument("--salida", type=Path)
@@ -55,7 +60,14 @@ def main() -> int:
         if args.plan:
             plan = Plan.model_validate_json(args.plan.read_text())
         else:
-            plan = plan_parejo(fuente, Imagen(cuartos=args.cuartos, **medidas.sugeridos), args.objetivo)
+            inspector = InspectorDeVideo.desde_entorno(simulado=args.sin_claude)
+            propuesta = inspector.proponer(mosaico(mirar), medidas, Contexto(producto=args.producto), cuartos=args.cuartos)
+            print(f"Imagen ({propuesta.origen}): {propuesta.razon}")
+            for aviso in propuesta.avisos:
+                print(f"Aviso: {aviso}")
+            if propuesta.uso:
+                print(f"Costo de Claude: {propuesta.uso.get('costo_usd', 0):.4f} dólares.")
+            plan = plan_parejo(fuente, propuesta.imagen, args.objetivo)
         (salida / "medidas.json").write_text(json.dumps(medidas.como_dict(), ensure_ascii=False, indent=2))
         (salida / "plan.json").write_text(plan.model_dump_json(indent=2))
 
@@ -70,7 +82,7 @@ def main() -> int:
         for aviso in clip.avisos:
             print(f"  Aviso: {aviso}")
         return 0
-    except (FaltaFfmpeg, VideoIlegible, PlanInvalido, ValueError) as e:
+    except (FaltaFfmpeg, VideoIlegible, PlanInvalido, ValueError, RuntimeError) as e:
         print(f"No se pudo: {e}")
         return 1
 
