@@ -52,7 +52,9 @@ describe('herramientas de escritura en la lista', () => {
     expect(tools.get('set_publication_measure')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('push_skus')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('set_publication_flex')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
-    expect(tools.size).toBe(94);
+    expect(tools.get('create_volume_campaign')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+    expect(tools.get('delete_volume_campaign')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+    expect(tools.size).toBe(98);
   });
 });
 

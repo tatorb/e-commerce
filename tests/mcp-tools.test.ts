@@ -33,6 +33,7 @@ describe('lista de herramientas', () => {
       'list_tasks',
       'get_flex_today',
       'get_flex_config',
+      'list_volume_campaigns',
       'get_publication_media',
       'get_description_step',
       'get_create_step',
