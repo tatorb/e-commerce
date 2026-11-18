@@ -25,7 +25,9 @@
     const persona = MRB.pidePersona();
     if (persona) return await frenar(persona, false);
 
-    if (trabajo.etapa === 'listado' && location.pathname.includes('/publicaciones/listado')) {
+    // El listado del vendedor: Mercado Libre lo abre en /publicaciones/listado o lo pasa a /publicaciones.
+    const enElListado = /^\/publicaciones(\/listado)?\/?$/.test(location.pathname) && new URLSearchParams(location.search).get('search')?.toUpperCase() === trabajo.codigo;
+    if (trabajo.etapa === 'listado' && enElListado) {
       await decir(`Buscando la publicación ${trabajo.codigo}…`);
       if (!(await MRB.esperar(MRB.MENU))) return await frenar(MRB.pidePersona() ?? `La publicación ${trabajo.codigo} no aparece en tu listado de Mercado Libre.`);
       await MRB.pausa(800);

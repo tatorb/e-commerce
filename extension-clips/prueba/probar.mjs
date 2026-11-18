@@ -73,7 +73,9 @@ const pedidosML = [];
 await contexto.route(/mercadolibre\.com\.ar/, (ruta) => {
   const url = ruta.request().url();
   pedidosML.push(`${ruta.request().method()} ${url}`);
-  if (url.includes('/publicaciones/listado')) return ruta.fulfill({ contentType: 'text/html; charset=utf-8', body: listado });
+  // Como el de verdad: el listado pasa al sitio de vendedores y pierde el /listado.
+  if (url.includes('www.mercadolibre.com.ar/publicaciones/listado')) return ruta.fulfill({ status: 302, headers: { location: url.replace('www.', 'vendedores.').replace('/publicaciones/listado', '/publicaciones') } });
+  if (new URL(url).pathname === '/publicaciones') return ruta.fulfill({ contentType: 'text/html; charset=utf-8', body: listado });
   if (url.includes('/video/creator/upload')) return ruta.fulfill({ contentType: 'text/html; charset=utf-8', body: crear });
   return ruta.fulfill({ status: 404, body: '' });
 });
@@ -88,7 +90,7 @@ const pagina = await contexto.newPage();
 await pagina.goto(`${APP}/a/insur/clips-por-subir`);
 await pagina.evaluate(() => postMessage({ origen: 'mrb-app', tipo: 'hola' }, location.origin));
 await pagina.waitForFunction(() => window.avances.some((a) => a.tipo === 'hola'), null, { timeout: 10000 });
-comprobar('la app ve que la extensión está', (await pagina.evaluate(() => window.avances.find((a) => a.tipo === 'hola').version)) === '0.1.0');
+comprobar('la app ve que la extensión está', (await pagina.evaluate(() => window.avances.find((a) => a.tipo === 'hola').version)) === '0.1.1');
 
 async function correr(codigo) {
   await pagina.evaluate(() => (window.avances = []));
@@ -153,7 +155,7 @@ async function correr(codigo) {
   comprobar('rechaza un código que no vale', /código/.test((await pagina.evaluate(() => window.avances.at(-1))).error));
   listado = fila();
   const suelta = await contexto.newPage();
-  await suelta.goto('https://www.mercadolibre.com.ar/publicaciones/listado?search=MLA1');
+  await suelta.goto('https://vendedores.mercadolibre.com.ar/publicaciones?search=MLA1');
   await suelta.waitForTimeout(1500);
   comprobar('en una pestaña de Mercado Libre que no abrió, no hace nada', (await suelta.locator('#mrb-clips-cartel').count()) === 0 && (await suelta.locator('ul').first().isHidden()));
   await suelta.close();
@@ -166,7 +168,7 @@ async function correr(codigo) {
   const espera = contexto.waitForEvent('page');
   await pagina.evaluate(() => window.subir('MLA1000001'));
   const ml = await espera;
-  await ml.waitForURL(/creator\/upload/);
+  for (let i = 0; i < 100 && !/creator\/upload/.test(ml.url()); i++) await pagina.waitForTimeout(200);
   await ml.close();
   await pagina.waitForFunction(() => window.avances.some((a) => a.error), null, { timeout: 10000 });
   comprobar('si se cierra la pestaña, avisa', /Se cerró la pestaña/.test((await pagina.evaluate(() => window.avances.at(-1))).error));
