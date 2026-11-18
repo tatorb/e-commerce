@@ -45,7 +45,7 @@ import {
 } from '@/lib/video-edits';
 import { productMeasures, setVideoMeasure, VideoMeasureError } from '@/lib/video-measure';
 import { saveVideoScript, VideoScriptError } from '@/lib/video-script';
-import { loadVideosStep, markClipUploaded, VideoError } from '@/lib/videos';
+import { loadVideosStep, markClipUploaded, syncProductVideos, VideoError } from '@/lib/videos';
 import { McpToolError, accountArg, appLink, defineTool, publicationArg, resolveAccount, resolvePublication, when, type AccountRef, type McpContext } from './tool';
 
 // El editor de videos para Claude: ver el paso Videos con sus ediciones y su
@@ -455,6 +455,74 @@ const momentsTool = defineTool({
   },
 });
 
+// Cuánto dura una vuelta de la revisión de toda la cuenta.
+const SYNC_ROUND_MS = 20_000;
+
+const syncTool = defineTool({
+  name: 'sync_videos',
+  section: ['pipeline', 'publicaciones'],
+  title: 'Revisar las carpetas de videos del Drive',
+  description:
+    'Lee la carpeta de videos del Drive de cada producto y pone al día la lista de videos de la app, como el botón de actualizar del paso Videos: suma los videos que se copiaron a la carpeta, saca de la lista los que se borraron o se movieron y anota las medidas que informa Google. Los videos son del producto: los ven todas sus publicaciones. Con publicaciones (hasta 20: id, código o link), revisa las carpetas de sus productos y las crea si no existen. Sin publicaciones, revisa de a una vuelta las carpetas de videos que ya existen en la cuenta, sin crear ninguna, y dice cuántas faltan: llamala de nuevo con «desde» hasta que falten 0. Con la cuenta en automático, los videos nuevos van solos a la cola del editor. No edita ni sube nada.',
+  input: z.object({
+    cuenta: accountArg,
+    publicaciones: z.array(z.string().min(1)).min(1).max(20).optional().describe('Las publicaciones: su id en la app, su código en el canal o su link. Sin la lista, las carpetas que ya existen en toda la cuenta.'),
+    desde: z.number().int().min(0).default(0).describe('Para seguir la revisión de toda la cuenta: el valor de «seguir_desde» de la vuelta anterior.'),
+  }),
+  readOnly: false,
+  destructive: false,
+  async run(ctx, args) {
+    const account = await resolveAccount(ctx, args.cuenta);
+    let productIds: string[];
+    let total: number;
+    if (args.publicaciones) {
+      const ids = await Promise.all(args.publicaciones.map((ref) => resolvePublication(ctx, account.id, ref)));
+      const pubs = await ctx.db.publication.findMany({ where: { id: { in: ids } }, select: { productId: true } });
+      productIds = [...new Set(pubs.map((p) => p.productId))];
+      total = productIds.length;
+    } else {
+      // Solo las carpetas que ya existen: revisar no crea una carpeta por cada producto de la cuenta.
+      const products = await ctx.db.product.findMany({ where: { accountId: account.id }, orderBy: { id: 'asc' }, select: { id: true } });
+      const folders = new Set((await ctx.db.driveFolder.findMany({ where: { key: { in: products.map((p) => `videos:${p.id}`) } }, select: { key: true } })).map((f) => f.key));
+      const withFolder = products.filter((p) => folders.has(`videos:${p.id}`)).map((p) => p.id);
+      total = withFolder.length;
+      productIds = withFolder.slice(args.desde);
+    }
+    const started = Date.now();
+    const out: Record<string, unknown>[] = [];
+    let done = 0;
+    for (const productId of productIds) {
+      if (!args.publicaciones && done > 0 && Date.now() - started > SYNC_ROUND_MS) break;
+      const product = await ctx.db.product.findUniqueOrThrow({ where: { id: productId }, select: { name: true } });
+      try {
+        const r = await syncProductVideos(ctx.db, { accountId: account.id, productId });
+        const [videos, toEdit] = await Promise.all([
+          ctx.db.productVideo.count({ where: { productId, goneAt: null } }),
+          ctx.db.productVideo.count({ where: { productId, goneAt: null, editedBy: null, edits: { none: {} } } }),
+        ]);
+        // De toda la cuenta, solo se cuentan las carpetas con novedades o con videos sin editar.
+        if (args.publicaciones || r.added > 0 || r.gone > 0 || toEdit > 0) {
+          out.push({ producto: product.name, videos_nuevos: r.added, videos_que_ya_no_estan: r.gone, videos_en_la_carpeta: videos, videos_sin_editar: toEdit, carpeta: r.folderUrl });
+        }
+      } catch (e) {
+        if (!(e instanceof VideoError || e instanceof DriveError || e instanceof CryptoError) && !storageError(e)) throw e;
+        const message = e instanceof Error && !storageError(e) ? e.message : (storageError(e) ?? 'No se pudo leer la carpeta.');
+        // Sin el Drive conectado no tiene sentido seguir con las demás.
+        if (done === 0 && out.length === 0) throw new McpToolError(message);
+        out.push({ producto: product.name, error: message });
+      }
+      done += 1;
+    }
+    const left = productIds.length - done;
+    return {
+      carpetas_revisadas: done,
+      ...(args.publicaciones ? {} : { carpetas_con_videos_en_la_cuenta: total, faltan: left, ...(left > 0 ? { seguir_desde: args.desde + done } : {}) }),
+      productos: out,
+      ...(args.publicaciones || out.length > 0 ? {} : { nota: 'Ninguna de las carpetas revisadas tiene videos nuevos ni videos sin editar.' }),
+    };
+  },
+});
+
 const protocolTypeTool = defineTool({
   name: 'set_protocol_product_type',
   section: 'protocolos',
@@ -600,4 +668,4 @@ const uploadedTool = defineTool({
   },
 });
 
-export const VIDEO_TOOLS = [getStep, saveScript, requestTool, reviewTool, queueTool, settingsTool, momentsTool, clipsProbe, uploadsList, uploadedTool, measureTool, protocolTypeTool];
+export const VIDEO_TOOLS = [getStep, saveScript, requestTool, reviewTool, queueTool, settingsTool, momentsTool, clipsProbe, uploadsList, uploadedTool, measureTool, protocolTypeTool, syncTool];

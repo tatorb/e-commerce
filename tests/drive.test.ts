@@ -290,6 +290,41 @@ describe.skipIf(!url)('el Drive y los videos en la base', () => {
     expect((await db.productVideo.findUniqueOrThrow({ where: { id: row.id } })).goneAt).toBeNull();
   });
 
+  it('desde Claude: revisa las carpetas de unas publicaciones o de toda la cuenta', async () => {
+    process.env.DATABASE_URL ??= url!;
+    const { handleRpc } = await import('@/lib/mcp/server');
+    const ctx = { db, userId, access: { isAdmin: true, permissions: {}, accountIds: [] }, baseUrl: 'https://app.ejemplo.com' };
+    const call = async (args: Record<string, unknown>) => {
+      const r = (await handleRpc({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'sync_videos', arguments: args } }, ctx as never)) as {
+        result: { content: { text: string }[]; isError?: boolean };
+      };
+      return { text: r.result.content[0].text, isError: r.result.isError === true, data: r.result.isError ? null : JSON.parse(r.result.content[0].text) };
+    };
+    // Sin el Drive conectado, lo dice.
+    const off = await call({ publicaciones: [publicationId] });
+    expect(off.isError).toBe(true);
+    expect(off.text).toContain('Drive');
+
+    await connect();
+    // De toda la cuenta, sin carpetas todavía: no crea ninguna.
+    expect((await call({})).data).toMatchObject({ carpetas_revisadas: 0, carpetas_con_videos_en_la_cuenta: 0, faltan: 0 });
+    expect(await db.driveFolder.count({ where: { key: `videos:${productId}` } })).toBe(0);
+
+    // De una publicación: crea la carpeta de su producto y la lee.
+    const first = await call({ publicaciones: [publicationId] });
+    expect(first.data).toMatchObject({ carpetas_revisadas: 1, productos: [{ producto: 'Kit de embrague PD-1', videos_nuevos: 0, videos_en_la_carpeta: 0 }] });
+    const folderId = (await db.driveFolder.findUniqueOrThrow({ where: { key: `videos:${productId}` } })).folderId;
+
+    // Alguien copia un video a la carpeta: la revisión de toda la cuenta lo encuentra.
+    google.addFile({ name: 'SP-449-00.MP4', mimeType: 'video/mp4', parents: [folderId], data: Buffer.alloc(1000), videoMediaMetadata: { width: 3840, height: 2160, durationMillis: '105000' } });
+    const all = await call({});
+    expect(all.data).toMatchObject({ carpetas_revisadas: 1, carpetas_con_videos_en_la_cuenta: 1, faltan: 0 });
+    expect(all.data.productos).toEqual([expect.objectContaining({ producto: 'Kit de embrague PD-1', videos_nuevos: 1, videos_que_ya_no_estan: 0, videos_en_la_carpeta: 1, videos_sin_editar: 1 })]);
+    expect(await db.productVideo.count({ where: { productId, name: 'SP-449-00.MP4' } })).toBe(1);
+    // Otra vuelta no lo suma de nuevo.
+    expect((await call({})).data.productos[0]).toMatchObject({ videos_nuevos: 0, videos_en_la_carpeta: 1 });
+  });
+
   it('la copia liviana de la cámara no es un video más: se anota en el suyo', async () => {
     await connect();
     const { folderId } = await syncProductVideos(db, { accountId, productId });
