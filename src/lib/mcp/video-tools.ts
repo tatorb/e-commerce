@@ -465,7 +465,7 @@ const uploadsList = defineTool({
   section: ['pipeline', 'publicaciones'],
   title: 'Ver los clips que falta subir a Mercado Libre',
   description:
-    'Lista los clips aprobados y elegidos que falta subir a mano a Mercado Libre, de las publicaciones activas de la cuenta, como la pantalla Clips por subir. Mercado Libre no deja subirlos por programa a las cuentas locales. De cada uno da el link para bajar el archivo y el link a la publicación en el listado del vendedor, donde está la opción de subir el video. Al aprobar un clip, queda elegido solo en las publicaciones activas del producto que no tienen clip.',
+    'Lista los clips aprobados y elegidos que falta subir a mano a Mercado Libre, de las publicaciones activas de la cuenta, como la pantalla Clips por subir. Mercado Libre no deja subirlos por programa a las cuentas locales. Mercado Libre lleva un video por producto, que se ve en todas sus medidas y formas de cobro: hay una fila por producto y clip, aunque esté elegido en varias publicaciones, y se sube una sola vez. De cada uno da el link para bajar el archivo y el link a la publicación en el listado del vendedor, donde está la opción de subir el video. Al aprobar un clip, queda elegido solo en las publicaciones activas del producto que no tienen clip.',
   input: z.object({ cuenta: accountArg }),
   readOnly: true,
   async run(ctx, args) {
@@ -477,7 +477,7 @@ const uploadsList = defineTool({
       clips: clips.map((c) => ({
         publicacion: c.publicationId,
         codigo: c.externalId,
-        medida: c.measure,
+        publicaciones_del_producto: c.publications,
         titulo: c.title,
         producto: c.product,
         video: c.videoId,
@@ -496,7 +496,7 @@ const uploadedTool = defineTool({
   section: ['pipeline', 'publicaciones'],
   title: 'Anotar que un clip ya se subió a Mercado Libre',
   description:
-    'Anota que la persona ya subió a mano un clip a Mercado Libre, o lo desmarca. No sube nada: solo lo saca de Clips por subir. Usala cuando la persona dice que ya lo subió.',
+    'Anota que la persona ya subió a mano un clip a Mercado Libre, o lo desmarca. No sube nada: solo lo saca de Clips por subir, en todas las publicaciones del producto que lo tienen elegido. Usala cuando la persona dice que ya lo subió.',
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg,

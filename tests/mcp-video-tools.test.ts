@@ -249,9 +249,17 @@ describe.skipIf(!url)('el editor de videos desde Claude', () => {
       subir_en: 'https://www.mercadolibre.com.ar/publicaciones/listado?search=MLA1110001',
       bajar: expect.stringContaining('https://drive.google.com/uc?export=download&id='),
     });
-    // Anotarlo como subido lo saca de la lista; desmarcarlo lo devuelve.
+    // El producto tiene otra publicación activa, de otra medida, con el mismo clip: sigue siendo una sola subida.
+    const first = await db.publication.findFirstOrThrow({ where: { externalId: 'MLA1110001' } });
+    const second = await db.publication.create({ data: { productId: first.productId, storeId: first.storeId, externalId: 'MLA1110002', title: 'Kit 4 Camisas 0,60', variantKey: '060' } });
+    await db.publicationClip.create({ data: { publicationId: second.id, videoId: list.data.clips[0].video } });
+    const both = await call('list_clips_to_upload');
+    expect(both.data.faltan).toBe(1);
+    expect(both.data.clips[0].publicaciones_del_producto).toBe(2);
+    // Anotarlo como subido lo saca de la lista en las dos; desmarcarlo lo devuelve.
     const marked = await call('mark_clip_uploaded', { publicacion: 'MLA1110001', video: list.data.clips[0].video });
     expect(marked.data).toMatchObject({ subido: true, faltan: 0 });
+    expect(await db.publicationClip.count({ where: { uploadedAt: { not: null } } })).toBe(2);
     expect((await call('mark_clip_uploaded', { publicacion: 'MLA1110001', video: list.data.clips[0].video, subido: false })).data.faltan).toBe(1);
     // Una publicación pausada no entra: Mercado Libre solo acepta clips en las activas.
     await db.publication.updateMany({ data: { channelStatus: 'PAUSED' } });

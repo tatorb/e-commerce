@@ -21,7 +21,7 @@ export type ClipUploadRow = {
   title: string | null;
   product: string;
   externalId: string;
-  measure: string | null;
+  publications: number;
   channelLink: string;
   fileName: string;
   mimeType: string;
@@ -113,8 +113,8 @@ function Row({ accountSlug, clip, extension, progress, onUpload }: { accountSlug
             {clip.title ?? clip.product}
           </Link>
           <p className="text-xs text-muted-foreground">
-            {clip.externalId}
-            {clip.measure ? ` · medida ${clip.measure}` : ''} · {clip.product}
+            {clip.externalId} · {clip.product}
+            {clip.publications > 1 ? ` · se ve en sus ${clip.publications} publicaciones` : ''}
           </p>
           <p className="break-all text-xs text-muted-foreground">{clip.fileName}</p>
           <VideoFacts video={{ durationMs: clip.durationMs, width: null, height: null, size: clip.size }} />

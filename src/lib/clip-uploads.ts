@@ -57,8 +57,8 @@ export type ClipUpload = {
   title: string | null;
   product: string;
   externalId: string;
-  // La medida de la publicación, si es una de varias.
-  measure: string | null;
+  // En cuántas publicaciones del producto está elegido: se sube una sola vez.
+  publications: number;
   storeName: string;
   // La publicación en el listado del vendedor, donde está la opción de subir el video.
   channelLink: string;
@@ -94,12 +94,21 @@ export const driveDownloadLink = (fileId: string) => `https://drive.google.com/u
 const pending = (accountId: string) =>
   ({ uploadedAt: null, video: { goneAt: null }, publication: { ...LIVE, product: { accountId } } }) satisfies Prisma.PublicationClipWhereInput;
 
-/** Cuántos clips faltan subir en la cuenta, para el menú. */
-export function clipUploadCount(db: Db, accountId: string): Promise<number> {
-  return db.publicationClip.count({ where: pending(accountId) });
+/**
+ * Cuántos clips faltan subir en la cuenta, para el menú. Mercado Libre lleva
+ * un video por producto, que se ve en todas sus medidas y formas de cobro: un
+ * clip elegido en varias publicaciones del producto es una sola subida.
+ */
+export async function clipUploadCount(db: Db, accountId: string): Promise<number> {
+  return (await db.publicationClip.findMany({ where: pending(accountId), distinct: ['videoId'], select: { videoId: true } })).length;
 }
 
-/** Los clips elegidos que faltan subir, de las publicaciones activas, los más viejos primero. */
+/**
+ * Los clips que faltan subir, uno por producto y clip, los más viejos primero.
+ * De las publicaciones del producto que lo tienen elegido se muestra una, la
+ * que está en el pipeline si hay: en el listado de Mercado Libre cualquiera de
+ * ellas lleva a la misma fila, la del producto.
+ */
 export async function pendingClipUploads(db: Db, accountId: string): Promise<ClipUpload[]> {
   const rows = await db.publicationClip.findMany({
     where: pending(accountId),
@@ -109,25 +118,30 @@ export async function pendingClipUploads(db: Db, accountId: string): Promise<Cli
       videoId: true,
       chosenAt: true,
       video: { select: { name: true, mimeType: true, driveFileId: true, webViewLink: true, durationMs: true, size: true } },
-      publication: { select: { title: true, externalId: true, variantKey: true, url: true, store: { select: { name: true } }, product: { select: { name: true } } } },
+      publication: { select: { title: true, externalId: true, url: true, pipelineStatus: true, store: { select: { name: true } }, product: { select: { name: true } } } },
     },
   });
-  return rows.map((r) => ({
-    publicationId: r.publicationId,
-    videoId: r.videoId,
-    title: r.publication.title,
-    product: r.publication.product.name,
-    externalId: r.publication.externalId!,
-    measure: r.publication.variantKey,
-    storeName: r.publication.store.name,
-    channelLink: sellerListingLink(r.publication.externalId!),
-    publicationLink: r.publication.url,
-    fileName: r.video.name,
-    mimeType: r.video.mimeType,
-    downloadLink: driveDownloadLink(r.video.driveFileId),
-    driveLink: r.video.webViewLink,
-    durationMs: r.video.durationMs,
-    size: r.video.size === null ? null : Number(r.video.size),
-    chosenAt: r.chosenAt,
-  }));
+  const byVideo = new Map<string, typeof rows>();
+  for (const r of rows) byVideo.set(r.videoId, [...(byVideo.get(r.videoId) ?? []), r]);
+  return [...byVideo.values()].map((group) => {
+    const r = group.find((g) => g.publication.pipelineStatus === 'IN_PIPELINE') ?? group[0];
+    return {
+      publicationId: r.publicationId,
+      videoId: r.videoId,
+      title: r.publication.title,
+      product: r.publication.product.name,
+      externalId: r.publication.externalId!,
+      publications: group.length,
+      storeName: r.publication.store.name,
+      channelLink: sellerListingLink(r.publication.externalId!),
+      publicationLink: r.publication.url,
+      fileName: r.video.name,
+      mimeType: r.video.mimeType,
+      downloadLink: driveDownloadLink(r.video.driveFileId),
+      driveLink: r.video.webViewLink,
+      durationMs: r.video.durationMs,
+      size: r.video.size === null ? null : Number(r.video.size),
+      chosenAt: group[0].chosenAt,
+    };
+  });
 }

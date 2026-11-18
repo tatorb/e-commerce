@@ -342,14 +342,18 @@ export async function moveClip(db: PrismaClient, args: { accountId: string; publ
   });
 }
 
-/** Anota que un clip ya se subió a mano al canal, o lo desmarca. */
+/**
+ * Anota que un clip ya se subió al canal, o lo desmarca. El canal lleva un
+ * video por producto, que se ve en todas sus medidas y formas de cobro: queda
+ * anotado en todas las publicaciones del producto que lo tienen elegido.
+ */
 export async function markClipUploaded(
   db: PrismaClient,
   args: { accountId: string; publicationId: string; videoId: string; uploaded: boolean; userId: string | null; now?: Date },
 ): Promise<void> {
   const pub = await publicationFor(db, args.accountId, args.publicationId);
   const r = await db.publicationClip.updateMany({
-    where: { publicationId: pub.id, videoId: args.videoId },
+    where: { videoId: args.videoId, publication: { productId: pub.productId } },
     data: args.uploaded ? { uploadedAt: args.now ?? new Date(), uploadedById: args.userId } : { uploadedAt: null, uploadedById: null },
   });
   if (r.count === 0) throw new VideoError('Primero elegí el clip.');
