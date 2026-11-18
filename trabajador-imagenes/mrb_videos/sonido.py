@@ -157,6 +157,8 @@ def _motivo(estado: int, cuerpo: str) -> str:
     dicho = " ".join(str(dicho or "").split())[:300]
     if estado in (402, 429) or "quota" in f"{dicho} {estado_dicho}".lower() or "credit" in dicho.lower():
         return f"La cuenta de ElevenLabs no tiene créditos o llegó a su límite. ElevenLabs dijo «{dicho}»."
+    if "must start with" in dicho:
+        return "La clave de ElevenLabs que está cargada en la Mac no es una clave: empiezan con sk_. Cargala de nuevo con bash configurar.sh."
     if estado == 401 and "permission" in dicho:
         return f"La clave de ElevenLabs no tiene permiso para esto. En ElevenLabs, en API Keys, dale acceso a Text to Speech y a Music. ElevenLabs dijo «{dicho}»."
     if estado == 401:

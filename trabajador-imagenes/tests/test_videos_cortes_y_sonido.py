@@ -192,6 +192,7 @@ def test_los_motivos_de_elevenlabs_en_palabras_simples():
     assert "no vale" in _motivo(401, json.dumps({"detail": {"message": "Invalid API key"}}))
     assert "créditos" in _motivo(401, json.dumps({"detail": {"status": "quota_exceeded", "message": "This request exceeds your quota"}}))
     assert "no encontró esa voz" in _motivo(404, "{}")
+    assert "empiezan con sk_" in _motivo(400, json.dumps({"detail": {"message": "API key must start with 'sk_'."}}))
 
 
 def test_sin_clave_de_elevenlabs_se_dice_como_cargarla(monkeypatch):

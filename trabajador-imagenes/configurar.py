@@ -87,6 +87,10 @@ def configurar_elevenlabs() -> bool:
     clave = getpass.getpass("Clave: ").strip()
     if not clave:
         return True
+    if not clave.startswith("sk_"):
+        print("Eso no parece una clave de ElevenLabs: empiezan con sk_. No se guardó nada.")
+        print("La clave se ve una sola vez, al crearla en ElevenLabs, en API Keys. Si no la tenés, creá una nueva.")
+        return False
     try:
         import keyring
 
