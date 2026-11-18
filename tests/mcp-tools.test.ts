@@ -45,6 +45,8 @@ describe('lista de herramientas', () => {
       'get_shipments',
       'get_text_images_step',
       'list_vehicle_brands',
+      'get_videos_step',
+      'get_video_queue',
       'check_photo_measures',
       'audit_compatibilities',
       'list_notes',
