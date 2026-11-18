@@ -15,7 +15,7 @@ No muevas ni borres la carpeta después: Chrome la lee de ahí. Para actualizarl
 ## Usarla
 
 1. Tené la sesión de Mercado Libre iniciada en ese Chrome.
-2. En la app, en **Clips por subir**, tocá **Subir a Mercado Libre** en el clip.
+2. Aprobá el clip en el paso Videos: se sube solo. Si quedó alguno pendiente, en **Clips por subir** tocá **Subir a Mercado Libre**.
 3. Se abre una pestaña de Mercado Libre. Un cartel abajo a la derecha cuenta qué va haciendo.
 4. Cuando Mercado Libre suma el video a **Tus videos**, la subida terminó: queda en revisión y la app lo marca sola como subido.
 

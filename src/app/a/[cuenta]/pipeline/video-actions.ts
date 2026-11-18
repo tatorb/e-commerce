@@ -1,5 +1,7 @@
 'use server';
 
+import { pendingClipUploads } from '@/lib/clip-uploads';
+import type { ClipUploadAsk } from '@/components/clips/clip-uploader';
 import { act } from '@/lib/auth/guard';
 import { revalidatePath } from 'next/cache';
 import { headers } from 'next/headers';
@@ -200,14 +202,17 @@ export async function requestVideoEditAction(
 }
 
 /** Aprueba el clip que armó la Mac. */
-export async function approveVideoEditAction(accountSlug: string, editId: string): Promise<Result> {
+/** Aprueba el clip. Devuelve lo que hace falta para subirlo a Mercado Libre, si quedó para subir. */
+export async function approveVideoEditAction(accountSlug: string, editId: string): Promise<({ ok: true; upload: ClipUploadAsk | null }) | Fail> {
   return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Aprobó un clip editado' }, async () => {
     const user = await requireUser();
     const accountId = await accountIdOf(accountSlug);
     if (!accountId) return NO_ACCOUNT;
     const r = await guardEdit(async () => {
       await approveEdit(prisma, { accountId, editId: String(editId), userId: user.id });
-      return {};
+      const edit = await prisma.videoEdit.findUnique({ where: { id: String(editId) }, select: { clipId: true } });
+      const u = edit?.clipId ? (await pendingClipUploads(prisma, accountId)).find((c) => c.videoId === edit.clipId) : undefined;
+      return { upload: u ? { publicationId: u.publicationId, videoId: u.videoId, externalId: u.externalId, fileName: u.fileName, mimeType: u.mimeType } : null };
     });
     revalidatePath(`/a/${accountSlug}/pipeline`, 'layout');
     return r;
