@@ -225,16 +225,73 @@ export function VideoEditPanel({
     </p>
   ) : null;
 
+  // Lo que dice la voz y cómo se editó: se ve mientras el clip espera la aprobación y también después.
+  const scriptAndPlan = edit ? (
+    <>
+      {edit.sound ? (
+        <p className="text-xs text-muted-foreground">
+          {[edit.sound.voz ? 'Con voz en off' : null, edit.sound.musica ? 'con música' : null, edit.sound.subtitulos ? 'con subtítulos' : null].filter(Boolean).join(', ') || 'Sin sonido'}.
+        </p>
+      ) : null}
+      {edit.script.length > 0 ? (
+        <details className="text-xs">
+          <summary className="cursor-pointer text-muted-foreground">Lo que dice la voz</summary>
+          <ol className="space-y-0.5 pt-1 text-muted-foreground">
+            {edit.script.map((line) => (
+              <li key={line.inicio}>
+                {clock(line.inicio)}: {line.texto}
+              </li>
+            ))}
+          </ol>
+        </details>
+      ) : null}
+      {edit.plan ? (
+        <details className="text-xs">
+          <summary className="cursor-pointer text-muted-foreground">Cómo se editó, {Math.round(planSeconds(edit.plan))} segundos</summary>
+          <div className="pt-1">
+            <PlanSummary plan={edit.plan} />
+          </div>
+        </details>
+      ) : null}
+    </>
+  ) : null;
+
   if (!edit || edit.status === 'APPROVED') {
     return (
       <div className="space-y-2">
         {edit ? (
-          <p className="flex items-center gap-1 text-xs text-muted-foreground">
-            <Check className="h-3.5 w-3.5" aria-hidden />
-            Ya tiene un clip editado y aprobado{clip ? `: ${clip.name}` : ''}.
-          </p>
+          <div className="space-y-2 rounded-md border bg-muted/30 p-3">
+            <p className="flex items-center gap-1 text-sm">
+              <Check className="h-4 w-4" aria-hidden />
+              Ya tiene un clip editado y aprobado{clip ? `: ${clip.name}` : ''}.
+            </p>
+            {scriptAndPlan}
+            {adjusting && edit.plan ? (
+              <>
+                <p className="text-xs text-muted-foreground">
+                  Al rehacerlo sale un clip nuevo para revisar. El aprobado queda en la lista hasta que lo mandes a la papelera.
+                </p>
+                <VideoPlanEditor
+                  plan={edit.plan}
+                  script={edit.script}
+                  hasVoice={editor.hasVoice}
+                  range={range}
+                  pending={pending}
+                  onSubmit={(ask) => run(() => requestVideoEditAction(accountSlug, video.id, { targetSeconds: edit.targetSeconds, plan: ask.plan, script: ask.script }))}
+                />
+              </>
+            ) : null}
+          </div>
         ) : null}
-        {askButton(edit ? 'Editar de nuevo' : 'Editar para clip', 'ask', (ask) => requestVideoEditAction(accountSlug, video.id, ask), edit ? 'ghost' : 'outline')}
+        <div className="flex flex-wrap items-center gap-2">
+          {edit?.plan ? (
+            <Button access="view" size="sm" variant="outline" onClick={() => setAdjusting((a) => !a)} disabled={pending}>
+              <SlidersHorizontal />
+              {adjusting ? 'Cerrar los cortes' : 'Ajustar los cortes y el guión'}
+            </Button>
+          ) : null}
+          {askButton(edit ? 'Editar de nuevo' : 'Editar para clip', 'ask', (ask) => requestVideoEditAction(accountSlug, video.id, ask), edit ? 'ghost' : 'outline')}
+        </div>
         {errorLine}
       </div>
     );
@@ -297,33 +354,7 @@ export function VideoEditPanel({
               {edit.reason}
             </p>
           ) : null}
-          {edit.plan ? (
-            <details className="text-xs">
-              <summary className="cursor-pointer text-muted-foreground">Cómo se editó, {Math.round(planSeconds(edit.plan))} segundos</summary>
-              <div className="pt-1">
-                <PlanSummary plan={edit.plan} />
-              </div>
-            </details>
-          ) : null}
-          {edit.sound ? (
-            <p className="text-xs text-muted-foreground">
-              {[edit.sound.voz ? 'Con voz en off' : null, edit.sound.musica ? 'con música' : null, edit.sound.subtitulos ? 'con subtítulos' : null].filter(Boolean).join(', ') ||
-                'Sin sonido'}
-              .
-            </p>
-          ) : null}
-          {edit.script.length > 0 ? (
-            <details className="text-xs">
-              <summary className="cursor-pointer text-muted-foreground">Lo que dice la voz</summary>
-              <ol className="space-y-0.5 pt-1 text-muted-foreground">
-                {edit.script.map((line) => (
-                  <li key={line.inicio}>
-                    {clock(line.inicio)}: {line.texto}
-                  </li>
-                ))}
-              </ol>
-            </details>
-          ) : null}
+          {scriptAndPlan}
           {edit.warnings.length > 0 ? (
             <ul className="space-y-0.5 text-xs text-amber-700 dark:text-amber-400">
               {edit.warnings.map((w) => (
