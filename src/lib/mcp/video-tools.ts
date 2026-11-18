@@ -41,6 +41,7 @@ import {
   videoSteps,
   type EditRow,
 } from '@/lib/video-edits';
+import { productMeasures, setVideoMeasure, VideoMeasureError } from '@/lib/video-measure';
 import { saveVideoScript, VideoScriptError } from '@/lib/video-script';
 import { loadVideosStep, markClipUploaded, VideoError } from '@/lib/videos';
 import { McpToolError, accountArg, appLink, defineTool, publicationArg, resolveAccount, resolvePublication, when, type AccountRef, type McpContext } from './tool';
@@ -136,9 +137,12 @@ const getStep = defineTool({
         ...(v.editedFrom ? { clip_editado_de: v.editedFrom.name, aprobado: v.editedFrom.approved } : {}),
         ...(v.hasLightCopy ? { con_copia_liviana: true } : {}),
         paso_del_protocolo: v.stepId,
+        medida: v.measureLabel ?? 'todas',
+        ...(v.measureSource ? { la_medida_salio_de: v.measureSource === 'archivo' ? 'el nombre del archivo' : v.measureSource === 'persona' ? 'la eligió una persona' : 'cómo se grabó en Registro de productos' } : {}),
         es_clip_de_esta_publicacion: clipIds.has(v.id),
         ...(editOf.has(v.id) ? { edicion: editOut(editOf.get(v.id)!, account) } : {}),
       })),
+      medidas_del_producto: s.measures.map((m) => m.label),
       guion_del_clip: s.script
         ? {
             frases: s.script.lines,
@@ -492,6 +496,39 @@ const uploadsList = defineTool({
   },
 });
 
+const measureTool = defineTool({
+  name: 'set_video_measure',
+  section: ['pipeline', 'publicaciones'],
+  title: 'Elegir de qué medida es un video',
+  description:
+    'Elige de qué medida del producto es un video o un clip, o que es de todas. La medida sale sola del nombre del archivo, cuando trae el SKU de la medida, o de cómo se grabó en Registro de productos; esto la cambia a mano. El clip que el editor armó con ese video queda con la misma medida. Importa al aprobar el clip: uno de una medida va solo a las publicaciones de esa medida y ahí reemplaza al que era de otra o de todas, así cada medida queda con su video; uno de todas va a las publicaciones que no tienen clip. get_videos_step muestra la medida de cada video y las medidas del producto.',
+  input: z.object({
+    cuenta: accountArg,
+    publicacion: publicationArg,
+    video: z.string().min(1).describe('El video o el clip: el id que da get_videos_step.'),
+    medida: z.string().min(1).nullable().describe('La medida, como la nombra medidas_del_producto en get_videos_step, por ejemplo "STD". null = es de todas las medidas.'),
+  }),
+  readOnly: false,
+  destructive: false,
+  async run(ctx, args) {
+    const { account, id } = await target(ctx, args);
+    const pub = await ctx.db.publication.findUniqueOrThrow({ where: { id }, select: { productId: true } });
+    const video = await ctx.db.productVideo.findFirst({ where: { id: args.video, productId: pub.productId }, select: { id: true } });
+    if (!video) throw new McpToolError(`No hay un video «${args.video}» en este producto.`);
+    const measures = await productMeasures(ctx.db, pub.productId);
+    const wanted = args.medida === null ? null : args.medida.trim().toLowerCase();
+    const measure = wanted === null ? null : measures.find((m) => m.label.toLowerCase() === wanted || m.key.toLowerCase() === wanted || m.sku?.toLowerCase() === wanted);
+    if (measure === undefined) throw new McpToolError(`El producto no tiene la medida «${args.medida}». Medidas: ${measures.map((m) => m.label).join(', ') || 'ninguna, tiene una sola'}.`);
+    try {
+      const r = await setVideoMeasure(ctx.db, { accountId: account.id, videoId: video.id, variantKey: measure?.key ?? null });
+      return { video: video.id, medida: r.label ?? 'todas' };
+    } catch (e) {
+      if (e instanceof VideoMeasureError) throw new McpToolError(e.message);
+      throw e;
+    }
+  },
+});
+
 const uploadedTool = defineTool({
   name: 'mark_clip_uploaded',
   section: ['pipeline', 'publicaciones'],
@@ -514,4 +551,4 @@ const uploadedTool = defineTool({
   },
 });
 
-export const VIDEO_TOOLS = [getStep, saveScript, requestTool, reviewTool, queueTool, settingsTool, momentsTool, clipsProbe, uploadsList, uploadedTool];
+export const VIDEO_TOOLS = [getStep, saveScript, requestTool, reviewTool, queueTool, settingsTool, momentsTool, clipsProbe, uploadsList, uploadedTool, measureTool];

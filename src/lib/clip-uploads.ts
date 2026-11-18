@@ -1,4 +1,6 @@
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
+import { measuresOf } from '@/lib/media';
+import { findVideoMeasures } from '@/lib/video-measure';
 
 // Los clips por subir. Mercado Libre no deja subir clips por programa a un
 // vendedor local (responde que la cuenta no tiene permiso), así que se suben
@@ -12,27 +14,41 @@ type Db = PrismaClient | Prisma.TransactionClient;
 const LIVE = { externalId: { not: null }, channelStatus: 'ACTIVE' } as const;
 
 /**
- * El clip aprobado queda elegido en las publicaciones activas del producto que
- * todavía no tienen clip. Las que ya tienen uno no se tocan: ahí decide la
- * persona. Un clip grabado para una medida va solo a las publicaciones de esa
- * medida. Se ofrece una sola vez por clip: si después la persona lo saca de
- * una publicación, no vuelve. Devuelve en cuántas quedó.
+ * El clip aprobado queda elegido en las publicaciones activas del producto.
+ * Se ofrece una sola vez por clip: si después la persona lo saca de una
+ * publicación, no vuelve. Devuelve en cuántas quedó.
+ *
+ * - Un clip sin medida, que es de todas, va a las publicaciones que todavía
+ *   no tienen clip. Las que ya tienen uno no se tocan: ahí decide la persona.
+ * - Un clip de una medida va a las publicaciones de esa medida, y ahí
+ *   reemplaza al que no era de esa medida. Mientras las otras medidas no
+ *   tengan su video, también va en ellas. Así, con un solo video aprobado se
+ *   ve en todas, y al aprobar el de otra medida cada uno queda en la suya.
  */
 export async function chooseApprovedClip(tx: Db, args: { clipId: string; userId: string | null; now?: Date }): Promise<number> {
   const now = args.now ?? new Date();
   await tx.videoEdit.updateMany({ where: { clipId: args.clipId }, data: { clipOfferedAt: now } });
-  const clip = await tx.productVideo.findUnique({ where: { id: args.clipId }, select: { id: true, productId: true, goneAt: true, variantKey: true } });
-  if (!clip || clip.goneAt) return 0;
-  const pubs = await tx.publication.findMany({
-    where: { productId: clip.productId, ...LIVE, clips: { none: {} }, ...(clip.variantKey ? { OR: [{ variantKey: clip.variantKey }, { variantKey: null }] } : {}) },
-    select: { id: true },
-  });
-  if (pubs.length === 0) return 0;
-  await tx.publicationClip.createMany({
-    data: pubs.map((p) => ({ publicationId: p.id, videoId: clip.id, position: 0, chosenById: args.userId, chosenAt: now })),
-    skipDuplicates: true,
-  });
-  return pubs.length;
+  const before = await tx.productVideo.findUnique({ where: { id: args.clipId }, select: { productId: true, goneAt: true } });
+  if (!before || before.goneAt) return 0;
+  await findVideoMeasures(tx, before.productId);
+  const clip = await tx.productVideo.findUniqueOrThrow({ where: { id: args.clipId }, select: { id: true, productId: true, variantKey: true } });
+  const add = (ids: string[]) =>
+    tx.publicationClip.createMany({ data: ids.map((publicationId) => ({ publicationId, videoId: clip.id, position: 0, chosenById: args.userId, chosenAt: now })), skipDuplicates: true });
+
+  if (!clip.variantKey) {
+    const pubs = await tx.publication.findMany({ where: { productId: clip.productId, ...LIVE, clips: { none: {} } }, select: { id: true } });
+    if (pubs.length > 0) await add(pubs.map((p) => p.id));
+    return pubs.length;
+  }
+  const own = (await tx.publication.findMany({ where: { productId: clip.productId, ...LIVE, variantKey: clip.variantKey }, select: { id: true } })).map((p) => p.id);
+  // En su medida, este clip reemplaza al que era de otra o de todas.
+  if (own.length > 0) {
+    await tx.publicationClip.deleteMany({ where: { publicationId: { in: own }, videoId: { not: clip.id }, video: { OR: [{ variantKey: null }, { variantKey: { not: clip.variantKey } }] } } });
+  }
+  // Y mientras las otras medidas no tengan su video, también va en ellas.
+  const empty = (await tx.publication.findMany({ where: { productId: clip.productId, ...LIVE, id: { notIn: own }, clips: { none: {} } }, select: { id: true } })).map((p) => p.id);
+  await add([...own, ...empty]);
+  return own.length + empty.length;
 }
 
 /**
@@ -118,7 +134,10 @@ export async function pendingClipUploads(db: Db, accountId: string, productId?: 
       chosenAt: true,
       video: { select: { name: true, mimeType: true, driveFileId: true, webViewLink: true, durationMs: true, size: true } },
       publication: {
-        select: { title: true, externalId: true, url: true, pipelineStatus: true, variantKey: true, productId: true, store: { select: { name: true } }, product: { select: { name: true } } },
+        select: { title: true, externalId: true, url: true, pipelineStatus: true, variantKey: true, productId: true,
+          store: { select: { name: true } },
+          product: { select: { name: true, variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } } } },
+        },
       },
     },
   });
@@ -128,14 +147,15 @@ export async function pendingClipUploads(db: Db, accountId: string, productId?: 
     where: { ...LIVE, productId: { in: [...new Set(rows.map((r) => r.publication.productId))] } },
     select: { productId: true, variantKey: true },
   });
-  const measuresOf = new Map<string, Set<string | null>>();
-  for (const p of live) measuresOf.set(p.productId, (measuresOf.get(p.productId) ?? new Set()).add(p.variantKey));
+  const liveMeasures = new Map<string, Set<string | null>>();
+  for (const p of live) liveMeasures.set(p.productId, (liveMeasures.get(p.productId) ?? new Set()).add(p.variantKey));
 
   const byVideo = new Map<string, typeof rows>();
   for (const r of rows) byVideo.set(r.videoId, [...(byVideo.get(r.videoId) ?? []), r]);
   const out: ClipUpload[] = [];
   for (const group of byVideo.values()) {
-    const all = measuresOf.get(group[0].publication.productId) ?? new Set();
+    const all = liveMeasures.get(group[0].publication.productId) ?? new Set();
+    const labels = measuresOf(group[0].publication.product.variants);
     const chosen = new Set(group.map((g) => g.publication.variantKey));
     const covers = [...all].every((m) => chosen.has(m));
     // Para todas las medidas, una fila; si no, una por medida.
@@ -150,7 +170,7 @@ export async function pendingClipUploads(db: Db, accountId: string, productId?: 
         externalId: r.publication.externalId!,
         publications: part.length,
         allMeasures: covers,
-        measure: covers ? null : r.publication.variantKey,
+        measure: covers ? null : (labels.find((m) => m.key === r.publication.variantKey)?.label ?? null),
         storeName: r.publication.store.name,
         channelLink: sellerListingLink(r.publication.externalId!),
         publicationLink: r.publication.url,

@@ -1,5 +1,6 @@
 'use server';
 
+import { setVideoMeasure, VideoMeasureError } from '@/lib/video-measure';
 import { act } from '@/lib/auth/guard';
 import { revalidatePath } from 'next/cache';
 import { headers } from 'next/headers';
@@ -277,6 +278,23 @@ export async function proposeVideoScriptAction(accountSlug: string, publicationI
       return r.ok ? { ok: true, costUsd: r.costUsd } : { ok: false, error: r.error };
     } catch (e) {
       if (e instanceof VideoScriptError) return { ok: false, error: e.message };
+      throw e;
+    }
+  });
+}
+
+/** Elige de qué medida del producto es un video, o que es de todas. */
+export async function setVideoMeasureAction(accountSlug: string, videoId: string, variantKey: string | null): Promise<Result> {
+  return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Cambió la medida de un video' }, async () => {
+    await requireUser();
+    const accountId = await accountIdOf(accountSlug);
+    if (!accountId) return NO_ACCOUNT;
+    try {
+      const r = await setVideoMeasure(prisma, { accountId, videoId: String(videoId), variantKey: variantKey === null ? null : String(variantKey) });
+      revalidatePath(`/a/${accountSlug}/pipeline`, 'layout');
+      return { ok: true, message: r.label ? `Es de la medida ${r.label}.` : 'Es de todas las medidas.' };
+    } catch (e) {
+      if (e instanceof VideoMeasureError) return { ok: false, error: e.message };
       throw e;
     }
   });

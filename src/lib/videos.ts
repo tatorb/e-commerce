@@ -1,3 +1,4 @@
+import { findVideoMeasures, productMeasures } from '@/lib/video-measure';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { videoUploadType } from '@/domain/videos';
 import { shotText } from '@/domain/shoot';
@@ -384,6 +385,10 @@ export type VideoRow = {
   hasLightCopy: boolean;
   // El paso del protocolo con que se grabó, si se sabe.
   stepId: string | null;
+  // De qué medida del producto es, y de dónde salió ese dato. Null: de todas.
+  measureKey: string | null;
+  measureLabel: string | null;
+  measureSource: 'archivo' | 'persona' | 'registro' | null;
 };
 
 /** Lo que muestra el paso Videos: los videos del producto, el clip de la publicación y la conexión con el Drive. */
@@ -406,8 +411,11 @@ export async function loadVideosStep(db: PrismaClient, args: { accountId: string
       store: { select: { channel: { select: { kind: true, name: true } } } },
     },
   });
-  const [email, rows, sharedWith] = await Promise.all([
+  // Antes de mostrar, se busca la medida de los videos que todavía no la tienen.
+  await findVideoMeasures(db, pub.productId);
+  const [email, measures, rows, sharedWith] = await Promise.all([
     driveEmail(db),
+    productMeasures(db, pub.productId),
     db.productVideo.findMany({
       where: { productId: pub.productId, OR: [{ goneAt: null }, { clips: { some: { publicationId: args.publicationId } } }] },
       orderBy: [{ driveCreatedAt: 'asc' }, { createdAt: 'asc' }],
@@ -446,9 +454,14 @@ export async function loadVideosStep(db: PrismaClient, args: { accountId: string
     editedFrom: v.editedBy ? { name: v.editedBy.video.name, approved: v.editedBy.status === 'APPROVED' } : null,
     stepId: v.shootStepId,
     hasLightCopy: v.lightFileId !== null,
+    measureKey: v.variantKey,
+    measureLabel: v.variantLabel,
+    measureSource: v.variantSource === 'archivo' || v.variantSource === 'persona' ? v.variantSource : v.variantKey ? 'registro' : null,
   }));
   return {
     productId: pub.productId,
+    // Las medidas de la ficha, para elegir de cuál es cada video.
+    measures: measures.map((m) => ({ key: m.key, label: m.label })),
     driveEmail: email,
     folderUrl: folderId ? folderUrl(folderId) : null,
     videos,

@@ -1902,6 +1902,10 @@ model ProductVideo {
   shootStep      ShootStep?        @relation(fields: [shootStepId], references: [id], onDelete: SetNull)
   variantKey     String?
   variantLabel   String?
+  // De dónde salió la medida del video: "archivo" (del nombre, que trae el SKU) o
+  // "persona" (la eligió alguien, también cuando eligió que es de todas). Null:
+  // se grabó con su medida en Registro de productos, o todavía no se buscó.
+  variantSource  String?
   // La copia liviana que la cámara graba al lado del video (el .LRF de DJI):
   // el editor la usa para mirar y medir rápido. No se muestra como un video.
   lightFileId    String?

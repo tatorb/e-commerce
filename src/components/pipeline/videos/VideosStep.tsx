@@ -171,6 +171,7 @@ export function VideosStep({
                   editedClip={active.find((c) => c.id === editOf.get(v.id)?.clipId) ?? null}
                   editor={editor}
                   range={range}
+                  measures={data.measures}
                 />
               ))}
             </ul>

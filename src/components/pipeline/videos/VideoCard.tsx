@@ -11,6 +11,7 @@ import { chooseClipAction, saveVideoMeasureAction, trashVideoAction } from '@/ap
 import type { VideoRow } from '@/lib/videos';
 import type { EditRow } from '@/lib/video-edits';
 import { VideoEditPanel, type EditorInfo } from './VideoEditPanel';
+import { VideoMeasureSelect } from './VideoMeasureSelect';
 
 // Un video del producto: su miniatura, sus medidas, si sirve como clip y lo
 // que se puede hacer con él. Se puede ver en la app aunque no se tenga el Drive.
@@ -119,6 +120,7 @@ export function VideoCard({
   editedClip,
   editor,
   range,
+  measures,
 }: {
   accountSlug: string;
   publicationId: string;
@@ -128,6 +130,8 @@ export function VideoCard({
   clipName: string;
   isClip: boolean;
   timeLabel: string;
+  // Las medidas de la ficha: con más de una, se elige de cuál es el video.
+  measures: { key: string; label: string }[];
   // La última edición de este video y el clip que dejó, si tiene.
   edit: EditRow | null;
   editedClip: VideoRow | null;
@@ -248,6 +252,9 @@ export function VideoCard({
         <p role="status" className="text-sm text-destructive">
           {error}
         </p>
+      ) : null}
+      {!video.gone && measures.length > 1 ? (
+        <VideoMeasureSelect accountSlug={accountSlug} videoId={video.id} measures={measures} value={video.measureKey} source={video.measureSource} />
       ) : null}
       {!video.gone && !video.editedFrom ? <VideoEditPanel accountSlug={accountSlug} video={video} edit={edit} clip={editedClip} editor={editor} range={range} /> : null}
     </li>

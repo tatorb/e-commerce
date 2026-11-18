@@ -88,6 +88,16 @@ El clip sigue la misma lógica que el resto del pipeline: se aprueba, queda en *
 2. En el Pipeline, la pestaña **Por subir** tiene la sección **Clips**. También aparecen en el paso **Publicación** de cada publicación.
 3. Va una subida por producto: Mercado Libre muestra el mismo video en todas sus medidas y formas de cobro. Si un clip está elegido solo en algunas medidas, va una subida por medida y se ve solo en esa.
 
+### La medida de cada video
+
+En un producto con varias medidas, cada video tiene la suya. Sale del primero de estos que haya:
+
+1. La elegís vos en el paso Videos, con el desplegable **Medida** de cada video.
+2. Se grabó con su medida en Registro de productos.
+3. El nombre del archivo trae el SKU de la medida, por ejemplo `SP-449-060.MP4`.
+
+El clip editado es de la medida de su video. Al aprobarlo: con un solo video aprobado se ve en todas las medidas; cuando aprobás el de otra medida, cada uno queda en la suya.
+
 Mercado Libre no deja subir clips por programa a las cuentas locales (se lo preguntamos con la conexión de Insur y respondió que la cuenta no tiene permiso) y desde septiembre de 2024 tampoco acepta videos de YouTube. Por eso la subida sale de tu Chrome, con la extensión de Studio MRB: el botón **Subir a Mercado Libre** abre la publicación con tu sesión de siempre, despliega el producto, entra por **Crear video** de la medida que corresponde y carga el archivo. Cuando Mercado Libre suma el video a Tus videos queda en revisión, y la app lo marca sola como subido. Cómo instalarla está en `extension-clips/LEEME.md`. Sin la extensión, cada clip tiene **Bajar el clip**, **Abrir en Mercado Libre** y **Ya lo subí**.
 
 Si Mercado Libre algún día habilita el permiso, Claude lo puede comprobar con `check_channel_clips`.
