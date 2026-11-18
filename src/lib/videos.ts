@@ -3,6 +3,7 @@ import { videoUploadType } from '@/domain/videos';
 import { shotText } from '@/domain/shoot';
 import { editorSummary, isLightCopy, pairKey } from '@/domain/video-edit';
 import { workerState } from '@/lib/image-worker';
+import { loadVideoScript } from '@/lib/video-script';
 import { editsOfProduct, loadAccountVideo, loadEditorSettings, queueNewVideos, videoSteps } from '@/lib/video-edits';
 import {
   DriveError,
@@ -411,7 +412,8 @@ export async function loadVideosStep(db: PrismaClient, args: { accountId: string
     }),
     db.publication.count({ where: { productId: pub.productId } }),
   ]);
-  const [edits, editor, worker, accountVideo, steps] = await Promise.all([
+  const [script, edits, editor, worker, accountVideo, steps] = await Promise.all([
+    loadVideoScript(db, pub.productId),
     editsOfProduct(db, pub.productId),
     loadEditorSettings(db),
     workerState(db),
@@ -461,6 +463,8 @@ export async function loadVideosStep(db: PrismaClient, args: { accountId: string
     // Cómo se editan los videos de la cuenta, y los pasos de video de sus protocolos.
     accountVideo,
     videoSteps: steps,
+    // El guión de la voz en off de los clips del producto, si ya está escrito.
+    script,
   };
 }
 

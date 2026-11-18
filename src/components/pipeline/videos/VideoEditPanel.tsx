@@ -273,11 +273,9 @@ export function VideoEditPanel({
                 </p>
                 <VideoPlanEditor
                   plan={edit.plan}
-                  script={edit.script}
-                  hasVoice={editor.hasVoice}
                   range={range}
                   pending={pending}
-                  onSubmit={(ask) => run(() => requestVideoEditAction(accountSlug, video.id, { targetSeconds: edit.targetSeconds, plan: ask.plan, script: ask.script }))}
+                  onSubmit={(ask) => run(() => requestVideoEditAction(accountSlug, video.id, { targetSeconds: edit.targetSeconds, plan: ask.plan }))}
                 />
               </>
             ) : null}
@@ -287,7 +285,7 @@ export function VideoEditPanel({
           {edit?.plan ? (
             <Button access="view" size="sm" variant="outline" onClick={() => setAdjusting((a) => !a)} disabled={pending}>
               <SlidersHorizontal />
-              {adjusting ? 'Cerrar los cortes' : 'Ajustar los cortes y el guión'}
+              {adjusting ? 'Cerrar los cortes' : 'Ajustar los cortes'}
             </Button>
           ) : null}
           {askButton(edit ? 'Editar de nuevo' : 'Editar para clip', 'ask', (ask) => requestVideoEditAction(accountSlug, video.id, ask), edit ? 'ghost' : 'outline')}
@@ -369,11 +367,9 @@ export function VideoEditPanel({
           {adjusting && edit.plan ? (
             <VideoPlanEditor
               plan={edit.plan}
-              script={edit.script}
-              hasVoice={editor.hasVoice}
               range={range}
               pending={pending}
-              onSubmit={(ask) => run(() => redoVideoEditAction(accountSlug, edit.id, { targetSeconds: edit.targetSeconds, plan: ask.plan, script: ask.script }))}
+              onSubmit={(ask) => run(() => redoVideoEditAction(accountSlug, edit.id, { targetSeconds: edit.targetSeconds, plan: ask.plan }))}
             />
           ) : null}
         </div>
@@ -394,7 +390,7 @@ export function VideoEditPanel({
         {edit.status === 'REVIEW' && edit.plan ? (
           <Button access="view" size="sm" variant="outline" onClick={() => setAdjusting((a) => !a)} disabled={pending}>
             <SlidersHorizontal />
-            {adjusting ? 'Cerrar los cortes' : 'Ajustar los cortes y el guión'}
+            {adjusting ? 'Cerrar los cortes' : 'Ajustar los cortes'}
           </Button>
         ) : null}
         {edit.status === 'REVIEW' || edit.status === 'FAILED'

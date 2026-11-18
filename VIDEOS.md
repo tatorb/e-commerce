@@ -29,13 +29,29 @@ Sin momentos en el protocolo, Claude los marca por lo que ve.
 
 Se prenden por cuenta, en Ajustes, Protocolos de fotos, Edición de videos.
 
-- **Voz en off.** Claude escribe una línea por tramo, con la ficha del producto, y cada línea entra en lo que dura su tramo. ElevenLabs la dice con la voz que elijas. Hace falta el ID de la voz: en ElevenLabs, en Voices, abrí el menú de la voz y elegí Copy voice ID.
+- **Voz en off.** ElevenLabs dice el guión del clip con la voz que elijas. Hace falta el ID de la voz: en ElevenLabs, en Voices, abrí el menú de la voz y elegí Copy voice ID. El guión se escribe aparte, antes de editar: está más abajo.
 - **Música.** ElevenLabs la genera para cada clip, del largo justo, con el estilo que describas. Baja sola cuando habla la voz.
 - **Subtítulos.** El guión escrito sobre el video, de a pocas palabras, con la que se está diciendo resaltada en el color de la marca, que se elige ahí mismo. Los dibuja el programa, con la letra Poppins Bold que viene con él, así que se ven igual en cualquier Mac y no dependen de cómo esté instalado ffmpeg.
 
 La mezcla lleva la voz a -14 LUFS, el volumen de las redes, y la música a un 16 %.
 
-Si algo falla, el clip sale igual con lo que hay y lo avisa: sin Claude va a una sola velocidad y sin voz, y sin ElevenLabs sale en silencio.
+Si algo falla, el clip sale igual con lo que hay y lo avisa: sin Claude va a una sola velocidad, sin guión sale sin voz, y sin ElevenLabs sale en silencio.
+
+## El guión del clip
+
+La voz no relata lo que se ve: eso ya se ve. Aprovecha ese tiempo para dar las certezas que el comprador necesita, las mismas que la imagen con texto: qué es, con qué es compatible, con qué no, y las dudas que más se repiten.
+
+Se escribe antes de editar, en el paso Videos, en la sección Guión del clip:
+
+1. **Pedir el guión a Claude.** Lo arma con el paso Información y con Preguntas y respuestas de la publicación: la ficha y sus compatibilidades, lo del fabricante, lo que sabe la tienda, las preguntas de los compradores y de la competencia, y los dolores y objeciones. No inventa: si falta un dato, no lo dice.
+2. **Corregirlo.** Cada frase se edita, se sube, se baja o se saca, y se pueden agregar frases. Abajo dice cuántas palabras tiene y cuántos segundos lleva decirlo.
+3. **Guardar.**
+
+El guión es del producto: vale para todos sus videos y todas sus publicaciones.
+
+Después, al editar un video, el editor se acomoda al guión y no al revés. Primero genera la voz, mide cuánto dura y con eso calcula las velocidades. Si la voz dura más que lo pedido, el clip se alarga para que entre, hasta lo que acepta el canal, y lo avisa. Las frases se reparten a lo largo del clip, con pausas parejas.
+
+Un clip ya editado no cambia cuando se corrige el guión: para que diga el guión nuevo, hay que pedirlo de nuevo.
 
 ## Qué necesitás
 
@@ -61,7 +77,7 @@ bash configurar.sh
 3. **Tocá Editar para clip.** Elegí cuántos segundos tiene que durar, con qué paso del protocolo se grabó y, si hace falta, escribí una indicación para el editor.
 4. **Esperá a que la Mac lo tome.** La pantalla se pone al día sola y muestra en qué etapa va: si Claude está mirando la imagen, marcando los cortes o escribiendo el guión, qué línea de la voz se está generando, y cuánto lleva exportado el clip. En Equipo, en Editor de videos, se ve la cola entera, de todas las cuentas.
 5. **Mirá el clip.** Abajo se ve cómo se editó, lo que dice la voz y los avisos.
-6. **Aprobalo, o corregilo.** Con Ajustar los cortes y el guión cambiás a mano dónde corta cada tramo, su velocidad y lo que dice la voz, y la Mac lo rehace tal cual. Con Pedir de nuevo, Claude lo propone otra vez con tu indicación.
+6. **Aprobalo, o corregilo.** Con Ajustar los cortes cambiás a mano dónde corta cada tramo y su velocidad, y la Mac lo rehace tal cual. Con Pedir de nuevo, Claude lo propone otra vez con tu indicación. Lo que dice la voz se corrige arriba, en Guión del clip.
 7. **Elegilo como clip** de la publicación, con Usar como clip.
 
 ## En automático
@@ -69,6 +85,7 @@ bash configurar.sh
 En Edición de videos, por cuenta:
 
 - **Editar solo cada video nuevo.** Al grabar un video en Registro de productos o al leer la carpeta del Drive, va a la cola sin que nadie lo pida.
+- **Que Claude escriba el guión solo.** Si el producto todavía no tiene guión, lo escribe Claude al pedir la edición y se usa sin que nadie lo revise.
 - **Aprobar solo el clip que salió sin avisos.** Si la edición tuvo algún aviso, espera a que alguien la mire.
 - **Paso del protocolo para los videos copiados al Drive.** Un video copiado a la carpeta no dice con qué paso se grabó: se edita con los momentos de ese.
 
@@ -117,8 +134,9 @@ Para probar cortes y velocidades a mano, editá el `plan.json` que dejó la corr
 
 ## Cómo está hecho
 
-- `trabajador-imagenes/mrb_videos/`: el editor. `plan.py` es el plan de edición, `medir.py` lo que mide el código, `inspector.py` las tres consultas a Claude (imagen, cortes y guión), `cortes.py` las velocidades por importancia, `sonido.py` la voz, la música, la mezcla y los subtítulos, `filtros.py` y `editar.py` lo que se le pide a ffmpeg, `linea.py` la edición completa, `trabajo.py` un pedido de la app de punta a punta y `conexion.py` los mensajes con la app.
+- `trabajador-imagenes/mrb_videos/`: el editor. `plan.py` es el plan de edición, `medir.py` lo que mide el código, `inspector.py` las dos consultas a Claude (imagen y cortes), `cortes.py` las velocidades por importancia, `sonido.py` la voz, la música, la mezcla y los subtítulos, `filtros.py` y `editar.py` lo que se le pide a ffmpeg, `linea.py` la edición completa, `trabajo.py` un pedido de la app de punta a punta y `conexion.py` los mensajes con la app.
 - `src/domain/video-edit.ts`: el plan, los mensajes y cuándo puede editar la Mac.
+- `src/lib/video-script.ts` y `src/ai/video-script.ts`: el guión del clip y lo que se le pide a Claude para escribirlo.
 - `src/lib/video-edits.ts`: la cola de edición. `src/lib/video-edit-files.ts`: los archivos en el Drive.
 - `src/app/api/videos/trabajador/`: por donde la Mac pregunta, avisa que sigue, baja el original y entrega.
 - `trabajador-imagenes/contrato/video_*.json`: ejemplos de los mensajes, que prueban los dos lados.

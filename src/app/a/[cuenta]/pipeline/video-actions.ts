@@ -8,7 +8,8 @@ import { requireUser } from '@/lib/auth/session';
 import { getAccountBySlug } from '@/lib/queries/accounts';
 import { CryptoError } from '@/lib/crypto';
 import { DriveError, trashFile, withDriveToken } from '@/lib/drive';
-import { approveEdit, discardEdit, redoEdit, requestEdit, VideoEditError } from '@/lib/video-edits';
+import { approveEdit, clipRulesFor, discardEdit, loadAccountVideo, redoEdit, requestEdit, VideoEditError } from '@/lib/video-edits';
+import { proposeVideoScript, saveVideoScript, VideoScriptError } from '@/lib/video-script';
 import { publicAppUrl } from '@/lib/public-url';
 import {
   chooseClip,
@@ -162,7 +163,7 @@ async function guardEdit<T extends object>(run: () => Promise<T>): Promise<({ ok
   try {
     return { ok: true, ...(await run()) };
   } catch (e) {
-    if (e instanceof VideoEditError || e instanceof VideoError || e instanceof DriveError || e instanceof CryptoError) return { ok: false, error: e.message };
+    if (e instanceof VideoEditError || e instanceof VideoScriptError || e instanceof VideoError || e instanceof DriveError || e instanceof CryptoError) return { ok: false, error: e.message };
     throw e;
   }
 }
@@ -177,8 +178,8 @@ async function trashClipFile(fileId: string | null): Promise<void> {
 export async function requestVideoEditAction(
   accountSlug: string,
   videoId: string,
-  // Con un plan, la Mac lo aplica tal cual; con un guión, lo dice tal cual, una línea por tramo.
-  ask: { targetSeconds?: number; note?: string; stepId?: string | null; plan?: unknown; script?: string[] },
+  // Con un plan, la Mac lo aplica tal cual. La voz dice el guión del producto.
+  ask: { targetSeconds?: number; note?: string; stepId?: string | null; plan?: unknown },
 ): Promise<Result> {
   return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Pidió editar un video' }, async () => {
     const user = await requireUser();
@@ -190,7 +191,6 @@ export async function requestVideoEditAction(
         targetSeconds: ask?.targetSeconds,
         note: ask?.note,
         plan: ask?.plan,
-        script: ask?.script,
         ...(ask?.stepId !== undefined ? { stepId: ask.stepId ? String(ask.stepId) : null } : {}),
         userId: user.id,
       }));
@@ -218,14 +218,14 @@ export async function approveVideoEditAction(accountSlug: string, editId: string
 export async function redoVideoEditAction(
   accountSlug: string,
   editId: string,
-  // Con un plan, la Mac lo aplica tal cual; con un guión, lo dice tal cual, una línea por tramo.
-  ask: { targetSeconds?: number; note?: string; plan?: unknown; script?: string[] },
+  // Con un plan, la Mac lo aplica tal cual. La voz dice el guión del producto, como está ahora.
+  ask: { targetSeconds?: number; note?: string; plan?: unknown },
 ): Promise<Result> {
   return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Pidió de nuevo la edición de un video' }, async () => {
     const user = await requireUser();
     const accountId = await accountIdOf(accountSlug);
     if (!accountId) return NO_ACCOUNT;
-    const r = await guardEdit(() => redoEdit(prisma, { accountId, editId: String(editId), targetSeconds: ask?.targetSeconds, note: ask?.note, plan: ask?.plan, script: ask?.script, userId: user.id }));
+    const r = await guardEdit(() => redoEdit(prisma, { accountId, editId: String(editId), targetSeconds: ask?.targetSeconds, note: ask?.note, plan: ask?.plan, userId: user.id }));
     if (r.ok) await trashClipFile(r.clipFileId);
     revalidatePath(`/a/${accountSlug}/pipeline`, 'layout');
     return r.ok ? { ok: true } : r;
@@ -242,5 +242,42 @@ export async function discardVideoEditAction(accountSlug: string, editId: string
     if (r.ok) await trashClipFile(r.clipFileId);
     revalidatePath(`/a/${accountSlug}/pipeline`, 'layout');
     return r.ok ? { ok: true } : r;
+  });
+}
+
+// ───────────────────────────── Guión del clip ─────────────────────────────
+
+/** Guarda el guión de la voz en off de los clips del producto, escrito o corregido a mano. */
+export async function saveVideoScriptAction(accountSlug: string, productId: string, lines: string[]): Promise<Result> {
+  return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Cambió el guión del clip', productId }, async () => {
+    const user = await requireUser();
+    const accountId = await accountIdOf(accountSlug);
+    if (!accountId) return NO_ACCOUNT;
+    const r = await guardEdit(async () => {
+      await saveVideoScript(prisma, { accountId, productId: String(productId), lines, userId: user.id, rules: await clipRulesFor(prisma, String(productId)) });
+      return {};
+    });
+    revalidatePath(`/a/${accountSlug}/pipeline`, 'layout');
+    return r;
+  });
+}
+
+/** Le pide a Claude el guión, con la información de la publicación, y lo guarda. */
+export async function proposeVideoScriptAction(accountSlug: string, publicationId: string, replace: boolean): Promise<({ ok: true } & { costUsd: number }) | Fail> {
+  return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Pidió a Claude el guión del clip', publicationId }, async () => {
+    const user = await requireUser();
+    const accountId = await accountIdOf(accountSlug);
+    if (!accountId) return NO_ACCOUNT;
+    try {
+      const pub = await prisma.publication.findFirst({ where: { id: String(publicationId), product: { accountId } }, select: { productId: true } });
+      if (!pub) return { ok: false, error: 'La publicación no es de esta cuenta.' };
+      const [settings, rules] = await Promise.all([loadAccountVideo(prisma, accountId), clipRulesFor(prisma, pub.productId)]);
+      const r = await proposeVideoScript(prisma, { accountId, publicationId: String(publicationId), clipSeconds: settings.targetSeconds, userId: user.id, replace: Boolean(replace), rules });
+      revalidatePath(`/a/${accountSlug}/pipeline`, 'layout');
+      return r.ok ? { ok: true, costUsd: r.costUsd } : { ok: false, error: r.error };
+    } catch (e) {
+      if (e instanceof VideoScriptError) return { ok: false, error: e.message };
+      throw e;
+    }
   });
 }

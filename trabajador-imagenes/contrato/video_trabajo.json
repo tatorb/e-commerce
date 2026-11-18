@@ -29,8 +29,11 @@
         "importancia": "REPETIDO"
       }
     ],
-    "ficha": "Producto: Camisa 384675\nTipo: Camisa de cilindro\nContenido: 4 camisas",
-    "guion": null,
+    "guion": [
+      "Camisas de cilindro para Fiat uno punto siete diésel.",
+      "Sirven para Uno, Duna y Fiorino.",
+      "Vienen las cuatro, con su garantía."
+    ],
     "sonido": {
       "voz": {
         "id": "voz-de-prueba"

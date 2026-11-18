@@ -8,6 +8,7 @@ import { ClipCard } from './ClipCard';
 import { DriveSync } from '@/components/drive/DriveSync';
 import { DriveMissing } from '@/components/drive/DriveMissing';
 import { VideoCard } from './VideoCard';
+import { VideoScriptCard } from './VideoScriptCard';
 import { VideoUploader } from './VideoUploader';
 
 // El paso Videos: los videos del producto, guardados en su carpeta del Drive,
@@ -125,6 +126,17 @@ export function VideosStep({
           </div>
         </SectionCard>
       ) : null}
+
+      <VideoScriptCard
+        accountSlug={accountSlug}
+        publicationId={publicationId}
+        productId={data.productId}
+        script={data.script}
+        targetSeconds={data.accountVideo.targetSeconds}
+        maxSeconds={range.max}
+        voiceOn={data.accountVideo.voiceOn}
+        sharedWith={data.sharedWith}
+      />
 
       <SectionCard
         title="Videos del producto"

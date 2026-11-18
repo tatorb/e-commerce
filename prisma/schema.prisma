@@ -381,6 +381,7 @@ model Product {
   inCombos         ComboItem[]      @relation("ComboComponent")
   photoEdits       PhotoEdit[]
   videos           ProductVideo[]
+  videoScript      VideoScript?
   shootChecks      ShootCheck[]
 
   // Desde cuándo la app maneja su stock: sus publicaciones lo heredan. Null:
@@ -1995,6 +1996,26 @@ model VideoEditorSettings {
   updatedAt   DateTime @updatedAt
 
   @@map("video_editor_settings")
+}
+
+// El guión de la voz en off de los clips de un producto: lo que se dice
+// mientras se ve el unboxing. No relata el video: aprovecha ese tiempo para
+// dar certezas, como la imagen con texto (compatibilidades, dudas y
+// objeciones). Se escribe antes de editar, con Claude o a mano, y el editor
+// acomoda el video a lo que dura.
+model VideoScript {
+  id          String   @id @default(cuid())
+  productId   String   @unique
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  // Las frases, en orden: ["...", "..."].
+  lines       Json
+  // claude: lo propuso Claude y nadie lo tocó. persona: se escribió o se corrigió a mano.
+  source      String   @default("persona")
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+
+  @@map("video_scripts")
 }
 
 // Cómo se editan los videos de una cuenta: la voz, la música, los subtítulos,

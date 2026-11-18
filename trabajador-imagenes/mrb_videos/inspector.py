@@ -2,8 +2,10 @@
 
 Claude mira unos cuadros del video como salió de la cámara y lo que midió el
 código, y propone la corrección: cómo girarlo para que quede vertical y
-derecho, cuánto acercar y la luz y el color. El código limita los valores a
-sus topes y los aplica. Claude nunca edita el video.
+derecho, cuánto acercar y la luz y el color. También marca los momentos del
+video, para los cortes. El código limita los valores a sus topes y los
+aplica. Claude nunca edita el video. El guión de la voz no se escribe acá:
+llega de la app, ya escrito y revisado.
 
 A Claude solo van los cuadros, las medidas, qué es el producto y las
 indicaciones para el editor: nunca precios ni datos del cliente.
@@ -255,48 +257,10 @@ ESQUEMA_CORTES = {
     "additionalProperties": False,
 }
 
-# ───────────────────────────── El guión ─────────────────────────────
-
-SISTEMA_GUION = """Escribís la voz en off de clips de unboxing de autopartes para Mercado Libre, de una tienda argentina.
-El clip muestra cómo llega el producto: la caja, cómo se abre y las piezas. Quien lo mira está decidiendo si compra: quiere saber qué recibe y en qué estado.
-Escribís una línea por tramo del clip, para decir mientras ese tramo se ve. Cada línea tiene que entrar en lo que dura su tramo: se te da la cantidad máxima de palabras de cada una y no la podés pasar. Si un tramo es muy corto para decir algo, dejá su línea vacía.
-Cómo escribir:
-- Castellano de Argentina, tratando de vos, claro y directo. Frases cortas, para escuchar y no para leer.
-- Decí lo que se ve y lo que el comprador gana con eso: que viene sellado, cuántas piezas trae, cómo viene protegida cada una, cómo es la pieza.
-- Usá solo los datos de la ficha del producto y lo que se ve. No inventes medidas, compatibilidades, materiales ni garantías que no estén en la ficha.
-- Nada de precios, descuentos, envíos, datos de contacto ni nombres de otras tiendas o sitios: Mercado Libre los rechaza.
-- Sin saludos, sin "hola", sin "en este video", sin pedir que compren ni que comenten.
-- Los números de pieza y las medidas decilos como se dirían en voz alta, o no los digas si suenan mal.
-- No uses el guion largo ni signos que no se leen en voz alta."""
-
-
-def esquema_guion(cantidad: int) -> dict:
-    return {
-        "type": "object",
-        "properties": {
-            "lineas": {"type": "array", "items": {"type": "string"}, "description": f"Exactamente {cantidad} líneas, una por tramo, en orden. Vacía si el tramo va en silencio."},
-        },
-        "required": ["lineas"],
-        "additionalProperties": False,
-    }
-
-
-# Cuántas palabras por segundo dice la voz, hablando tranquila.
-PALABRAS_POR_SEGUNDO = 2.3
-
-
 @dataclass
 class PropuestaDeCortes:
     momentos: list[dict]
     razon: str
-    origen: str
-    uso: dict | None = None
-    avisos: tuple[str, ...] = ()
-
-
-@dataclass
-class Guion:
-    lineas: list[str]
     origen: str
     uso: dict | None = None
     avisos: tuple[str, ...] = ()
@@ -308,22 +272,6 @@ def _imagen(jpg: bytes) -> dict:
 
 def _texto_de(respuesta) -> str:
     return next((b.text for b in respuesta.content if getattr(b, "type", "") == "text"), "")
-
-
-def recortar_palabras(linea: str, maximo: int) -> str:
-    """La línea, sin pasar de las palabras que entran en su tramo."""
-    palabras = " ".join(str(linea).split()).split(" ")
-    if maximo <= 0 or palabras == [""]:
-        return ""
-    if len(palabras) <= maximo:
-        return " ".join(palabras)
-    return " ".join(palabras[:maximo]).rstrip(",;:") + "."
-
-
-def palabras_que_entran(segundos: float) -> int:
-    # Se deja un respiro al principio y al final de cada línea.
-    return max(0, int((segundos - 0.6) * PALABRAS_POR_SEGUNDO))
-
 
 
 def _pedir(inspector: InspectorDeVideo, sistema: str, contenido: list[dict], esquema_: dict, tokens: int = 6000):
@@ -377,37 +325,3 @@ def proponer_cortes(inspector: InspectorDeVideo, hojas_jpg: list[bytes], duracio
         aviso = "Claude no pudo marcar los cortes: el video va todo a una sola velocidad." if isinstance(e, (ValueError, KeyError, TypeError)) else aviso_sin_claude(e).replace("se usan los valores medidos", "el video va todo a una sola velocidad")
         return PropuestaDeCortes(momentos=[], razon=aviso, origen="medido", avisos=(aviso,))
     return PropuestaDeCortes(momentos=marcados, razon=" ".join(str(datos["razon"]).split())[:300], origen="claude", uso=_uso(respuesta))
-
-
-def consigna_de_guion(tramos: list[dict], ficha: str | None, contexto: Contexto | None) -> str:
-    partes = []
-    if ficha:
-        partes.append(f"Ficha del producto:\n{ficha}")
-    texto = (contexto or Contexto()).texto()
-    if texto:
-        partes.append(texto)
-    lista = "\n".join(
-        f"{i + 1}. {t['nombre'] or 'Sin nombre'}: dura {t['segundos']:.1f} segundos en el clip, hasta {t['palabras']} palabras."
-        + (" Va acelerado." if t["velocidad"] > 1.2 else "")
-        for i, t in enumerate(tramos)
-    )
-    partes.append(f"Los tramos del clip, en orden:\n{lista}")
-    partes.append("La imagen muestra un cuadro de cada tramo, numerado, para que sepas qué se ve.")
-    return "\n\n".join(partes)
-
-
-def escribir_guion(inspector: InspectorDeVideo, cuadros_jpg: bytes | None, tramos: list[dict], ficha: str | None, contexto: Contexto | None) -> Guion | None:
-    """Una línea por tramo, cada una dentro de sus palabras. None si no se le consulta o no respondió: el clip sale sin voz."""
-    if inspector.simulado or inspector.cliente is None:
-        return None
-    contenido = ([_imagen(cuadros_jpg)] if cuadros_jpg else []) + [{"type": "text", "text": consigna_de_guion(tramos, ficha, contexto)}]
-    try:
-        respuesta = _pedir(inspector, SISTEMA_GUION, contenido, esquema_guion(len(tramos)), tokens=3000)
-        lineas = [str(linea) for linea in json.loads(_texto_de(respuesta))["lineas"]]
-        if respuesta.stop_reason in ("refusal", "max_tokens"):
-            raise ValueError("sin guión")
-    except Exception as e:
-        logging.getLogger("trabajador").info(f"Claude no escribió el guión: {e}")
-        return Guion(lineas=[], origen="medido", avisos=("Claude no pudo escribir el guión: el clip sale sin voz en off.",))
-    lineas = (lineas + [""] * len(tramos))[: len(tramos)]
-    return Guion(lineas=[recortar_palabras(linea, t["palabras"]) for linea, t in zip(lineas, tramos)], origen="claude", uso=_uso(respuesta))

@@ -73,7 +73,7 @@ export function AccountVideoCard({ accountSlug, settings, steps }: { accountSlug
         </div>
 
         <div className="space-y-3">
-          <Check checked={v.voiceOn} onChange={(voiceOn) => set({ voiceOn, subtitlesOn: voiceOn ? v.subtitlesOn : false })} label="Voz en off" help="Claude escribe el guión con la ficha del producto y ElevenLabs lo dice." />
+          <Check checked={v.voiceOn} onChange={(voiceOn) => set({ voiceOn, subtitlesOn: voiceOn ? v.subtitlesOn : false })} label="Voz en off" help="ElevenLabs dice el guión del clip, que se escribe en el paso Videos de cada producto. No relata el video: da las compatibilidades y resuelve las dudas." />
           {v.voiceOn ? (
             <div className="space-y-1.5 pl-6">
               <Label htmlFor="video-voice">ID de la voz de ElevenLabs</Label>
@@ -112,6 +112,12 @@ export function AccountVideoCard({ accountSlug, settings, steps }: { accountSlug
 
         <div className="space-y-3 border-t pt-4">
           <Check checked={v.autoEdit} onChange={(autoEdit) => set({ autoEdit })} label="Editar solo cada video nuevo" help="Al grabar un video en Registro de productos o al leer la carpeta del Drive, va a la cola del editor sin que nadie lo pida." />
+          <Check
+            checked={v.autoScript}
+            onChange={(autoScript) => set({ autoScript })}
+            label="Que Claude escriba el guión solo"
+            help="Si el producto todavía no tiene guión, lo escribe Claude al pedir la edición y se usa sin que nadie lo revise. Apagado, el guión se escribe y se revisa antes, en el paso Videos."
+          />
           <Check checked={v.autoApprove} onChange={(autoApprove) => set({ autoApprove })} label="Aprobar solo el clip que salió sin avisos" help="Si la edición tuvo algún aviso, espera a que alguien la mire." />
         </div>
 

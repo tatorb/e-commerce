@@ -116,7 +116,6 @@ def procesar_video(
             contexto=Contexto(producto=trabajo.producto, paso=protocolo.titulo if protocolo else None, indicaciones=protocolo.indicaciones if protocolo else None, indicacion=trabajo.indicacion),
             plan=trabajo.plan,
             momentos=[m.model_dump() for m in trabajo.momentos],
-            ficha=trabajo.ficha,
             guion=trabajo.guion,
             voz=sonido.voz.id if sonido and sonido.voz else None,
             musica=sonido.musica.estilo if sonido and sonido.musica else None,

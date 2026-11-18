@@ -3,6 +3,7 @@ import { Prisma } from '@/generated/prisma/client';
 import type { VideoEditStatus } from '@/generated/prisma/enums';
 import { getChannelAdapter } from '@/channels';
 import type { ClipRules } from '@/domain/videos';
+import { proposeVideoScript, scriptLinesOf } from '@/lib/video-script';
 import {
   accountVideoSchema,
   cleanNote,
@@ -157,6 +158,9 @@ export async function requestEdit(
   if (video.goneAt) throw new VideoEditError('Ese video ya no está en la carpeta del Drive.');
   if (video.editedBy) throw new VideoEditError('Ese video ya es un clip editado. Editá el original.');
   const rules = await clipRulesFor(db, video.productId);
+  // La voz dice el guión del producto, como está en este momento. Con otro guión pedido, ese.
+  let script = settings.voiceOn ? (parseRequestedScript(args.script) ?? (await scriptLinesOf(db, video.productId))) : null;
+  if (settings.voiceOn && !script && settings.autoScript) script = await writeScript(db, args.accountId, video.productId, cleanTarget(args.targetSeconds ?? settings.targetSeconds, rules), rules);
   let plan: VideoPlan | null = null;
   if (args.plan !== undefined && args.plan !== null) {
     plan = parsePlan(args.plan);
@@ -177,12 +181,29 @@ export async function requestEdit(
         targetSeconds: cleanTarget(args.targetSeconds ?? settings.targetSeconds, rules),
         note: cleanNote(args.note),
         requested: json(plan),
-        requestedScript: json(parseRequestedScript(args.script)),
+        requestedScript: json(script),
         askedById: args.userId,
       },
     });
     return { editId: edit.id };
   });
+}
+
+/**
+ * Con la cuenta en automático, Claude escribe el guión del producto que todavía
+ * no tiene, con la información de una de sus publicaciones. Si no se puede, el
+ * clip sale sin voz: no frena la edición.
+ */
+async function writeScript(db: PrismaClient, accountId: string, productId: string, clipSeconds: number, rules: ClipRules | null): Promise<string[] | null> {
+  try {
+    const pub = await db.publication.findFirst({ where: { productId }, orderBy: { createdAt: 'asc' }, select: { id: true } });
+    if (!pub) return null;
+    const r = await proposeVideoScript(db, { accountId, publicationId: pub.id, clipSeconds, userId: null, rules });
+    return r.ok ? r.script.lines : null;
+  } catch (e) {
+    console.error('No se pudo escribir el guión del clip.', e);
+    return null;
+  }
 }
 
 /**
@@ -273,7 +294,7 @@ export async function buildVideoJob(db: PrismaClient, editId: string, deps: Vide
       video: {
         include: {
           product: {
-            select: { id: true, accountId: true, name: true, productType: true, brand: true, partNumber: true, line: true, engineSystem: true, origin: true, kitContents: true, specs: true },
+            select: { id: true, accountId: true, name: true, productType: true },
           },
           shootStep: { select: { title: true, editorNotes: true, moments: true } },
         },
@@ -310,7 +331,6 @@ export async function buildVideoJob(db: PrismaClient, editId: string, deps: Vide
     objetivo_segundos: edit.targetSeconds,
     plan: parsePlan(edit.requested),
     momentos,
-    ficha: productFacts(video.product, video.variantLabel),
     guion: parseRequestedScript(edit.requestedScript),
     sonido: voice || music ? { voz: voice, musica: music, subtitulos: Boolean(voice) && settings.subtitlesOn, color_subtitulos: settings.subtitleColor.toUpperCase() } : null,
     reglas: {
@@ -325,29 +345,6 @@ export async function buildVideoJob(db: PrismaClient, editId: string, deps: Vide
     liviana: video.lightFileId ? source('liviana', video.name.replace(/\.[^.]+$/, '') + '.LRF', video.lightSize) : null,
     subidas: { clip: await deps.upload({ productId: video.productId, editId: edit.id, lease: edit.lease, name: clipName(video.name) }) },
   };
-}
-
-type Facts = { name: string; productType: string | null; brand: string | null; partNumber: string | null; line: string | null; engineSystem: string | null; origin: string | null; kitContents: string | null; specs: unknown };
-
-/** Lo que se sabe del producto, en pocas líneas, para que Claude escriba el guión. Nunca precios ni datos del cliente. */
-export function productFacts(p: Facts, measure: string | null): string | null {
-  const lines = [
-    ['Producto', p.name],
-    ['Tipo', p.productType],
-    ['Marca', p.brand],
-    ['Número de pieza', p.partNumber],
-    ['Medida', measure],
-    ['Línea', p.line],
-    ['Sistema', p.engineSystem],
-    ['Origen', p.origin],
-    ['Contenido', p.kitContents],
-  ].flatMap(([k, v]) => (v && v.trim() ? [`${k}: ${v.trim().slice(0, 400)}`] : []));
-  const specs = Array.isArray(p.specs) ? p.specs : [];
-  for (const sp of specs.slice(0, 15)) {
-    const { name, value } = (sp ?? {}) as { name?: unknown; value?: unknown };
-    if (typeof name === 'string' && typeof value === 'string' && name.trim() && value.trim()) lines.push(`${name.trim().slice(0, 80)}: ${value.trim().slice(0, 200)}`);
-  }
-  return lines.length > 0 ? lines.join('\n') : null;
 }
 
 /** No se pudo armar el trabajo, por ejemplo porque el Drive no respondió: vuelve a la cola sin contar el intento. */
@@ -522,6 +519,9 @@ export async function redoEdit(
     plan = parsePlan(args.plan);
     if (!plan) throw new VideoEditError('El plan de edición no vale: revisá los tramos y las velocidades.');
   }
+  const settings = await loadAccountVideo(db, args.accountId);
+  // Se rehace con el guión del producto como está ahora: si se corrigió, sale corregido.
+  const script = settings.voiceOn ? (parseRequestedScript(args.script) ?? (await scriptLinesOf(db, before.video.productId))) : null;
   return db.$transaction(async (tx) => {
     const { clipFileId } = await discardIn(tx, args);
     const edit = await tx.videoEdit.create({
@@ -531,7 +531,7 @@ export async function redoEdit(
         targetSeconds: cleanTarget(args.targetSeconds ?? before.targetSeconds, rules),
         note: cleanNote(args.note),
         requested: json(plan),
-        requestedScript: json(parseRequestedScript(args.script)),
+        requestedScript: json(script),
         askedById: args.userId,
       },
     });

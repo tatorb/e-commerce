@@ -4,16 +4,17 @@ Uso:
     ./probar_video.sh VIDEO [opciones]
 
 Lo que decide Claude:
-    --sin-claude            No consultarlo: luz y color medidos, una sola velocidad y sin guión.
+    --sin-claude            No consultarlo: luz y color medidos y una sola velocidad.
     --cuartos N             El giro a vertical si Claude no decide, en cuartos de vuelta en sentido horario.
     --producto TEXTO        Qué es el producto.
     --momentos ARCHIVO      Los momentos del video según el protocolo: [{"texto": ..., "importancia": "IMPORTANTE"}].
-    --ficha ARCHIVO         Lo que se sabe del producto, en texto, para el guión.
+
+El guión no lo escribe este programa: llega de la app, ya revisado. Acá se pasa con --guion.
 
 Para probar a mano, sin Claude:
     --plan ARCHIVO          Un plan guardado, para aplicarlo tal cual.
     --cortes ARCHIVO        Los cortes ya marcados: [{"inicio": 0, "fin": 8, "importancia": "IMPORTANTE", "nombre": "La caja"}].
-    --guion ARCHIVO         El guión, una línea por tramo: ["Viene sellada de fábrica.", "", ...].
+    --guion ARCHIVO         El guión del clip, frase por frase: ["Camisas para Fiat uno punto siete diésel.", ...].
 
 El clip:
     --objetivo SEGUNDOS     Cuánto tiene que durar. 45 si no se dice.
@@ -54,7 +55,6 @@ def main() -> int:
     p.add_argument("--cuartos", type=int, default=0, choices=[0, 1, 2, 3])
     p.add_argument("--producto")
     p.add_argument("--momentos", type=Path)
-    p.add_argument("--ficha", type=Path)
     p.add_argument("--plan", type=Path)
     p.add_argument("--cortes", type=Path)
     p.add_argument("--guion", type=Path)
@@ -85,7 +85,6 @@ def main() -> int:
             plan=Plan.model_validate_json(args.plan.read_text()) if args.plan else None,
             momentos=_json(args.momentos) or [],
             cortes=_json(args.cortes),
-            ficha=args.ficha.read_text() if args.ficha else None,
             guion=_json(args.guion),
             voz=args.voz,
             musica=args.musica,

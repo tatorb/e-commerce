@@ -83,9 +83,7 @@ class TrabajoDeVideo(BaseModel):
     plan: Plan | None = None
     # Los momentos del video según el protocolo, para que Claude ubique los cortes.
     momentos: list[Momento] = Field(default_factory=list)
-    # Lo que se sabe del producto, para el guión.
-    ficha: str | None = None
-    # El guión que pidió la persona, una línea por tramo. Sin pedido, lo escribe Claude.
+    # El guión del clip, ya escrito y revisado: las frases que dice la voz, en orden. None: sin voz.
     guion: list[str] | None = None
     # El sonido del clip. None: sale en silencio.
     sonido: Sonido | None = None

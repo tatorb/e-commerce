@@ -1,4 +1,4 @@
-"""Los cortes por importancia, las consultas a Claude y el sonido del clip.
+"""Los cortes por importancia, la consulta a Claude y el sonido del clip.
 
 Claude y ElevenLabs se simulan: no hace falta ninguna clave.
 """
@@ -9,13 +9,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from mrb_videos import hojas
-from mrb_videos.cortes import IMPORTANTE, NORMAL, REPETIDO, Momento, ordenar, plan_de_cortes, tiempos_en_el_clip, velocidades
-from mrb_videos.inspector import ESQUEMA_CORTES, Contexto, InspectorDeVideo, escribir_guion, palabras_que_entran, proponer_cortes, recortar_palabras
+from mrb_videos.cortes import IMPORTANTE, NORMAL, REPETIDO, Momento, ordenar, plan_de_cortes, velocidades
+from mrb_videos.inspector import ESQUEMA_CORTES, Contexto, InspectorDeVideo, proponer_cortes
 from mrb_videos.linea import Pedido, armar
 from mrb_videos.medios import hay_ffmpeg, leer
 from mrb_videos.plan import Imagen, Plan, Tramo
-from mrb_videos.sonido import ElevenLabs, Linea, Palabra, SinElevenLabs, _motivo, decir_guion, dibujar_franja, grupos_de, mezclar, momentos_de, palabras_de, subtitulos, volumen
+from mrb_videos.sonido import ElevenLabs, Linea, Palabra, SinElevenLabs, _motivo, decir_guion, dibujar_franja, grupos_de, largo_de_la_voz, mezclar, momentos_de, palabras_de, subtitulos, ubicar, volumen
 
 con_ffmpeg = pytest.mark.skipif(not hay_ffmpeg(), reason="Falta ffmpeg")
 
@@ -82,11 +81,6 @@ def test_los_momentos_quedan_en_orden_pegados_y_cubren_todo_el_video():
     assert ordenar([Momento(0, 0.05)], 30) == [Momento(0.0, 30, NORMAL, "Todo")]
 
 
-def test_tiempos_en_el_clip():
-    plan = Plan(tramos=[Tramo(inicio=0, fin=8, velocidad=1), Tramo(inicio=8, fin=28, velocidad=4)])
-    assert tiempos_en_el_clip(plan) == [(0, 8), (8, 13)]
-
-
 # ───────────────────────────── Claude ─────────────────────────────
 
 
@@ -137,39 +131,6 @@ def test_si_claude_no_marca_los_cortes_se_avisa_y_no_hay_cortes():
         c = proponer_cortes(InspectorDeVideo(cliente=cliente), [b"h"], 30, 2, [], None, 20)
         assert c.momentos == [] and c.origen == "medido" and "una sola velocidad" in c.avisos[0]
     assert proponer_cortes(InspectorDeVideo(simulado=True), [b"h"], 30, 2, [], None, 20) is None
-
-
-TRAMOS = [{"nombre": "La caja", "segundos": 8.0, "palabras": 17, "velocidad": 1.0}, {"nombre": "Abrir", "segundos": 2.0, "palabras": 3, "velocidad": 4.0}, {"nombre": "Final", "segundos": 0.5, "palabras": 0, "velocidad": 1.0}]
-
-
-def test_claude_escribe_una_linea_por_tramo_y_cada_una_entra_en_sus_palabras():
-    cliente = ClienteFalso([json.dumps({"lineas": ["Así llega: caja sellada.", "La abrimos y adentro vienen las cuatro.", "Esto no entra."]})])
-    g = escribir_guion(InspectorDeVideo(cliente=cliente), b"cuadros", TRAMOS, "Producto: Camisa 384675\nContenido: 4 camisas", Contexto(producto="Camisas"))
-    assert g.lineas == ["Así llega: caja sellada.", "La abrimos y.", ""]
-    texto = cliente.pedidos[0]["messages"][0]["content"][-1]["text"]
-    assert "Ficha del producto:\nProducto: Camisa 384675" in texto
-    assert "1. La caja: dura 8.0 segundos en el clip, hasta 17 palabras." in texto
-    assert "2. Abrir: dura 2.0 segundos en el clip, hasta 3 palabras. Va acelerado." in texto
-    sistema = cliente.pedidos[0]["system"]
-    assert "Nada de precios" in sistema and "No inventes" in sistema
-
-
-def test_si_claude_devuelve_menos_lineas_las_que_faltan_van_en_silencio():
-    g = escribir_guion(InspectorDeVideo(cliente=ClienteFalso([json.dumps({"lineas": ["Una sola."]})])), None, TRAMOS, None, None)
-    assert g.lineas == ["Una sola.", "", ""]
-
-
-def test_sin_claude_no_hay_guion():
-    assert escribir_guion(InspectorDeVideo(simulado=True), None, TRAMOS, None, None) is None
-    g = escribir_guion(InspectorDeVideo(cliente=ClienteFalso(error=RuntimeError("x"))), None, TRAMOS, None, None)
-    assert g.lineas == [] and "sin voz en off" in g.avisos[0]
-
-
-def test_las_palabras_que_entran_en_un_tramo():
-    assert palabras_que_entran(8.0) == 17 and palabras_que_entran(0.5) == 0
-    assert recortar_palabras("  una   dos tres  ", 5) == "una dos tres"
-    assert recortar_palabras("una dos, tres cuatro", 2) == "una dos."
-    assert recortar_palabras("una dos", 0) == ""
 
 
 # ───────────────────────────── ElevenLabs ─────────────────────────────
@@ -229,23 +190,44 @@ class ElevenFalso:
 
 
 @con_ffmpeg
-def test_cada_linea_va_donde_empieza_su_tramo_y_nunca_encima_de_la_anterior(tmp_path):
+def test_primero_se_dice_el_guion_y_despues_se_reparte_a_lo_largo_del_clip(tmp_path):
     eleven = ElevenFalso(tmp_path)
-    lineas = ["Una dos tres cuatro cinco seis siete ocho nueve diez.", "", "Otra línea corta.", "Fin."]
-    dichas = decir_guion(eleven, lineas, [(0, 2), (2, 3), (3, 9), (9, 12)], "voz1", tmp_path / "voz")
-    assert [d.texto for d in dichas] == [lineas[0], lineas[2], lineas[3]]
-    # La primera dura 4 s y pisa el tramo siguiente: la segunda espera a que termine.
-    assert dichas[0].inicio == pytest.approx(0.3) and dichas[0].fin == pytest.approx(4.3, abs=0.15)
-    assert dichas[1].inicio == pytest.approx(dichas[0].fin + 0.25, abs=0.01)
-    assert dichas[2].inicio == pytest.approx(9.3)
-    # Cada pedido lleva lo que se dijo antes y lo que sigue, para la entonación.
-    assert eleven.dichas[1] == {"texto": "Otra línea corta.", "voz": "voz1", "anterior": lineas[0], "siguiente": "Fin."}
+    guion = ["Camisas para Fiat uno punto siete diésel.", "", "Vienen las cuatro.", "Con garantía."]
+    dichas = decir_guion(eleven, guion, "voz1", tmp_path / "voz")
+    # Las frases vacías no se dicen, y cada pedido lleva lo de antes y lo que sigue, para la entonación.
+    assert [d.texto for d in dichas] == [guion[0], guion[2], guion[3]]
+    assert eleven.dichas[1] == {"texto": "Vienen las cuatro.", "voz": "voz1", "anterior": guion[0], "siguiente": "Con garantía."}
+    # Todavía sin lugar: solo se sabe cuánto dura cada una.
+    assert all(d.inicio == 0 for d in dichas)
+    duraciones = [d.fin for d in dichas]
+    assert duraciones == pytest.approx([2.8, 1.2, 0.8], abs=0.15)
+    # Lo mínimo que tiene que durar el clip: la voz, sus pausas y el aire al principio y al final.
+    assert largo_de_la_voz(dichas) == pytest.approx(0.4 + sum(duraciones) + 2 * 0.4 + 0.8)
+    assert largo_de_la_voz([]) == 0
+
+    # En un clip justo, van pegadas con la pausa mínima.
+    justas = ubicar(dichas, largo_de_la_voz(dichas))
+    assert justas[0].inicio == pytest.approx(0.4)
+    assert justas[1].inicio == pytest.approx(justas[0].fin + 0.4)
+    assert justas[-1].fin == pytest.approx(largo_de_la_voz(dichas) - 0.8, abs=0.01)
+    # En un clip más largo, las pausas se estiran para acompañar todo el video.
+    sueltas = ubicar(dichas, 9.0)
+    pausa = sueltas[1].inicio - sueltas[0].fin
+    assert pausa == pytest.approx((9.0 - 0.4 - 0.8 - sum(duraciones)) / 2, abs=0.01) and 0.4 < pausa < 2.5
+    assert sueltas[-1].fin == pytest.approx(9.0 - 0.8, abs=0.01)
+    # Pero nunca más que un silencio que se note: lo que sobra queda al final.
+    lejos = ubicar(dichas, 50.0)
+    assert lejos[1].inicio - lejos[0].fin == pytest.approx(2.5) and lejos[-1].fin < 20
+    # Y ninguna se pisa con la anterior.
+    for lista in (justas, sueltas, lejos):
+        assert all(a.fin <= b.inicio for a, b in zip(lista, lista[1:]))
+    assert ubicar([], 30) == []
 
 
 @con_ffmpeg
 def test_la_mezcla_dura_lo_que_el_clip_con_voz_musica_o_las_dos(tmp_path):
     eleven = ElevenFalso(tmp_path)
-    dichas = decir_guion(eleven, ["Una dos tres cuatro.", "Cinco seis."], [(0, 4), (4, 8)], "v", tmp_path / "voz")
+    dichas = ubicar(decir_guion(eleven, ["Una dos tres cuatro.", "Cinco seis."], "v", tmp_path / "voz"), 9.0)
     musica = tmp_path / "m.mp3"
     musica.write_bytes(eleven.musica("x", 6))
     for nombre, lineas, pista in [("todo", dichas, musica), ("voz", dichas, None), ("musica", [], musica)]:
@@ -340,53 +322,86 @@ CORTES = [
 ]
 
 
+IMAGEN_DE_CLAUDE = json.dumps({"valores": {"cuartos": 1, "enderezado": 0, "zoom": 1, "centro_x": 0.5, "centro_y": 0.5, "rojo": 1, "verde": 1, "azul": 1, "contraste": 1, "saturacion": 1}, "razon": "Girado."})
+GUION = ["Camisas de cilindro para Fiat uno punto siete diésel.", "Sirven para Uno, Duna y Fiorino.", "Vienen las cuatro, con su garantía."]
+
+
 @con_ffmpeg
 def test_un_clip_completo_con_cortes_de_claude_guion_voz_musica_y_subtitulos(video, tmp_path):
     fuente = leer(video)
-    claude = ClienteFalso(
-        [
-            json.dumps({"valores": {"cuartos": 1, "enderezado": 0, "zoom": 1, "centro_x": 0.5, "centro_y": 0.5, "rojo": 1, "verde": 1, "azul": 1, "contraste": 1, "saturacion": 1}, "razon": "Girado."}),
-            json.dumps({"momentos": CORTES, "razon": "Tres momentos."}),
-            json.dumps({"lineas": ["Así llega la caja, sellada de fábrica.", "", "Todo listo para colocar."]}),
-        ]
-    )
+    claude = ClienteFalso([IMAGEN_DE_CLAUDE, json.dumps({"momentos": CORTES, "razon": "Tres momentos."})])
     eleven = ElevenFalso(tmp_path)
-    pedido = Pedido(objetivo=20, momentos=MOMENTOS_DEL_PROTOCOLO, ficha="Producto: Camisa", voz="voz1", musica="Suave, sin voces.", subtitulos=True)
+    pedido = Pedido(objetivo=20, momentos=MOMENTOS_DEL_PROTOCOLO, guion=GUION, voz="voz1", musica="Suave, sin voces.", subtitulos=True, color_subtitulos="#6FA82C")
     r = armar(fuente, fuente, pedido, InspectorDeVideo(cliente=claude), tmp_path / "trabajo", tmp_path / "clip.mp4", eleven=lambda: eleven)
 
-    assert len(claude.pedidos) == 3
+    # Claude decide la imagen y los cortes. El guión no: llega escrito.
+    assert len(claude.pedidos) == 2
     assert r.origen == "claude" and r.razon == "Girado. Tres momentos."
     assert [(t.nombre, t.importancia, t.velocidad == 1) for t in r.plan.tramos] == [("La caja", "IMPORTANTE", True), ("Las piezas", "REPETIDO", False), ("Todo junto", "IMPORTANTE", True)]
     assert r.clip.duracion == pytest.approx(20, abs=0.4) and (r.clip.ancho, r.clip.alto) == (1080, 1920)
-    assert [linea.texto for linea in r.guion] == ["Así llega la caja, sellada de fábrica.", "Todo listo para colocar."]
-    # La última línea va cuando empieza el último tramo.
-    assert r.guion[1].inicio == pytest.approx(tiempos_en_el_clip(r.plan)[2][0] + 0.3, abs=0.01)
+    # La voz dice el guión tal cual, repartido a lo largo del clip: no va atada a los tramos del video.
+    assert [linea.texto for linea in r.guion] == GUION
+    assert r.guion[0].inicio == pytest.approx(0.4) and r.guion[-1].fin <= r.plan.dura - 0.8 + 0.05
+    pausas = [b.inicio - a.fin for a, b in zip(r.guion, r.guion[1:])]
+    assert all(0.4 <= pausa <= 2.5 + 0.01 for pausa in pausas)
     assert r.con_musica and r.con_subtitulos and r.volumen_lufs is not None
     assert eleven.musicas == [("Suave, sin voces.", pytest.approx(r.plan.dura))]
-    assert r.costo_usd > 0
+    # El único aviso es del video de prueba, que no tiene un fondo claro.
+    assert r.costo_usd > 0 and r.avisos == ["No se encontró un fondo claro: el color queda como está."]
     assert leer(r.clip.ruta).tiene_audio
 
 
 @con_ffmpeg
-def test_el_guion_pedido_se_dice_tal_cual_y_si_no_entra_se_estira_el_cierre(video, tmp_path):
+def test_si_el_guion_dura_mas_que_lo_pedido_el_clip_se_alarga_para_que_entre(video, tmp_path):
+    fuente = leer(video)
+    claude = ClienteFalso([IMAGEN_DE_CLAUDE, json.dumps({"momentos": CORTES, "razon": "x"})])
+    eleven = ElevenFalso(tmp_path)
+    # Unas 45 palabras: con la voz de prueba son unos 18 segundos de voz, más pausas. Se pide un clip de 12.
+    largo = ["Una dos tres cuatro cinco seis siete ocho nueve.", "Diez once doce trece catorce quince dieciséis diecisiete dieciocho.", "Uno dos tres cuatro cinco seis siete ocho nueve.", "Diez once doce trece catorce quince dieciséis diecisiete dieciocho.", "Uno dos tres cuatro cinco seis siete ocho nueve."]
+    r = armar(fuente, fuente, Pedido(objetivo=12, guion=largo, voz="v"), InspectorDeVideo(cliente=claude), tmp_path / "t", tmp_path / "clip.mp4", eleven=lambda: eleven)
+    assert [linea.texto for linea in r.guion] == largo
+    necesita = largo_de_la_voz(r.guion)
+    assert r.plan.dura == pytest.approx(necesita, abs=0.1) and r.plan.dura > 18
+    assert r.guion[-1].fin <= r.plan.dura
+    # A Claude se le pide marcar los cortes para esa duración, y la persona se entera.
+    assert f"unos {necesita:g} segundos" in claude.pedidos[1]["messages"][0]["content"][-1]["text"] or "unos 2" in claude.pedidos[1]["messages"][0]["content"][-1]["text"]
+    assert any("el guión necesita ese tiempo" in a for a in r.avisos)
+
+
+@con_ffmpeg
+def test_si_el_guion_no_entra_ni_en_el_clip_mas_largo_no_se_dicen_las_ultimas_frases(video, tmp_path):
     fuente = leer(video)
     eleven = ElevenFalso(tmp_path)
-    largo = "Esta última línea es bastante más larga que lo que queda del clip."
+    frase = "Una dos tres cuatro cinco seis siete ocho nueve diez once doce trece catorce quince."
+    r = armar(fuente, fuente, Pedido(objetivo=30, guion=[frase] * 12, voz="v", cuartos=1), InspectorDeVideo(simulado=True), tmp_path / "t", tmp_path / "clip.mp4", eleven=lambda: eleven)
+    assert 0 < len(r.guion) < 12
+    # El video dura 40 segundos: el clip no se puede estirar más que eso y la imagen quieta del final.
+    assert r.plan.dura <= 60 and r.guion[-1].fin <= r.plan.dura
+    assert any("El guión es largo para este clip" in a for a in r.avisos)
+
+
+@con_ffmpeg
+def test_con_un_plan_pedido_a_mano_la_voz_estira_el_cierre_si_hace_falta(video, tmp_path):
+    fuente = leer(video)
+    eleven = ElevenFalso(tmp_path)
     plan = Plan(imagen=Imagen(cuartos=1), tramos=[Tramo(inicio=0, fin=10, velocidad=1), Tramo(inicio=10, fin=40, velocidad=10)], cierre=0)
-    r = armar(fuente, fuente, Pedido(plan=plan, guion=["Hola.", largo], voz="v"), InspectorDeVideo(simulado=True), tmp_path / "t", tmp_path / "clip.mp4", eleven=lambda: eleven)
+    guion = ["Una dos tres cuatro cinco seis siete ocho nueve diez.", "Once doce trece catorce quince dieciséis diecisiete dieciocho diecinueve veinte.", "Uno dos tres cuatro cinco seis siete ocho."]
+    r = armar(fuente, fuente, Pedido(plan=plan, guion=guion, voz="v"), InspectorDeVideo(simulado=True), tmp_path / "t", tmp_path / "clip.mp4", eleven=lambda: eleven)
     assert r.origen == "pedido"
-    assert [linea.texto for linea in r.guion] == ["Hola.", largo]
-    assert r.plan.cierre > 0 and r.guion[-1].fin <= r.plan.dura
+    assert [linea.texto for linea in r.guion] == guion
+    assert r.plan.tramos == plan.tramos and r.plan.cierre > 0 and r.guion[-1].fin <= r.plan.dura
     assert not r.con_musica and not r.con_subtitulos and eleven.musicas == []
 
 
 @con_ffmpeg
-def test_sin_claude_no_hay_cortes_ni_voz_pero_la_musica_va(video, tmp_path):
+def test_sin_guion_el_clip_sale_sin_voz_y_lo_avisa_pero_la_musica_va(video, tmp_path):
     fuente = leer(video)
     eleven = ElevenFalso(tmp_path)
     r = armar(fuente, fuente, Pedido(objetivo=15, voz="v", musica="Suave.", subtitulos=True, cuartos=1), InspectorDeVideo(simulado=True), tmp_path / "t", tmp_path / "clip.mp4", eleven=lambda: eleven)
     assert len(r.plan.tramos) == 1 and r.guion == [] and r.con_musica and not r.con_subtitulos
-    assert any("sin voz en off" in a for a in r.avisos)
+    assert eleven.dichas == []
+    assert any("todavía no tiene guión" in a and "Guión del clip" in a for a in r.avisos)
+    assert r.clip.duracion == pytest.approx(15, abs=0.4)
 
 
 @con_ffmpeg
@@ -398,18 +413,18 @@ def test_si_elevenlabs_falla_el_clip_sale_en_silencio_con_su_aviso(video, tmp_pa
     assert r.guion == [] and not r.con_musica and r.volumen_lufs is None
     assert r.avisos[-1] == "El clip salió sin sonido. La cuenta de ElevenLabs no tiene créditos."
     assert r.clip.duracion == pytest.approx(13.3, abs=0.4)
+    assert eleven.musicas == []
 
 
 @con_ffmpeg
-def test_un_cuadro_por_tramo_para_el_guion(video):
-    import io
-
-    from PIL import Image
-
-    with Image.open(io.BytesIO(hojas.de_tramos(leer(video), [3, 20, 37], cuartos=1, columnas=4, ancho=90))) as hoja:
-        assert hoja.size == (3 * 90, 160)
-
-
+def test_si_solo_falla_la_musica_el_clip_sale_con_la_voz(video, tmp_path):
+    fuente = leer(video)
+    eleven = ElevenFalso(tmp_path)
+    eleven.musica = lambda estilo, segundos: (_ for _ in ()).throw(SinElevenLabs("La clave no tiene permiso para Music."))
+    plan = Plan(imagen=Imagen(cuartos=1), tramos=[Tramo(inicio=0, fin=40, velocidad=3)])
+    r = armar(fuente, fuente, Pedido(plan=plan, guion=["Hola a todos."], voz="v", musica="Suave.", subtitulos=True), InspectorDeVideo(simulado=True), tmp_path / "t", tmp_path / "clip.mp4", eleven=lambda: eleven)
+    assert [linea.texto for linea in r.guion] == ["Hola a todos."] and not r.con_musica and r.con_subtitulos
+    assert r.avisos[-1] == "El clip salió sin música. La clave no tiene permiso para Music." and r.volumen_lufs is not None
 
 
 @con_ffmpeg
@@ -446,27 +461,21 @@ def test_los_subtitulos_se_pegan_como_imagenes_y_si_fallan_el_clip_sale_sin_ello
 @con_ffmpeg
 def test_la_edicion_va_contando_en_que_anda(video, tmp_path):
     fuente = leer(video)
-    claude = ClienteFalso(
-        [
-            json.dumps({"valores": {"cuartos": 1, "enderezado": 0, "zoom": 1, "centro_x": 0.5, "centro_y": 0.5, "rojo": 1, "verde": 1, "azul": 1, "contraste": 1, "saturacion": 1}, "razon": "Girado."}),
-            json.dumps({"momentos": CORTES, "razon": "Tres momentos."}),
-            json.dumps({"lineas": ["Así llega la caja.", "", "Todo listo."]}),
-        ]
-    )
+    claude = ClienteFalso([IMAGEN_DE_CLAUDE, json.dumps({"momentos": CORTES, "razon": "Tres momentos."})])
     dicho = []
     eleven = ElevenFalso(tmp_path)
     armar(
-        fuente, fuente, Pedido(objetivo=20, voz="v", musica="Suave.", subtitulos=True), InspectorDeVideo(cliente=claude),
+        fuente, fuente, Pedido(objetivo=20, guion=["Así llega la caja.", "Todo listo."], voz="v", musica="Suave.", subtitulos=True), InspectorDeVideo(cliente=claude),
         tmp_path / "t", tmp_path / "clip.mp4", eleven=lambda: eleven, informar=lambda etapa, porcentaje=None: dicho.append((etapa, porcentaje)),
     )
     etapas = list(dict.fromkeys(e for e, _ in dicho))
+    # Primero la voz, para saber cuánto dura, y recién después los cortes.
     assert etapas == [
         "Midiendo la luz y el color",
         "Claude mira la imagen",
+        "Generando la voz, frase 1 de 2",
+        "Generando la voz, frase 2 de 2",
         "Claude marca los cortes",
-        "Claude escribe el guión",
-        "Generando la voz, línea 1 de 2",
-        "Generando la voz, línea 2 de 2",
         "Generando la música",
         "Mezclando el sonido",
         "Dibujando los subtítulos",

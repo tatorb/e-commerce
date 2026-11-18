@@ -1,8 +1,11 @@
 """El sonido del clip: la voz en off, la música y los subtítulos.
 
-La voz y la música las genera ElevenLabs. La voz se pide línea por línea, con
-el momento exacto de cada palabra: de ahí salen los subtítulos. Cada línea se
-ubica donde empieza su tramo del clip y nunca encima de la anterior.
+La voz y la música las genera ElevenLabs. La voz dice el guión del clip, que
+llega ya escrito y revisado: no relata el video, da las certezas de la
+publicación. Se pide frase por frase, con el momento exacto de cada palabra,
+de ahí salen los subtítulos. Primero se dice todo, para saber cuánto dura, y
+con eso se decide cuánto dura el clip; después cada frase se reparte a lo
+largo del video.
 
 La mezcla es la de siempre: la voz a volumen de redes, la música de fondo y
 bajando sola cuando hay voz, con entrada y salida suaves.
@@ -36,9 +39,13 @@ MUSICA_BAJO_LA_VOZ = 0.16
 MUSICA_SOLA_LUFS = -18.0
 ENTRADA_S = 0.8
 SALIDA_S = 1.6
-# Cuánto se espera entre una línea y la siguiente, y antes de la primera palabra de cada tramo.
-AIRE_ENTRE_LINEAS = 0.25
-AIRE_AL_EMPEZAR = 0.3
+# La voz arranca enseguida y termina un poco antes que el clip.
+AIRE_AL_EMPEZAR = 0.4
+AIRE_AL_TERMINAR = 0.8
+# La pausa entre una frase y la siguiente: nunca menos que la primera, para que se entienda, ni más
+# que la segunda, para que no parezca que la voz se cortó.
+PAUSA_MIN = 0.4
+PAUSA_MAX = 2.5
 # La música que pide ElevenLabs dura al menos esto.
 MUSICA_MIN_S = 10.0
 
@@ -171,32 +178,50 @@ def _motivo(estado: int, cuerpo: str) -> str:
 def decir_guion(
     eleven: ElevenLabs,
     lineas: list[str],
-    tramos: list[tuple[float, float]],
     voz: str,
     carpeta: Path,
     cancelado: Callable[[], bool] | None = None,
     informar: Callable[[str, float | None], None] | None = None,
 ) -> list[Linea]:
-    """Dice cada línea y la ubica en el clip: donde empieza su tramo, y nunca encima de la anterior."""
+    """Dice cada frase del guión. Todavía sin lugar en el clip: primero hay que saber cuánto dura cada una."""
     carpeta.mkdir(parents=True, exist_ok=True)
     dichas: list[Linea] = []
-    con_texto = [(i, " ".join(linea.split())) for i, linea in enumerate(lineas) if linea and linea.strip()]
-    for n, (i, texto) in enumerate(con_texto):
+    frases = [" ".join(linea.split()) for linea in lineas if linea and linea.strip()]
+    for n, texto in enumerate(frases):
         if cancelado and cancelado():
             raise Cancelado()
         if informar:
-            informar(f"Generando la voz, línea {n + 1} de {len(con_texto)}", 100 * n / len(con_texto))
-        anterior = " ".join(t for _, t in con_texto[:n])
-        siguiente = " ".join(t for _, t in con_texto[n + 1 :])
-        audio, palabras = eleven.decir(texto, voz, anterior, siguiente)
-        archivo = carpeta / f"linea_{i:02d}.mp3"
+            informar(f"Generando la voz, frase {n + 1} de {len(frases)}", 100 * n / len(frases))
+        # Lo que se dijo antes y lo que sigue, para que la entonación sea de una sola locución.
+        audio, palabras = eleven.decir(texto, voz, " ".join(frases[:n]), " ".join(frases[n + 1 :]))
+        archivo = carpeta / f"frase_{n:02d}.mp3"
         archivo.write_bytes(audio)
-        dura = leer_duracion(archivo)
-        inicio = tramos[i][0] + AIRE_AL_EMPEZAR
-        if dichas:
-            inicio = max(inicio, dichas[-1].fin + AIRE_ENTRE_LINEAS)
-        dichas.append(Linea(texto=texto, inicio=round(inicio, 3), fin=round(inicio + dura, 3), archivo=archivo, palabras=palabras))
+        dichas.append(Linea(texto=texto, inicio=0.0, fin=round(leer_duracion(archivo), 3), archivo=archivo, palabras=palabras))
     return dichas
+
+
+def largo_de_la_voz(dichas: list[Linea]) -> float:
+    """Lo mínimo que tiene que durar el clip para que entre toda la voz, con sus pausas y su aire al principio y al final."""
+    if not dichas:
+        return 0.0
+    return AIRE_AL_EMPEZAR + sum(d.fin - d.inicio for d in dichas) + PAUSA_MIN * (len(dichas) - 1) + AIRE_AL_TERMINAR
+
+
+def ubicar(dichas: list[Linea], segundos: float) -> list[Linea]:
+    """
+    Reparte las frases a lo largo del clip: arrancan enseguida y la pausa entre una y otra se estira para
+    acompañar todo el video, sin pasar de un silencio que se note. Lo que sobre queda al final, con la música.
+    """
+    if not dichas:
+        return []
+    duraciones = [d.fin - d.inicio for d in dichas]
+    libre = segundos - AIRE_AL_EMPEZAR - AIRE_AL_TERMINAR - sum(duraciones)
+    pausa = PAUSA_MIN if len(dichas) < 2 else min(PAUSA_MAX, max(PAUSA_MIN, libre / (len(dichas) - 1)))
+    ubicadas, t = [], AIRE_AL_EMPEZAR
+    for d, dura in zip(dichas, duraciones):
+        ubicadas.append(Linea(texto=d.texto, inicio=round(t, 3), fin=round(t + dura, 3), archivo=d.archivo, palabras=d.palabras))
+        t += dura + pausa
+    return ubicadas
 
 
 def leer_duracion(archivo: Path) -> float:

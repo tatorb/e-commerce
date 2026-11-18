@@ -3,13 +3,12 @@
 import { useState } from 'react';
 import { Scissors, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { MOMENT_LEVEL_LABEL, planSeconds, SCRIPT_LINE_MAX, SPEED_MAX, SPEED_MIN, type MomentLevel, type ScriptLine, type VideoPlan } from '@/domain/video-edit';
+import { MOMENT_LEVEL_LABEL, planSeconds, SPEED_MAX, SPEED_MIN, type MomentLevel, type VideoPlan } from '@/domain/video-edit';
 
-// Los cortes y el guión de un clip, para corregirlos a mano y pedirlo de
-// nuevo: de dónde a dónde va cada tramo del original, a qué velocidad y qué
-// dice la voz mientras se ve.
+// Los cortes de un clip, para corregirlos a mano y pedirlo de nuevo: de dónde
+// a dónde va cada tramo del original y a qué velocidad.
 
-type Row = { inicio: string; fin: string; velocidad: string; nombre: string; importancia: MomentLevel | null; linea: string };
+type Row = { inicio: string; fin: string; velocidad: string; nombre: string; importancia: MomentLevel | null };
 
 const num = (n: number) => String(Math.round(n * 100) / 100);
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -25,39 +24,20 @@ function startsOf(plan: VideoPlan): number[] {
   return out;
 }
 
-/** Cada línea dicha, en el tramo durante el que empezó. */
-export function linesByRow(plan: VideoPlan, script: ScriptLine[]): string[] {
-  const starts = startsOf(plan);
-  const lines = plan.tramos.map(() => '');
-  for (const line of script) {
-    let i = 0;
-    for (let k = 0; k < starts.length; k++) if (starts[k] <= line.inicio + 0.05) i = k;
-    while (i < lines.length - 1 && lines[i]) i++;
-    lines[i] = lines[i] ? `${lines[i]} ${line.texto}` : line.texto;
-  }
-  return lines;
-}
-
 export function VideoPlanEditor({
   plan,
-  script,
-  hasVoice,
   range,
   pending,
   onSubmit,
 }: {
   plan: VideoPlan;
-  script: ScriptLine[];
-  // Si la cuenta tiene la voz en off prendida: sin ella el guión no se dice.
-  hasVoice: boolean;
   range: { min: number; max: number };
   pending: boolean;
-  onSubmit: (ask: { plan: VideoPlan; script: string[] }) => void;
+  onSubmit: (ask: { plan: VideoPlan }) => void;
 }) {
-  const [rows, setRows] = useState<Row[]>(() => {
-    const lines = linesByRow(plan, script);
-    return plan.tramos.map((t, i) => ({ inicio: num(t.inicio), fin: num(t.fin), velocidad: num(t.velocidad), nombre: t.nombre, importancia: t.importancia ?? null, linea: lines[i] }));
-  });
+  const [rows, setRows] = useState<Row[]>(() =>
+    plan.tramos.map((t) => ({ inicio: num(t.inicio), fin: num(t.fin), velocidad: num(t.velocidad), nombre: t.nombre, importancia: t.importancia ?? null })),
+  );
   const [cierre, setCierre] = useState(num(plan.cierre));
 
   const set = (i: number, patch: Partial<Row>) =>
@@ -73,7 +53,7 @@ export function VideoPlanEditor({
     setRows((old) => {
       const r = old[i];
       const mid = num((Number(r.inicio) + Number(r.fin)) / 2);
-      return [...old.slice(0, i), { ...r, fin: mid }, { ...r, inicio: mid, linea: '' }, ...old.slice(i + 1)];
+      return [...old.slice(0, i), { ...r, fin: mid }, { ...r, inicio: mid }, ...old.slice(i + 1)];
     });
   const remove = (i: number) =>
     setRows((old) => {
@@ -109,8 +89,8 @@ export function VideoPlanEditor({
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        Cada tramo es un pedazo del video original, en segundos del original. Con velocidad 1 va normal, con 4 va cuatro veces más rápido. Lo que escribas en Voz
-        se dice mientras se ve ese tramo.
+        Cada tramo es un pedazo del video original, en segundos del original. Con velocidad 1 va normal, con 4 va cuatro veces más rápido. La voz dice el guión
+        del clip, que se corrige arriba, en Guión del clip: si lo cambiaste, sale con el cambio.
       </p>
       <ol className="space-y-2">
         {rows.map((r, i) => (
@@ -143,10 +123,6 @@ export function VideoPlanEditor({
                 <Trash2 />
               </Button>
             </div>
-            <label className="block space-y-0.5 text-xs">
-              <span className="text-muted-foreground">Voz{hasVoice ? '' : ' (la voz en off está apagada en esta cuenta)'}</span>
-              <textarea className="w-full rounded-md border bg-background px-2 py-1 text-sm" rows={1} maxLength={SCRIPT_LINE_MAX} value={r.linea} onChange={(e) => set(i, { linea: e.target.value })} />
-            </label>
           </li>
         ))}
       </ol>
@@ -164,7 +140,7 @@ export function VideoPlanEditor({
         <p className="text-xs text-muted-foreground">Así el clip dura {Math.round(seconds ?? 0)} segundos.</p>
       )}
       <div className="flex justify-end">
-        <Button size="sm" pending={pending} disabled={pending || problems.length > 0} onClick={() => onSubmit({ plan: built, script: rows.map((r) => r.linea.trim()) })}>
+        <Button size="sm" pending={pending} disabled={pending || problems.length > 0} onClick={() => onSubmit({ plan: built })}>
           Rehacer con estos cortes
         </Button>
       </div>

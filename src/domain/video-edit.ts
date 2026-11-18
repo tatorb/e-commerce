@@ -112,6 +112,38 @@ export function cleanNote(note: unknown): string | null {
 
 export const SCRIPT_LINE_MAX = 400;
 
+// El guión del clip: las frases que dice la voz, en orden. No relata el video:
+// da las certezas de la publicación. Se escribe antes de editar.
+export const SCRIPT_LINES_MAX = 14;
+export const scriptLinesSchema = z.array(z.string().trim().max(SCRIPT_LINE_MAX, 'Una frase del guión es muy larga.')).max(SCRIPT_LINES_MAX, 'El guión tiene demasiadas frases.');
+
+// Cuántas palabras por segundo dice la voz, hablando tranquila, y la pausa entre una frase y la siguiente.
+export const WORDS_PER_SECOND = 2.3;
+export const SCRIPT_PAUSE_SECONDS = 0.4;
+// Lo que queda en silencio al principio y al final del clip.
+const SCRIPT_EDGES_SECONDS = 1.2;
+
+/** Las frases limpias: sin vacías y sin espacios de más. */
+export function cleanScriptLines(raw: unknown): string[] {
+  const r = scriptLinesSchema.safeParse(Array.isArray(raw) ? raw.filter((l) => typeof l === 'string') : []);
+  return r.success ? r.data.map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean) : [];
+}
+
+export const countWords = (text: string) => text.trim().split(/\s+/).filter(Boolean).length;
+
+/** Cuántos segundos lleva decir el guión, a ojo: sirve para avisar antes de editar. */
+export function scriptSeconds(lines: string[]): number {
+  const said = lines.filter((l) => l.trim());
+  if (said.length === 0) return 0;
+  const words = said.reduce((sum, l) => sum + countWords(l), 0);
+  return words / WORDS_PER_SECOND + (said.length - 1) * SCRIPT_PAUSE_SECONDS + SCRIPT_EDGES_SECONDS;
+}
+
+/** Cuántas palabras entran, como mucho, en un clip de esos segundos. */
+export function scriptWordBudget(clipSeconds: number, lines = 7): number {
+  return Math.max(10, Math.floor((clipSeconds - SCRIPT_EDGES_SECONDS - (lines - 1) * SCRIPT_PAUSE_SECONDS) * WORDS_PER_SECOND));
+}
+
 // El guión que pide la persona: una línea por tramo del plan, en orden. Una línea vacía es un tramo en silencio.
 export const requestedScriptSchema = z.array(z.string().trim().max(SCRIPT_LINE_MAX)).max(60);
 
@@ -143,9 +175,11 @@ export const accountVideoSchema = z.object({
   subtitlesOn: z.boolean(),
   // El color de la palabra que se está diciendo, como #6FA82C: el de la marca.
   subtitleColor: z.string().trim().regex(/^#[0-9a-fA-F]{6}$/, 'El color va como #6FA82C.'),
-  // Editar solo cada video nuevo, y aprobar solo el clip que no tuvo avisos.
+  // Editar solo cada video nuevo, aprobar solo el clip que no tuvo avisos, y que Claude
+  // escriba el guión, sin que nadie lo revise, cuando el producto todavía no tiene uno.
   autoEdit: z.boolean(),
   autoApprove: z.boolean(),
+  autoScript: z.boolean(),
   // El paso de protocolo que vale para los videos copiados al Drive, que no dicen con cuál se grabaron.
   defaultStepId: z.string().max(60).nullable(),
 });
@@ -166,6 +200,7 @@ export const DEFAULT_ACCOUNT_VIDEO: AccountVideoSettings = {
   subtitleColor: DEFAULT_SUBTITLE_COLOR,
   autoEdit: false,
   autoApprove: false,
+  autoScript: false,
   defaultStepId: null,
 };
 
@@ -255,9 +290,7 @@ export type VideoJob = {
   plan: VideoPlan | null;
   // Los momentos del video según el protocolo, para que Claude ubique los cortes.
   momentos: VideoMoment[];
-  // Lo que se sabe del producto, para el guión.
-  ficha: string | null;
-  // El guión que pidió la persona, una línea por tramo. Sin pedido, lo escribe Claude.
+  // El guión del clip, ya escrito y revisado: las frases que dice la voz, en orden. Null: sin voz.
   guion: string[] | null;
   // El sonido del clip. Null: sale en silencio.
   sonido: { voz: { id: string } | null; musica: { estilo: string } | null; subtitulos: boolean; color_subtitulos: string } | null;
