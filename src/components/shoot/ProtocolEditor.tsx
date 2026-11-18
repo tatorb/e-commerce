@@ -15,6 +15,7 @@ import { useReadOnly } from '@/components/access/AccessProvider';
 import { uploadToDrive } from '@/components/drive/upload';
 import { ILLUSTRATION_TYPES, SHOOT_KIND_LABEL, illustrationType, type ShootKind } from '@/domain/shoot';
 import type { ProtocolView, StepView } from '@/lib/shoot';
+import { MOMENT_LEVEL_HELP, MOMENT_LEVEL_LABEL, MOMENT_LEVELS, MOMENTS_MAX, type VideoMoment } from '@/domain/video-edit';
 import { ShootKindIcon } from './ShootKindIcon';
 import {
   addStepAction,
@@ -230,7 +231,7 @@ function ProtocolCard({ accountSlug, protocol, index, total }: { accountSlug: st
           {adding ? (
             <StepForm
               idPrefix={`new-${protocol.id}`}
-              initial={{ title: '', kind: 'PHOTO', explanation: '', editorNotes: '' }}
+              initial={{ title: '', kind: 'PHOTO', explanation: '', editorNotes: '', moments: [] }}
               saveLabel="Agregar paso"
               onCancel={() => setAdding(false)}
               onSave={async (values) => {
@@ -308,7 +309,78 @@ function MediaOrder({ accountSlug, protocol }: { accountSlug: string; protocol: 
   );
 }
 
-type StepValues = { title: string; kind: ShootKind; explanation: string; editorNotes: string };
+type StepValues = { title: string; kind: ShootKind; explanation: string; editorNotes: string; moments: VideoMoment[] };
+
+/** Los momentos de un paso de video, en orden: qué pasa en cada uno y qué tan importante es. */
+function MomentsField({ idPrefix, moments, onChange }: { idPrefix: string; moments: VideoMoment[]; onChange: (m: VideoMoment[]) => void }) {
+  const set = (i: number, patch: Partial<VideoMoment>) => onChange(moments.map((m, j) => (j === i ? { ...m, ...patch } : m)));
+  const move = (i: number, by: number) => {
+    const next = [...moments];
+    const [m] = next.splice(i, 1);
+    next.splice(i + by, 0, m);
+    onChange(next);
+  };
+  return (
+    <div className="space-y-2">
+      <div>
+        <p className="text-sm font-medium">Momentos del video</p>
+        <p className="text-xs text-muted-foreground">
+          Contá, en orden, lo que pasa en el video y qué tan importante es cada cosa. El editor muestra lo importante a velocidad normal, acelera lo normal y pasa lo
+          más rápido lo repetido, que es lo mismo que ya se mostró antes.
+        </p>
+      </div>
+      {moments.length > 0 ? (
+        <ol className="space-y-2">
+          {moments.map((m, i) => (
+            <li key={i} className="grid gap-2 rounded-md border p-2 sm:grid-cols-[1.5rem_1fr_auto_auto] sm:items-center">
+              <span className="text-sm text-muted-foreground">{i + 1}.</span>
+              <Input
+                aria-label={`Momento ${i + 1}`}
+                value={m.texto}
+                maxLength={300}
+                onChange={(e) => set(i, { texto: e.target.value })}
+                placeholder="Por ejemplo: sacar la primera pieza y mostrarla en detalle"
+              />
+              <select
+                aria-label={`Importancia del momento ${i + 1}`}
+                id={`${idPrefix}-moment-${i}`}
+                value={m.importancia}
+                onChange={(e) => set(i, { importancia: e.target.value as VideoMoment['importancia'] })}
+                className="h-9 rounded-md border bg-background px-2 text-sm"
+              >
+                {MOMENT_LEVELS.map((level) => (
+                  <option key={level} value={level}>
+                    {MOMENT_LEVEL_LABEL[level]}
+                  </option>
+                ))}
+              </select>
+              <div className="flex gap-1">
+                <Button type="button" variant="ghost" size="icon" title="Subir" disabled={i === 0} onClick={() => move(i, -1)}>
+                  <ArrowUp />
+                </Button>
+                <Button type="button" variant="ghost" size="icon" title="Bajar" disabled={i === moments.length - 1} onClick={() => move(i, 1)}>
+                  <ArrowDown />
+                </Button>
+                <Button type="button" variant="ghost" size="icon" title="Sacar" onClick={() => onChange(moments.filter((_, j) => j !== i))}>
+                  <Trash2 />
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ol>
+      ) : null}
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="button" variant="outline" size="sm" disabled={moments.length >= MOMENTS_MAX} onClick={() => onChange([...moments, { texto: '', importancia: 'NORMAL' }])}>
+          <Plus />
+          Agregar momento
+        </Button>
+        <span className="text-xs text-muted-foreground">
+          {MOMENT_LEVELS.map((level) => `${MOMENT_LEVEL_LABEL[level]}: ${MOMENT_LEVEL_HELP[level].toLowerCase()}`).join(' ')}
+        </span>
+      </div>
+    </div>
+  );
+}
 
 function StepForm({
   idPrefix,
@@ -380,13 +452,28 @@ function StepForm({
           <p className="text-xs text-muted-foreground">Claude las recibe en cada foto de este paso, también al procesarla de cero.</p>
         </div>
       ) : null}
+      {values.kind === 'VIDEO' ? (
+        <>
+          <div className="space-y-1.5">
+            <Label htmlFor={`${idPrefix}-editor-notes`}>Indicaciones para el editor</Label>
+            <Textarea
+              id={`${idPrefix}-editor-notes`}
+              rows={3}
+              value={values.editorNotes}
+              onChange={(e) => setValues((v) => ({ ...v, editorNotes: e.target.value }))}
+              placeholder={'Lo que Claude tiene que tener en cuenta al editar los videos de este paso.\nPor ejemplo: la etiqueta de la caja tiene que leerse entera.'}
+            />
+          </div>
+          <MomentsField idPrefix={idPrefix} moments={values.moments} onChange={(moments) => setValues((v) => ({ ...v, moments }))} />
+        </>
+      ) : null}
       <div className="flex gap-2">
         <Button
           pending={pending}
           disabled={pending || !values.title.trim()}
           onClick={async () => {
             setPending(true);
-            await onSave(values);
+            await onSave({ ...values, moments: values.kind === 'VIDEO' ? values.moments.filter((m) => m.texto.trim()) : [] });
             setPending(false);
           }}
         >
@@ -431,7 +518,7 @@ function StepRow({ accountSlug, step, n, total, archived }: { accountSlug: strin
       <li className="px-4 py-4">
         <StepForm
           idPrefix={`step-${step.id}`}
-          initial={{ title: step.title, kind: step.kind, explanation: step.explanation, editorNotes: step.editorNotes }}
+          initial={{ title: step.title, kind: step.kind, explanation: step.explanation, editorNotes: step.editorNotes, moments: step.moments }}
           saveLabel="Guardar"
           onCancel={() => setEditing(false)}
           onSave={async (values) => {
@@ -492,7 +579,17 @@ function StepRow({ accountSlug, step, n, total, archived }: { accountSlug: strin
         </div>
         <p className="font-medium">{step.title}</p>
         {step.explanation ? <p className="whitespace-pre-line text-sm text-muted-foreground">{step.explanation}</p> : null}
-        {step.kind === 'PHOTO' && step.editorNotes ? (
+        {step.kind === 'VIDEO' && step.moments.length > 0 ? (
+          <ol className="space-y-0.5 rounded-md bg-muted/60 px-2.5 py-1.5 text-sm">
+            <li className="font-medium">Momentos del video, para el editor</li>
+            {step.moments.map((m, i) => (
+              <li key={i}>
+                {i + 1}. {m.texto} <span className="text-muted-foreground">· {MOMENT_LEVEL_LABEL[m.importancia]}</span>
+              </li>
+            ))}
+          </ol>
+        ) : null}
+        {step.kind !== 'CHECK' && step.editorNotes ? (
           <p className="whitespace-pre-line rounded-md bg-muted/60 px-2.5 py-1.5 text-sm">
             <span className="font-medium">Para el editor: </span>
             {step.editorNotes}

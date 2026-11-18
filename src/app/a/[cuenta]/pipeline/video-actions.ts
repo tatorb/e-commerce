@@ -174,12 +174,12 @@ async function trashClipFile(fileId: string | null): Promise<void> {
 }
 
 /** Pone un video en la cola del editor: la Mac del estudio lo edita cuando puede. */
-export async function requestVideoEditAction(accountSlug: string, videoId: string, ask: { targetSeconds?: number; note?: string }): Promise<Result> {
+export async function requestVideoEditAction(accountSlug: string, videoId: string, ask: { targetSeconds?: number; note?: string; stepId?: string | null }): Promise<Result> {
   return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Pidió editar un video' }, async () => {
     const user = await requireUser();
     const accountId = await accountIdOf(accountSlug);
     if (!accountId) return NO_ACCOUNT;
-    const r = await guardEdit(() => requestEdit(prisma, { accountId, videoId: String(videoId), targetSeconds: ask?.targetSeconds, note: ask?.note, userId: user.id }));
+    const r = await guardEdit(() => requestEdit(prisma, { accountId, videoId: String(videoId), targetSeconds: ask?.targetSeconds, note: ask?.note, ...(ask?.stepId !== undefined ? { stepId: ask.stepId ? String(ask.stepId) : null } : {}), userId: user.id }));
     revalidatePath(`/a/${accountSlug}/pipeline`, 'layout');
     return r.ok ? { ok: true } : r;
   });
@@ -201,12 +201,17 @@ export async function approveVideoEditAction(accountSlug: string, editId: string
 }
 
 /** Pide la edición de nuevo, con otra duración o con una indicación para el editor. */
-export async function redoVideoEditAction(accountSlug: string, editId: string, ask: { targetSeconds?: number; note?: string }): Promise<Result> {
+export async function redoVideoEditAction(
+  accountSlug: string,
+  editId: string,
+  // Con un plan, la Mac lo aplica tal cual; con un guión, lo dice tal cual, una línea por tramo.
+  ask: { targetSeconds?: number; note?: string; plan?: unknown; script?: string[] },
+): Promise<Result> {
   return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Pidió de nuevo la edición de un video' }, async () => {
     const user = await requireUser();
     const accountId = await accountIdOf(accountSlug);
     if (!accountId) return NO_ACCOUNT;
-    const r = await guardEdit(() => redoEdit(prisma, { accountId, editId: String(editId), targetSeconds: ask?.targetSeconds, note: ask?.note, userId: user.id }));
+    const r = await guardEdit(() => redoEdit(prisma, { accountId, editId: String(editId), targetSeconds: ask?.targetSeconds, note: ask?.note, plan: ask?.plan, script: ask?.script, userId: user.id }));
     if (r.ok) await trashClipFile(r.clipFileId);
     revalidatePath(`/a/${accountSlug}/pipeline`, 'layout');
     return r.ok ? { ok: true } : r;

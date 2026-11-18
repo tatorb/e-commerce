@@ -6,6 +6,8 @@ import { can } from '@/domain/access';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { prisma } from '@/lib/db';
 import { listProtocols } from '@/lib/shoot';
+import { AccountVideoCard } from '@/components/shoot/AccountVideoCard';
+import { loadAccountVideo, videoSteps } from '@/lib/video-edits';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,7 +20,7 @@ export async function generateMetadata({ params }: { params: Promise<{ cuenta: s
 export default async function ProtocolsPage({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
   const { user, account } = await requireAccount(cuenta, 'protocolos');
-  const protocols = await listProtocols(prisma, account.id, { archived: true });
+  const [protocols, video, steps] = await Promise.all([listProtocols(prisma, account.id, { archived: true }), loadAccountVideo(prisma, account.id), videoSteps(prisma, account.id)]);
 
   return (
     <>
@@ -40,6 +42,7 @@ export default async function ProtocolsPage({ params }: { params: Promise<{ cuen
       </PageHeader>
       <PageBody>
         <ProtocolEditor accountSlug={account.slug} protocols={protocols} />
+        <AccountVideoCard accountSlug={account.slug} settings={video} steps={steps} />
       </PageBody>
     </>
   );

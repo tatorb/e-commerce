@@ -7,6 +7,7 @@ import {
   cleanTarget,
   clipName,
   clockOf,
+  DEFAULT_ACCOUNT_VIDEO,
   DEFAULT_EDITOR_SETTINGS,
   editorAllows,
   editorSummary,
@@ -32,7 +33,11 @@ import {
   discardEdit,
   editHeartbeat,
   editsOfProduct,
+  loadAccountVideo,
   loadEditorSettings,
+  queueNewVideos,
+  saveAccountVideo,
+  videoSteps,
   pendingEdits,
   redoEdit,
   releaseEditClaim,
@@ -163,7 +168,7 @@ describe('el contrato con la Mac', () => {
   it('el trabajo de ejemplo tiene las partes que arma la app', () => {
     const job = example('video_trabajo.json').trabajo;
     expect(Object.keys(job).sort()).toEqual(
-      ['id', 'indicacion', 'liviana', 'objetivo_segundos', 'original', 'plan', 'producto', 'reglas', 'subidas', 'turno', 'video', 'video_del_protocolo'].sort(),
+      ['ficha', 'guion', 'id', 'indicacion', 'liviana', 'momentos', 'objetivo_segundos', 'original', 'plan', 'producto', 'reglas', 'sonido', 'subidas', 'turno', 'video', 'video_del_protocolo'].sort(),
     );
     expect(Object.keys(job.original).sort()).toEqual(['bajar', 'bytes', 'carpeta', 'nombre', 'pedazo']);
   });
@@ -189,7 +194,7 @@ describe.skipIf(!url)('la cola del editor de videos en la base', () => {
 
   beforeEach(async () => {
     await db.$executeRawUnsafe(
-      'TRUNCATE video_edits, video_editor_settings, image_workers, publication_clips, product_videos, shoot_steps, shoot_protocols, publications, stores, channels, products, accounts, users CASCADE',
+      'TRUNCATE video_edits, video_editor_settings, video_account_settings, image_workers, publication_clips, product_videos, shoot_steps, shoot_protocols, publications, stores, channels, products, accounts, users CASCADE',
     );
     accountId = (await db.account.create({ data: { slug: 'prueba', name: 'Cuenta de prueba' } })).id;
     productId = (await db.product.create({ data: { accountId, name: 'Camisa 384675', productType: 'Camisa de cilindro' } })).id;
@@ -440,6 +445,94 @@ describe.skipIf(!url)('la cola del editor de videos en la base', () => {
     expect(await discardEdit(db, { accountId, editId: edit.id, userId })).toEqual({ clipFileId: `clip-de-${edit.id}` });
     expect(await db.publicationClip.count()).toBe(0);
     await expect(discardEdit(db, { accountId, editId: edit.id, userId })).rejects.toThrow('no se puede descartar ahora');
+  });
+
+  it('el pedido lleva los momentos del protocolo, la ficha del producto y el sonido de la cuenta', async () => {
+    await db.product.update({ where: { id: productId }, data: { brand: 'Esteem', partNumber: '384675-030', kitContents: '4 camisas', specs: [{ name: 'Diámetro', value: '95 mm' }] } });
+    const protocol = await db.shootProtocol.create({ data: { accountId, name: 'Unboxing' } });
+    const moments = [
+      { texto: 'Mostrar la caja y la etiqueta', importancia: 'IMPORTANTE' },
+      { texto: 'Sacar las demás piezas', importancia: 'REPETIDO' },
+    ];
+    const step = await db.shootStep.create({ data: { protocolId: protocol.id, title: 'Unboxing cenital', kind: 'VIDEO', moments } });
+    expect(await videoSteps(db, accountId)).toEqual([{ id: step.id, label: 'Unboxing: Unboxing cenital', moments: 2 }]);
+    expect(await loadAccountVideo(db, accountId)).toEqual(DEFAULT_ACCOUNT_VIDEO);
+    const settings = { ...DEFAULT_ACCOUNT_VIDEO, targetSeconds: 40, voiceOn: true, voiceId: 'voz1', musicOn: true, subtitlesOn: true, defaultStepId: step.id };
+    await saveAccountVideo(db, { accountId, values: settings, userId });
+    expect(await loadAccountVideo(db, accountId)).toEqual(settings);
+
+    // Un video copiado al Drive no dice su paso: vale el de la cuenta.
+    const v = await db.productVideo.update({ where: { id: (await video()).id }, data: { variantLabel: '0.50' } });
+    const { editId } = await requestEdit(db, { accountId, videoId: v.id, userId });
+    await claimNextEdit(db, workerId);
+    const job = await buildVideoJob(db, editId, deps);
+    expect(job.objetivo_segundos).toBe(40);
+    expect(job.video_del_protocolo).toEqual({ titulo: 'Unboxing cenital', indicaciones: null });
+    expect(job.momentos).toEqual(moments);
+    expect(job.ficha).toBe('Producto: Camisa 384675\nTipo: Camisa de cilindro\nMarca: Esteem\nNúmero de pieza: 384675-030\nMedida: 0.50\nContenido: 4 camisas\nDiámetro: 95 mm');
+    expect(job.guion).toBeNull();
+    expect(job.sonido).toEqual({ voz: { id: 'voz1' }, musica: { estilo: DEFAULT_ACCOUNT_VIDEO.musicStyle }, subtitulos: true });
+  });
+
+  it('los ajustes de video de la cuenta se revisan antes de guardarse', async () => {
+    const base = { ...DEFAULT_ACCOUNT_VIDEO };
+    await expect(saveAccountVideo(db, { accountId, values: { ...base, voiceOn: true }, userId })).rejects.toThrow('ID de la voz');
+    await expect(saveAccountVideo(db, { accountId, values: { ...base, subtitlesOn: true }, userId })).rejects.toThrow('prendé la voz primero');
+    await expect(saveAccountVideo(db, { accountId, values: { ...base, musicOn: true, musicStyle: '' }, userId })).rejects.toThrow('estilo');
+    await expect(saveAccountVideo(db, { accountId, values: { ...base, defaultStepId: 'no-existe' }, userId })).rejects.toThrow('ya no está en los protocolos');
+    await expect(saveAccountVideo(db, { accountId, values: { ...base, targetSeconds: 500 }, userId })).rejects.toThrow(VideoEditError);
+    expect(await db.videoAccountSettings.count()).toBe(0);
+  });
+
+  it('al pedir la edición se puede decir con qué paso se grabó, y pedir de nuevo con cortes y guión', async () => {
+    const protocol = await db.shootProtocol.create({ data: { accountId, name: 'Unboxing' } });
+    const step = await db.shootStep.create({ data: { protocolId: protocol.id, title: 'Unboxing', kind: 'VIDEO' } });
+    const photo = await db.shootStep.create({ data: { protocolId: protocol.id, title: 'Frente', kind: 'PHOTO' } });
+    const v = await video();
+    await expect(requestEdit(db, { accountId, videoId: v.id, stepId: photo.id, userId })).rejects.toThrow('ya no está en los protocolos');
+    await requestEdit(db, { accountId, videoId: v.id, stepId: step.id, userId });
+    expect((await db.productVideo.findUniqueOrThrow({ where: { id: v.id } })).shootStepId).toBe(step.id);
+
+    await claimNextEdit(db, workerId);
+    const first = (await db.videoEdit.findFirstOrThrow()).id;
+    uploaded.set(first, clipFile(first));
+    const script = [{ inicio: 0.3, fin: 4.1, texto: 'Así llega la caja.' }];
+    await submitEditResult(db, workerId, done(first, 1, { guion: script, sonido: { voz: true, musica: true, subtitulos: false, costo_usd: null } }), { collect });
+    expect((await editsOfProduct(db, productId))[0]).toMatchObject({ script, sound: { voz: true, musica: true, subtitulos: false } });
+
+    const lines = ['Así llega la caja, sellada.', '', 'La pieza, sin golpes.'];
+    const again = await redoEdit(db, { accountId, editId: first, plan: PLAN, script: lines, userId });
+    await claimNextEdit(db, workerId);
+    const job = await buildVideoJob(db, again.editId, deps);
+    expect(job.plan).toEqual(PLAN);
+    expect(job.guion).toEqual(lines);
+  });
+
+  it('con la cuenta en automático, el video nuevo se edita solo y el clip sin avisos se aprueba solo', async () => {
+    const a = await video('a.mp4');
+    expect(await queueNewVideos(db, { accountId, productId })).toBe(0);
+    await saveAccountVideo(db, { accountId, values: { ...DEFAULT_ACCOUNT_VIDEO, autoEdit: true, autoApprove: true, targetSeconds: 30 }, userId });
+    expect(await queueNewVideos(db, { accountId, productId })).toBe(1);
+    // No lo pone dos veces.
+    expect(await queueNewVideos(db, { accountId, productId })).toBe(0);
+    const edit = await db.videoEdit.findFirstOrThrow({ where: { videoId: a.id } });
+    expect(edit).toMatchObject({ status: 'QUEUED', targetSeconds: 30, askedById: null });
+
+    await claimNextEdit(db, workerId);
+    uploaded.set(edit.id, clipFile(edit.id));
+    await submitEditResult(db, workerId, done(edit.id, 1, { avisos: [] }), { collect });
+    expect(await db.videoEdit.findUniqueOrThrow({ where: { id: edit.id } })).toMatchObject({ status: 'APPROVED', openFor: null });
+    // El clip editado no vuelve a la cola.
+    expect(await queueNewVideos(db, { accountId, productId })).toBe(0);
+
+    // Con un aviso, espera a que alguien lo mire.
+    const b = await video('b.mp4');
+    expect(await queueNewVideos(db, { accountId, productId })).toBe(1);
+    const second = await db.videoEdit.findFirstOrThrow({ where: { videoId: b.id } });
+    await claimNextEdit(db, workerId);
+    uploaded.set(second.id, { ...clipFile(second.id), name: 'b · editado.mp4' });
+    await submitEditResult(db, workerId, done(second.id, 1), { collect });
+    expect((await db.videoEdit.findUniqueOrThrow({ where: { id: second.id } })).status).toBe('REVIEW');
   });
 
   it('una edición descartada mientras la Mac trabajaba ya no acepta su resultado', async () => {

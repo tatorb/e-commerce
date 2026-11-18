@@ -45,7 +45,15 @@ export function VideosStep({
   const toMeasure = active.filter((v) => !v.measuredByBrowser).map((v) => v.id);
   // El editor de videos: la última edición de cada video y cuándo edita la Mac.
   const editOf = new Map(data.edits.map((e) => [e.videoId, e]));
-  const editor = { summary: data.editor.summary, connected: data.editor.connected, hasKey: data.editor.hasKey, off: data.editor.settings.mode === 'OFF' };
+  const editor = {
+    summary: data.editor.summary,
+    connected: data.editor.connected,
+    hasKey: data.editor.hasKey,
+    off: data.editor.settings.mode === 'OFF',
+    steps: data.videoSteps,
+    defaultStepId: data.accountVideo.defaultStepId,
+    hasVoice: data.accountVideo.voiceOn,
+  };
   const range = { min: clipRules?.minSeconds ?? 10, max: clipRules?.maxSeconds ?? 60 };
 
   if (!data.driveEmail) {

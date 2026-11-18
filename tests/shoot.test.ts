@@ -27,11 +27,22 @@ describe('protocolos', () => {
     expect(protocolInput.safeParse({ name: '  ' }).success).toBe(false);
     expect(protocolInput.parse({ name: ' Aros ' })).toEqual({ name: 'Aros', description: '' });
     expect(stepInput.safeParse({ title: 'Frente', kind: 'AUDIO' }).success).toBe(false);
-    expect(stepInput.parse({ title: 'Limpiar el lugar', kind: 'CHECK' })).toEqual({ title: 'Limpiar el lugar', kind: 'CHECK', explanation: '', editorNotes: '' });
+    expect(stepInput.parse({ title: 'Limpiar el lugar', kind: 'CHECK' })).toEqual({ title: 'Limpiar el lugar', kind: 'CHECK', explanation: '', editorNotes: '', moments: [] });
     // Las indicaciones para el editor, sin espacios de más y con un largo máximo.
     expect(stepInput.parse({ title: 'Frente', kind: 'PHOTO', editorNotes: '  Sin brillos.  ' }).editorNotes).toBe('Sin brillos.');
     expect(stepInput.safeParse({ title: 'Frente', kind: 'PHOTO', editorNotes: 'x'.repeat(2001) }).success).toBe(false);
-    expect(stepInput.parse({ title: 'Frente', kind: 'VIDEO', explanation: ' Girarlo ' })).toEqual({ title: 'Frente', kind: 'VIDEO', explanation: 'Girarlo', editorNotes: '' });
+    expect(stepInput.parse({ title: 'Frente', kind: 'VIDEO', explanation: ' Girarlo ' })).toEqual({ title: 'Frente', kind: 'VIDEO', explanation: 'Girarlo', editorNotes: '', moments: [] });
+    // Un paso de video cuenta sus momentos, en orden y con su importancia.
+    const moments = [
+      { texto: ' Mostrar la caja ', importancia: 'IMPORTANTE' },
+      { texto: 'Sacar las demás piezas', importancia: 'REPETIDO' },
+    ];
+    expect(stepInput.parse({ title: 'Unboxing', kind: 'VIDEO', moments }).moments).toEqual([
+      { texto: 'Mostrar la caja', importancia: 'IMPORTANTE' },
+      { texto: 'Sacar las demás piezas', importancia: 'REPETIDO' },
+    ]);
+    expect(stepInput.safeParse({ title: 'Unboxing', kind: 'VIDEO', moments: [{ texto: 'x', importancia: 'URGENTE' }] }).success).toBe(false);
+    expect(stepInput.safeParse({ title: 'Unboxing', kind: 'VIDEO', moments: Array.from({ length: 31 }, () => ({ texto: 'x', importancia: 'NORMAL' })) }).success).toBe(false);
   });
 
   it('las ilustraciones son imágenes comunes de hasta 15 MB', () => {

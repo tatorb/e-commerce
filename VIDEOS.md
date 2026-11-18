@@ -4,15 +4,38 @@ El editor arma el clip vertical de un video de unboxing. Corre en la Mac del est
 1. Lo gira para que quede vertical, con las manos entrando desde abajo y la etiqueta derecha.
 2. Lo endereza y lo acerca, si hace falta.
 3. Corrige la luz y el balance de blancos.
-4. Lo acelera para que dure lo pedido.
+4. Marca los momentos del video y le da a cada uno su velocidad.
 5. Le saca el sonido de la grabación.
-6. Lo exporta en el tamaño que pide Mercado Libre, 1080 × 1920.
+6. Le pone la voz en off, la música y los subtítulos, si la cuenta los tiene prendidos.
+7. Lo exporta en el tamaño que pide Mercado Libre, 1080 × 1920.
 
-Claude mira unos cuadros del video y propone los valores, y el programa los aplica. El clip queda en la carpeta de videos del producto en el Drive, al lado del original, esperando que lo apruebes.
+Claude mira el video y propone la imagen, los cortes y el guión, y el programa los aplica. El clip queda en la carpeta de videos del producto en el Drive, al lado del original, esperando que lo apruebes.
 
 **Regla de oro:** solo se edita el video original. Nada se genera ni se inventa en la imagen, y el original nunca se toca.
 
-**Lo que todavía no hace:** cortar por momentos con distintas velocidades, el guión, la voz en off y la música. Hoy todo el video va a una sola velocidad.
+## Cómo decide las velocidades
+
+En el protocolo, cada paso de video cuenta sus momentos en orden y qué tan importante es cada uno:
+
+- **Importante:** va a velocidad normal. La etiqueta, la pieza en detalle, el final con todo a la vista.
+- **Normal:** se acelera. Abrir la caja, sacar envoltorios.
+- **Repetido:** va lo más rápido. Lo mismo que ya se mostró, hecho otra vez.
+
+Claude ubica cada momento en el video. Las velocidades las calcula el programa, lo justo para que el clip dure lo pedido: por eso la duración sale siempre dentro de lo que acepta el canal. Si lo importante solo no entra, también se acelera un poco, y el clip lo avisa.
+
+Sin momentos en el protocolo, Claude los marca por lo que ve.
+
+## La voz, la música y los subtítulos
+
+Se prenden por cuenta, en Ajustes, Protocolos de fotos, Edición de videos.
+
+- **Voz en off.** Claude escribe una línea por tramo, con la ficha del producto, y cada línea entra en lo que dura su tramo. ElevenLabs la dice con la voz que elijas. Hace falta el ID de la voz: en ElevenLabs, en Voices, abrí el menú de la voz y elegí Copy voice ID.
+- **Música.** ElevenLabs la genera para cada clip, del largo justo, con el estilo que describas. Baja sola cuando habla la voz.
+- **Subtítulos.** El guión escrito sobre el video, de a pocas palabras, con la que se está diciendo resaltada.
+
+La mezcla lleva la voz a -14 LUFS, el volumen de las redes, y la música a un 16 %.
+
+Si algo falla, el clip sale igual con lo que hay y lo avisa: sin Claude va a una sola velocidad y sin voz, y sin ElevenLabs sale en silencio.
 
 ## Qué necesitás
 
@@ -23,16 +46,31 @@ Claude mira unos cuadros del video y propone los valores, y el programa los apli
 brew install ffmpeg
 ```
 
+- **Una clave de ElevenLabs**, solo si querés voz o música. Se crea en elevenlabs.io, en API Keys, con acceso a Text to Speech y a Music. Se carga en la Mac con:
+
+```bash
+bash configurar.sh
+```
+
 - **Google Drive para computadoras** en la Mac, con la cuenta del estudio. No es obligatorio, pero sin él cada video se baja por internet antes de editarlo, y pesan mucho.
 
 ## Cómo se usa
 
 1. **Copiá el video a la carpeta del producto.** En el Drive, `E-commerce Studio MRB / la cuenta / el producto / Videos`. Si la cámara es una DJI, copiá también el archivo `.LRF` que graba al lado de cada video: es una copia liviana y el editor la usa para mirar más rápido.
 2. **Abrí el paso Videos** de una publicación del producto. La app lee la carpeta y muestra el video.
-3. **Tocá Editar para clip.** Elegí cuántos segundos tiene que durar y, si hace falta, escribí una indicación para el editor.
+3. **Tocá Editar para clip.** Elegí cuántos segundos tiene que durar, con qué paso del protocolo se grabó y, si hace falta, escribí una indicación para el editor.
 4. **Esperá a que la Mac lo tome.** La pantalla se pone al día sola.
-5. **Mirá el clip** y tocá Aprobar, Pedir de nuevo o Descartar el clip.
-6. **Elegilo como clip** de la publicación, con Usar como clip.
+5. **Mirá el clip.** Abajo se ve cómo se editó, lo que dice la voz y los avisos.
+6. **Aprobalo, o corregilo.** Con Ajustar los cortes y el guión cambiás a mano dónde corta cada tramo, su velocidad y lo que dice la voz, y la Mac lo rehace tal cual. Con Pedir de nuevo, Claude lo propone otra vez con tu indicación.
+7. **Elegilo como clip** de la publicación, con Usar como clip.
+
+## En automático
+
+En Edición de videos, por cuenta:
+
+- **Editar solo cada video nuevo.** Al grabar un video en Registro de productos o al leer la carpeta del Drive, va a la cola sin que nadie lo pida.
+- **Aprobar solo el clip que salió sin avisos.** Si la edición tuvo algún aviso, espera a que alguien la mire.
+- **Paso del protocolo para los videos copiados al Drive.** Un video copiado a la carpeta no dice con qué paso se grabó: se edita con los momentos de ese.
 
 ## Cuándo edita la Mac
 
@@ -60,6 +98,12 @@ Deja al lado del video una carpeta `edicion-…` con el clip, las hojas de cuadr
 ./probar_video.sh ~/Desktop/DJI_0073_D.MP4 --sin-claude --cuartos 1
 ```
 
+Con voz, música y subtítulos:
+
+```bash
+./probar_video.sh ~/Desktop/DJI_0073_D.MP4 --voz ID_DE_LA_VOZ --musica "Instrumental suave, sin voces." --subtitulos
+```
+
 Para probar cortes y velocidades a mano, editá el `plan.json` que dejó la corrida anterior y pasalo:
 
 ```bash
@@ -73,7 +117,7 @@ Para probar cortes y velocidades a mano, editá el `plan.json` que dejó la corr
 
 ## Cómo está hecho
 
-- `trabajador-imagenes/mrb_videos/`: el editor. `plan.py` es el plan de edición, `medir.py` lo que mide el código, `inspector.py` la consulta a Claude, `filtros.py` y `editar.py` lo que se le pide a ffmpeg, `trabajo.py` una edición de punta a punta y `conexion.py` los mensajes con la app.
+- `trabajador-imagenes/mrb_videos/`: el editor. `plan.py` es el plan de edición, `medir.py` lo que mide el código, `inspector.py` las tres consultas a Claude (imagen, cortes y guión), `cortes.py` las velocidades por importancia, `sonido.py` la voz, la música, la mezcla y los subtítulos, `filtros.py` y `editar.py` lo que se le pide a ffmpeg, `linea.py` la edición completa, `trabajo.py` un pedido de la app de punta a punta y `conexion.py` los mensajes con la app.
 - `src/domain/video-edit.ts`: el plan, los mensajes y cuándo puede editar la Mac.
 - `src/lib/video-edits.ts`: la cola de edición. `src/lib/video-edit-files.ts`: los archivos en el Drive.
 - `src/app/api/videos/trabajador/`: por donde la Mac pregunta, avisa que sigue, baja el original y entrega.
