@@ -1957,6 +1957,9 @@ model VideoEdit {
   sound         Json?
   clipId        String?         @unique
   clip          ProductVideo?   @relation("VideoEditClip", fields: [clipId], references: [id], onDelete: SetNull)
+  // Cuándo se ofreció el clip aprobado a las publicaciones del producto, para
+  // Clips por subir. Se ofrece una sola vez: si la persona lo saca, no vuelve.
+  clipOfferedAt DateTime?
   aiUsage       Json?
   seconds       Int?
   // En qué anda la Mac mientras lo edita: { etapa, porcentaje, at }.

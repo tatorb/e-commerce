@@ -20,7 +20,7 @@ import { formatSeconds } from '@/domain/videos';
 import { ConnectError } from '@/channels/connect-types';
 import { askClips, readClipsAnswer } from '@/channels/mercadolibre/clips-api';
 import { withAccessToken } from '@/lib/connections';
-import { pendingClipUploads } from '@/lib/clip-uploads';
+import { offerApprovedClips, pendingClipUploads } from '@/lib/clip-uploads';
 import { CryptoError } from '@/lib/crypto';
 import { DriveError, trashFile, withDriveToken } from '@/lib/drive';
 import { workerState } from '@/lib/image-worker';
@@ -470,12 +470,14 @@ const uploadsList = defineTool({
   readOnly: true,
   async run(ctx, args) {
     const account = await resolveAccount(ctx, args.cuenta);
+    await offerApprovedClips(ctx.db, account.id);
     const clips = await pendingClipUploads(ctx.db, account.id);
     return {
       faltan: clips.length,
       clips: clips.map((c) => ({
         publicacion: c.publicationId,
         codigo: c.externalId,
+        medida: c.measure,
         titulo: c.title,
         producto: c.product,
         video: c.videoId,

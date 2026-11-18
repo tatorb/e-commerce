@@ -12,20 +12,43 @@ type Db = PrismaClient | Prisma.TransactionClient;
 const LIVE = { externalId: { not: null }, channelStatus: 'ACTIVE' } as const;
 
 /**
- * El clip recién aprobado queda elegido en las publicaciones activas del
- * producto que todavía no tienen clip. Las que ya tienen uno no se tocan: ahí
- * decide la persona. Devuelve en cuántas quedó.
+ * El clip aprobado queda elegido en las publicaciones activas del producto que
+ * todavía no tienen clip. Las que ya tienen uno no se tocan: ahí decide la
+ * persona. Un clip grabado para una medida va solo a las publicaciones de esa
+ * medida. Se ofrece una sola vez por clip: si después la persona lo saca de
+ * una publicación, no vuelve. Devuelve en cuántas quedó.
  */
 export async function chooseApprovedClip(tx: Db, args: { clipId: string; userId: string | null; now?: Date }): Promise<number> {
-  const clip = await tx.productVideo.findUnique({ where: { id: args.clipId }, select: { id: true, productId: true, goneAt: true } });
+  const now = args.now ?? new Date();
+  await tx.videoEdit.updateMany({ where: { clipId: args.clipId }, data: { clipOfferedAt: now } });
+  const clip = await tx.productVideo.findUnique({ where: { id: args.clipId }, select: { id: true, productId: true, goneAt: true, variantKey: true } });
   if (!clip || clip.goneAt) return 0;
-  const pubs = await tx.publication.findMany({ where: { productId: clip.productId, ...LIVE, clips: { none: {} } }, select: { id: true } });
+  const pubs = await tx.publication.findMany({
+    where: { productId: clip.productId, ...LIVE, clips: { none: {} }, ...(clip.variantKey ? { OR: [{ variantKey: clip.variantKey }, { variantKey: null }] } : {}) },
+    select: { id: true },
+  });
   if (pubs.length === 0) return 0;
   await tx.publicationClip.createMany({
-    data: pubs.map((p) => ({ publicationId: p.id, videoId: clip.id, position: 0, chosenById: args.userId, chosenAt: args.now ?? new Date() })),
+    data: pubs.map((p) => ({ publicationId: p.id, videoId: clip.id, position: 0, chosenById: args.userId, chosenAt: now })),
     skipDuplicates: true,
   });
   return pubs.length;
+}
+
+/**
+ * Ofrece los clips aprobados de la cuenta que todavía no se ofrecieron: los
+ * que se aprobaron antes de que existiera Clips por subir. Los más viejos
+ * primero, así el primero que se aprobó es el que queda.
+ */
+export async function offerApprovedClips(db: PrismaClient, accountId: string, now = new Date()): Promise<number> {
+  const edits = await db.videoEdit.findMany({
+    where: { status: 'APPROVED', clipOfferedAt: null, clipId: { not: null }, clip: { goneAt: null }, video: { product: { accountId } } },
+    orderBy: { reviewedAt: 'asc' },
+    select: { clipId: true, reviewedById: true },
+  });
+  let chosen = 0;
+  for (const e of edits) chosen += await db.$transaction((tx) => chooseApprovedClip(tx, { clipId: e.clipId!, userId: e.reviewedById, now }));
+  return chosen;
 }
 
 export type ClipUpload = {
@@ -34,6 +57,8 @@ export type ClipUpload = {
   title: string | null;
   product: string;
   externalId: string;
+  // La medida de la publicación, si es una de varias.
+  measure: string | null;
   storeName: string;
   // La publicación en el listado del vendedor, donde está la opción de subir el video.
   channelLink: string;
@@ -84,7 +109,7 @@ export async function pendingClipUploads(db: Db, accountId: string): Promise<Cli
       videoId: true,
       chosenAt: true,
       video: { select: { name: true, mimeType: true, driveFileId: true, webViewLink: true, durationMs: true, size: true } },
-      publication: { select: { title: true, externalId: true, url: true, store: { select: { name: true } }, product: { select: { name: true } } } },
+      publication: { select: { title: true, externalId: true, variantKey: true, url: true, store: { select: { name: true } }, product: { select: { name: true } } } },
     },
   });
   return rows.map((r) => ({
@@ -93,6 +118,7 @@ export async function pendingClipUploads(db: Db, accountId: string): Promise<Cli
     title: r.publication.title,
     product: r.publication.product.name,
     externalId: r.publication.externalId!,
+    measure: r.publication.variantKey,
     storeName: r.publication.store.name,
     channelLink: sellerListingLink(r.publication.externalId!),
     publicationLink: r.publication.url,

@@ -258,6 +258,13 @@ describe.skipIf(!url)('el editor de videos desde Claude', () => {
     expect((await call('list_clips_to_upload')).data.faltan).toBe(0);
     await db.publication.updateMany({ data: { channelStatus: 'ACTIVE' } });
 
+    // Un clip aprobado antes de que existiera la lista entra al abrirla, una sola vez: si se saca, no vuelve.
+    await db.publicationClip.deleteMany();
+    await db.videoEdit.updateMany({ where: { status: 'APPROVED' }, data: { clipOfferedAt: null } });
+    expect((await call('list_clips_to_upload')).data.faltan).toBe(1);
+    await db.publicationClip.deleteMany();
+    expect((await call('list_clips_to_upload')).data.faltan).toBe(0);
+
     // Una edición en cola se descarta sin más.
     await call('request_video_edit', { publicacion: 'MLA1110001', video: videoId });
     const discarded = await call('review_video_edit', { publicacion: 'MLA1110001', video: videoId, decision: 'descartar' });
