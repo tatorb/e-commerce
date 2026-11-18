@@ -52,7 +52,6 @@ export function VideosStep({
     hasKey: data.editor.hasKey,
     off: data.editor.settings.mode === 'OFF',
     steps: data.videoSteps,
-    defaultStepId: data.accountVideo.defaultStepId,
     hasVoice: data.accountVideo.voiceOn,
   };
   const range = { min: clipRules?.minSeconds ?? 10, max: clipRules?.maxSeconds ?? 60 };

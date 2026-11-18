@@ -455,19 +455,20 @@ describe.skipIf(!url)('la cola del editor de videos en la base', () => {
   });
 
   it('el pedido lleva los momentos del protocolo, la ficha del producto y el sonido de la cuenta', async () => {
-    const protocol = await db.shootProtocol.create({ data: { accountId, name: 'Unboxing' } });
+    // El protocolo es del tipo del producto.
+    const protocol = await db.shootProtocol.create({ data: { accountId, name: 'Unboxing', productType: 'Camisa de cilindro' } });
     const moments = [
       { texto: 'Mostrar la caja y la etiqueta', importancia: 'IMPORTANTE' },
       { texto: 'Sacar las demás piezas', importancia: 'REPETIDO' },
     ];
     const step = await db.shootStep.create({ data: { protocolId: protocol.id, title: 'Unboxing cenital', kind: 'VIDEO', moments } });
-    expect(await videoSteps(db, accountId)).toEqual([{ id: step.id, label: 'Unboxing: Unboxing cenital', moments: 2 }]);
+    expect(await videoSteps(db, accountId)).toEqual([{ id: step.id, label: 'Unboxing: Unboxing cenital', moments: 2, productType: 'Camisa de cilindro', forDrive: true }]);
     expect(await loadAccountVideo(db, accountId)).toEqual(DEFAULT_ACCOUNT_VIDEO);
-    const settings = { ...DEFAULT_ACCOUNT_VIDEO, targetSeconds: 40, voiceOn: true, voiceId: 'voz1', musicOn: true, subtitlesOn: true, subtitleColor: '#6fa82c', defaultStepId: step.id };
+    const settings = { ...DEFAULT_ACCOUNT_VIDEO, targetSeconds: 40, voiceOn: true, voiceId: 'voz1', musicOn: true, subtitlesOn: true, subtitleColor: '#6fa82c' };
     await saveAccountVideo(db, { accountId, values: settings, userId });
     expect(await loadAccountVideo(db, accountId)).toEqual(settings);
 
-    // Un video copiado al Drive no dice su paso: vale el de la cuenta.
+    // Un video copiado al Drive no dice su paso: vale el paso de video del protocolo del tipo de su producto.
     const v = await db.productVideo.update({ where: { id: (await video()).id }, data: { variantLabel: '0.50' } });
     const { editId } = await requestEdit(db, { accountId, videoId: v.id, userId });
     await claimNextEdit(db, workerId);
@@ -485,7 +486,9 @@ describe.skipIf(!url)('la cola del editor de videos en la base', () => {
     await expect(saveAccountVideo(db, { accountId, values: { ...base, voiceOn: true }, userId })).rejects.toThrow('ID de la voz');
     await expect(saveAccountVideo(db, { accountId, values: { ...base, subtitlesOn: true }, userId })).rejects.toThrow('prendé la voz primero');
     await expect(saveAccountVideo(db, { accountId, values: { ...base, musicOn: true, musicStyle: '' }, userId })).rejects.toThrow('estilo');
-    await expect(saveAccountVideo(db, { accountId, values: { ...base, defaultStepId: 'no-existe' }, userId })).rejects.toThrow('ya no está en los protocolos');
+    // El paso por defecto de la cuenta ya no existe: unos ajustes viejos que lo traen se guardan sin él.
+    expect(await saveAccountVideo(db, { accountId, values: { ...base, defaultStepId: 'un-paso' }, userId })).not.toHaveProperty('defaultStepId');
+    await db.videoAccountSettings.deleteMany();
     await expect(saveAccountVideo(db, { accountId, values: { ...base, targetSeconds: 500 }, userId })).rejects.toThrow(VideoEditError);
     await expect(saveAccountVideo(db, { accountId, values: { ...base, subtitleColor: 'verde' }, userId })).rejects.toThrow(VideoEditError);
     // Unos ajustes guardados antes de que existiera el color siguen valiendo, con el de siempre.

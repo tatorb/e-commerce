@@ -5,7 +5,7 @@ import { shotText } from '@/domain/shoot';
 import { editorSummary, isLightCopy, pairKey } from '@/domain/video-edit';
 import { workerState } from '@/lib/image-worker';
 import { loadVideoScript } from '@/lib/video-script';
-import { editsOfProduct, loadAccountVideo, loadEditorSettings, queueNewVideos, videoSteps } from '@/lib/video-edits';
+import { editsOfProduct, loadAccountVideo, loadEditorSettings, queueNewVideos, stepForVideo, videoSteps, type StepReason } from '@/lib/video-edits';
 import {
   DriveError,
   driveEmail,
@@ -383,8 +383,14 @@ export type VideoRow = {
   editedFrom: { name: string; approved: boolean } | null;
   // Si tiene al lado la copia liviana de la cámara.
   hasLightCopy: boolean;
-  // El paso del protocolo con que se grabó, si se sabe.
+  // El paso del protocolo que tiene anotado: con el que se grabó o el que eligió una persona.
   stepId: string | null;
+  // Una persona eligió el paso, o que no use protocolo.
+  stepChosen: boolean;
+  // El paso con que se edita hoy, por qué, y el que saldría solo si nadie eligiera.
+  usedStep: { id: string; label: string } | null;
+  stepReason: StepReason;
+  autoStep: { id: string; label: string } | null;
   // De qué medida del producto es, y de dónde salió ese dato. Null: de todas.
   measureKey: string | null;
   measureLabel: string | null;
@@ -436,6 +442,15 @@ export async function loadVideosStep(db: PrismaClient, args: { accountId: string
     videoSteps(db, args.accountId),
   ]);
   const folderId = email ? await knownFolderId(db, `videos:${pub.productId}`, email) : null;
+  // El paso de cada video: el que se usa y el que saldría solo por el tipo de producto.
+  const product = await db.product.findUniqueOrThrow({ where: { id: pub.productId }, select: { productType: true } });
+  const labelOf = (id: string | undefined) => (id ? { id, label: steps.find((s) => s.id === id)?.label ?? 'Paso de video' } : null);
+  const auto = await stepForVideo(db, { accountId: args.accountId, productType: product.productType, shootStepId: null, stepChosen: false });
+  const stepOf = new Map<string, Pick<VideoRow, 'usedStep' | 'stepReason' | 'autoStep'>>();
+  for (const v of rows) {
+    const used = v.stepChosen || v.shootStepId ? await stepForVideo(db, { accountId: args.accountId, productType: product.productType, shootStepId: v.shootStepId, stepChosen: v.stepChosen }) : auto;
+    stepOf.set(v.id, { usedStep: labelOf(used.step?.id), stepReason: used.reason, autoStep: labelOf(auto.step?.id) });
+  }
   const videos: VideoRow[] = rows.map((v) => ({
     id: v.id,
     name: v.name,
@@ -453,6 +468,8 @@ export async function loadVideosStep(db: PrismaClient, args: { accountId: string
     shot: v.shot ? shotText(v.variantLabel, v.shootStep?.title ?? null) : null,
     editedFrom: v.editedBy ? { name: v.editedBy.video.name, approved: v.editedBy.status === 'APPROVED' } : null,
     stepId: v.shootStepId,
+    stepChosen: v.stepChosen,
+    ...stepOf.get(v.id)!,
     hasLightCopy: v.lightFileId !== null,
     measureKey: v.variantKey,
     measureLabel: v.variantLabel,

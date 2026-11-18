@@ -109,7 +109,12 @@ En Edición de videos, por cuenta:
 - **Editar solo cada video nuevo.** Al grabar un video en Registro de productos o al leer la carpeta del Drive, va a la cola sin que nadie lo pida.
 - **Que Claude escriba el guión solo.** Si el producto todavía no tiene guión, lo escribe Claude al pedir la edición y se usa sin que nadie lo revise.
 - **Aprobar solo el clip que salió sin avisos.** Si la edición tuvo algún aviso, espera a que alguien la mire.
-- **Paso del protocolo para los videos copiados al Drive.** Un video copiado a la carpeta no dice con qué paso se grabó: se edita con los momentos de ese.
+- **Con qué paso del protocolo se edita cada video.** Cada protocolo es de un tipo de producto, y cada tipo tiene uno solo (se elige al crearlo, en Protocolos de fotos). El paso sale del primero de estos que haya:
+  1. El que elegís al pedir la edición: un paso, **Sin protocolo**, o **Automático** para volver al que sale solo.
+  2. El paso con que se grabó en Registro de productos.
+  3. En un video copiado al Drive, el paso de video del protocolo del tipo de su producto. Si ese protocolo tiene más de un paso de video, el marcado como "Usar este paso para los videos copiados al Drive".
+
+  Si el producto no tiene tipo, su tipo no tiene protocolo o ningún paso está marcado, el editor marca los momentos por lo que ve.
 
 ## Cuándo edita la Mac
 

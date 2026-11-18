@@ -24,9 +24,11 @@ import { offerApprovedClips, pendingClipUploads } from '@/lib/clip-uploads';
 import { CryptoError } from '@/lib/crypto';
 import { DriveError, trashFile, withDriveToken } from '@/lib/drive';
 import { workerState } from '@/lib/image-worker';
-import { ShootError, updateStep } from '@/lib/shoot';
+import { listProtocols, ShootError, updateProtocol, updateStep } from '@/lib/shoot';
 import { storageError } from '@/lib/stored-files';
 import {
+  STEP_REASON_TEXT,
+  chooseVideoStep,
   approveEdit,
   clipRulesFor,
   discardEdit,
@@ -136,7 +138,8 @@ const getStep = defineTool({
         ...(v.gone ? { ya_no_esta_en_el_drive: true } : {}),
         ...(v.editedFrom ? { clip_editado_de: v.editedFrom.name, aprobado: v.editedFrom.approved } : {}),
         ...(v.hasLightCopy ? { con_copia_liviana: true } : {}),
-        paso_del_protocolo: v.stepId,
+        paso_con_que_se_edita: v.usedStep ? v.usedStep.id : null,
+        por_que_ese_paso: STEP_REASON_TEXT[v.stepReason],
         medida: v.measureLabel ?? 'todas',
         ...(v.measureSource ? { la_medida_salio_de: v.measureSource === 'archivo' ? 'el nombre del archivo' : v.measureSource === 'persona' ? 'la eligió una persona' : 'cómo se grabó en Registro de productos' } : {}),
         es_clip_de_esta_publicacion: clipIds.has(v.id),
@@ -169,12 +172,18 @@ const getStep = defineTool({
         editar_solo_cada_video_nuevo: s.accountVideo.autoEdit,
         claude_escribe_el_guion_solo: s.accountVideo.autoScript,
         aprobar_solo_el_clip_sin_avisos: s.accountVideo.autoApprove,
-        paso_para_los_videos_copiados_al_drive: s.accountVideo.defaultStepId,
       },
       mac_del_estudio: { cuando_edita: s.editor.summary, conectada: s.editor.connected, tiene_llave: s.editor.hasKey },
       pasos_de_video_de_los_protocolos: s.videoSteps.map((st) => {
         const row = steps.find((x) => x.id === st.id);
-        return { paso: st.id, nombre: st.label, indicaciones_para_el_editor: row?.editorNotes.trim() || null, momentos: parseMoments(row?.moments) };
+        return {
+          paso: st.id,
+          nombre: st.label,
+          tipo_de_producto_del_protocolo: st.productType,
+          se_usa_para_los_videos_copiados_al_drive: st.forDrive,
+          indicaciones_para_el_editor: row?.editorNotes.trim() || null,
+          momentos: parseMoments(row?.moments),
+        };
       }),
       drive_conectado: Boolean(s.driveEmail),
       link_app: `${appLink(ctx, account, id)}?paso=videos`,
@@ -236,7 +245,7 @@ const requestTool = defineTool({
     video: z.string().min(1).describe('La clave «video» del video original, de get_videos_step.'),
     segundos: z.number().int().min(10).max(60).optional().describe('Cuánto tiene que durar el clip. Sin decir, lo de la cuenta. Si el guión dura más, el clip se alarga.'),
     indicacion: z.string().max(1000).optional().describe('Una indicación puntual para el editor, que manda sobre las del protocolo.'),
-    paso: z.string().nullable().optional().describe('Con qué paso de video del protocolo se grabó: la clave «paso» de get_videos_step. null: ninguno, el editor marca los momentos por lo que ve.'),
+    paso: z.string().nullable().optional().describe('Con qué paso de video del protocolo se edita: la clave «paso» de get_videos_step. null: sin protocolo, el editor marca los momentos por lo que ve. "auto": vuelve al que sale solo. Sin mandarlo, queda como está: el que eligió una persona, el paso con que se grabó en Registro de productos o, en un video copiado al Drive, el paso de video del protocolo del tipo del producto. Lo que se elige acá manda sobre eso.'),
     plan: planSchema.optional().describe('Los cortes a aplicar tal cual: el plan de una edición anterior, de get_videos_step, con los cambios que haga falta.'),
   }),
   readOnly: false,
@@ -250,7 +259,7 @@ const requestTool = defineTool({
     const ask = { accountId: account.id, targetSeconds: args.segundos, note: args.indicacion, plan: args.plan, userId: ctx.userId };
     let redone = false;
     if (edit && (edit.status === 'REVIEW' || edit.status === 'FAILED')) {
-      if (args.paso !== undefined) await ctx.db.productVideo.update({ where: { id: video.id }, data: { shootStepId: args.paso } });
+      if (args.paso !== undefined) await asToolError(() => chooseVideoStep(ctx.db, { accountId: account.id, videoId: video.id, stepId: args.paso === 'auto' ? 'auto' : args.paso! }));
       const r = await asToolError(() => redoEdit(ctx.db, { ...ask, editId: edit.id }));
       await trashClip(ctx, r.clipFileId);
       redone = true;
@@ -332,7 +341,7 @@ const settingsTool = defineTool({
   section: 'protocolos',
   title: 'Cambiar cómo se editan los videos de la cuenta',
   description:
-    'Cambia cómo arma la Mac el clip de cada video de la cuenta. Lo que no mandes queda como está. La voz en off necesita el ID de una voz de ElevenLabs; los subtítulos necesitan la voz. color_de_los_subtitulos es el color de la palabra que se está diciendo, el de la marca, como #6FA82C. paso_para_los_videos_copiados_al_drive es la clave «paso» de un paso de video del protocolo, de get_videos_step: vale para los videos que no dicen con cuál se grabaron. Lo automático conviene prenderlo cuando los clips ya salen bien: editar solo cada video nuevo, que Claude escriba el guión del producto que no tiene, y aprobar solo el clip que salió sin avisos. Con modo_de_la_mac, además, cambia cuándo puede editar la Mac del estudio, para todas las cuentas: solo lo puede hacer un administrador.',
+    'Cambia cómo arma la Mac el clip de cada video de la cuenta. Lo que no mandes queda como está. La voz en off necesita el ID de una voz de ElevenLabs; los subtítulos necesitan la voz. color_de_los_subtitulos es el color de la palabra que se está diciendo, el de la marca, como #6FA82C. Lo automático conviene prenderlo cuando los clips ya salen bien: editar solo cada video nuevo, que Claude escriba el guión del producto que no tiene, y aprobar solo el clip que salió sin avisos. Con modo_de_la_mac, además, cambia cuándo puede editar la Mac del estudio, para todas las cuentas: solo lo puede hacer un administrador.',
   input: z.object({
     cuenta: accountArg,
     segundos_del_clip: z.number().int().min(10).max(60).optional(),
@@ -345,7 +354,6 @@ const settingsTool = defineTool({
     editar_solo_cada_video_nuevo: z.boolean().optional(),
     claude_escribe_el_guion_solo: z.boolean().optional(),
     aprobar_solo_el_clip_sin_avisos: z.boolean().optional(),
-    paso_para_los_videos_copiados_al_drive: z.string().nullable().optional(),
     modo_de_la_mac: z
       .object({
         modo: z.enum(EDITOR_MODES).describe('OFF: no edita. ON: edita cuando hay un video en cola. SCHEDULE: solo entre las dos horas.'),
@@ -371,7 +379,6 @@ const settingsTool = defineTool({
       ...(args.editar_solo_cada_video_nuevo !== undefined ? { autoEdit: args.editar_solo_cada_video_nuevo } : {}),
       ...(args.claude_escribe_el_guion_solo !== undefined ? { autoScript: args.claude_escribe_el_guion_solo } : {}),
       ...(args.aprobar_solo_el_clip_sin_avisos !== undefined ? { autoApprove: args.aprobar_solo_el_clip_sin_avisos } : {}),
-      ...(args.paso_para_los_videos_copiados_al_drive !== undefined ? { defaultStepId: args.paso_para_los_videos_copiados_al_drive } : {}),
     });
     const saved = await asToolError(() => saveAccountVideo(ctx.db, { accountId: account.id, values: next, userId: ctx.userId }));
     let editor = await loadEditorSettings(ctx.db);
@@ -400,7 +407,6 @@ const settingsTool = defineTool({
         editar_solo_cada_video_nuevo: saved.autoEdit,
         claude_escribe_el_guion_solo: saved.autoScript,
         aprobar_solo_el_clip_sin_avisos: saved.autoApprove,
-        paso_para_los_videos_copiados_al_drive: saved.defaultStepId,
       },
       mac_del_estudio: { cuando_edita: editorSummary(editor) },
       link_app: `${ctx.baseUrl}/a/${account.slug}/protocolos`,
@@ -418,6 +424,7 @@ const momentsTool = defineTool({
     paso: z.string().min(1).describe('La clave «paso» del paso de video, de get_videos_step.'),
     momentos: z.array(z.object({ texto: z.string().min(1).max(300), importancia: z.enum(MOMENT_LEVELS) })).max(MOMENTS_MAX),
     indicaciones_para_el_editor: z.string().max(2000).optional().describe('Lo que el editor tiene que tener en cuenta en todos los videos de este paso. Sin mandar, quedan las que había.'),
+    usar_para_los_videos_copiados_al_drive: z.boolean().optional().describe('Hace falta cuando el protocolo tiene más de un paso de video: marca este como el que se usa para los videos copiados al Drive, y desmarca los otros. Sin mandar, queda como está.'),
   }),
   readOnly: false,
   destructive: true,
@@ -426,10 +433,52 @@ const momentsTool = defineTool({
     const known = await videoSteps(ctx.db, account.id);
     const step = known.find((s) => s.id === args.paso.trim());
     if (!step) throw new McpToolError(`No hay un paso de video «${args.paso}» en los protocolos de la cuenta. Pasos: ${known.map((s) => `${s.label} (${s.id})`).join(', ') || 'ninguno'}.`);
-    const row = await ctx.db.shootStep.findUniqueOrThrow({ where: { id: step.id }, select: { title: true, kind: true, explanation: true, editorNotes: true } });
-    const input = stepInput.parse({ title: row.title, kind: row.kind, explanation: row.explanation, editorNotes: args.indicaciones_para_el_editor ?? row.editorNotes, moments: args.momentos });
+    const row = await ctx.db.shootStep.findUniqueOrThrow({ where: { id: step.id }, select: { title: true, kind: true, explanation: true, editorNotes: true, driveDefault: true } });
+    const input = stepInput.parse({
+      title: row.title,
+      kind: row.kind,
+      explanation: row.explanation,
+      editorNotes: args.indicaciones_para_el_editor ?? row.editorNotes,
+      moments: args.momentos,
+      driveDefault: args.usar_para_los_videos_copiados_al_drive ?? row.driveDefault,
+    });
     await asToolError(() => updateStep(ctx.db, { accountId: account.id, stepId: step.id, input }));
-    return { paso: step.id, nombre: step.label, indicaciones_para_el_editor: input.editorNotes || null, momentos: input.moments, link_app: `${ctx.baseUrl}/a/${account.slug}/protocolos` };
+    const after = (await videoSteps(ctx.db, account.id)).find((s) => s.id === step.id);
+    return {
+      paso: step.id,
+      nombre: step.label,
+      se_usa_para_los_videos_copiados_al_drive: after?.forDrive ?? false,
+      indicaciones_para_el_editor: input.editorNotes || null,
+      momentos: input.moments,
+      link_app: `${ctx.baseUrl}/a/${account.slug}/protocolos`,
+    };
+  },
+});
+
+const protocolTypeTool = defineTool({
+  name: 'set_protocol_product_type',
+  section: 'protocolos',
+  title: 'Decir para qué tipo de producto es un protocolo',
+  description:
+    'Asocia un protocolo de fotos y videos a un tipo de producto de la lista de la cuenta (Tipos y marcas). Cada tipo tiene un solo protocolo. Sirve para los videos copiados al Drive, que no dicen con qué paso se grabaron: la app mira el tipo del producto y usa el paso de video del protocolo de ese tipo, el único que tenga o el marcado con set_video_moments si tiene varios. Si el tipo no tiene protocolo, el editor marca los momentos por lo que ve. Sin protocolo, lista los de la cuenta con su tipo.',
+  input: z.object({
+    cuenta: accountArg,
+    protocolo: z.string().min(1).optional().describe('El protocolo: su nombre o su id. Sin mandarlo, solo lista los protocolos.'),
+    tipo_de_producto: z.string().min(1).optional().describe('El tipo, como está en la lista de la cuenta, por ejemplo "Camisas".'),
+  }),
+  readOnly: false,
+  destructive: false,
+  async run(ctx, args) {
+    const account = await resolveAccount(ctx, args.cuenta);
+    const list = async () => (await listProtocols(ctx.db, account.id)).map((p) => ({ protocolo: p.id, nombre: p.name, tipo_de_producto: p.productType, pasos_de_video: p.steps.filter((s) => s.kind === 'VIDEO').length }));
+    if (!args.protocolo) return { protocolos: await list() };
+    const wanted = args.protocolo.trim().toLowerCase();
+    const protocols = await listProtocols(ctx.db, account.id);
+    const protocol = protocols.find((p) => p.id === args.protocolo || p.name.toLowerCase() === wanted);
+    if (!protocol) throw new McpToolError(`No hay un protocolo «${args.protocolo}» en la cuenta. Protocolos: ${protocols.map((p) => p.name).join(', ') || 'ninguno'}.`);
+    if (!args.tipo_de_producto) throw new McpToolError('Falta el tipo de producto.');
+    await asToolError(() => updateProtocol(ctx.db, { accountId: account.id, protocolId: protocol.id, input: { name: protocol.name, description: protocol.description, productType: args.tipo_de_producto } }));
+    return { protocolos: await list(), link_app: `${ctx.baseUrl}/a/${account.slug}/protocolos` };
   },
 });
 
@@ -551,4 +600,4 @@ const uploadedTool = defineTool({
   },
 });
 
-export const VIDEO_TOOLS = [getStep, saveScript, requestTool, reviewTool, queueTool, settingsTool, momentsTool, clipsProbe, uploadsList, uploadedTool, measureTool];
+export const VIDEO_TOOLS = [getStep, saveScript, requestTool, reviewTool, queueTool, settingsTool, momentsTool, clipsProbe, uploadsList, uploadedTool, measureTool, protocolTypeTool];

@@ -19,6 +19,8 @@ export const SHOOT_KIND_TEXT: Record<ShootKind, string> = { PHOTO: 'de una foto'
 export const protocolInput = z.object({
   name: z.string().trim().min(1, 'Poné un nombre.').max(120, 'El nombre es muy largo.'),
   description: z.string().trim().max(1000, 'La descripción es muy larga.').default(''),
+  // El tipo de producto para el que es, de la lista de Tipos y marcas. Uno nuevo lo lleva siempre.
+  productType: z.string().trim().max(120).nullable().default(null),
 });
 
 export const stepInput = z.object({
@@ -29,6 +31,8 @@ export const stepInput = z.object({
   editorNotes: z.string().trim().max(2000, 'Las indicaciones para el editor son muy largas.').default(''),
   // En un paso de video, los momentos del video en orden y qué tan importante es cada uno.
   moments: momentsSchema.default([]),
+  // En un paso de video: es el que se usa para los videos copiados al Drive.
+  driveDefault: z.boolean().default(false),
 });
 
 // ───────────────────────────── Orden en multimedia ─────────────────────────────

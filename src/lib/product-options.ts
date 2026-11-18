@@ -127,6 +127,8 @@ export async function renameOption(db: PrismaClient, accountId: string, kind: Op
     const field = kind === 'TYPE' ? 'productType' : 'brand';
     const { count } = await tx.product.updateMany({ where: { accountId, [field]: from }, data: { [field]: clean } });
     if (kind === 'TYPE') {
+      // El protocolo de ese tipo sigue siendo suyo.
+      await tx.shootProtocol.updateMany({ where: { accountId, productType: from }, data: { productType: clean } });
       // Las reglas de título de ese tipo siguen siendo suyas.
       const sets = await tx.titleRuleSet.findMany({ where: { accountId }, select: { id: true, structures: true } });
       for (const set of sets) {

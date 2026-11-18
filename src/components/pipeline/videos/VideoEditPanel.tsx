@@ -20,13 +20,15 @@ export type EditorInfo = {
   connected: boolean;
   hasKey: boolean;
   off: boolean;
-  // Los pasos de video de los protocolos de la cuenta, el que vale si el video no dice el suyo, y si la cuenta tiene voz en off.
+  // Los pasos de video de los protocolos de la cuenta, y si la cuenta tiene voz en off.
   steps: { id: string; label: string; moments: number }[];
-  defaultStepId: string | null;
   hasVoice: boolean;
 };
 
-type Ask = { targetSeconds: number; note: string; stepId?: string | null };
+// stepId: un paso, null para no usar protocolo, o 'auto' para el que sale solo del tipo de producto.
+type Ask = { targetSeconds: number; note: string; stepId?: string | null | 'auto' };
+const AUTO = 'auto';
+const NONE = 'none';
 type ActionResult = { ok: true } | { ok: false; error: string };
 
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -37,21 +39,24 @@ function AskForm({
   range,
   initial,
   steps,
+  autoText,
   submitLabel,
   pending,
   onSubmit,
 }: {
   range: { min: number; max: number };
   initial: Ask;
-  // Los pasos de video para elegir con cuál se grabó. Null: no se pregunta.
+  // Los pasos de video para elegir con cuál se edita. Null: no se pregunta.
   steps: { id: string; label: string; moments: number }[] | null;
+  // El paso que sale solo, sin que nadie elija, dicho en palabras.
+  autoText?: string;
   submitLabel: string;
   pending: boolean;
   onSubmit: (ask: Ask) => void;
 }) {
   const [seconds, setSeconds] = useState(String(initial.targetSeconds));
   const [note, setNote] = useState(initial.note);
-  const [stepId, setStepId] = useState(initial.stepId ?? '');
+  const [stepId, setStepId] = useState(initial.stepId === null ? NONE : (initial.stepId ?? AUTO));
   const n = Number(seconds);
   const valid = Number.isFinite(n) && n >= range.min && n <= range.max;
   return (
@@ -73,9 +78,10 @@ function AskForm({
       </label>
       {steps && steps.length > 0 ? (
         <label className="block space-y-1 text-sm">
-          <span className="font-medium">Con qué paso del protocolo se grabó</span>
+          <span className="font-medium">Con qué paso del protocolo se edita</span>
           <select value={stepId} onChange={(e) => setStepId(e.target.value)} className="h-9 w-full rounded-md border bg-background px-2 text-sm">
-            <option value="">Ninguno: el editor marca los momentos por lo que ve</option>
+            <option value={AUTO}>Automático: {autoText ?? 'según el tipo de producto'}</option>
+            <option value={NONE}>Sin protocolo: el editor marca los momentos por lo que ve</option>
             {steps.map((st) => (
               <option key={st.id} value={st.id}>
                 {st.label}
@@ -97,7 +103,7 @@ function AskForm({
         />
       </label>
       <div className="flex justify-end">
-        <Button size="sm" pending={pending} disabled={pending || !valid} onClick={() => onSubmit({ targetSeconds: Math.round(n), note, ...(steps ? { stepId: stepId || null } : {}) })}>
+        <Button size="sm" pending={pending} disabled={pending || !valid} onClick={() => onSubmit({ targetSeconds: Math.round(n), note, ...(steps ? { stepId: stepId === NONE ? null : stepId } : {}) })}>
           {submitLabel}
         </Button>
       </div>
@@ -167,8 +173,10 @@ export function VideoEditPanel({
   const initial: Ask = {
     targetSeconds: edit?.targetSeconds ?? Math.min(Math.max(TARGET_DEFAULT, range.min), range.max),
     note: '',
-    stepId: video.stepId ?? editor.defaultStepId,
+    // Lo que eligió una persona, si eligió; si no, automático.
+    stepId: video.stepChosen ? video.stepId : AUTO,
   };
+  const autoText = video.autoStep ? video.autoStep.label : 'sin protocolo';
   // Lo que falta para que la Mac lo tome, dicho antes de pedirlo.
   const macNote = !editor.hasKey
     ? 'El trabajador de la Mac todavía no tiene llave: se crea en Equipo.'
@@ -191,7 +199,7 @@ export function VideoEditPanel({
           La Mac del estudio gira el video a vertical, corrige la luz y el color, lo acelera para que dure lo pedido y le saca el sonido. El original no se toca.
         </p>
         {macNote ? <p className="text-xs text-muted-foreground">{macNote}</p> : null}
-        <AskForm range={range} initial={initial} steps={key === 'ask' ? editor.steps : null} submitLabel={label} pending={pending} onSubmit={(ask) => run(() => submit(ask))} />
+        <AskForm range={range} initial={initial} steps={key === 'ask' ? editor.steps : null} autoText={autoText} submitLabel={label} pending={pending} onSubmit={(ask) => run(() => submit(ask))} />
       </PopoverContent>
     </Popover>
   );

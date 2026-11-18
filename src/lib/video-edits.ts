@@ -92,13 +92,81 @@ export async function loadAccountVideo(db: PrismaClient | Tx, accountId: string)
 }
 
 /** Los pasos de video de los protocolos de la cuenta, para elegir con cuál se grabó un video. */
-export async function videoSteps(db: PrismaClient | Tx, accountId: string): Promise<{ id: string; label: string; moments: number }[]> {
+export async function videoSteps(db: PrismaClient | Tx, accountId: string): Promise<{ id: string; label: string; moments: number; productType: string | null; forDrive: boolean }[]> {
   const steps = await db.shootStep.findMany({
     where: { kind: 'VIDEO', archivedAt: null, protocol: { accountId, archivedAt: null } },
     orderBy: [{ protocol: { position: 'asc' } }, { position: 'asc' }],
-    select: { id: true, title: true, moments: true, protocol: { select: { name: true } } },
+    select: { id: true, title: true, moments: true, driveDefault: true, protocolId: true, protocol: { select: { name: true, productType: true } } },
   });
-  return steps.map((s) => ({ id: s.id, label: `${s.protocol.name}: ${s.title}`, moments: parseMoments(s.moments).length }));
+  return steps.map((s) => ({
+    id: s.id,
+    label: `${s.protocol.name}: ${s.title}`,
+    moments: parseMoments(s.moments).length,
+    productType: s.protocol.productType,
+    // El que se usa para los videos copiados al Drive: el único de video del protocolo, o el marcado.
+    forDrive: steps.filter((o) => o.protocolId === s.protocolId).length === 1 || s.driveDefault,
+  }));
+}
+
+/**
+ * La persona dice con qué paso del protocolo se edita un video: uno, ninguno
+ * (null), o que vuelva a salir solo ('auto'). Lo que elige una persona manda
+ * sobre el paso del tipo de producto.
+ */
+export async function chooseVideoStep(db: PrismaClient | Tx, args: { accountId: string; videoId: string; stepId: string | null | 'auto' }): Promise<void> {
+  const video = await db.productVideo.findFirst({ where: { id: args.videoId, product: { accountId: args.accountId } }, select: { id: true, stepChosen: true } });
+  if (!video) throw new VideoEditError('El video no es de esta cuenta.');
+  if (args.stepId === 'auto') {
+    // Solo se suelta lo que había elegido una persona: el paso con que se grabó en el registro queda.
+    if (video.stepChosen) await db.productVideo.update({ where: { id: video.id }, data: { shootStepId: null, stepChosen: false } });
+    return;
+  }
+  if (args.stepId !== null && !(await videoSteps(db, args.accountId)).some((st) => st.id === args.stepId)) {
+    throw new VideoEditError('Ese paso de video ya no está en los protocolos de la cuenta.');
+  }
+  await db.productVideo.update({ where: { id: video.id }, data: { shootStepId: args.stepId, stepChosen: true } });
+}
+
+export type StepReason = 'persona' | 'registro' | 'tipo' | 'sin-tipo' | 'sin-protocolo' | 'sin-marcar';
+
+/** Por qué un video usa ese paso, o por qué no usa ninguno. */
+export const STEP_REASON_TEXT: Record<StepReason, string> = {
+  persona: 'Lo eligió una persona.',
+  registro: 'Se grabó con ese paso en Registro de productos.',
+  tipo: 'Es el paso de video del protocolo de su tipo de producto.',
+  'sin-tipo': 'El producto no tiene tipo: el editor marca los momentos por lo que ve.',
+  'sin-protocolo': 'Su tipo de producto no tiene protocolo: el editor marca los momentos por lo que ve.',
+  'sin-marcar': 'El protocolo de su tipo tiene más de un paso de video y ninguno está marcado para los videos del Drive: el editor marca los momentos por lo que ve.',
+};
+
+type StepForEditor = { id: string; title: string; editorNotes: string; moments: unknown };
+const STEP_SELECT = { id: true, title: true, editorNotes: true, moments: true } as const;
+
+/**
+ * El paso del protocolo con que se edita un video, en este orden:
+ * 1. el que eligió una persona al pedir la edición, o ninguno si eligió que no use;
+ * 2. el paso con que se grabó en Registro de productos;
+ * 3. el paso de video del protocolo del tipo del producto: el único que tenga,
+ *    o el marcado para los videos del Drive si tiene varios.
+ * Si no hay, ninguno: el editor marca los momentos por lo que ve.
+ */
+export async function stepForVideo(
+  db: PrismaClient | Tx,
+  v: { accountId: string; productType: string | null; shootStepId: string | null; stepChosen: boolean },
+): Promise<{ step: StepForEditor | null; reason: StepReason }> {
+  if (v.stepChosen || v.shootStepId) {
+    const step = v.shootStepId ? await db.shootStep.findFirst({ where: { id: v.shootStepId, kind: 'VIDEO', archivedAt: null }, select: STEP_SELECT }) : null;
+    if (v.stepChosen) return { step, reason: 'persona' };
+    if (step) return { step, reason: 'registro' };
+  }
+  if (!v.productType) return { step: null, reason: 'sin-tipo' };
+  const protocol = await db.shootProtocol.findFirst({
+    where: { accountId: v.accountId, productType: v.productType, archivedAt: null },
+    select: { steps: { where: { kind: 'VIDEO', archivedAt: null }, orderBy: { position: 'asc' }, select: { ...STEP_SELECT, driveDefault: true } } },
+  });
+  if (!protocol || protocol.steps.length === 0) return { step: null, reason: 'sin-protocolo' };
+  const step = protocol.steps.length === 1 ? protocol.steps[0] : (protocol.steps.find((s) => s.driveDefault) ?? null);
+  return step ? { step, reason: 'tipo' } : { step: null, reason: 'sin-marcar' };
 }
 
 export async function saveAccountVideo(db: PrismaClient, args: { accountId: string; values: unknown; userId: string | null }): Promise<AccountVideoSettings> {
@@ -108,9 +176,6 @@ export async function saveAccountVideo(db: PrismaClient, args: { accountId: stri
   if (v.voiceOn && !v.voiceId) throw new VideoEditError('Para prender la voz en off hace falta el ID de la voz de ElevenLabs.');
   if (v.subtitlesOn && !v.voiceOn) throw new VideoEditError('Los subtítulos escriben lo que dice la voz en off: prendé la voz primero.');
   if (v.musicOn && !v.musicStyle) throw new VideoEditError('Para prender la música hace falta describir el estilo.');
-  if (v.defaultStepId && !(await videoSteps(db, args.accountId)).some((s) => s.id === v.defaultStepId)) {
-    throw new VideoEditError('Ese paso de video ya no está en los protocolos de la cuenta.');
-  }
   const data = { values: v as unknown as Prisma.InputJsonValue, updatedById: args.userId };
   await db.videoAccountSettings.upsert({ where: { accountId: args.accountId }, create: { accountId: args.accountId, ...data }, update: data });
   return v;
@@ -129,7 +194,7 @@ export async function clipRulesFor(db: PrismaClient | Tx, productId: string): Pr
 async function videoOf(db: PrismaClient | Tx, accountId: string, videoId: string) {
   const video = await db.productVideo.findFirst({
     where: { id: videoId, product: { accountId } },
-    select: { id: true, productId: true, name: true, goneAt: true, shootStepId: true, editedBy: { select: { id: true } } },
+    select: { id: true, productId: true, name: true, goneAt: true, shootStepId: true, stepChosen: true, editedBy: { select: { id: true } } },
   });
   if (!video) throw new VideoEditError('El video no es de esta cuenta.');
   return video;
@@ -145,17 +210,11 @@ async function lockVideo(tx: Tx, videoId: string) {
  */
 export async function requestEdit(
   db: PrismaClient,
-  args: { accountId: string; videoId: string; targetSeconds?: unknown; note?: unknown; plan?: unknown; script?: unknown; stepId?: string | null; userId: string | null },
+  args: { accountId: string; videoId: string; targetSeconds?: unknown; note?: unknown; plan?: unknown; script?: unknown; stepId?: string | null | 'auto'; userId: string | null },
 ): Promise<{ editId: string }> {
   const video = await videoOf(db, args.accountId, args.videoId);
   const settings = await loadAccountVideo(db, args.accountId);
-  // Con qué paso del protocolo se grabó, si la persona lo dice.
-  if (args.stepId !== undefined && args.stepId !== video.shootStepId) {
-    if (args.stepId !== null && !(await videoSteps(db, args.accountId)).some((st) => st.id === args.stepId)) {
-      throw new VideoEditError('Ese paso de video ya no está en los protocolos de la cuenta.');
-    }
-    await db.productVideo.update({ where: { id: video.id }, data: { shootStepId: args.stepId } });
-  }
+  if (args.stepId !== undefined) await chooseVideoStep(db, { accountId: args.accountId, videoId: video.id, stepId: args.stepId });
   if (video.goneAt) throw new VideoEditError('Ese video ya no está en la carpeta del Drive.');
   if (video.editedBy) throw new VideoEditError('Ese video ya es un clip editado. Editá el original.');
   const rules = await clipRulesFor(db, video.productId);
@@ -304,12 +363,7 @@ export async function buildVideoJob(db: PrismaClient, editId: string, deps: Vide
   });
   const { video } = edit;
   const settings = await loadAccountVideo(db, video.product.accountId);
-  // Un video copiado al Drive no dice con qué paso se grabó: vale el de la cuenta.
-  const step =
-    video.shootStep ??
-    (settings.defaultStepId
-      ? await db.shootStep.findFirst({ where: { id: settings.defaultStepId, kind: 'VIDEO', archivedAt: null }, select: { title: true, editorNotes: true, moments: true } })
-      : null);
+  const step = (await stepForVideo(db, { accountId: video.product.accountId, productType: video.product.productType, shootStepId: video.shootStepId, stepChosen: video.stepChosen })).step;
   const momentos: VideoMoment[] = parseMoments(step?.moments);
   const voice = settings.voiceOn && settings.voiceId ? { id: settings.voiceId } : null;
   const music = settings.musicOn && settings.musicStyle ? { estilo: settings.musicStyle } : null;

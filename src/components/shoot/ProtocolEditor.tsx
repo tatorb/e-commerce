@@ -76,21 +76,21 @@ function Status({ message }: { message: Message }) {
   );
 }
 
-export function ProtocolEditor({ accountSlug, protocols }: { accountSlug: string; protocols: ProtocolView[] }) {
+export function ProtocolEditor({ accountSlug, protocols, types }: { accountSlug: string; protocols: ProtocolView[]; types: string[] }) {
   const active = protocols.filter((p) => !p.archived);
   const archived = protocols.filter((p) => p.archived);
   return (
     <div className="space-y-6">
-      <NewProtocol accountSlug={accountSlug} first={active.length === 0} />
+      <NewProtocol accountSlug={accountSlug} first={active.length === 0} types={types.filter((t) => !active.some((p) => p.productType === t))} />
       {active.map((p, i) => (
-        <ProtocolCard key={p.id} accountSlug={accountSlug} protocol={p} index={i} total={active.length} />
+        <ProtocolCard key={p.id} accountSlug={accountSlug} protocol={p} index={i} total={active.length} types={types.filter((t) => t === p.productType || !active.some((o) => o.productType === t))} />
       ))}
       {archived.length > 0 ? (
         <details className="overflow-hidden rounded-2xl border bg-card shadow-card">
           <summary className={cn('flex cursor-pointer items-center px-4 py-3 text-sm font-medium', BAND)}>Archivados ({archived.length})</summary>
           <div className="space-y-4 border-t p-4">
             {archived.map((p, i) => (
-              <ProtocolCard key={p.id} accountSlug={accountSlug} protocol={p} index={i} total={archived.length} />
+              <ProtocolCard key={p.id} accountSlug={accountSlug} protocol={p} index={i} total={archived.length} types={types} />
             ))}
           </div>
         </details>
@@ -99,10 +99,31 @@ export function ProtocolEditor({ accountSlug, protocols }: { accountSlug: string
   );
 }
 
-function NewProtocol({ accountSlug, first }: { accountSlug: string; first: boolean }) {
+// El tipo de producto del protocolo: de la lista de Tipos y marcas, los que todavía no tienen uno.
+function TypeSelect({ id, value, types, onChange }: { id: string; value: string; types: string[]; onChange: (v: string) => void }) {
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id}>Tipo de producto</Label>
+      <select id={id} value={value} onChange={(e) => onChange(e.target.value)} className="h-9 w-full max-w-md rounded-md border bg-background px-2 text-sm">
+        <option value="">Elegí el tipo</option>
+        {types.map((t) => (
+          <option key={t} value={t}>
+            {t}
+          </option>
+        ))}
+      </select>
+      <p className="text-xs text-muted-foreground">
+        Cada tipo tiene un solo protocolo. Un video copiado al Drive se edita con el paso de video del protocolo del tipo de su producto.
+      </p>
+    </div>
+  );
+}
+
+function NewProtocol({ accountSlug, first, types }: { accountSlug: string; first: boolean; types: string[] }) {
   const [open, setOpen] = useState(first);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [productType, setProductType] = useState('');
   const { pending, message, run } = useRun();
   if (!open) {
     return (
@@ -116,10 +137,11 @@ function NewProtocol({ accountSlug, first }: { accountSlug: string; first: boole
     );
   }
   async function save() {
-    const r = await run(() => createProtocolAction(accountSlug, { name, description }), 'Listo. Ahora agregale los pasos abajo.');
+    const r = await run(() => createProtocolAction(accountSlug, { name, description, productType: productType || null }), 'Listo. Ahora agregale los pasos abajo.');
     if (r) {
       setName('');
       setDescription('');
+      setProductType('');
       setOpen(false);
     }
   }
@@ -130,12 +152,13 @@ function NewProtocol({ accountSlug, first }: { accountSlug: string; first: boole
           <Label htmlFor="np-name">Nombre</Label>
           <Input id="np-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Por ejemplo: Aros de pistón" />
         </div>
+        <TypeSelect id="np-type" value={productType} types={types} onChange={setProductType} />
         <div className="space-y-1.5">
           <Label htmlFor="np-desc">Para qué productos es</Label>
           <Textarea id="np-desc" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Una línea que ayude al operario a elegirlo." />
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <Button onClick={save} pending={pending} disabled={pending || !name.trim()}>
+          <Button onClick={save} pending={pending} disabled={pending || !name.trim() || !productType}>
             Crear protocolo
           </Button>
           {!first ? (
@@ -150,15 +173,17 @@ function NewProtocol({ accountSlug, first }: { accountSlug: string; first: boole
   );
 }
 
-function ProtocolCard({ accountSlug, protocol, index, total }: { accountSlug: string; protocol: ProtocolView; index: number; total: number }) {
+function ProtocolCard({ accountSlug, protocol, index, total, types }: { accountSlug: string; protocol: ProtocolView; index: number; total: number; types: string[] }) {
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState(protocol.name);
   const [description, setDescription] = useState(protocol.description);
+  const [productType, setProductType] = useState(protocol.productType ?? '');
+  const videoSteps = protocol.steps.filter((st) => st.kind === 'VIDEO').length;
   const { pending, message, run } = useRun();
 
   async function saveInfo() {
-    if (await run(() => updateProtocolAction(accountSlug, protocol.id, { name, description }), 'Guardado.')) setEditing(false);
+    if (await run(() => updateProtocolAction(accountSlug, protocol.id, { name, description, productType: productType || null }), 'Guardado.')) setEditing(false);
   }
 
   const action = (
@@ -173,7 +198,7 @@ function ProtocolCard({ accountSlug, protocol, index, total }: { accountSlug: st
           </Button>
           <Button variant="outline" size="sm" onClick={() => setEditing((v) => !v)} disabled={pending}>
             <Pencil />
-            Nombre
+            Nombre y tipo
           </Button>
         </>
       ) : null}
@@ -193,7 +218,7 @@ function ProtocolCard({ accountSlug, protocol, index, total }: { accountSlug: st
     <SectionCard
       title={protocol.name}
       count={protocol.steps.length}
-      description={protocol.description || (protocol.archived ? 'Archivado: el operario no lo ve.' : 'Sin descripción.')}
+      description={`${protocol.productType ? `Para: ${protocol.productType}.` : 'Sin tipo de producto: no se usa para los videos copiados al Drive.'} ${protocol.description || (protocol.archived ? 'Archivado: el operario no lo ve.' : '')}`.trim()}
       action={action}
     >
       {editing ? (
@@ -206,6 +231,7 @@ function ProtocolCard({ accountSlug, protocol, index, total }: { accountSlug: st
             <Label htmlFor={`p-desc-${protocol.id}`}>Para qué productos es</Label>
             <Textarea id={`p-desc-${protocol.id}`} rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
           </div>
+          <TypeSelect id={`p-type-${protocol.id}`} value={productType} types={types} onChange={setProductType} />
           <div className="flex gap-2">
             <Button onClick={saveInfo} pending={pending} disabled={pending || !name.trim()}>
               Guardar
@@ -221,7 +247,7 @@ function ProtocolCard({ accountSlug, protocol, index, total }: { accountSlug: st
       ) : (
         <ol className="divide-y">
           {protocol.steps.map((s, i) => (
-            <StepRow key={s.id} accountSlug={accountSlug} step={s} n={i + 1} total={protocol.steps.length} archived={protocol.archived} />
+            <StepRow key={s.id} accountSlug={accountSlug} step={s} n={i + 1} total={protocol.steps.length} archived={protocol.archived} videoSteps={videoSteps} />
           ))}
         </ol>
       )}
@@ -231,7 +257,7 @@ function ProtocolCard({ accountSlug, protocol, index, total }: { accountSlug: st
           {adding ? (
             <StepForm
               idPrefix={`new-${protocol.id}`}
-              initial={{ title: '', kind: 'PHOTO', explanation: '', editorNotes: '', moments: [] }}
+              initial={{ title: '', kind: 'PHOTO', explanation: '', editorNotes: '', moments: [], driveDefault: false }}
               saveLabel="Agregar paso"
               onCancel={() => setAdding(false)}
               onSave={async (values) => {
@@ -309,7 +335,7 @@ function MediaOrder({ accountSlug, protocol }: { accountSlug: string; protocol: 
   );
 }
 
-type StepValues = { title: string; kind: ShootKind; explanation: string; editorNotes: string; moments: VideoMoment[] };
+type StepValues = { title: string; kind: ShootKind; explanation: string; editorNotes: string; moments: VideoMoment[]; driveDefault: boolean };
 
 /** Los momentos de un paso de video, en orden: qué pasa en cada uno y qué tan importante es. */
 function MomentsField({ idPrefix, moments, onChange }: { idPrefix: string; moments: VideoMoment[]; onChange: (m: VideoMoment[]) => void }) {
@@ -465,6 +491,15 @@ function StepForm({
             />
           </div>
           <MomentsField idPrefix={idPrefix} moments={values.moments} onChange={(moments) => setValues((v) => ({ ...v, moments }))} />
+          <label className="flex items-start gap-2 text-sm">
+            <input type="checkbox" className="mt-1" checked={values.driveDefault} onChange={(e) => setValues((v) => ({ ...v, driveDefault: e.target.checked }))} />
+            <span>
+              Usar este paso para los videos copiados al Drive
+              <span className="block text-xs text-muted-foreground">
+                Hace falta marcar uno cuando el protocolo tiene más de un paso de video. Con uno solo, se usa ese. Al marcar este, se desmarca el otro.
+              </span>
+            </span>
+          </label>
         </>
       ) : null}
       <div className="flex gap-2">
@@ -473,7 +508,7 @@ function StepForm({
           disabled={pending || !values.title.trim()}
           onClick={async () => {
             setPending(true);
-            await onSave({ ...values, moments: values.kind === 'VIDEO' ? values.moments.filter((m) => m.texto.trim()) : [] });
+            await onSave({ ...values, moments: values.kind === 'VIDEO' ? values.moments.filter((m) => m.texto.trim()) : [], driveDefault: values.kind === 'VIDEO' && values.driveDefault });
             setPending(false);
           }}
         >
@@ -487,7 +522,7 @@ function StepForm({
   );
 }
 
-function StepRow({ accountSlug, step, n, total, archived }: { accountSlug: string; step: StepView; n: number; total: number; archived: boolean }) {
+function StepRow({ accountSlug, step, n, total, archived, videoSteps }: { accountSlug: string; step: StepView; n: number; total: number; archived: boolean; videoSteps: number }) {
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
@@ -518,7 +553,7 @@ function StepRow({ accountSlug, step, n, total, archived }: { accountSlug: strin
       <li className="px-4 py-4">
         <StepForm
           idPrefix={`step-${step.id}`}
-          initial={{ title: step.title, kind: step.kind, explanation: step.explanation, editorNotes: step.editorNotes, moments: step.moments }}
+          initial={{ title: step.title, kind: step.kind, explanation: step.explanation, editorNotes: step.editorNotes, moments: step.moments, driveDefault: step.driveDefault }}
           saveLabel="Guardar"
           onCancel={() => setEditing(false)}
           onSave={async (values) => {
@@ -578,6 +613,9 @@ function StepRow({ accountSlug, step, n, total, archived }: { accountSlug: strin
           </Badge>
         </div>
         <p className="font-medium">{step.title}</p>
+        {step.kind === 'VIDEO' && videoSteps > 1 ? (
+          <p className="text-xs text-muted-foreground">{step.driveDefault ? 'Se usa para los videos copiados al Drive.' : 'No se usa para los videos copiados al Drive.'}</p>
+        ) : null}
         {step.explanation ? <p className="whitespace-pre-line text-sm text-muted-foreground">{step.explanation}</p> : null}
         {step.kind === 'VIDEO' && step.moments.length > 0 ? (
           <ol className="space-y-0.5 rounded-md bg-muted/60 px-2.5 py-1.5 text-sm">

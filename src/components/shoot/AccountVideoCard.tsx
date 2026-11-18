@@ -26,7 +26,7 @@ function Check({ checked, onChange, label, help, disabled }: { checked: boolean;
   );
 }
 
-export function AccountVideoCard({ accountSlug, settings, steps }: { accountSlug: string; settings: AccountVideoSettings; steps: { id: string; label: string; moments: number }[] }) {
+export function AccountVideoCard({ accountSlug, settings }: { accountSlug: string; settings: AccountVideoSettings }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [v, setV] = useState(settings);
@@ -48,7 +48,7 @@ export function AccountVideoCard({ accountSlug, settings, steps }: { accountSlug
   return (
     <SectionCard
       title="Edición de videos"
-      description="Cómo arma la Mac del estudio el clip de cada video de esta cuenta. Los momentos de cada video se cuentan arriba, en su paso del protocolo."
+      description="Cómo arma la Mac del estudio el clip de cada video de esta cuenta. Los momentos de cada video se cuentan arriba, en su paso del protocolo. Un video copiado al Drive usa el paso de video del protocolo de su tipo de producto."
     >
       <div className="space-y-5 p-4">
         <div className="grid gap-4 sm:grid-cols-2">
@@ -56,19 +56,6 @@ export function AccountVideoCard({ accountSlug, settings, steps }: { accountSlug
             <Label htmlFor="video-target">Cuánto dura el clip, en segundos</Label>
             <Input id="video-target" type="number" inputMode="numeric" min={10} max={60} value={seconds} onChange={(e) => setSeconds(e.target.value)} className="w-28" />
             <p className="text-xs text-muted-foreground">De 10 a 60. Se puede cambiar al pedir cada edición.</p>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="video-step">Paso del protocolo para los videos copiados al Drive</Label>
-            <select id="video-step" value={v.defaultStepId ?? ''} onChange={(e) => set({ defaultStepId: e.target.value || null })} className="h-9 w-full rounded-md border bg-background px-2 text-sm">
-              <option value="">Ninguno</option>
-              {steps.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.label}
-                  {s.moments === 0 ? ' (sin momentos)' : ''}
-                </option>
-              ))}
-            </select>
-            <p className="text-xs text-muted-foreground">Un video copiado a la carpeta no dice con qué paso se grabó: se edita con los momentos de este.</p>
           </div>
         </div>
 

@@ -180,8 +180,6 @@ export const accountVideoSchema = z.object({
   autoEdit: z.boolean(),
   autoApprove: z.boolean(),
   autoScript: z.boolean(),
-  // El paso de protocolo que vale para los videos copiados al Drive, que no dicen con cuál se grabaron.
-  defaultStepId: z.string().max(60).nullable(),
 });
 export type AccountVideoSettings = z.infer<typeof accountVideoSchema>;
 
@@ -201,7 +199,6 @@ export const DEFAULT_ACCOUNT_VIDEO: AccountVideoSettings = {
   autoEdit: false,
   autoApprove: false,
   autoScript: false,
-  defaultStepId: null,
 };
 
 export function parseAccountVideo(raw: unknown): AccountVideoSettings {

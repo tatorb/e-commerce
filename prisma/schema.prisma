@@ -1900,6 +1900,9 @@ model ProductVideo {
   shot           Boolean           @default(false)
   shootStepId    String?
   shootStep      ShootStep?        @relation(fields: [shootStepId], references: [id], onDelete: SetNull)
+  // Una persona eligió el paso al pedir la edición, o que no use protocolo
+  // (shootStepId null): vale eso y no se busca el paso por el tipo de producto.
+  stepChosen     Boolean           @default(false)
   variantKey     String?
   variantLabel   String?
   // De dónde salió la medida del video: "archivo" (del nombre, que trae el SKU) o
@@ -2077,6 +2080,9 @@ model ShootProtocol {
   account     Account     @relation(fields: [accountId], references: [id], onDelete: Cascade)
   name        String
   description String      @default("")
+  // El tipo de producto para el que es, como está en la ficha (Tipos y marcas).
+  // Un tipo tiene un solo protocolo en uso. Null en uno viejo que todavía no lo tiene.
+  productType String?
   position    Int         @default(0)
   // Archivado: no se ofrece, pero lo que se sacó con él sigue anotado.
   archivedAt  DateTime?
@@ -2101,6 +2107,10 @@ model ShootStep {
   mediaPosition    Int            @default(0)
   title            String
   kind             ShootKind      @default(PHOTO)
+  // En un paso de video: es el que se usa para los videos copiados al Drive,
+  // que no dicen con qué paso se grabaron. Hace falta cuando el protocolo
+  // tiene más de un paso de video; uno solo por protocolo.
+  driveDefault     Boolean        @default(false)
   explanation      String         @default("")
   // Indicaciones para el editor: Claude las recibe en cada foto de este paso,
   // en el trabajador de imágenes, junto con el título.

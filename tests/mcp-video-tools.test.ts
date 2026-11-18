@@ -44,7 +44,7 @@ describe.skipIf(!url)('el editor de videos desde Claude', () => {
 
   beforeEach(async () => {
     await db.$executeRawUnsafe(
-      'TRUNCATE video_edits, video_scripts, video_editor_settings, video_account_settings, image_workers, publication_clips, product_videos, shoot_steps, shoot_protocols, drive_connections, channel_copies, publications, products, stores, channels, accounts, users CASCADE',
+      'TRUNCATE product_options, video_edits, video_scripts, video_editor_settings, video_account_settings, image_workers, publication_clips, product_videos, shoot_steps, shoot_protocols, drive_connections, channel_copies, publications, products, stores, channels, accounts, users CASCADE',
     );
     await db.user.create({ data: { id: 'u1', name: 'Persona', email: 'persona@example.com' } });
     const channel = await db.channel.create({ data: { kind: 'MERCADOLIBRE', name: 'Mercado Libre' } });
@@ -107,14 +107,28 @@ describe.skipIf(!url)('el editor de videos desde Claude', () => {
 
   it('muestra el paso Videos: los videos, sin guión todavía, los ajustes, la Mac y los pasos del protocolo', async () => {
     const r = await call('get_videos_step', { publicacion: 'MLA1110001' });
-    expect(r.data.videos).toEqual([expect.objectContaining({ video: videoId, nombre: 'DJI_0073_D.MP4', duracion: '1 min 47 s', tamano: '3840 × 2160', paso_del_protocolo: null, es_clip_de_esta_publicacion: false })]);
+    expect(r.data.videos).toEqual([expect.objectContaining({ video: videoId, nombre: 'DJI_0073_D.MP4', duracion: '1 min 47 s', tamano: '3840 × 2160', paso_con_que_se_edita: null, es_clip_de_esta_publicacion: false })]);
     expect(r.data.videos[0].edicion).toBeUndefined();
     expect(r.data.guion_del_clip).toBeNull();
     expect(r.data.para_escribir_el_guion).toMatchObject({ segundos_del_clip: 45, lo_mas_que_acepta_el_canal_en_segundos: 60 });
     expect(r.data.para_escribir_el_guion.palabras_que_entran).toBeGreaterThan(80);
     expect(r.data.como_se_editan_los_videos_de_la_cuenta).toMatchObject({ voz_en_off: false, musica: false, subtitulos: false, color_de_los_subtitulos: '#FFE633', claude_escribe_el_guion_solo: false });
     expect(r.data.mac_del_estudio).toEqual({ cuando_edita: 'Apagado: la Mac no edita videos.', conectada: true, tiene_llave: true });
-    expect(r.data.pasos_de_video_de_los_protocolos).toEqual([{ paso: stepId, nombre: 'Unboxing: Unboxing cenital', indicaciones_para_el_editor: null, momentos: [] }]);
+    expect(r.data.pasos_de_video_de_los_protocolos).toEqual([
+      { paso: stepId, nombre: 'Unboxing: Unboxing cenital', tipo_de_producto_del_protocolo: null, se_usa_para_los_videos_copiados_al_drive: true, indicaciones_para_el_editor: null, momentos: [] },
+    ]);
+    // El protocolo todavía no es de ningún tipo: el video del Drive no usa protocolo.
+    expect(r.data.videos[0].por_que_ese_paso).toContain('no tiene protocolo');
+    // Se le pone el tipo del producto y el video pasa a editarse con su paso de video.
+    await db.productOption.create({ data: { accountId, kind: 'TYPE', name: 'Camisa de cilindro' } });
+    const typed = await call('set_protocol_product_type', { protocolo: 'unboxing', tipo_de_producto: 'camisa de cilindro' });
+    expect(typed.data.protocolos).toEqual([expect.objectContaining({ nombre: 'Unboxing', tipo_de_producto: 'Camisa de cilindro', pasos_de_video: 1 })]);
+    const after = await call('get_videos_step', { publicacion: 'MLA1110001' });
+    expect(after.data.videos[0]).toMatchObject({ paso_con_que_se_edita: stepId, por_que_ese_paso: 'Es el paso de video del protocolo de su tipo de producto.' });
+    // Pedir la edición sin protocolo manda sobre eso.
+    await call('request_video_edit', { publicacion: 'MLA1110001', video: videoId, paso: null });
+    expect((await call('get_videos_step', { publicacion: 'MLA1110001' })).data.videos[0]).toMatchObject({ paso_con_que_se_edita: null, por_que_ese_paso: 'Lo eligió una persona.' });
+    expect((await call('set_protocol_product_type', { protocolo: 'unboxing', tipo_de_producto: 'Bujías' })).text).toContain('no está en los tipos');
     expect(r.data.link_app).toMatch(/\?paso=videos$/);
   });
 
@@ -139,10 +153,10 @@ describe.skipIf(!url)('el editor de videos desde Claude', () => {
       musica: true,
       subtitulos: true,
       color_de_los_subtitulos: '#6fa82c',
-      paso_para_los_videos_copiados_al_drive: stepId,
       modo_de_la_mac: { modo: 'SCHEDULE', desde: '22:00', hasta: '7:00', solo_enchufada: true },
     });
-    expect(s.data.como_se_editan_los_videos_de_la_cuenta).toMatchObject({ segundos_del_clip: 40, voz_en_off: true, voz_de_elevenlabs: 'voz1', subtitulos: true, color_de_los_subtitulos: '#6FA82C', paso_para_los_videos_copiados_al_drive: stepId });
+    expect(s.data.como_se_editan_los_videos_de_la_cuenta).toMatchObject({ segundos_del_clip: 40, voz_en_off: true, voz_de_elevenlabs: 'voz1', subtitulos: true, color_de_los_subtitulos: '#6FA82C' });
+    expect(s.data.como_se_editan_los_videos_de_la_cuenta).not.toHaveProperty('paso_para_los_videos_copiados_al_drive');
     expect(s.data.mac_del_estudio.cuando_edita).toBe('Con horario: edita de 22:00 a 07:00, solo enchufada.');
     // Lo que no se manda queda como está.
     const again = await call('update_video_settings', { musica: false });

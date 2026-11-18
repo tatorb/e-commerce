@@ -43,7 +43,8 @@ async function guard<T extends object>(accountSlug: string, run: () => Promise<T
 
 const section = 'protocolos' as const;
 
-type StepInput = { title: string; kind: string; explanation: string; editorNotes: string; moments?: { texto: string; importancia: string }[] };
+type StepInput = { title: string; kind: string; explanation: string; editorNotes: string; moments?: { texto: string; importancia: string }[]; driveDefault?: boolean };
+type ProtocolInput = { name: string; description: string; productType: string | null };
 
 /** Guarda cómo se editan los videos de la cuenta: la voz, la música, los subtítulos y lo que se hace solo. */
 export async function saveAccountVideoAction(accountSlug: string, values: unknown): Promise<Result> {
@@ -59,13 +60,13 @@ export async function saveAccountVideoAction(accountSlug: string, values: unknow
   });
 }
 
-export async function createProtocolAction(accountSlug: string, input: { name: string; description: string }): Promise<Result<{ id: string }>> {
+export async function createProtocolAction(accountSlug: string, input: ProtocolInput): Promise<Result<{ id: string }>> {
   return act(accountSlug, { section, does: 'Creó un protocolo de fotos', targetLabel: String(input?.name ?? '').slice(0, 120) }, ({ user, account }) =>
     guard(accountSlug, async () => ({ id: await createProtocol(prisma, { accountId: account.id, input, userId: user.id }) })),
   );
 }
 
-export async function updateProtocolAction(accountSlug: string, protocolId: string, input: { name: string; description: string }): Promise<Result> {
+export async function updateProtocolAction(accountSlug: string, protocolId: string, input: ProtocolInput): Promise<Result> {
   return act(accountSlug, { section, does: 'Cambió un protocolo de fotos', targetLabel: String(input?.name ?? '').slice(0, 120) }, ({ account }) =>
     guard(accountSlug, async () => {
       await updateProtocol(prisma, { accountId: account.id, protocolId: String(protocolId), input });

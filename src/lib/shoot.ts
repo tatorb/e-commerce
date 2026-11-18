@@ -1,3 +1,5 @@
+import { matchOption } from '@/domain/product-options';
+import { loadProductOptions } from '@/lib/product-options';
 import { parseMoments } from '@/domain/video-edit';
 import { queueNewVideos } from '@/lib/video-edits';
 import type { z } from 'zod';
@@ -56,11 +58,12 @@ export async function listProtocols(db: Db, accountId: string, opts: { archived?
       id: true,
       name: true,
       description: true,
+      productType: true,
       archivedAt: true,
       steps: {
         where: { archivedAt: null },
         orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
-        select: { id: true, title: true, kind: true, mediaPosition: true, position: true, explanation: true, editorNotes: true, moments: true, illustrationUrl: true, illustrationName: true, updatedAt: true },
+        select: { id: true, title: true, kind: true, driveDefault: true, mediaPosition: true, position: true, explanation: true, editorNotes: true, moments: true, illustrationUrl: true, illustrationName: true, updatedAt: true },
       },
     },
   });
@@ -68,11 +71,13 @@ export async function listProtocols(db: Db, accountId: string, opts: { archived?
     id: p.id,
     name: p.name,
     description: p.description,
+    productType: p.productType,
     archived: p.archivedAt !== null,
     steps: p.steps.map((s) => ({
       id: s.id,
       title: s.title,
       kind: s.kind as ShootKind,
+      driveDefault: s.kind === 'VIDEO' && s.driveDefault,
       explanation: s.explanation,
       editorNotes: s.editorNotes,
       moments: parseMoments(s.moments),
@@ -96,7 +101,7 @@ function mediaOrderOf<T extends { kind: string; mediaPosition: number; position:
 export const illustrationHref = (stepId: string, updatedAt: Date) => `/api/protocolos/${stepId}?v=${updatedAt.getTime()}`;
 
 async function protocolIn(db: Db, accountId: string, protocolId: string) {
-  const p = await db.shootProtocol.findFirst({ where: { id: protocolId, accountId }, select: { id: true } });
+  const p = await db.shootProtocol.findFirst({ where: { id: protocolId, accountId }, select: { id: true, productType: true } });
   if (!p) throw new ShootError('El protocolo no es de esta cuenta.');
   return p;
 }
@@ -117,18 +122,41 @@ function parsed<T extends z.ZodType>(schema: T, raw: unknown): z.infer<T> {
   return r.data as z.infer<T>;
 }
 
+/**
+ * El tipo de producto del protocolo, como está en la lista de la cuenta. Un
+ * tipo tiene un solo protocolo en uso: si no, no se sabría cuál vale.
+ */
+async function protocolType(db: Db, args: { accountId: string; wanted: string | null; protocolId: string | null }): Promise<string | null> {
+  if (!args.wanted) return null;
+  const { types } = await loadProductOptions(db, args.accountId);
+  const type = matchOption(types, args.wanted);
+  if (!type) throw new ShootError(`«${args.wanted}» no está en los tipos de producto de la cuenta. Se agregan en Tipos y marcas.`);
+  const other = await db.shootProtocol.findFirst({
+    where: { accountId: args.accountId, productType: type, archivedAt: null, ...(args.protocolId ? { id: { not: args.protocolId } } : {}) },
+    select: { name: true },
+  });
+  if (other) throw new ShootError(`El tipo «${type}» ya tiene un protocolo: ${other.name}. Cada tipo de producto tiene uno solo.`);
+  return type;
+}
+
 export async function createProtocol(db: Db, args: { accountId: string; input: unknown; userId: string | null }): Promise<string> {
   const data = parsed(protocolInput, args.input);
+  if (!data.productType) throw new ShootError('Elegí para qué tipo de producto es el protocolo.');
+  const productType = await protocolType(db, { accountId: args.accountId, wanted: data.productType, protocolId: null });
   const last = await db.shootProtocol.aggregate({ where: { accountId: args.accountId }, _max: { position: true } });
   const p = await db.shootProtocol.create({
-    data: { accountId: args.accountId, ...data, position: (last._max.position ?? -1) + 1, createdById: args.userId },
+    data: { accountId: args.accountId, ...data, productType, position: (last._max.position ?? -1) + 1, createdById: args.userId },
   });
   return p.id;
 }
 
 export async function updateProtocol(db: Db, args: { accountId: string; protocolId: string; input: unknown }): Promise<void> {
-  await protocolIn(db, args.accountId, args.protocolId);
-  await db.shootProtocol.update({ where: { id: args.protocolId }, data: parsed(protocolInput, args.input) });
+  const before = await protocolIn(db, args.accountId, args.protocolId);
+  const data = parsed(protocolInput, args.input);
+  // Uno que ya tiene tipo no lo pierde.
+  if (!data.productType && before.productType) throw new ShootError('Elegí para qué tipo de producto es el protocolo.');
+  const productType = await protocolType(db, { accountId: args.accountId, wanted: data.productType, protocolId: args.protocolId });
+  await db.shootProtocol.update({ where: { id: args.protocolId }, data: { ...data, productType } });
 }
 
 /** Archivado no se ofrece al operario, pero lo que se sacó con él sigue anotado. */
@@ -160,15 +188,23 @@ export async function addStep(db: Db, args: { accountId: string; protocolId: str
   const data = parsed(stepInput, args.input);
   // Un paso nuevo va último, para sacarlo y en multimedia.
   const last = await db.shootStep.aggregate({ where: { protocolId: args.protocolId }, _max: { position: true, mediaPosition: true } });
+  const driveDefault = data.kind === 'VIDEO' && data.driveDefault;
   const s = await db.shootStep.create({
-    data: { protocolId: args.protocolId, ...data, position: (last._max.position ?? -1) + 1, mediaPosition: (last._max.mediaPosition ?? -1) + 1 },
+    data: { protocolId: args.protocolId, ...data, driveDefault, position: (last._max.position ?? -1) + 1, mediaPosition: (last._max.mediaPosition ?? -1) + 1 },
   });
+  if (driveDefault) await db.shootStep.updateMany({ where: { protocolId: args.protocolId, id: { not: s.id } }, data: { driveDefault: false } });
   return s.id;
 }
 
 export async function updateStep(db: Db, args: { accountId: string; stepId: string; input: unknown }): Promise<void> {
-  await stepIn(db, args.accountId, args.stepId);
-  await db.shootStep.update({ where: { id: args.stepId }, data: parsed(stepInput, args.input) });
+  const step = await stepIn(db, args.accountId, args.stepId);
+  const data = parsed(stepInput, args.input);
+  // Solo un paso de video puede ser el de los videos del Drive, y uno por protocolo.
+  const driveDefault = data.kind === 'VIDEO' && data.driveDefault;
+  await db.$transaction([
+    db.shootStep.update({ where: { id: args.stepId }, data: { ...data, driveDefault } }),
+    ...(driveDefault ? [db.shootStep.updateMany({ where: { protocolId: step.protocolId, id: { not: args.stepId } }, data: { driveDefault: false } })] : []),
+  ]);
 }
 
 /** Saca el paso del protocolo. Lo que se sacó con él sigue anotado, por eso no se borra. */

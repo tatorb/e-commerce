@@ -180,7 +180,7 @@ export async function requestVideoEditAction(
   accountSlug: string,
   videoId: string,
   // Con un plan, la Mac lo aplica tal cual. La voz dice el guión del producto.
-  ask: { targetSeconds?: number; note?: string; stepId?: string | null; plan?: unknown },
+  ask: { targetSeconds?: number; note?: string; stepId?: string | null | 'auto'; plan?: unknown },
 ): Promise<Result> {
   return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Pidió editar un video' }, async () => {
     const user = await requireUser();
@@ -192,7 +192,7 @@ export async function requestVideoEditAction(
         targetSeconds: ask?.targetSeconds,
         note: ask?.note,
         plan: ask?.plan,
-        ...(ask?.stepId !== undefined ? { stepId: ask.stepId ? String(ask.stepId) : null } : {}),
+        ...(ask?.stepId !== undefined ? { stepId: ask.stepId === 'auto' ? ('auto' as const) : ask.stepId ? String(ask.stepId) : null } : {}),
         userId: user.id,
       }));
     revalidatePath(`/a/${accountSlug}/pipeline`, 'layout');
