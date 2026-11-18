@@ -90,6 +90,15 @@ Mercado Libre no deja subir clips desde la app a las cuentas locales. Se lo preg
 
 Si Mercado Libre algún día habilita el permiso, Claude lo puede comprobar con `check_channel_clips`.
 
+### Que la Mac lo suba sola (en prueba)
+
+Como Mercado Libre no da el permiso, la Mac puede hacer lo mismo que una persona: abre un Chrome aparte con tu sesión de Mercado Libre, busca la publicación, entra por **Crear video** y elige el archivo. Todavía está en prueba, falta conocer el último paso de la pantalla.
+
+1. Una sola vez, iniciar sesión: `bash sesion_mercadolibre.sh`. Se abre un Chrome aparte, entrás a Mercado Libre y lo cerrás. La contraseña no pasa por el programa.
+2. Probar con un clip: `bash probar_subida.sh ~/Desktop/clip.mp4 MLA123`. Llega hasta elegir el archivo y se frena, sin publicar. Deja en el Escritorio una captura y un informe de lo que apareció.
+
+Reglas del programa: sube de a un clip, y ante cualquier pantalla que no reconoce, un captcha o la sesión cerrada, no insiste ni adivina. Se frena, saca una captura y avisa. Usar el sitio con un programa va por fuera del camino oficial de Mercado Libre: es una decisión de la tienda.
+
 ## En automático
 
 En Edición de videos, por cuenta:

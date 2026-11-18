@@ -13,6 +13,7 @@ dependencies = [
   "opencv-python-headless>=4.10",
   "pillow>=11",
   "pillow-heif>=1.0",
+  "playwright>=1.49",
   "pydantic>=2.9",
   "rembg[cpu]>=2.0.70",
   "tifffile>=2024.8",
