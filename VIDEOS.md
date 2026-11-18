@@ -101,6 +101,17 @@ En cualquiera de los dos últimos se puede pedir que edite solo con la Mac enchu
 
 Las fotos van siempre primero: la Mac pregunta por videos solo cuando no tiene fotos para corregir.
 
+## Desde Claude
+
+Todo lo del editor se puede hacer también hablando con Claude, conectado a la app:
+
+- **Ver** el paso Videos, cada edición con su avance, el guión y los ajustes: `get_videos_step`. La cola de la Mac: `get_video_queue`.
+- **Escribir el guión** del clip: `save_video_script`. Claude lee antes el paso Información y Preguntas y respuestas.
+- **Pedir o rehacer** una edición, con o sin cortes propios: `request_video_edit`. **Aprobar o descartar** el clip: `review_video_edit`.
+- **Cambiar** la voz, la música, los subtítulos y lo automático de la cuenta, y cuándo edita la Mac: `update_video_settings`. **Cargar los momentos** de un paso del protocolo: `set_video_moments`.
+
+Claude no puede ver ni escuchar el clip: antes de aprobarlo muestra cómo se editó, lo que dice la voz y los avisos.
+
 ## Probar un video sin la app
 
 En la Terminal, en la carpeta `trabajador-imagenes`:
@@ -138,5 +149,6 @@ Para probar cortes y velocidades a mano, editá el `plan.json` que dejó la corr
 - `src/domain/video-edit.ts`: el plan, los mensajes y cuándo puede editar la Mac.
 - `src/lib/video-script.ts` y `src/ai/video-script.ts`: el guión del clip y lo que se le pide a Claude para escribirlo.
 - `src/lib/video-edits.ts`: la cola de edición. `src/lib/video-edit-files.ts`: los archivos en el Drive.
+- `src/lib/mcp/video-tools.ts`: las herramientas de Claude.
 - `src/app/api/videos/trabajador/`: por donde la Mac pregunta, avisa que sigue, baja el original y entrega.
 - `trabajador-imagenes/contrato/video_*.json`: ejemplos de los mensajes, que prueban los dos lados.

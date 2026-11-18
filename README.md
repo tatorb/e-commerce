@@ -163,7 +163,7 @@ publicaciones de productos en distintos canales de venta. Va a vivir en
 - `src/lib/mcp/`: la conexión con Claude (MCP). `oauth.ts` es el permiso: registro del programa, código de un solo
   uso con PKCE, llaves de 30 días y desconexión. `redirect-allowlist.ts` dice a qué direcciones puede volver el
   permiso (las de Claude, las de la propia computadora y las de `MCP_OAUTH_REDIRECT_URIS`). `read-tools.ts` y
-  `write-tools.ts` son las herramientas, y `media-tools.ts` las de fotos y videos (ver lo elegido y lo que hay para
+  `write-tools.ts` son las herramientas, y `video-tools.ts` las del editor de videos (el paso Videos con sus ediciones y su guión, el guión, pedir y aprobar ediciones, la cola, los ajustes y los momentos del protocolo), `media-tools.ts` las de fotos y videos (ver lo elegido y lo que hay para
   elegir, elegir y ordenar las fotos con sus medidas y los clips, sumar al paso Imágenes las fotos del canal y usar
   una tal cual; copiar fotos y clips va en `copy_publication_data`): una capa fina sobre las mismas consultas y la misma lógica de las
   pantallas, con las mismas reglas y avisos. `price-tools.ts` es el paso Precio: ver sus pestañas con el costo, el

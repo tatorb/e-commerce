@@ -1,0 +1,261 @@
+import { PrismaPg } from '@prisma/adapter-pg';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { PrismaClient } from '@/generated/prisma/client';
+import { VIDEO_PROTOCOL } from '@/domain/video-edit';
+import { createWorkerKey, verifyWorkerRequest } from '@/lib/image-worker';
+import type { McpContext } from '@/lib/mcp/tool';
+import { claimNextEdit, editHeartbeat, submitEditResult } from '@/lib/video-edits';
+
+// El editor de videos desde Claude. Datos inventados.
+
+const url = process.env.TEST_DATABASE_URL;
+
+vi.hoisted(() => {
+  process.env.DATABASE_URL = process.env.TEST_DATABASE_URL ?? 'postgresql://sin-base@localhost/sin-base';
+});
+
+const { handleRpc, toolList } = await import('@/lib/mcp/server');
+
+describe('herramientas del editor de videos en la lista', () => {
+  it('ver y la cola solo leen; lo que pisa o descarta pide confirmación', () => {
+    const tools = new Map(toolList().map((t) => [t.name, t.annotations]));
+    expect(tools.get('get_videos_step')).toMatchObject({ readOnlyHint: true });
+    expect(tools.get('get_video_queue')).toMatchObject({ readOnlyHint: true });
+    for (const name of ['save_video_script', 'request_video_edit', 'review_video_edit', 'set_video_moments']) {
+      expect(tools.get(name), name).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+    }
+    expect(tools.get('update_video_settings')).toMatchObject({ readOnlyHint: false, destructiveHint: false });
+  });
+
+  it('las descripciones dicen que el guión no relata el video', () => {
+    const tools = new Map(toolList().map((t) => [t.name, t.description]));
+    expect(tools.get('save_video_script')).toContain('NO relata lo que se ve');
+    expect(tools.get('get_videos_step')).toContain('no inventes nada');
+  });
+});
+
+describe.skipIf(!url)('el editor de videos desde Claude', () => {
+  const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: url! }) });
+  const ctx: McpContext = { db, userId: 'u1', access: { isAdmin: true, permissions: {}, accountIds: [] }, baseUrl: 'https://app.ejemplo.com' };
+  let videoId = '';
+  let stepId = '';
+  let workerId = '';
+  let accountId = '';
+
+  beforeEach(async () => {
+    await db.$executeRawUnsafe(
+      'TRUNCATE video_edits, video_scripts, video_editor_settings, video_account_settings, image_workers, publication_clips, product_videos, shoot_steps, shoot_protocols, drive_connections, channel_copies, publications, products, stores, channels, accounts, users CASCADE',
+    );
+    await db.user.create({ data: { id: 'u1', name: 'Persona', email: 'persona@example.com' } });
+    const channel = await db.channel.create({ data: { kind: 'MERCADOLIBRE', name: 'Mercado Libre' } });
+    accountId = (await db.account.create({ data: { slug: 'prueba', name: 'Cuenta de prueba' } })).id;
+    const store = await db.store.create({ data: { accountId, channelId: channel.id, name: 'TIENDA' } });
+    const product = await db.product.create({ data: { accountId, name: 'Camisa 384675', productType: 'Camisa de cilindro' } });
+    await db.publication.create({ data: { productId: product.id, storeId: store.id, externalId: 'MLA1110001', title: 'Kit 4 Camisas' } });
+    videoId = (await db.productVideo.create({ data: { productId: product.id, driveFileId: 'drive-1', name: 'DJI_0073_D.MP4', mimeType: 'video/mp4', origin: 'DRIVE', durationMs: 106_600, width: 3840, height: 2160 } })).id;
+    const protocol = await db.shootProtocol.create({ data: { accountId, name: 'Unboxing' } });
+    stepId = (await db.shootStep.create({ data: { protocolId: protocol.id, title: 'Unboxing cenital', kind: 'VIDEO', explanation: 'Cámara arriba.' } })).id;
+    const key = await createWorkerKey(db, 'u1');
+    workerId = (await verifyWorkerRequest(db, `Bearer ${key}`))!.workerId;
+  });
+
+  afterAll(async () => {
+    await db.$disconnect();
+  });
+
+  async function call(name: string, args: Record<string, unknown> = {}) {
+    const r = (await handleRpc({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }, ctx)) as {
+      result: { content: { text: string }[]; isError?: boolean };
+    };
+    const text = r.result.content[0].text;
+    return { text, isError: r.result.isError === true, data: r.result.isError ? null : JSON.parse(text) };
+  }
+
+  const PLAN = {
+    imagen: { cuartos: 1, enderezado: 0, zoom: 1, centro_x: 0.5, centro_y: 0.5, rojo: 1.1, verde: 1.05, azul: 1, contraste: 1, saturacion: 1 },
+    tramos: [
+      { inicio: 0, fin: 8, velocidad: 1, nombre: 'La caja', importancia: 'IMPORTANTE' as const },
+      { inicio: 8, fin: 106.6, velocidad: 3.4, nombre: 'Las piezas', importancia: 'REPETIDO' as const },
+    ],
+    cierre: 2,
+  };
+
+  /** La Mac toma la edición y entrega el clip. */
+  async function macDelivers(avisos: string[] = []) {
+    const { editId } = (await claimNextEdit(db, workerId))!;
+    await submitEditResult(
+      db,
+      workerId,
+      {
+        protocolo: VIDEO_PROTOCOL,
+        id: editId,
+        turno: 1,
+        ok: true,
+        plan: PLAN,
+        medidas: {},
+        propuesta: { razon: 'Girado un cuarto.', origen: 'claude', avisos: [], uso: { costo_usd: 0.02 } },
+        clip: { ancho: 1080, alto: 1920, segundos: 39, bytes: 40_000_000 },
+        guion: [{ inicio: 0.4, fin: 4.2, texto: 'Camisas para Fiat uno punto siete diésel.' }],
+        sonido: { voz: true, musica: true, subtitulos: true, costo_usd: null },
+        avisos,
+        segundos: 200,
+      },
+      { collect: async () => ({ fileId: `clip-${editId}`, name: 'DJI_0073_D · editado.mp4', mimeType: 'video/mp4', size: BigInt(40_000_000), webViewLink: null, createdAt: new Date() }) },
+    );
+    return editId;
+  }
+
+  it('muestra el paso Videos: los videos, sin guión todavía, los ajustes, la Mac y los pasos del protocolo', async () => {
+    const r = await call('get_videos_step', { publicacion: 'MLA1110001' });
+    expect(r.data.videos).toEqual([expect.objectContaining({ video: videoId, nombre: 'DJI_0073_D.MP4', duracion: '1 min 47 s', tamano: '3840 × 2160', paso_del_protocolo: null, es_clip_de_esta_publicacion: false })]);
+    expect(r.data.videos[0].edicion).toBeUndefined();
+    expect(r.data.guion_del_clip).toBeNull();
+    expect(r.data.para_escribir_el_guion).toMatchObject({ segundos_del_clip: 45, lo_mas_que_acepta_el_canal_en_segundos: 60 });
+    expect(r.data.para_escribir_el_guion.palabras_que_entran).toBeGreaterThan(80);
+    expect(r.data.como_se_editan_los_videos_de_la_cuenta).toMatchObject({ voz_en_off: false, musica: false, subtitulos: false, color_de_los_subtitulos: '#FFE633', claude_escribe_el_guion_solo: false });
+    expect(r.data.mac_del_estudio).toEqual({ cuando_edita: 'Apagado: la Mac no edita videos.', conectada: true, tiene_llave: true });
+    expect(r.data.pasos_de_video_de_los_protocolos).toEqual([{ paso: stepId, nombre: 'Unboxing: Unboxing cenital', indicaciones_para_el_editor: null, momentos: [] }]);
+    expect(r.data.link_app).toMatch(/\?paso=videos$/);
+  });
+
+  it('carga los momentos del protocolo y los ajustes de la cuenta, con el modo de la Mac', async () => {
+    const moments = [
+      { texto: 'Mostrar la caja y la etiqueta', importancia: 'IMPORTANTE' },
+      { texto: 'Sacar las demás piezas', importancia: 'REPETIDO' },
+    ];
+    const m = await call('set_video_moments', { paso: stepId, momentos: moments, indicaciones_para_el_editor: 'Que se lea la etiqueta.' });
+    expect(m.data).toMatchObject({ paso: stepId, momentos: moments, indicaciones_para_el_editor: 'Que se lea la etiqueta.' });
+    // Lo demás del paso queda como estaba.
+    expect(await db.shootStep.findUniqueOrThrow({ where: { id: stepId } })).toMatchObject({ title: 'Unboxing cenital', kind: 'VIDEO', explanation: 'Cámara arriba.' });
+    expect((await call('set_video_moments', { paso: 'otro', momentos: [] })).text).toContain('No hay un paso de video «otro»');
+
+    const bad = await call('update_video_settings', { voz_en_off: true });
+    expect(bad.isError).toBe(true);
+    expect(bad.text).toContain('ID de la voz');
+    const s = await call('update_video_settings', {
+      segundos_del_clip: 40,
+      voz_en_off: true,
+      voz_de_elevenlabs: 'voz1',
+      musica: true,
+      subtitulos: true,
+      color_de_los_subtitulos: '#6fa82c',
+      paso_para_los_videos_copiados_al_drive: stepId,
+      modo_de_la_mac: { modo: 'SCHEDULE', desde: '22:00', hasta: '7:00', solo_enchufada: true },
+    });
+    expect(s.data.como_se_editan_los_videos_de_la_cuenta).toMatchObject({ segundos_del_clip: 40, voz_en_off: true, voz_de_elevenlabs: 'voz1', subtitulos: true, color_de_los_subtitulos: '#6FA82C', paso_para_los_videos_copiados_al_drive: stepId });
+    expect(s.data.mac_del_estudio.cuando_edita).toBe('Con horario: edita de 22:00 a 07:00, solo enchufada.');
+    // Lo que no se manda queda como está.
+    const again = await call('update_video_settings', { musica: false });
+    expect(again.data.como_se_editan_los_videos_de_la_cuenta).toMatchObject({ segundos_del_clip: 40, voz_en_off: true, musica: false });
+    const step = await call('get_videos_step', { publicacion: 'MLA1110001' });
+    expect(step.data.pasos_de_video_de_los_protocolos[0].momentos).toEqual(moments);
+  });
+
+  it('quien no es administrador no cambia cuándo edita la Mac', async () => {
+    const before = ctx.access;
+    ctx.access = { isAdmin: false, permissions: { protocolos: 'write' } as never, accountIds: [accountId] };
+    try {
+      const r = await call('update_video_settings', { segundos_del_clip: 30, modo_de_la_mac: { modo: 'ON' } });
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain('solo un administrador');
+      expect(await db.videoEditorSettings.count()).toBe(0);
+    } finally {
+      ctx.access = before;
+    }
+  });
+
+  it('guarda el guión del clip, avisa si es largo o si la voz está apagada, y lo borra', async () => {
+    const frases = ['Camisas de cilindro para motor Fiat uno punto siete diésel.', '  ', 'Sirven para Uno, Duna y Fiorino.'];
+    const r = await call('save_video_script', { publicacion: 'MLA1110001', frases });
+    expect(r.data.guion_del_clip).toEqual({ frases: [frases[0], frases[2]], palabras: 16, segundos: expect.any(Number) });
+    expect(r.data.voz_apagada).toContain('update_video_settings');
+    const step = await call('get_videos_step', { publicacion: 'MLA1110001' });
+    expect(step.data.guion_del_clip).toMatchObject({ frases: [frases[0], frases[2]], palabras: 16, lo_escribio: 'Claude, sin corregir' });
+
+    const long = Array.from({ length: 10 }, () => 'Una frase larga de unas quince palabras que no termina nunca y sigue y sigue.');
+    const tooLong = await call('save_video_script', { publicacion: 'MLA1110001', frases: long });
+    expect(tooLong.isError).toBe(true);
+    expect(tooLong.text).toContain('el clip puede durar hasta 60');
+
+    await call('update_video_settings', { segundos_del_clip: 10, voz_en_off: true, voz_de_elevenlabs: 'voz1' });
+    const warned = await call('save_video_script', { publicacion: 'MLA1110001', frases: long.slice(0, 3) });
+    expect(warned.data.aviso).toContain('el editor lo va a hacer más largo');
+    expect(warned.data.voz_apagada).toBeUndefined();
+
+    const cleared = await call('save_video_script', { publicacion: 'MLA1110001', frases: [] });
+    expect(cleared.data.guion_del_clip).toBeNull();
+    expect(await db.videoScript.count()).toBe(0);
+  });
+
+  it('pide la edición, muestra el avance y la cola, aprueba el clip, lo rehace con un plan y lo descarta', async () => {
+    await call('update_video_settings', { voz_en_off: true, voz_de_elevenlabs: 'voz1' });
+    await call('save_video_script', { publicacion: 'MLA1110001', frases: ['Camisas para Fiat uno punto siete diésel.'] });
+    const asked = await call('request_video_edit', { publicacion: 'MLA1110001', video: videoId, segundos: 40, indicacion: 'Más lento al final.', paso: stepId });
+    expect(asked.data.edicion).toMatchObject({ estado: 'en cola', segundos_pedidos: 40, indicacion: 'Más lento al final.', pedida_por: 'Persona' });
+    expect(asked.data.mac_del_estudio.cuando_edita).toBe('Apagado: la Mac no edita videos.');
+    expect((await db.productVideo.findUniqueOrThrow({ where: { id: videoId } })).shootStepId).toBe(stepId);
+    // El guión viaja como estaba al pedirla.
+    expect((await db.videoEdit.findFirstOrThrow()).requestedScript).toEqual(['Camisas para Fiat uno punto siete diésel.']);
+    // Pedirla dos veces no hace nada.
+    expect((await call('request_video_edit', { publicacion: 'MLA1110001', video: videoId })).data.aviso).toContain('ya está en la cola');
+    expect(await db.videoEdit.count()).toBe(1);
+
+    // La Mac la toma y cuenta en qué anda.
+    const { editId } = (await claimNextEdit(db, workerId))!;
+    await editHeartbeat(db, workerId, editId, 1, new Date(), { etapa: 'Exportando el clip', porcentaje: 42 });
+    const queue = await call('get_video_queue');
+    expect(queue.data.cola).toEqual([expect.objectContaining({ orden: 1, cuenta: 'Cuenta de prueba', producto: 'Camisa 384675', video: 'DJI_0073_D.MP4', estado: 'la Mac lo está editando', etapa: 'Exportando el clip', porcentaje: 42 })]);
+    expect((await call('get_videos_step', { publicacion: 'MLA1110001' })).data.videos[0].edicion.avance).toEqual({ etapa: 'Exportando el clip', porcentaje: 42 });
+    await db.videoEdit.update({ where: { id: editId }, data: { status: 'QUEUED', workerId: null, lease: 0, attempts: 0 } });
+
+    // Entrega el clip: se ve cómo se editó y lo que dice la voz.
+    await macDelivers(['La cámara fue cambiando la luz sola.']);
+    const ready = await call('get_videos_step', { publicacion: 'MLA1110001' });
+    const original = ready.data.videos.find((v: { video: string }) => v.video === videoId);
+    expect(original.edicion).toMatchObject({
+      estado: 'clip listo, espera la aprobación',
+      explicacion: 'Girado un cuarto.',
+      avisos: ['La cámara fue cambiando la luz sola.'],
+      sonido: { voz: true, musica: true, subtitulos: true },
+      lo_que_dice_la_voz: [{ segundo: 0.4, texto: 'Camisas para Fiat uno punto siete diésel.' }],
+      costo_de_claude_usd: 0.02,
+    });
+    expect(original.edicion.plan.tramos[1]).toMatchObject({ desde: 8, hasta: 106.6, importancia: 'REPETIDO', en_palabras: '3,4 veces más rápido' });
+    const clip = ready.data.videos.find((v: { clip_editado_de?: string }) => v.clip_editado_de);
+    expect(clip).toMatchObject({ clip_editado_de: 'DJI_0073_D.MP4', aprobado: false, video: original.edicion.clip });
+    expect((await call('get_video_queue')).data.cola).toEqual([]);
+
+    // Rehacerlo con otros cortes: el clip anterior se descarta y la edición nueva lleva el plan tal cual.
+    const plan = { ...PLAN, tramos: [PLAN.tramos[0], { ...PLAN.tramos[1], velocidad: 5 }] };
+    const redone = await call('request_video_edit', { publicacion: 'MLA1110001', video: videoId, plan });
+    expect(redone.data.clip_anterior).toContain('papelera');
+    expect(redone.data.edicion).toMatchObject({ estado: 'en cola' });
+    expect(redone.data.edicion.plan.tramos[1].velocidad).toBe(5);
+    expect((await db.productVideo.findUniqueOrThrow({ where: { id: clip.video } })).goneAt).not.toBeNull();
+
+    // Se aprueba el nuevo, y ya no se puede aprobar ni descartar otra vez.
+    await macDelivers();
+    const approved = await call('review_video_edit', { publicacion: 'MLA1110001', video: videoId, decision: 'aprobar' });
+    expect(approved.data).toMatchObject({ estado: 'clip aprobado' });
+    expect(approved.data.siguiente).toContain('set_publication_media');
+    expect((await call('review_video_edit', { publicacion: 'MLA1110001', video: videoId, decision: 'descartar' })).text).toContain('ya está aprobado');
+
+    // Una edición en cola se descarta sin más.
+    await call('request_video_edit', { publicacion: 'MLA1110001', video: videoId });
+    const discarded = await call('review_video_edit', { publicacion: 'MLA1110001', video: videoId, decision: 'descartar' });
+    expect(discarded.data).toMatchObject({ estado: 'edición descartada' });
+    expect(await claimNextEdit(db, workerId)).toBeNull();
+  });
+
+  it('no edita un clip ya editado ni un video que no es del producto', async () => {
+    await call('request_video_edit', { publicacion: 'MLA1110001', video: videoId });
+    const editId = await macDelivers();
+    const clipId = (await db.videoEdit.findUniqueOrThrow({ where: { id: editId } })).clipId!;
+    await call('review_video_edit', { publicacion: 'MLA1110001', video: videoId, decision: 'aprobar' });
+    const r = await call('request_video_edit', { publicacion: 'MLA1110001', video: clipId });
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain('ya es un clip editado');
+    expect((await call('request_video_edit', { publicacion: 'MLA1110001', video: 'no-existe' })).text).toContain('No hay un video «no-existe»');
+    expect((await call('review_video_edit', { publicacion: 'MLA1110001', video: clipId, decision: 'aprobar' })).text).toContain('no tiene ninguna edición');
+  });
+});
