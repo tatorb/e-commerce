@@ -39,6 +39,7 @@ export type ClipUpload = {
   channelLink: string;
   publicationLink: string | null;
   fileName: string;
+  mimeType: string;
   // Baja el archivo del Drive, con la cuenta de Google de la persona.
   downloadLink: string;
   driveLink: string | null;
@@ -82,7 +83,7 @@ export async function pendingClipUploads(db: Db, accountId: string): Promise<Cli
       publicationId: true,
       videoId: true,
       chosenAt: true,
-      video: { select: { name: true, driveFileId: true, webViewLink: true, durationMs: true, size: true } },
+      video: { select: { name: true, mimeType: true, driveFileId: true, webViewLink: true, durationMs: true, size: true } },
       publication: { select: { title: true, externalId: true, url: true, store: { select: { name: true } }, product: { select: { name: true } } } },
     },
   });
@@ -96,6 +97,7 @@ export async function pendingClipUploads(db: Db, accountId: string): Promise<Cli
     channelLink: sellerListingLink(r.publication.externalId!),
     publicationLink: r.publication.url,
     fileName: r.video.name,
+    mimeType: r.video.mimeType,
     downloadLink: driveDownloadLink(r.video.driveFileId),
     driveLink: r.video.webViewLink,
     durationMs: r.video.durationMs,

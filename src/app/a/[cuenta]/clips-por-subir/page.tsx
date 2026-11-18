@@ -24,8 +24,9 @@ export default async function ClipUploadsPage({ params }: { params: Promise<{ cu
         <div className="space-y-1">
           <h1 className="text-2xl font-bold tracking-tight">Clips por subir</h1>
           <p className="text-sm text-muted-foreground">
-            Los clips aprobados de <strong>{account.name}</strong> que falta subir a Mercado Libre. Mercado Libre no deja subirlos desde la app a las cuentas locales, así que se suben a mano: bajá el
-            archivo, abrí la publicación en Mercado Libre, subilo desde su menú de opciones y marcalo acá.
+            Los clips aprobados de <strong>{account.name}</strong> que falta subir a Mercado Libre. Mercado Libre no deja subirlos desde la app a las cuentas locales, así que se suben desde tu Chrome. Con la
+            extensión de Studio MRB, un botón abre la publicación y carga el archivo solo. Sin ella, bajá el archivo, abrí la publicación en Mercado Libre y subilo desde su menú de opciones. Al
+            terminar, marcalo acá.
           </p>
         </div>
       </PageHeader>
@@ -40,6 +41,7 @@ export default async function ClipUploadsPage({ params }: { params: Promise<{ cu
             externalId: c.externalId,
             channelLink: c.channelLink,
             fileName: c.fileName,
+            mimeType: c.mimeType,
             downloadLink: c.downloadLink,
             durationMs: c.durationMs,
             size: c.size,
