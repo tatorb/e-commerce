@@ -17,6 +17,9 @@ import {
   scriptWordBudget,
 } from '@/domain/video-edit';
 import { formatSeconds } from '@/domain/videos';
+import { ConnectError } from '@/channels/connect-types';
+import { askClips, readClipsAnswer } from '@/channels/mercadolibre/clips-api';
+import { withAccessToken } from '@/lib/connections';
 import { CryptoError } from '@/lib/crypto';
 import { DriveError, trashFile, withDriveToken } from '@/lib/drive';
 import { workerState } from '@/lib/image-worker';
@@ -425,4 +428,35 @@ const momentsTool = defineTool({
   },
 });
 
-export const VIDEO_TOOLS = [getStep, saveScript, requestTool, reviewTool, queueTool, settingsTool, momentsTool];
+const clipsProbe = defineTool({
+  name: 'check_channel_clips',
+  section: ['pipeline', 'publicaciones'],
+  title: 'Preguntar a Mercado Libre por los clips de una publicación',
+  description:
+    'Pregunta a Mercado Libre, con la conexión de la tienda, qué clips tiene una publicación. Solo consulta, no sube ni cambia nada. Sirve para saber si la cuenta puede manejar clips por programa: devuelve lo que respondió Mercado Libre por cada dirección conocida y qué significa.',
+  input: z.object({ cuenta: accountArg, publicacion: publicationArg }),
+  readOnly: true,
+  async run(ctx, args) {
+    const { account, id } = await target(ctx, args);
+    const pub = await ctx.db.publication.findFirstOrThrow({
+      where: { id, store: { accountId: account.id } },
+      select: { externalId: true, storeId: true, store: { select: { name: true, channel: { select: { kind: true } } } } },
+    });
+    if (pub.store.channel.kind !== 'MERCADOLIBRE') throw new McpToolError('Los clips son de Mercado Libre y esta publicación es de otro canal.');
+    if (!pub.externalId) throw new McpToolError('La publicación todavía no está en Mercado Libre: no tiene código para consultar.');
+    const externalId = pub.externalId;
+    try {
+      const answers = await withAccessToken(ctx.db, pub.storeId, (token) => askClips(token, externalId));
+      return {
+        publicacion: externalId,
+        tienda: pub.store.name,
+        respuestas: answers.map((a) => ({ direccion: a.path, codigo: a.status, significa: readClipsAnswer(a), respuesta: a.body })),
+      };
+    } catch (e) {
+      if (e instanceof ConnectError) throw new McpToolError(e.message);
+      throw e;
+    }
+  },
+});
+
+export const VIDEO_TOOLS = [getStep, saveScript, requestTool, reviewTool, queueTool, settingsTool, momentsTool, clipsProbe];

@@ -47,6 +47,7 @@ describe('lista de herramientas', () => {
       'list_vehicle_brands',
       'get_videos_step',
       'get_video_queue',
+      'check_channel_clips',
       'check_photo_measures',
       'audit_compatibilities',
       'list_notes',
