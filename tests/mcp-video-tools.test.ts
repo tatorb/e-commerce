@@ -285,6 +285,13 @@ describe.skipIf(!url)('el editor de videos desde Claude', () => {
     expect(marked.data).toMatchObject({ subido: true, faltan: 0 });
     expect(await db.publicationClip.count({ where: { uploadedAt: { not: null } } })).toBe(2);
     expect((await call('mark_clip_uploaded', { publicacion: 'MLA1110001', video: list.data.clips[0].video, subido: false })).data.faltan).toBe(1);
+    // Claude lo pone en la cola de subida: la app no lo sube, queda el pedido para la extensión de Chrome.
+    const queued = await call('queue_clip_uploads', { todos: true });
+    expect(queued.data).toMatchObject({ puestos_en_la_cola: 1, en_la_cola: 1, faltan_subir: 1 });
+    expect(queued.data.quien_atiende_la_cola).toContain('Ninguna extensión está atendiendo');
+    expect((await call('list_clips_to_upload')).data).toMatchObject({ en_la_cola: 1, clips: [expect.objectContaining({ estado: 'en la cola de subida' })] });
+    expect((await call('queue_clip_uploads', { clips: [{ publicacion: 'MLA1110001', video: list.data.clips[0].video }], sacar: true })).data).toMatchObject({ sacados_de_la_cola: 1, en_la_cola: 0 });
+    expect((await call('queue_clip_uploads', {})).text).toContain('Decí qué clips');
     // Una publicación pausada no entra: Mercado Libre solo acepta clips en las activas.
     await db.publication.updateMany({ data: { channelStatus: 'PAUSED' } });
     expect((await call('list_clips_to_upload')).data.faltan).toBe(0);

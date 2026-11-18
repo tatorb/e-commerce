@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Studio MRB · Clips a Mercado Libre",
   "description": "Carga en Mercado Libre los clips aprobados en E-commerce Studio MRB, desde tu propio Chrome.",
-  "version": "0.3.0",
-  "permissions": ["storage"],
+  "version": "0.4.0",
+  "permissions": ["storage", "alarms"],
   "host_permissions": ["https://e-commerce.studiomrb.com/*", "https://www.mercadolibre.com.ar/*", "https://vendedores.mercadolibre.com.ar/*"],
   "background": { "service_worker": "fondo.js" },
   "content_scripts": [

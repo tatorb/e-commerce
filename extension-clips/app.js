@@ -6,7 +6,13 @@
 
   window.addEventListener('message', (e) => {
     if (e.source !== window || e.origin !== location.origin || e.data?.origen !== 'mrb-app') return;
-    if (e.data.tipo === 'hola') return decir({ tipo: 'hola', version });
+    if (e.data.tipo === 'hola' || e.data.tipo === 'cola') {
+      // Si la extensión sube sola la cola; con «sola», además lo cambia.
+      return chrome.runtime
+        .sendMessage({ tipo: 'cola', ...(e.data.tipo === 'cola' && typeof e.data.sola === 'boolean' ? { sola: e.data.sola } : {}) })
+        .then((r) => decir({ tipo: 'hola', version, sola: r?.sola === true }))
+        .catch(() => decir({ tipo: 'hola', version, sola: false }));
+    }
     if (e.data.tipo !== 'subir') return;
     const { publicacion, video, codigo, nombre, tipoDeArchivo, todasLasVariantes } = e.data;
     chrome.runtime
@@ -18,5 +24,8 @@
   chrome.runtime.onMessage.addListener((mensaje) => {
     if (mensaje?.tipo === 'avance') decir(mensaje);
   });
-  decir({ tipo: 'hola', version });
+  chrome.runtime
+    .sendMessage({ tipo: 'cola' })
+    .then((r) => decir({ tipo: 'hola', version, sola: r?.sola === true }))
+    .catch(() => decir({ tipo: 'hola', version, sola: false }));
 })();

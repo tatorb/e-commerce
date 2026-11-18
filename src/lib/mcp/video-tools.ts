@@ -20,7 +20,7 @@ import { formatSeconds } from '@/domain/videos';
 import { ConnectError } from '@/channels/connect-types';
 import { askClips, readClipsAnswer } from '@/channels/mercadolibre/clips-api';
 import { withAccessToken } from '@/lib/connections';
-import { offerApprovedClips, pendingClipUploads } from '@/lib/clip-uploads';
+import { activeUploaders, offerApprovedClips, pendingClipUploads, queueClipUploads, UPLOAD_PAUSE_S } from '@/lib/clip-uploads';
 import { CryptoError } from '@/lib/crypto';
 import { DriveError, trashFile, withDriveToken } from '@/lib/drive';
 import { workerState } from '@/lib/image-worker';
@@ -595,10 +595,13 @@ const uploadsList = defineTool({
     const clips = await pendingClipUploads(ctx.db, account.id);
     return {
       faltan: clips.length,
+      en_la_cola: clips.filter((c) => c.queuedAt).length,
+      quien_atiende_la_cola: await uploadersText(ctx),
       clips: clips.map((c) => ({
         publicacion: c.publicationId,
         codigo: c.externalId,
         publicaciones_del_producto: c.publications,
+        estado: c.queuedAt ? (c.triedAt ? 'en la cola, la extensión lo está subiendo' : 'en la cola de subida') : c.error ? `sin pedir: la última vez falló. ${c.error}` : 'sin pedir',
         va_en: c.allMeasures ? 'todas las medidas del producto' : `solo la medida ${c.measure ?? 'de esta publicación'}`,
         titulo: c.title,
         producto: c.product,
@@ -646,6 +649,49 @@ const measureTool = defineTool({
   },
 });
 
+// Quién está atendiendo la cola, en palabras: sin una extensión con la cola prendida, nada se sube solo.
+async function uploadersText(ctx: McpContext): Promise<string> {
+  const alive = await activeUploaders(ctx.db);
+  return alive.length > 0
+    ? `La extensión de Chrome de ${alive.map((u) => u.name).join(', ')} está atendiendo la cola: sube de a un clip, con una pausa de unos ${Math.round(UPLOAD_PAUSE_S / 60)} minutos entre uno y otro.`
+    : 'Ninguna extensión está atendiendo la cola ahora. Para que se suban, alguien tiene que tener Chrome abierto, con la sesión de la app y la de Mercado Libre, la extensión de Studio MRB instalada y «Subir sola la cola» prendido en Por subir.';
+}
+
+const queueUploadsTool = defineTool({
+  name: 'queue_clip_uploads',
+  section: ['pipeline', 'publicaciones'],
+  title: 'Pedir que se suban clips a Mercado Libre',
+  description:
+    'Pone clips en la cola de subida a Mercado Libre, o los saca. Mercado Libre no deja subir clips por programa a las cuentas locales, así que la app no los sube: los sube la extensión de Chrome de Studio MRB desde el navegador de una persona, que toma la cola sola cuando tiene «Subir sola la cola» prendido. Esta herramienta deja el pedido; la subida ocurre de a un clip, con pausas, mientras ese Chrome esté abierto. La respuesta dice si hay una extensión atendiendo la cola: si no la hay, avisale a la persona. Con «todos», pone en la cola todos los clips que faltan subir en la cuenta; si no, los de «clips» (publicación y video, como los da list_clips_to_upload). Solo entran los clips aprobados y elegidos que faltan subir. Para ver cómo va, list_clips_to_upload: cada clip dice si está en la cola, si se está subiendo o por qué falló; el que falló sale de la cola y se puede pedir de nuevo. Subir un clip lo publica en la tienda después de la revisión de Mercado Libre: confirmalo con la persona antes, salvo que ya te haya pedido subir en lote.',
+  input: z.object({
+    cuenta: accountArg,
+    todos: z.boolean().default(false).describe('true = todos los clips que faltan subir en la cuenta.'),
+    clips: z
+      .array(z.object({ publicacion: z.string().min(1).describe('La publicación: su id, su código en el canal o su link.'), video: z.string().min(1).describe('El clip: la clave «video» de list_clips_to_upload.') }))
+      .max(200)
+      .optional(),
+    sacar: z.boolean().default(false).describe('true = sacarlos de la cola en vez de ponerlos.'),
+  }),
+  readOnly: false,
+  destructive: true,
+  async run(ctx, args) {
+    const account = await resolveAccount(ctx, args.cuenta);
+    if (!args.todos && (!args.clips || args.clips.length === 0)) throw new McpToolError('Decí qué clips: mandá «clips», o «todos» en true.');
+    await offerApprovedClips(ctx.db, account.id);
+    const items = args.todos ? undefined : await Promise.all(args.clips!.map(async (c) => ({ publicationId: await resolvePublication(ctx, account.id, c.publicacion), videoId: c.video })));
+    const r = await queueClipUploads(ctx.db, { accountId: account.id, items, queued: !args.sacar });
+    const clips = await pendingClipUploads(ctx.db, account.id);
+    return {
+      [args.sacar ? 'sacados_de_la_cola' : 'puestos_en_la_cola']: r.changed,
+      ...(r.skipped.length > 0 ? { no_estan_para_subir: r.skipped.map((s) => ({ publicacion: s.publicationId, video: s.videoId })), aviso: 'Esos no son clips aprobados y elegidos que falten subir: fijate en list_clips_to_upload.' } : {}),
+      en_la_cola: clips.filter((c) => c.queuedAt).length,
+      faltan_subir: clips.length,
+      quien_atiende_la_cola: await uploadersText(ctx),
+      link_app: `${ctx.baseUrl}/a/${account.slug}/pipeline?vista=por-subir`,
+    };
+  },
+});
+
 const uploadedTool = defineTool({
   name: 'mark_clip_uploaded',
   section: ['pipeline', 'publicaciones'],
@@ -668,4 +714,4 @@ const uploadedTool = defineTool({
   },
 });
 
-export const VIDEO_TOOLS = [getStep, saveScript, requestTool, reviewTool, queueTool, settingsTool, momentsTool, clipsProbe, uploadsList, uploadedTool, measureTool, protocolTypeTool, syncTool];
+export const VIDEO_TOOLS = [getStep, saveScript, requestTool, reviewTool, queueTool, settingsTool, momentsTool, clipsProbe, uploadsList, uploadedTool, measureTool, protocolTypeTool, syncTool, queueUploadsTool];

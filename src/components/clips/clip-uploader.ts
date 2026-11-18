@@ -17,11 +17,12 @@ export const uploadKey = (c: { publicationId: string; videoId: string }) => `${c
 // Los informes se juntan, para copiarlos si algo no sale.
 export type ClipProgress = { text: string | null; error: string | null; done: boolean; uploaded: boolean; reports: unknown[] };
 
-type FromExtension = { origen?: string; tipo?: string; version?: string; publicacion?: string; video?: string; texto?: string | null; error?: string | null; listo?: boolean; subido?: boolean; informe?: unknown };
-type State = { extension: string | null; progress: Record<string, ClipProgress> };
+type FromExtension = { origen?: string; tipo?: string; version?: string; sola?: boolean; publicacion?: string; video?: string; texto?: string | null; error?: string | null; listo?: boolean; subido?: boolean; informe?: unknown };
+// queue: si la extensión de este navegador sube sola la cola.
+type State = { extension: string | null; queue: boolean; progress: Record<string, ClipProgress> };
 
-let state: State = { extension: null, progress: {} };
-const EMPTY: State = { extension: null, progress: {} };
+let state: State = { extension: null, queue: false, progress: {} };
+const EMPTY: State = { extension: null, queue: false, progress: {} };
 const listeners = new Set<() => void>();
 // Qué cuenta y qué hacer al terminar, por cada subida pedida desde esta pestaña.
 const asked = new Map<string, { accountSlug: string; allMeasures: boolean; onUploaded?: () => void }>();
@@ -39,7 +40,7 @@ function hear(e: MessageEvent<FromExtension>) {
   if (e.source !== window || e.origin !== window.location.origin || e.data?.origen !== 'mrb-clips') return;
   const d = e.data;
   if (d.tipo === 'hola' && d.version) {
-    if (state.extension !== d.version) set({ ...state, extension: d.version });
+    if (state.extension !== d.version || state.queue !== (d.sola === true)) set({ ...state, extension: d.version, queue: d.sola === true });
     return;
   }
   if (d.tipo !== 'avance' || !d.publicacion || !d.video) return;
@@ -100,4 +101,9 @@ export function askClipUpload(accountSlug: string, ask: ClipUploadAsk, onUploade
     },
     window.location.origin,
   );
+}
+
+/** Prende o apaga que la extensión de este navegador suba sola la cola. */
+export function setClipQueue(on: boolean) {
+  window.postMessage({ origen: 'mrb-app', tipo: 'cola', sola: on }, window.location.origin);
 }

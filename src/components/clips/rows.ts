@@ -18,5 +18,7 @@ export function clipRows(clips: ClipUpload[]): ClipUploadRow[] {
     downloadLink: c.downloadLink,
     durationMs: c.durationMs,
     size: c.size,
+    queued: c.queuedAt !== null,
+    error: c.error,
   }));
 }

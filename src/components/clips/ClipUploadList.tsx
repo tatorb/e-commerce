@@ -2,13 +2,14 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useEffect } from 'react';
 import { Download, ExternalLink, Puzzle, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { StatusText } from '@/components/pipeline/StatusText';
 import { useStepAction } from '@/components/pipeline/useStepAction';
 import { VideoFacts, VideoThumb } from '@/components/pipeline/videos/VideoCard';
-import { markClipUploadedAction } from '@/app/a/[cuenta]/pipeline/video-actions';
-import { askClipUpload, uploadKey, useClipUploader } from './clip-uploader';
+import { markClipUploadedAction, queueClipUploadsAction } from '@/app/a/[cuenta]/pipeline/video-actions';
+import { askClipUpload, setClipQueue, uploadKey, useClipUploader } from './clip-uploader';
 import { ClipUploadStatus } from './ClipUploadStatus';
 
 // La lista de clips que falta subir al canal. Con la extensión de Chrome de
@@ -31,23 +32,59 @@ export type ClipUploadRow = {
   downloadLink: string;
   durationMs: number | null;
   size: number | null;
+  // Está en la cola de subida, o la última vez que se intentó no se pudo.
+  queued: boolean;
+  error: string | null;
 };
 
 export function ClipUploadList({ accountSlug, clips }: { accountSlug: string; clips: ClipUploadRow[] }) {
   const router = useRouter();
-  const { extension, progress } = useClipUploader();
+  const { extension, queue, progress } = useClipUploader();
+  const all = useStepAction();
+  const queuedCount = clips.filter((c) => c.queued).length;
+  // Mientras la cola trabaja, la lista se pone al día sola.
+  useEffect(() => {
+    if (!queue || queuedCount === 0) return;
+    const timer = setInterval(() => router.refresh(), 30_000);
+    return () => clearInterval(timer);
+  }, [queue, queuedCount, router]);
 
   if (clips.length === 0) {
     return null;
   }
   return (
     <div className="space-y-3">
-      <p className="flex items-start gap-2 rounded-lg border p-3 text-sm">
-        <Puzzle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-        {extension
-          ? `La extensión de Studio MRB está instalada en este Chrome (versión ${extension}). Tenés que tener la sesión de Mercado Libre iniciada.`
-          : 'La extensión de Studio MRB no está instalada en este navegador. Con ella, un botón abre la publicación y carga el clip solo. Mientras tanto, se sube a mano con los botones de cada clip.'}
-      </p>
+      <div className="space-y-3 rounded-lg border p-3 text-sm">
+        <p className="flex items-start gap-2">
+          <Puzzle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+          {extension
+            ? `La extensión de Studio MRB está instalada en este Chrome (versión ${extension}). Tenés que tener la sesión de Mercado Libre iniciada.`
+            : 'La extensión de Studio MRB no está instalada en este navegador. Con ella, un botón abre la publicación y carga el clip solo. Mientras tanto, se sube a mano con los botones de cada clip.'}
+        </p>
+        {extension ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" variant={queue ? 'default' : 'outline'} onClick={() => setClipQueue(!queue)}>
+              {queue ? 'Subir sola la cola: prendido' : 'Subir sola la cola: apagado'}
+            </Button>
+            <Button size="sm" variant="outline" pending={all.running('all')} disabled={all.pending || queuedCount === clips.length} onClick={() => all.run(() => queueClipUploadsAction(accountSlug, null, true), undefined, 'all')}>
+              Poner todos en la cola
+            </Button>
+            {queuedCount > 0 ? (
+              <Button size="sm" variant="ghost" pending={all.running('none')} disabled={all.pending} onClick={() => all.run(() => queueClipUploadsAction(accountSlug, clips.filter((c) => c.queued).map((c) => ({ publicationId: c.publicationId, videoId: c.videoId })), false), undefined, 'none')}>
+                Vaciar la cola
+              </Button>
+            ) : null}
+            <StatusText status={all.status} />
+          </div>
+        ) : null}
+        {extension ? (
+          <p className="text-xs text-muted-foreground">
+            {queue
+              ? `Prendido: este Chrome sube solo lo que esté en la cola, de a uno, en una ventana aparte y con una pausa entre uno y otro. ${queuedCount === 0 ? 'La cola está vacía.' : `Hay ${queuedCount} en la cola.`} Tiene que quedar Chrome abierto.`
+              : 'Apagado: los clips de la cola esperan. La cola la llenás vos o Claude; prendelo para que este Chrome los suba solo.'}
+          </p>
+        ) : null}
+      </div>
       <ul className="space-y-3">
         {clips.map((c) => {
           const p = progress[uploadKey(c)];
@@ -112,8 +149,19 @@ function Row({ accountSlug, clip, extension, working, onUpload }: { accountSlug:
           >
             Ya lo subí
           </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => action.run(() => queueClipUploadsAction(accountSlug, [{ publicationId: clip.publicationId, videoId: clip.videoId }], !clip.queued), undefined, 'queue')}
+            pending={action.running('queue')}
+            disabled={action.pending}
+          >
+            {clip.queued ? 'Sacar de la cola' : 'Poner en la cola'}
+          </Button>
           <StatusText status={action.status} />
         </div>
+        {clip.queued ? <p className="text-sm font-medium">En la cola de subida.</p> : null}
+        {clip.error && !clip.queued ? <p className="text-sm text-destructive">La última vez no se pudo subir: {clip.error}</p> : null}
         <ClipUploadStatus uploadKey={uploadKey(clip)} />
       </div>
     </li>

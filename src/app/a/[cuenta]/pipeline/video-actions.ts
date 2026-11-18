@@ -1,5 +1,6 @@
 'use server';
 
+import { queueClipUploads } from '@/lib/clip-uploads';
 import { setVideoMeasure, VideoMeasureError } from '@/lib/video-measure';
 import { act } from '@/lib/auth/guard';
 import { revalidatePath } from 'next/cache';
@@ -297,5 +298,17 @@ export async function setVideoMeasureAction(accountSlug: string, videoId: string
       if (e instanceof VideoMeasureError) return { ok: false, error: e.message };
       throw e;
     }
+  });
+}
+
+/** Pone clips en la cola de subida, o los saca. Sin lista, todos los que faltan subir en la cuenta. */
+export async function queueClipUploadsAction(accountSlug: string, items: { publicationId: string; videoId: string }[] | null, queued: boolean): Promise<Result> {
+  return act(accountSlug, { section: ['subir', 'pipeline'], does: queued ? 'Puso clips en la cola de subida' : 'Sacó clips de la cola de subida' }, async () => {
+    await requireUser();
+    const accountId = await accountIdOf(accountSlug);
+    if (!accountId) return NO_ACCOUNT;
+    const r = await queueClipUploads(prisma, { accountId, items: items ? items.map((i) => ({ publicationId: String(i.publicationId), videoId: String(i.videoId) })) : undefined, queued: Boolean(queued) });
+    revalidatePath(`/a/${accountSlug}/pipeline`, 'layout');
+    return { ok: true, message: queued ? (r.changed === 1 ? 'Quedó en la cola.' : `Quedaron ${r.changed} en la cola.`) : 'Salió de la cola.' };
   });
 }

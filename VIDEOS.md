@@ -138,7 +138,7 @@ Todo lo del editor se puede hacer también hablando con Claude, conectado a la a
 - **Revisar las carpetas del Drive** para ver si se copiaron videos, de unas publicaciones o de toda la cuenta: `sync_videos`.
 - **Cambiar** la voz, la música, los subtítulos y lo automático de la cuenta, y cuándo edita la Mac: `update_video_settings`. **Cargar los momentos** de un paso del protocolo: `set_video_moments`.
 - **Decir para qué tipo de producto es** cada protocolo: `set_protocol_product_type`. **Elegir la medida** de un video: `set_video_measure`.
-- **Ver y anotar los clips por subir**: `list_clips_to_upload` y `mark_clip_uploaded`.
+- **Ver los clips por subir** y cómo va la cola: `list_clips_to_upload`. **Pedir que se suban**, de a uno o todos: `queue_clip_uploads`. La app no puede subirlos por su cuenta: los sube la extensión de Chrome de quien tenga **Subir sola la cola** prendido, con Chrome abierto. **Anotar** uno subido a mano: `mark_clip_uploaded`.
 
 Claude no puede ver ni escuchar el clip: antes de aprobarlo muestra cómo se editó, lo que dice la voz y los avisos.
 

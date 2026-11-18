@@ -19,6 +19,17 @@ No muevas ni borres la carpeta después: Chrome la lee de ahí. Para actualizarl
 3. Se abre una pestaña de Mercado Libre. Si el producto tiene varias medidas, las despliega y entra por la de la publicación. Un cartel abajo a la derecha cuenta qué va haciendo.
 4. Cuando Mercado Libre suma el video a **Tus videos**, la subida terminó: queda en revisión y la app lo marca sola como subido.
 
+## La cola de subida
+
+Para subir en lote, sin tocar cada clip:
+
+1. En el Pipeline, pestaña **Por subir**, sección **Clips**, prendé **Subir sola la cola**. Queda prendido en ese Chrome.
+2. Poné clips en la cola: con **Poner todos en la cola**, con **Poner en la cola** de cada uno, o pidiéndoselo a Claude (`queue_clip_uploads`).
+3. La extensión le pregunta a la app cada minuto si hay algo en la cola. Sube de a un clip, en una ventana aparte que no te saca el foco, y espera unos dos minutos entre uno y otro.
+4. El que se sube sale de la lista. El que falla sale de la cola con su motivo, a la vista en la lista, y la ventana queda abierta para que mires qué pasó.
+
+Hace falta dejar Chrome abierto, con la sesión de la app y la de Mercado Libre iniciadas. Con la cola apagada, nada se sube solo.
+
 ## Qué hace y qué no
 
 - Solo actúa en la pestaña que abrió ella para subir un clip. En tus otras pestañas de Mercado Libre no hace nada.

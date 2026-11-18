@@ -1,7 +1,7 @@
 import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@/generated/prisma/client';
-import { chooseApprovedClip, pendingClipUploads } from '@/lib/clip-uploads';
+import { activeUploaders, chooseApprovedClip, claimQueuedUpload, finishQueuedUpload, pendingClipUploads, queueClipUploads, uploaderSeen } from '@/lib/clip-uploads';
 import { measuresOf } from '@/lib/media';
 import { findVideoMeasures, setVideoMeasure } from '@/lib/video-measure';
 import { markClipUploaded } from '@/lib/videos';
@@ -19,7 +19,7 @@ describe.skipIf(!url)('un video por medida', () => {
   const [STD, M60] = measuresOf(VARIANTS);
 
   beforeEach(async () => {
-    await db.$executeRawUnsafe('TRUNCATE video_edits, publication_clips, product_videos, publications, stores, channels, product_variants, products, accounts, users CASCADE');
+    await db.$executeRawUnsafe('TRUNCATE clip_uploaders, video_edits, publication_clips, product_videos, publications, stores, channels, product_variants, products, accounts, users CASCADE');
     accountId = (await db.account.create({ data: { slug: 'prueba', name: 'Cuenta' } })).id;
     productId = (await db.product.create({ data: { accountId, name: 'Subconjunto SP-449', productType: 'Subconjunto', variants: { create: VARIANTS.map((v, position) => ({ ...v, position })) } } })).id;
     const channel = await db.channel.create({ data: { kind: 'MERCADOLIBRE', name: 'Mercado Libre' } });
@@ -96,5 +96,55 @@ describe.skipIf(!url)('un video por medida', () => {
     await findVideoMeasures(db, productId);
     expect((await db.productVideo.findUniqueOrThrow({ where: { id: std.original.id } })).variantKey).toBeNull();
     await expect(setVideoMeasure(db, { accountId, videoId: std.original.id, variantKey: 'no-existe' })).rejects.toThrow('no está en la ficha');
+  });
+  it('la cola de subida: se pide, la extensión la toma de a uno y cuenta cómo salió', async () => {
+    const std = await approved('SP-449-00.MP4');
+    await chooseApprovedClip(db, { clipId: std.clip.id, userId: null });
+    const m60 = await approved('SP-449-060.MP4');
+    await chooseApprovedClip(db, { clipId: m60.clip.id, userId: null });
+    const accounts = [{ id: accountId, slug: 'prueba' }];
+    const t0 = new Date('2026-11-19T10:00:00Z');
+    // Sin pedir nada, la cola está vacía.
+    expect(await claimQueuedUpload(db, accounts, t0)).toBeNull();
+    // Se piden todos: son dos subidas, una por medida.
+    expect((await queueClipUploads(db, { accountId, queued: true, now: t0 })).changed).toBe(2);
+    expect((await pendingClipUploads(db, accountId)).every((c) => c.queuedAt)).toBe(true);
+
+    const first = await claimQueuedUpload(db, accounts, t0);
+    expect(first).toMatchObject({ fileName: 'SP-449-00 · editado.mp4', allMeasures: false, accountSlug: 'prueba' });
+    // Mientras ese está en curso, no entrega otro: de a uno.
+    expect(await claimQueuedUpload(db, accounts, new Date(t0.getTime() + 60_000))).toBeNull();
+    await finishQueuedUpload(db, { accountId, publicationId: first!.publicationId, videoId: first!.videoId, allMeasures: false, ok: true, userId: null, now: t0 });
+    // Quedó subido en las dos formas de cobro de su medida, y salió de la lista.
+    expect((await pendingClipUploads(db, accountId)).map((c) => c.fileName)).toEqual(['SP-449-060 · editado.mp4']);
+
+    // El segundo falla: sale de la cola con su motivo, y no se vuelve a tomar hasta que se pida de nuevo.
+    const second = await claimQueuedUpload(db, accounts, t0);
+    await finishQueuedUpload(db, { accountId, publicationId: second!.publicationId, videoId: second!.videoId, allMeasures: false, ok: false, error: 'La sesión de Mercado Libre está cerrada.', userId: null });
+    expect(await pendingClipUploads(db, accountId)).toMatchObject([{ queuedAt: null, error: 'La sesión de Mercado Libre está cerrada.' }]);
+    expect(await claimQueuedUpload(db, accounts, t0)).toBeNull();
+    // Se pide de nuevo, con una publicación cualquiera de esa medida.
+    const other = await db.publication.findFirstOrThrow({ where: { externalId: 'MLA4' } });
+    expect(await queueClipUploads(db, { accountId, items: [{ publicationId: other.id, videoId: second!.videoId }], queued: true, now: t0 })).toMatchObject({ changed: 1, skipped: [] });
+    // Un clip que no está para subir no entra.
+    expect((await queueClipUploads(db, { accountId, items: [{ publicationId: other.id, videoId: 'no-existe' }], queued: true })).skipped).toHaveLength(1);
+
+    // Una subida que se cuelga se vuelve a tomar pasado un rato, hasta tres veces.
+    for (const minutes of [0, 16, 32]) expect(await claimQueuedUpload(db, accounts, new Date(t0.getTime() + minutes * 60_000))).not.toBeNull();
+    expect(await claimQueuedUpload(db, accounts, new Date(t0.getTime() + 48 * 60_000))).toBeNull();
+    expect((await pendingClipUploads(db, accountId))[0]).toMatchObject({ queuedAt: null, error: expect.stringContaining('3 veces') });
+  });
+
+  it('se sabe si hay una extensión atendiendo la cola', async () => {
+    await db.user.create({ data: { id: 'u1', name: 'Martín', email: 'm@example.com' } });
+    const now = new Date('2026-11-19T10:00:00Z');
+    expect(await activeUploaders(db, now)).toEqual([]);
+    // Con la cola apagada está, pero no la atiende.
+    await uploaderSeen(db, { userId: 'u1', version: '0.4.0', auto: false, now });
+    expect(await activeUploaders(db, now)).toEqual([]);
+    await uploaderSeen(db, { userId: 'u1', version: '0.4.0', auto: true, now });
+    expect(await activeUploaders(db, now)).toMatchObject([{ name: 'Martín', version: '0.4.0' }]);
+    // Si dejó de preguntar, ya no cuenta.
+    expect(await activeUploaders(db, new Date(now.getTime() + 10 * 60_000))).toEqual([]);
   });
 });

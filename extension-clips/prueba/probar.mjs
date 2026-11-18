@@ -19,6 +19,7 @@ const HUELLA = createHash('sha256').update(CLIP).digest('hex');
 const PEDAZO = 4 * 1024 * 1024;
 const SUBIDA = 'https://www.mercadolibre.com.ar/video/creator/upload?item_id=MLA4188931774&user_product_id=MLAU1&origin=syi_dropdown';
 
+const cola = { pendientes: [], preguntas: [], resultados: [] };
 const fila = (opcion = 'Crear video', href = SUBIDA) => `
   <div><button class="sll-list-row-secondary-actions-trigger" aria-label="Acciones secundarias" onclick="this.nextElementSibling.hidden=false"></button>
   <ul hidden><li><a class="sll-list-row-secondary-action__label--link" href="https://www.mercadolibre.com.ar/publicar/kit">Publicar en kit</a></li>
@@ -55,6 +56,24 @@ const app = createServer((req, res) => {
       addEventListener('message', (e) => { if (e.data?.origen === 'mrb-clips') window.avances.push(e.data); });
       window.subir = (codigo) => postMessage({ origen: 'mrb-app', tipo: 'subir', publicacion: 'pub123456', video: 'vid123456', codigo, nombre: 'clip · editado.mp4', tipoDeArchivo: 'video/mp4' }, location.origin);
     </script>`);
+  }
+  // La cola de subida: un clip pedido, y lo que la extensión cuenta al terminar.
+  if (req.url.startsWith('/api/clips/cola')) {
+    if (!/sesion=1/.test(req.headers.cookie ?? '')) return res.writeHead(401).end();
+    if (req.method === 'POST') {
+      let cuerpo = '';
+      req.on('data', (c) => (cuerpo += c));
+      req.on('end', () => {
+        cola.resultados.push(JSON.parse(cuerpo));
+        res.writeHead(200, { 'Content-Type': 'application/json' }).end('{"ok":true}');
+      });
+      return;
+    }
+    cola.preguntas.push(req.url);
+    const sola = /sola=1/.test(req.url);
+    const trabajo = sola ? cola.pendientes.shift() ?? null : null;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ trabajo, pausa_segundos: 1 }));
   }
   if (req.url === '/api/drive/videos/vid123456') {
     if (!/sesion=1/.test(req.headers.cookie ?? '')) return res.writeHead(401).end();
@@ -104,7 +123,7 @@ const pagina = await contexto.newPage();
 await pagina.goto(`${APP}/a/insur/clips-por-subir`);
 await pagina.evaluate(() => postMessage({ origen: 'mrb-app', tipo: 'hola' }, location.origin));
 await pagina.waitForFunction(() => window.avances.some((a) => a.tipo === 'hola'), null, { timeout: 10000 });
-comprobar('la app ve que la extensión está', (await pagina.evaluate(() => window.avances.find((a) => a.tipo === 'hola').version)) === '0.3.0');
+comprobar('la app ve que la extensión está', (await pagina.evaluate(() => window.avances.find((a) => a.tipo === 'hola').version)) === '0.4.0');
 
 async function correr(codigo) {
   await pagina.evaluate(() => (window.avances = []));
@@ -224,6 +243,33 @@ async function correr(codigo) {
   await ml.close();
   await pagina.waitForFunction(() => window.avances.some((a) => a.error), null, { timeout: 10000 });
   comprobar('si se cierra la pestaña, avisa', /Se cerró la pestaña/.test((await pagina.evaluate(() => window.avances.at(-1))).error));
+}
+
+// 7. La cola: con «subir sola» prendido, toma lo que pidió alguien (o Claude) sin que nadie toque nada.
+{
+  listado = fila();
+  crear = CREAR;
+  cola.pendientes.push({ publicacion: 'pub123456', video: 'vid123456', codigo: 'MLA5550001', nombre: 'clip.mp4', tipoDeArchivo: 'video/mp4', todasLasVariantes: true });
+  const antes = contexto.pages().length;
+  // Apagada, pregunta pero no toma nada.
+  await pagina.evaluate(() => postMessage({ origen: 'mrb-app', tipo: 'cola', sola: false }, location.origin));
+  await pagina.waitForTimeout(1500);
+  comprobar('con la cola apagada no sube nada', cola.pendientes.length === 1 && contexto.pages().length === antes);
+  await pagina.evaluate(() => ((window.avances = []), postMessage({ origen: 'mrb-app', tipo: 'cola', sola: true }, location.origin)));
+  await pagina.waitForFunction(() => window.avances.some((a) => a.tipo === 'hola' && a.sola === true), null, { timeout: 10000 });
+  comprobar('la app ve que la cola quedó prendida', true);
+  for (let i = 0; i < 150 && cola.resultados.length === 0; i++) await pagina.waitForTimeout(200);
+  comprobar('toma el clip de la cola, lo sube y le cuenta a la app', cola.resultados.length === 1 && cola.resultados[0].ok === true && cola.resultados[0].publicacion === 'pub123456', JSON.stringify(cola.resultados));
+  await pagina.waitForTimeout(1500);
+  comprobar('y cierra la pestaña que abrió', contexto.pages().length === antes, String(contexto.pages().length - antes));
+  comprobar('pregunta con su versión', cola.preguntas.some((u) => u.includes('version=0.4.0')));
+  // Uno que no se puede subir: se lo cuenta a la app con el motivo.
+  listado = fila() + fila();
+  cola.pendientes.push({ publicacion: 'pub123456', video: 'vid123456', codigo: 'MLA5550002', nombre: 'clip.mp4', tipoDeArchivo: 'video/mp4', todasLasVariantes: true });
+  await pagina.evaluate(() => postMessage({ origen: 'mrb-app', tipo: 'cola', sola: true }, location.origin));
+  for (let i = 0; i < 150 && cola.resultados.length === 1; i++) await pagina.waitForTimeout(200);
+  comprobar('si no puede, le cuenta a la app por qué', cola.resultados[1]?.ok === false && /2 publicaciones/.test(cola.resultados[1]?.error ?? ''), JSON.stringify(cola.resultados[1]));
+  await pagina.evaluate(() => postMessage({ origen: 'mrb-app', tipo: 'cola', sola: false }, location.origin));
 }
 
 await contexto.close();

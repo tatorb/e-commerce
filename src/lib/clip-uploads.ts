@@ -91,6 +91,11 @@ export type ClipUpload = {
   durationMs: number | null;
   size: number | null;
   chosenAt: Date;
+  // La cola de subida: si está pedido, cuándo, y por qué falló la última vez.
+  queuedAt: Date | null;
+  attempts: number;
+  triedAt: Date | null;
+  error: string | null;
 };
 
 const SELLER_SITE: Record<string, string> = {
@@ -132,6 +137,10 @@ export async function pendingClipUploads(db: Db, accountId: string, productId?: 
       publicationId: true,
       videoId: true,
       chosenAt: true,
+      uploadAskedAt: true,
+      uploadTriedAt: true,
+      uploadAttempts: true,
+      uploadError: true,
       video: { select: { name: true, mimeType: true, driveFileId: true, webViewLink: true, durationMs: true, size: true } },
       publication: {
         select: { title: true, externalId: true, url: true, pipelineStatus: true, variantKey: true, productId: true,
@@ -181,6 +190,10 @@ export async function pendingClipUploads(db: Db, accountId: string, productId?: 
         durationMs: r.video.durationMs,
         size: r.video.size === null ? null : Number(r.video.size),
         chosenAt: part[0].chosenAt,
+        queuedAt: part.find((g) => g.uploadAskedAt)?.uploadAskedAt ?? null,
+        attempts: Math.max(...part.map((g) => g.uploadAttempts)),
+        triedAt: part.find((g) => g.uploadTriedAt)?.uploadTriedAt ?? null,
+        error: part.find((g) => g.uploadError)?.uploadError ?? null,
       });
     }
   }
@@ -190,4 +203,109 @@ export async function pendingClipUploads(db: Db, accountId: string, productId?: 
 /** Cuántos clips faltan subir en la cuenta. */
 export async function clipUploadCount(db: Db, accountId: string): Promise<number> {
   return (await pendingClipUploads(db, accountId)).length;
+}
+
+// ───────────────────────────── La cola de subida ─────────────────────────────
+
+// Cuántas veces la extensión intenta un clip, y cuánto se espera a que termine
+// antes de darlo por colgado y tomarlo de nuevo.
+export const UPLOAD_MAX_ATTEMPTS = 3;
+const UPLOAD_LEASE_MS = 15 * 60_000;
+// La pausa entre una subida y la siguiente: de a una y sin apuro.
+export const UPLOAD_PAUSE_S = 120;
+// Una extensión que no pregunta hace más que esto no está atendiendo la cola.
+const UPLOADER_ALIVE_MS = 5 * 60_000;
+
+/** Las filas de la base de una subida: las publicaciones del producto, o de la medida, que tienen ese clip sin subir. */
+async function rowsOf(db: Db, accountId: string, u: { publicationId: string; videoId: string; allMeasures: boolean }) {
+  const pub = await db.publication.findFirst({ where: { id: u.publicationId, product: { accountId } }, select: { productId: true, variantKey: true } });
+  if (!pub) return null;
+  return { videoId: u.videoId, uploadedAt: null, publication: { productId: pub.productId, ...(u.allMeasures ? {} : { variantKey: pub.variantKey }) } } satisfies Prisma.PublicationClipWhereInput;
+}
+
+/**
+ * Pone clips en la cola de subida, o los saca. Sin `items`, todos los que
+ * faltan subir en la cuenta. Devuelve cuántos quedaron pedidos.
+ */
+export async function queueClipUploads(
+  db: PrismaClient,
+  args: { accountId: string; items?: { publicationId: string; videoId: string }[]; queued: boolean; now?: Date },
+): Promise<{ changed: number; skipped: { publicationId: string; videoId: string }[] }> {
+  const pendings = await pendingClipUploads(db, args.accountId);
+  const skipped: { publicationId: string; videoId: string }[] = [];
+  let targets = pendings;
+  if (args.items) {
+    targets = [];
+    for (const item of args.items) {
+      // La publicación puede ser cualquiera de las del producto, o de la medida, que tienen el clip.
+      const pub = await db.publication.findFirst({ where: { id: item.publicationId, product: { accountId: args.accountId } }, select: { productId: true, variantKey: true } });
+      const reps = pub ? await db.publication.findMany({ where: { id: { in: pendings.filter((p) => p.videoId === item.videoId).map((p) => p.publicationId) }, productId: pub.productId }, select: { id: true, variantKey: true } }) : [];
+      const hit = pendings.find((p) => p.videoId === item.videoId && reps.some((r) => r.id === p.publicationId && (p.allMeasures || r.variantKey === pub!.variantKey)));
+      if (hit) targets.push(hit);
+      else skipped.push(item);
+    }
+  }
+  let changed = 0;
+  for (const u of targets) {
+    const where = await rowsOf(db, args.accountId, u);
+    if (!where) continue;
+    await db.publicationClip.updateMany({
+      where,
+      data: args.queued ? { uploadAskedAt: args.now ?? new Date(), uploadTriedAt: null, uploadAttempts: 0, uploadError: null } : { uploadAskedAt: null, uploadTriedAt: null },
+    });
+    changed += 1;
+  }
+  return { changed, skipped };
+}
+
+export type QueuedUpload = Pick<ClipUpload, 'publicationId' | 'videoId' | 'externalId' | 'fileName' | 'mimeType' | 'allMeasures'> & { accountSlug: string };
+
+/**
+ * La extensión pregunta si hay un clip para subir, entre las cuentas que ve la
+ * persona. Toma el más viejo de la cola, lo anota como en curso y lo devuelve.
+ * Uno que se intentó demasiadas veces sale de la cola con su aviso.
+ */
+export async function claimQueuedUpload(db: PrismaClient, accounts: { id: string; slug: string }[], now = new Date()): Promise<QueuedUpload | null> {
+  for (const account of accounts) {
+    const queue = (await pendingClipUploads(db, account.id)).filter((u) => u.queuedAt).sort((a, b) => a.queuedAt!.getTime() - b.queuedAt!.getTime());
+    for (const u of queue) {
+      // Otra pestaña o el intento anterior lo tienen todavía.
+      if (u.triedAt && now.getTime() - u.triedAt.getTime() < UPLOAD_LEASE_MS) return null;
+      const where = await rowsOf(db, account.id, u);
+      if (!where) continue;
+      if (u.attempts >= UPLOAD_MAX_ATTEMPTS) {
+        await db.publicationClip.updateMany({ where, data: { uploadAskedAt: null, uploadTriedAt: null, uploadError: `La extensión empezó esta subida ${UPLOAD_MAX_ATTEMPTS} veces y no la terminó. Puede que se haya cerrado Chrome.` } });
+        continue;
+      }
+      await db.publicationClip.updateMany({ where, data: { uploadTriedAt: now, uploadAttempts: { increment: 1 } } });
+      return { publicationId: u.publicationId, videoId: u.videoId, externalId: u.externalId, fileName: u.fileName, mimeType: u.mimeType, allMeasures: u.allMeasures, accountSlug: account.slug };
+    }
+  }
+  return null;
+}
+
+/** La extensión cuenta cómo salió: subido queda anotado; si falló, sale de la cola con el motivo. */
+export async function finishQueuedUpload(
+  db: PrismaClient,
+  args: { accountId: string; publicationId: string; videoId: string; allMeasures: boolean; ok: boolean; error?: string | null; userId: string | null; now?: Date },
+): Promise<void> {
+  const where = await rowsOf(db, args.accountId, args);
+  if (!where) return;
+  if (args.ok) {
+    await db.publicationClip.updateMany({ where, data: { uploadedAt: args.now ?? new Date(), uploadedById: args.userId, uploadAskedAt: null, uploadTriedAt: null, uploadError: null } });
+    return;
+  }
+  await db.publicationClip.updateMany({ where, data: { uploadAskedAt: null, uploadTriedAt: null, uploadError: (args.error ?? 'La extensión no pudo subirlo.').slice(0, 500) } });
+}
+
+/** La extensión avisa que está viva, y si tiene prendido subir sola la cola. */
+export async function uploaderSeen(db: PrismaClient, args: { userId: string; version: string | null; auto: boolean; now?: Date }): Promise<void> {
+  const data = { seenAt: args.now ?? new Date(), version: args.version?.slice(0, 20) ?? null, auto: args.auto };
+  await db.clipUploader.upsert({ where: { userId: args.userId }, create: { userId: args.userId, ...data }, update: data });
+}
+
+/** Quién está atendiendo la cola ahora: las extensiones que preguntaron hace poco con la cola prendida. */
+export async function activeUploaders(db: Db, now = new Date()): Promise<{ name: string; seenAt: Date; version: string | null }[]> {
+  const rows = await db.clipUploader.findMany({ where: { auto: true, seenAt: { gte: new Date(now.getTime() - UPLOADER_ALIVE_MS) } }, orderBy: { seenAt: 'desc' }, select: { seenAt: true, version: true, user: { select: { name: true } } } });
+  return rows.map((r) => ({ name: r.user.name, seenAt: r.seenAt, version: r.version }));
 }

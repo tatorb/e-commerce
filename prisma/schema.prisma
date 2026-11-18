@@ -101,6 +101,7 @@ model User {
   shootChecks        ShootCheck[]         @relation("ShootCheckDoneBy")
 
   @@map("users")
+  clipUploader   ClipUploader?
 }
 
 model Session {
@@ -2057,6 +2058,13 @@ model PublicationClip {
   uploadedAt    DateTime?
   uploadedById  String?
   uploadedBy    User?        @relation("ClipUploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+  // La cola de subida: alguien pidió subirlo y la extensión de Chrome lo toma
+  // sola. Cuándo se pidió, cuándo lo tomó por última vez, cuántas veces y, si
+  // no pudo, por qué. Al fallar sale de la cola hasta que se pida de nuevo.
+  uploadAskedAt  DateTime?
+  uploadTriedAt  DateTime?
+  uploadAttempts Int          @default(0)
+  uploadError    String?
 
   @@id([publicationId, videoId])
   @@index([videoId])
@@ -2806,4 +2814,17 @@ model PushKeys {
   createdAt  DateTime @default(now())
 
   @@map("push_keys")
+}
+
+// La extensión de Chrome que sube los clips: cuándo preguntó por última vez si
+// hay algo en la cola, para saber si hay un navegador que la esté atendiendo.
+model ClipUploader {
+  userId  String   @id
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  seenAt  DateTime
+  version String?
+  // Si esa persona tiene prendido que la extensión suba sola la cola.
+  auto    Boolean  @default(false)
+
+  @@map("clip_uploaders")
 }
