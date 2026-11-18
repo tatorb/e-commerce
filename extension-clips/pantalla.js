@@ -5,6 +5,8 @@ const MRB = {
   OPCION: 'a.sll-list-row-secondary-action__label--link',
   TEXTO_OPCION: 'Crear video',
   ARCHIVO: 'input.clip-dropzone__file-input',
+  // Cada video de "Tus videos".
+  VIDEO: '.clip-preview',
 
   esperar(selector, ms = 30000, raiz = document) {
     return new Promise((resolver) => {
@@ -52,13 +54,6 @@ const MRB = {
       if (sin >= quieto) return true;
     }
     return false;
-  },
-
-  // Un elemento, contado en pocas palabras.
-  contar(e) {
-    const corto = (t) => (t || '').replace(/\s+/g, ' ').trim().slice(0, 160);
-    const attrs = Object.fromEntries(['id', 'class', 'data-testid', 'aria-label', 'role', 'type', 'href'].filter((a) => e.hasAttribute(a)).map((a) => [a, corto(e.getAttribute(a))]));
-    return { tag: e.tagName.toLowerCase(), texto: corto(e.innerText || e.value), ...attrs };
   },
 
   // Si Mercado Libre pide algo que solo puede hacer la persona.

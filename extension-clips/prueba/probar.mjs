@@ -25,13 +25,14 @@ const fila = (opcion = 'Crear video', href = SUBIDA) => `
   <li><a class="sll-list-row-secondary-action__label--link" target="_self" href="${href}">${opcion}</a></li></ul></div>`;
 const CREAR = `<title>Crear clip con IA</title><h1>Crear video</h1>
   <div class="clip-dropzone" role="button">Subir más<input type="file" class="clip-dropzone__file-input" accept=".mp4,.mpeg,.avi,.mov" style="display:none"></div>
+  <div class="clip-preview"><div class="clip-preview__pill">PUBLICADO</div></div>
   <div id="paso"></div>
   <script>document.querySelector('input').addEventListener('change', async (e) => {
     const f = e.target.files[0];
     const h = [...new Uint8Array(await crypto.subtle.digest('SHA-256', await f.arrayBuffer()))].map((b) => b.toString(16).padStart(2, '0')).join('');
     // Como el de verdad: primero un círculo girando, y recién después lo que sigue.
     document.querySelector('#paso').innerHTML = '<div class="clip-preview"><div class="clip-preview__loading">.</div></div><div class="andes-progress-indicator-circular">.</div>';
-    setTimeout(() => { document.querySelector('#paso').innerHTML = '<h2>Revisá tu video</h2><p id="dato">' + f.name + '|' + f.type + '|' + f.size + '|' + h + '</p><button class="andes-button andes-button--loud" data-testid="publish" onclick="window.tocado=true">Publicar video</button>'; }, 5000);
+    setTimeout(() => { document.querySelector('#paso').innerHTML = (window.rechaza ? '' : '<div class="clip-preview"><div class="clip-preview__pill">EN REVISIÓN</div></div>') + '<p id="dato">' + f.name + '|' + f.type + '|' + f.size + '|' + h + '</p><button onclick="window.tocado=true">Eliminar</button>'; }, 5000);
   });</script>`;
 
 // La app de mentira: la pantalla que pide la subida y el clip de a pedazos, solo con sesión.
@@ -92,7 +93,7 @@ const pagina = await contexto.newPage();
 await pagina.goto(`${APP}/a/insur/clips-por-subir`);
 await pagina.evaluate(() => postMessage({ origen: 'mrb-app', tipo: 'hola' }, location.origin));
 await pagina.waitForFunction(() => window.avances.some((a) => a.tipo === 'hola'), null, { timeout: 10000 });
-comprobar('la app ve que la extensión está', (await pagina.evaluate(() => window.avances.find((a) => a.tipo === 'hola').version)) === '0.1.2');
+comprobar('la app ve que la extensión está', (await pagina.evaluate(() => window.avances.find((a) => a.tipo === 'hola').version)) === '0.2.0');
 
 async function correr(codigo) {
   await pagina.evaluate(() => (window.avances = []));
@@ -107,21 +108,24 @@ async function correr(codigo) {
 {
   const { ml, avances } = await correr('mla3307805900');
   const fin = avances.at(-1);
-  comprobar('termina avisando que el clip quedó cargado', fin.listo === true && /Revisalo y confirmá vos/.test(fin.texto), JSON.stringify(fin).slice(0, 300));
+  comprobar('termina avisando que el clip quedó subido y en revisión', fin.listo === true && fin.subido === true && /quedó subido en Mercado Libre/.test(fin.texto), JSON.stringify(fin).slice(0, 300));
   comprobar('avisa de qué clip y publicación', fin.publicacion === 'pub123456' && fin.video === 'vid123456');
   const dato = await ml.locator('#dato').innerText();
   comprobar('el archivo llega entero, con su nombre y tipo', dato === `clip · editado.mp4|video/mp4|${CLIP.length}|${HUELLA}`, dato);
-  comprobar('el informe trae el botón que apareció', fin.informe.despues.botones.some((b) => b.texto === 'Publicar video') && !fin.informe.antes.botones.some((b) => b.texto === 'Publicar video'));
   comprobar('esperó a que terminara de cargar', !JSON.stringify(fin.informe.despues).includes('clip-preview__loading'));
-  comprobar('no tocó el botón de publicar', (await ml.evaluate(() => window.tocado)) !== true);
-  // Lo que la persona toca después queda anotado, para aprender el paso que falta.
-  await ml.locator('[data-testid=publish]').click();
-  await pagina.waitForFunction(() => window.avances.some((a) => a.informe?.toque), null, { timeout: 10000 });
-  const toque = (await pagina.evaluate(() => window.avances.find((a) => a.informe?.toque))).informe.toque;
-  comprobar('anota el botón que tocó la persona', toque.texto === 'Publicar video' && toque['data-testid'] === 'publish', JSON.stringify(toque));
+  comprobar('no tocó ningún botón', (await ml.evaluate(() => window.tocado)) !== true);
   comprobar('buscó por el código y entró por Crear video', pedidosML[0] === 'GET https://www.mercadolibre.com.ar/publicaciones/listado?search=MLA3307805900' && pedidosML.some((p) => p === `GET ${SUBIDA}`), pedidosML.join(' , '));
   comprobar('solo leyó páginas de Mercado Libre', pedidosML.every((p) => p.startsWith('GET ')));
   comprobar('hubo avances del traslado', avances.some((a) => /Trayendo el clip: 100 %/.test(a.texto ?? '')));
+  await ml.close();
+}
+// 1b. Mercado Libre no suma el video: no lo da por subido.
+{
+  crear = CREAR.replace('<script>', '<script>window.rechaza = true;');
+  const { ml, avances } = await correr('MLA1000001');
+  const fin = avances.at(-1);
+  comprobar('si el video no aparece en Tus videos, no lo da por subido', /no sumó el video/.test(fin.error ?? '') && fin.subido !== true, JSON.stringify(fin).slice(0, 200));
+  crear = CREAR;
   await ml.close();
 }
 // 2. Dos publicaciones en el listado: no elige.

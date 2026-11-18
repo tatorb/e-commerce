@@ -17,14 +17,13 @@ No muevas ni borres la carpeta después: Chrome la lee de ahí. Para actualizarl
 1. Tené la sesión de Mercado Libre iniciada en ese Chrome.
 2. En la app, en **Clips por subir**, tocá **Subir a Mercado Libre** en el clip.
 3. Se abre una pestaña de Mercado Libre. Un cartel abajo a la derecha cuenta qué va haciendo.
-4. Cuando el clip quedó cargado, revisalo y confirmá vos en Mercado Libre.
-5. Volvé a la app y tocá **Ya lo subí**.
+4. Cuando Mercado Libre suma el video a **Tus videos**, la subida terminó: queda en revisión y la app lo marca sola como subido.
 
 ## Qué hace y qué no
 
 - Solo actúa en la pestaña que abrió ella para subir un clip. En tus otras pestañas de Mercado Libre no hace nada.
 - Solo toca el menú de la publicación, el link **Crear video** y el campo del archivo.
-- Por ahora no confirma la subida: eso lo hacés vos.
+- No hay nada que confirmar: al cargar el archivo, Mercado Libre lo pone en revisión. Si el video no aparece en Tus videos, la extensión no lo da por subido.
 - Si el listado muestra más de una publicación, si la pantalla cambió, si la sesión está cerrada o aparece un captcha, se frena y avisa. No insiste ni adivina.
 - No guarda contraseñas. El clip lo toma de la app con tu sesión de la app.
 

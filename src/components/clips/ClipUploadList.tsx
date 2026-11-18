@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { ClipboardCopy, Download, ExternalLink, Puzzle, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -32,7 +33,7 @@ export type ClipUploadRow = {
 // Lo que cuenta la extensión de una subida.
 // Los informes se juntan: la pantalla al cargar el clip y lo que pasa después.
 type Progress = { text: string | null; error: string | null; done: boolean; reports: unknown[] };
-type FromExtension = { origen?: string; tipo?: string; version?: string; publicacion?: string; video?: string; texto?: string | null; error?: string | null; listo?: boolean; informe?: unknown };
+type FromExtension = { origen?: string; tipo?: string; version?: string; publicacion?: string; video?: string; texto?: string | null; error?: string | null; listo?: boolean; subido?: boolean; informe?: unknown };
 
 const rowKey = (c: { publicationId: string; videoId: string }) => `${c.publicationId}:${c.videoId}`;
 
@@ -40,6 +41,7 @@ export function ClipUploadList({ accountSlug, clips }: { accountSlug: string; cl
   // La versión de la extensión, si está instalada en este Chrome.
   const [extension, setExtension] = useState<string | null>(null);
   const [progress, setProgress] = useState<Record<string, Progress>>({});
+  const router = useRouter();
 
   useEffect(() => {
     function hear(e: MessageEvent<FromExtension>) {
@@ -49,12 +51,20 @@ export function ClipUploadList({ accountSlug, clips }: { accountSlug: string; cl
       if (d.tipo === 'avance' && d.publicacion && d.video) {
         const key = `${d.publicacion}:${d.video}`;
         setProgress((p) => ({ ...p, [key]: { text: d.texto ?? null, error: d.error ?? null, done: d.listo === true, reports: d.informe ? [...(p[key]?.reports ?? []), d.informe] : (p[key]?.reports ?? []) } }));
+        // Mercado Libre ya tiene el video: se anota solo y sale de la lista.
+        if (d.subido === true) {
+          const [publicationId, videoId] = [d.publicacion, d.video];
+          markClipUploadedAction(accountSlug, publicationId, videoId, true).then((r) => {
+            if (r.ok) router.refresh();
+            else setProgress((p) => ({ ...p, [key]: { ...p[key], error: `Se subió a Mercado Libre, pero no se pudo anotar acá: ${r.error} Tocá Ya lo subí.` } }));
+          });
+        }
       }
     }
     window.addEventListener('message', hear);
     window.postMessage({ origen: 'mrb-app', tipo: 'hola' }, window.location.origin);
     return () => window.removeEventListener('message', hear);
-  }, []);
+  }, [accountSlug, router]);
 
   function upload(c: ClipUploadRow) {
     setProgress((p) => ({ ...p, [rowKey(c)]: { text: 'Pidiendo la subida a la extensión…', error: null, done: false, reports: [] } }));

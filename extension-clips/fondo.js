@@ -76,9 +76,8 @@ chrome.runtime.onMessage.addListener((mensaje, sender, responder) => {
       return { ok: true };
     }
     if (mensaje?.tipo === 'avance') {
-      avisar(trabajo, { texto: mensaje.texto, error: mensaje.error ?? null, listo: mensaje.listo === true, informe: mensaje.informe ?? null });
-      // Con el clip cargado, el trabajo sigue hasta que se cierra la pestaña: la persona termina a mano.
-      if (mensaje.error) await borrar(trabajo.pestana);
+      avisar(trabajo, { texto: mensaje.texto, error: mensaje.error ?? null, listo: mensaje.listo === true, subido: mensaje.subido === true, informe: mensaje.informe ?? null });
+      if (mensaje.error || mensaje.listo) await borrar(trabajo.pestana);
       return { ok: true };
     }
     return { ok: false };

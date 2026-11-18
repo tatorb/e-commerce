@@ -1,7 +1,8 @@
 // En la pestaña de Mercado Libre que abrió la extensión: busca la publicación,
 // entra por "Crear video" y carga el archivo del clip. Ante cualquier pantalla
 // que no reconoce, no insiste ni adivina: se frena y avisa. No toca nada de la
-// publicación que no sea el video, y por ahora no confirma: eso lo hace la persona.
+// publicación que no sea el video. La subida termina cuando Mercado Libre suma el
+// video a "Tus videos": no hay nada que confirmar.
 (async () => {
   const pedir = (mensaje) => chrome.runtime.sendMessage(mensaje);
   const trabajo = await pedir({ tipo: 'trabajo' }).catch(() => null);
@@ -20,23 +21,6 @@
     return pedir({ tipo: 'avance', texto, ...extra });
   };
   const frenar = (error, conInforme = true) => decir(null, { error, informe: conInforme ? MRB.mirar() : null });
-
-  // Después de cargar el clip, la persona termina a mano. Mientras tanto se anota
-  // qué toca en esta pestaña y qué pantalla aparece, para que más adelante la
-  // extensión pueda hacer ese paso sola. Solo en esta pestaña y solo eso.
-  const FIN = 'El clip quedó cargado. Revisalo y confirmá vos en esta pantalla, y después marcá Ya lo subí en la app.';
-  const observar = () => {
-    document.addEventListener(
-      'click',
-      (e) => {
-        const tocado = e.target instanceof Element ? e.target.closest('button, a, [role=button], input, label, .clip-preview') ?? e.target : null;
-        if (!tocado || tocado.closest('#mrb-clips-cartel')) return;
-        const toque = MRB.contar(tocado);
-        setTimeout(() => pedir({ tipo: 'avance', texto: FIN, listo: true, informe: { toque, pantalla_despues_del_toque: MRB.mirar() } }).catch(() => {}), 1500);
-      },
-      true,
-    );
-  };
 
   try {
     const persona = MRB.pidePersona();
@@ -69,6 +53,7 @@
       const campo = await MRB.esperar(MRB.ARCHIVO);
       if (!campo) return await frenar(MRB.pidePersona() ?? 'La pantalla Crear video no tiene dónde elegir el archivo. Puede que Mercado Libre la haya cambiado: no se tocó nada.');
       const antes = MRB.mirar();
+      const videosAntes = document.querySelectorAll(MRB.VIDEO).length;
 
       // El clip llega de la app de a pedazos.
       const partes = [];
@@ -101,18 +86,15 @@
       if (persona2) return await frenar(persona2, false);
       if (!termino) return await frenar('Mercado Libre tardó más de diez minutos en cargar el clip. Mirá la pestaña: puede que haya terminado o que haya que probar de nuevo.');
       await MRB.pausa(1000);
-      await decir(FIN, { listo: true, informe: { antes, despues: MRB.mirar() } });
-      observar();
+      // Al terminar, Mercado Libre suma el video a "Tus videos" con su estado: ahí termina la subida.
+      const ahora = document.querySelectorAll(MRB.VIDEO).length;
+      const informe = { antes, despues: MRB.mirar() };
+      if (ahora <= videosAntes) return await decir(null, { error: 'Mercado Libre no sumó el video a «Tus videos». Mirá la pestaña: puede que lo haya rechazado.', informe });
+      await decir('El clip quedó subido en Mercado Libre. Lo revisan antes de mostrarlo, puede tardar hasta 48 horas.', { listo: true, subido: true, informe });
       return;
     }
 
-    // La pestaña siguió a otra pantalla después de cargar el clip: se anota y no se toca.
-    if (trabajo.etapa === 'cargado') {
-      await MRB.pausa(1500);
-      await decir(FIN, { listo: true, informe: { pantalla_nueva: MRB.mirar() } });
-      observar();
-      return;
-    }
+    if (trabajo.etapa === 'cargado') return;
     await frenar('Mercado Libre abrió una pantalla que no es la esperada: no se tocó nada.');
   } catch (e) {
     await frenar(`Algo falló en la extensión: ${String(e?.message ?? e)}`).catch(() => {});

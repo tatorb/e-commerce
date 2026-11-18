@@ -92,7 +92,7 @@ Si Mercado Libre algún día habilita el permiso, Claude lo puede comprobar con 
 
 ### Con la extensión de Chrome
 
-Con la extensión de Studio MRB instalada, en **Clips por subir** aparece el botón **Subir a Mercado Libre**: abre la publicación en tu Chrome, con tu sesión de siempre, entra por **Crear video** y carga el archivo solo. Vos revisás, confirmás en Mercado Libre y marcás **Ya lo subí**. Cómo instalarla y qué hace está en `extension-clips/LEEME.md`.
+Con la extensión de Studio MRB instalada, en **Clips por subir** aparece el botón **Subir a Mercado Libre**: abre la publicación en tu Chrome, con tu sesión de siempre, entra por **Crear video** y carga el archivo solo. Cuando Mercado Libre suma el video a Tus videos queda en revisión, y la app lo marca sola como subido. Cómo instalarla y qué hace está en `extension-clips/LEEME.md`.
 
 Se probó primero un Chrome aparte manejado por la Mac (`probar_subida.sh`), pero Mercado Libre no deja iniciar sesión ahí. Por eso la subida va por la extensión.
 
