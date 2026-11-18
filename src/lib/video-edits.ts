@@ -3,7 +3,7 @@ import { Prisma } from '@/generated/prisma/client';
 import type { VideoEditStatus } from '@/generated/prisma/enums';
 import { getChannelAdapter } from '@/channels';
 import type { ClipRules } from '@/domain/videos';
-import { chooseApprovedClip } from '@/lib/clip-uploads';
+import { chooseApprovedClip, queueApprovedClip } from '@/lib/clip-uploads';
 import { proposeVideoScript, scriptLinesOf, scriptShownOf } from '@/lib/video-script';
 import {
   accountVideoSchema,
@@ -210,7 +210,7 @@ async function lockVideo(tx: Tx, videoId: string) {
  */
 export async function requestEdit(
   db: PrismaClient,
-  args: { accountId: string; videoId: string; targetSeconds?: unknown; note?: unknown; plan?: unknown; script?: unknown; stepId?: string | null | 'auto'; userId: string | null },
+  args: { accountId: string; videoId: string; targetSeconds?: unknown; note?: unknown; plan?: unknown; script?: unknown; stepId?: string | null | 'auto'; preApprove?: boolean; autoUpload?: boolean; userId: string | null },
 ): Promise<{ editId: string }> {
   const video = await videoOf(db, args.accountId, args.videoId);
   const settings = await loadAccountVideo(db, args.accountId);
@@ -242,6 +242,8 @@ export async function requestEdit(
         note: cleanNote(args.note),
         requested: json(plan),
         requestedScript: json(script),
+        approveWhenDone: args.preApprove === true,
+        uploadWhenApproved: args.autoUpload === true,
         askedById: args.userId,
       },
     });
@@ -479,8 +481,16 @@ export async function submitEditResult(
     const clip = await tx.productVideo.upsert({ where: { driveFileId: file.fileId }, create: { driveFileId: file.fileId, ...fields }, update: fields });
     const cost = (typeof done.propuesta?.uso?.costo_usd === 'number' ? done.propuesta.uso.costo_usd : 0) + (typeof done.sonido?.costo_usd === 'number' ? done.sonido.costo_usd : 0);
     const warnings = [...(done.propuesta?.avisos ?? []), ...done.avisos];
-    // Con la cuenta en automático, un clip que salió sin avisos no espera a nadie.
-    const auto = settings.autoApprove && warnings.length === 0;
+    // Lo que la cuenta tiene prendido y el clip no trae: con eso el canal lo rechaza o no dice nada.
+    const missing = [
+      settings.voiceOn && !done.sonido?.voz ? 'la voz' : null,
+      settings.musicOn && !done.sonido?.musica ? 'la música' : null,
+      settings.voiceOn && settings.subtitlesOn && !done.sonido?.subtitulos ? 'los subtítulos' : null,
+    ].filter((m): m is string => m !== null);
+    // Con la cuenta en automático, un clip que salió sin avisos no espera a nadie. Uno
+    // pre-aprobado tampoco, aunque traiga avisos, salvo que le falte parte del sonido.
+    const auto = (settings.autoApprove && warnings.length === 0) || (edit.approveWhenDone && missing.length === 0);
+    const held = edit.approveWhenDone && !auto ? `Estaba pre-aprobado, pero salió sin ${missing.join(' ni ')}: quedó para revisar.` : null;
     await tx.videoEdit.update({
       where: { id: edit.id },
       data: {
@@ -491,7 +501,11 @@ export async function submitEditResult(
         sound: json(done.sonido ? { voz: done.sonido.voz, musica: done.sonido.musica, subtitulos: done.sonido.subtitulos } : null),
         plan: json(done.plan),
         measures: json(done.medidas ?? null),
-        proposal: json(done.propuesta ? { razon: done.propuesta.razon, origen: done.propuesta.origen, avisos: [...done.propuesta.avisos, ...done.avisos] } : { razon: '', origen: 'pedido', avisos: done.avisos }),
+        proposal: json(
+          done.propuesta
+            ? { razon: done.propuesta.razon, origen: done.propuesta.origen, avisos: [...done.propuesta.avisos, ...done.avisos, ...(held ? [held] : [])] }
+            : { razon: '', origen: 'pedido', avisos: [...done.avisos, ...(held ? [held] : [])] },
+        ),
         clipId: clip.id,
         aiUsage: cost > 0 ? { costo_usd: Math.round(cost * 100000) / 100000 } : Prisma.DbNull,
         seconds: done.segundos,
@@ -499,7 +513,10 @@ export async function submitEditResult(
         error: null,
       },
     });
-    if (auto) await chooseApprovedClip(tx, { clipId: clip.id, userId: null });
+    if (auto) {
+      await chooseApprovedClip(tx, { clipId: clip.id, userId: null });
+      if (edit.uploadWhenApproved) await queueApprovedClip(tx, clip.id);
+    }
     return { aceptado: true as const };
   });
 }
@@ -539,7 +556,25 @@ export async function approveEdit(db: PrismaClient, args: { accountId: string; e
   await db.$transaction(async (tx) => {
     const edit = await openEdit(tx, args.accountId, args.editId, ['REVIEW'], 'aprobar');
     await tx.videoEdit.update({ where: { id: edit.id }, data: { status: 'APPROVED', openFor: null, reviewedById: args.userId, reviewedAt: args.now ?? new Date() } });
-    if (edit.clipId) await chooseApprovedClip(tx, { clipId: edit.clipId, userId: args.userId, now: args.now });
+    if (edit.clipId) {
+      await chooseApprovedClip(tx, { clipId: edit.clipId, userId: args.userId, now: args.now });
+      if (edit.uploadWhenApproved) await queueApprovedClip(tx, edit.clipId, args.now);
+    }
+  });
+}
+
+/**
+ * Deja dicho, en una edición que todavía no se aprobó, que se apruebe sola al
+ * terminar y que el clip vaya a la cola de subida. Si ya está para revisar y
+ * queda pre-aprobada, no se aprueba sola: eso pasa cuando la Mac entrega.
+ */
+export async function setEditAuto(db: PrismaClient, args: { accountId: string; editId: string; preApprove?: boolean; autoUpload?: boolean }): Promise<void> {
+  await db.$transaction(async (tx) => {
+    const edit = await openEdit(tx, args.accountId, args.editId, ['QUEUED', 'PROCESSING', 'REVIEW'], 'cambiar');
+    await tx.videoEdit.update({
+      where: { id: edit.id },
+      data: { ...(args.preApprove !== undefined ? { approveWhenDone: args.preApprove } : {}), ...(args.autoUpload !== undefined ? { uploadWhenApproved: args.autoUpload } : {}) },
+    });
   });
 }
 
@@ -571,7 +606,7 @@ async function discardIn(tx: Tx, args: { accountId: string; editId: string; user
  */
 export async function redoEdit(
   db: PrismaClient,
-  args: { accountId: string; editId: string; targetSeconds?: unknown; note?: unknown; plan?: unknown; script?: unknown; userId: string | null; now?: Date },
+  args: { accountId: string; editId: string; targetSeconds?: unknown; note?: unknown; plan?: unknown; script?: unknown; preApprove?: boolean; autoUpload?: boolean; userId: string | null; now?: Date },
 ): Promise<{ editId: string; clipFileId: string | null }> {
   const before = await db.videoEdit.findFirst({ where: { id: args.editId, video: { product: { accountId: args.accountId } } }, include: { video: { select: { productId: true } } } });
   if (!before) throw new VideoEditError('Esa edición ya no existe.');
@@ -594,6 +629,9 @@ export async function redoEdit(
         note: cleanNote(args.note),
         requested: json(plan),
         requestedScript: json(script),
+        // Lo que se había dejado dicho sigue valiendo, salvo que se diga otra cosa.
+        approveWhenDone: args.preApprove ?? before.approveWhenDone,
+        uploadWhenApproved: args.autoUpload ?? before.uploadWhenApproved,
         askedById: args.userId,
       },
     });
@@ -625,6 +663,9 @@ export type EditRow = {
   // En qué anda la Mac, mientras lo edita.
   progress: EditProgress | null;
   askedBy: string | null;
+  // Lo que se dejó dicho: aprobarlo solo al terminar, y subirlo apenas quede aprobado.
+  preApproved: boolean;
+  autoUpload: boolean;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -678,6 +719,8 @@ export async function editsOfProduct(db: PrismaClient, productId: string): Promi
       costUsd: typeof usage === 'number' ? usage : null,
       progress: r.status === 'PROCESSING' ? parseProgress(r.progress) : null,
       askedBy: r.askedBy?.name ?? null,
+      preApproved: r.approveWhenDone,
+      autoUpload: r.uploadWhenApproved,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
     });

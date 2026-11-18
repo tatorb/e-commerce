@@ -1965,6 +1965,11 @@ model VideoEdit {
   sound         Json?
   clipId        String?         @unique
   clip          ProductVideo?   @relation("VideoEditClip", fields: [clipId], references: [id], onDelete: SetNull)
+  // Lo que se deja dicho antes de que la Mac termine: aprobarlo solo, salvo que
+  // salga sin la voz, la música o los subtítulos que la cuenta tiene prendidos,
+  // y mandarlo a la cola de subida apenas quede aprobado.
+  approveWhenDone    Boolean   @default(false)
+  uploadWhenApproved Boolean   @default(false)
   // Cuándo se ofreció el clip aprobado a las publicaciones del producto, para
   // Clips por subir. Se ofrece una sola vez: si la persona lo saca, no vuelve.
   clipOfferedAt DateTime?

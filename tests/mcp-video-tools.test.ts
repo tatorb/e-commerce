@@ -322,6 +322,17 @@ describe.skipIf(!url)('el editor de videos desde Claude', () => {
     expect((await call('save_video_script', { publicacion: 'MLA1110001', frases: ['Vienen cuatro.'] })).data.guion_del_clip).not.toHaveProperty('en_los_subtitulos');
   });
 
+  it('la edición se puede dejar pre-aprobada y con la orden de subir, también cuando ya está en la cola', async () => {
+    const asked = await call('request_video_edit', { publicacion: 'MLA1110001', video: videoId, aprobar_al_terminar: true });
+    expect(asked.data.edicion).toMatchObject({ estado: 'en cola', pre_aprobada: expect.stringContaining('Se aprueba sola') });
+    expect(asked.data.edicion).not.toHaveProperty('se_sube_sola');
+    // Ya está en la cola: no se pide de nuevo, pero queda anotada la orden de subir.
+    const again = await call('request_video_edit', { publicacion: 'MLA1110001', video: videoId, subir_al_aprobar: true });
+    expect(again.data.aviso).toContain('Quedó anotado');
+    expect(again.data.edicion).toMatchObject({ pre_aprobada: expect.any(String), se_sube_sola: expect.any(String) });
+    expect(await db.videoEdit.count()).toBe(1);
+  });
+
   it('no edita un clip ya editado ni un video que no es del producto', async () => {
     await call('request_video_edit', { publicacion: 'MLA1110001', video: videoId });
     const editId = await macDelivers();

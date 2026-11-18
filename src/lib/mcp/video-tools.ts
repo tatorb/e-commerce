@@ -28,6 +28,7 @@ import { listProtocols, ShootError, updateProtocol, updateStep } from '@/lib/sho
 import { storageError } from '@/lib/stored-files';
 import {
   STEP_REASON_TEXT,
+  setEditAuto,
   chooseVideoStep,
   approveEdit,
   clipRulesFor,
@@ -92,6 +93,8 @@ function editOut(e: EditRow, account: AccountRef) {
     estado: STATUS[e.status],
     pedida: when(e.createdAt, account),
     pedida_por: e.askedBy,
+    ...(e.preApproved ? { pre_aprobada: 'Se aprueba sola al terminar, salvo que salga sin la voz, la música o los subtítulos que la cuenta tiene prendidos.' } : {}),
+    ...(e.autoUpload ? { se_sube_sola: 'Apenas quede aprobado, el clip va a la cola de subida.' } : {}),
     segundos_pedidos: e.targetSeconds,
     indicacion: e.note,
     ...(e.progress ? { avance: { etapa: e.progress.stage, porcentaje: e.progress.percent } } : {}),
@@ -252,6 +255,14 @@ const requestTool = defineTool({
     video: z.string().min(1).describe('La clave «video» del video original, de get_videos_step.'),
     segundos: z.number().int().min(10).max(60).optional().describe('Cuánto tiene que durar el clip. Sin decir, lo de la cuenta. Si el guión dura más, el clip se alarga.'),
     indicacion: z.string().max(1000).optional().describe('Una indicación puntual para el editor, que manda sobre las del protocolo.'),
+    aprobar_al_terminar: z
+      .boolean()
+      .optional()
+      .describe('true = dejarlo pre-aprobado: cuando la Mac termine, el clip se aprueba solo, aunque traiga avisos, salvo que salga sin la voz, la música o los subtítulos que la cuenta tiene prendidos; en ese caso queda para revisar. Nadie ve ni escucha el clip antes: usalo cuando la persona ya vio que los clips de ese tipo de producto salen bien, y confirmalo con ella. También se puede mandar para un video que ya está en la cola.'),
+    subir_al_aprobar: z
+      .boolean()
+      .optional()
+      .describe('true = apenas el clip quede aprobado, solo o por una persona, va a la cola de subida a Mercado Libre, que atiende la extensión de Chrome con «Subir sola la cola» prendido. Con aprobar_al_terminar, el video se edita, se aprueba y se sube sin que nadie intervenga.'),
     paso: z.string().nullable().optional().describe('Con qué paso de video del protocolo se edita: la clave «paso» de get_videos_step. null: sin protocolo, el editor marca los momentos por lo que ve. "auto": vuelve al que sale solo. Sin mandarlo, queda como está: el que eligió una persona, el paso con que se grabó en Registro de productos o, en un video copiado al Drive, el paso de video del protocolo del tipo del producto. Lo que se elige acá manda sobre eso.'),
     plan: planSchema.optional().describe('Los cortes a aplicar tal cual: el plan de una edición anterior, de get_videos_step, con los cambios que haga falta.'),
   }),
@@ -260,10 +271,17 @@ const requestTool = defineTool({
   async run(ctx, args) {
     const { account, id } = await target(ctx, args);
     const { video, edit } = await videoIn(ctx, account, id, args.video);
+    const auto = { ...(args.aprobar_al_terminar !== undefined ? { preApprove: args.aprobar_al_terminar } : {}), ...(args.subir_al_aprobar !== undefined ? { autoUpload: args.subir_al_aprobar } : {}) };
     if (edit && (edit.status === 'QUEUED' || edit.status === 'PROCESSING')) {
-      return { edicion: editOut(edit, account), aviso: 'Ese video ya está en la cola o editándose: no se pidió de nuevo.' };
+      // Ya está pedida: no se pide de nuevo, pero se le puede dejar dicho que se apruebe y se suba sola.
+      if (Object.keys(auto).length > 0) await asToolError(() => setEditAuto(ctx.db, { accountId: account.id, editId: edit.id, ...auto }));
+      const after = await videoIn(ctx, account, id, video.id);
+      return {
+        edicion: after.edit ? editOut(after.edit, account) : null,
+        aviso: `Ese video ya está en la cola o editándose: no se pidió de nuevo.${Object.keys(auto).length > 0 ? ' Quedó anotado lo que se hace solo cuando termine.' : ''}`,
+      };
     }
-    const ask = { accountId: account.id, targetSeconds: args.segundos, note: args.indicacion, plan: args.plan, userId: ctx.userId };
+    const ask = { accountId: account.id, targetSeconds: args.segundos, note: args.indicacion, plan: args.plan, userId: ctx.userId, ...auto };
     let redone = false;
     if (edit && (edit.status === 'REVIEW' || edit.status === 'FAILED')) {
       if (args.paso !== undefined) await asToolError(() => chooseVideoStep(ctx.db, { accountId: account.id, videoId: video.id, stepId: args.paso === 'auto' ? 'auto' : args.paso! }));

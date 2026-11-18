@@ -53,6 +53,7 @@ import {
   VideoEditError,
   type UploadedClip,
   type VideoJobDeps,
+  setEditAuto,
 } from '@/lib/video-edits';
 
 // Datos inventados.
@@ -563,6 +564,31 @@ describe.skipIf(!url)('la cola del editor de videos en la base', () => {
     uploaded.set(second.id, { ...clipFile(second.id), name: 'b · editado.mp4' });
     await submitEditResult(db, workerId, done(second.id, 1), { collect });
     expect((await db.videoEdit.findUniqueOrThrow({ where: { id: second.id } })).status).toBe('REVIEW');
+  });
+
+  it('una edición pre-aprobada se aprueba sola aunque traiga avisos, salvo que le falte el sonido de la cuenta', async () => {
+    // La cuenta no aprueba sola, y tiene la música prendida.
+    await saveAccountVideo(db, { accountId, values: { ...DEFAULT_ACCOUNT_VIDEO, musicOn: true }, userId });
+    const a = await video('a.mp4');
+    const first = await requestEdit(db, { accountId, videoId: a.id, preApprove: true, userId });
+    await claimNextEdit(db, workerId);
+    uploaded.set(first.editId, clipFile(first.editId));
+    // Sale con un aviso leve y con su música: se aprueba igual.
+    await submitEditResult(db, workerId, done(first.editId, 1, { avisos: ['La cámara fue cambiando la luz sola.'], sonido: { voz: false, musica: true, subtitulos: false, costo_usd: null } }), { collect });
+    expect(await db.videoEdit.findUniqueOrThrow({ where: { id: first.editId } })).toMatchObject({ status: 'APPROVED', openFor: null });
+
+    // A otra le falta la música: queda para revisar, y dice por qué.
+    const b = await video('b.mp4');
+    const second = await requestEdit(db, { accountId, videoId: b.id, userId });
+    // Se la deja pre-aprobada mientras espera en la cola.
+    await setEditAuto(db, { accountId, editId: second.editId, preApprove: true });
+    await claimNextEdit(db, workerId);
+    uploaded.set(second.editId, { ...clipFile(second.editId), name: 'b · editado.mp4' });
+    await submitEditResult(db, workerId, done(second.editId, 1, { avisos: [] }), { collect });
+    expect(await db.videoEdit.findUniqueOrThrow({ where: { id: second.editId } })).toMatchObject({ status: 'REVIEW' });
+    const row = (await editsOfProduct(db, productId)).find((e) => e.id === second.editId)!;
+    expect(row.preApproved).toBe(true);
+    expect(row.warnings.at(-1)).toBe('Estaba pre-aprobado, pero salió sin la música: quedó para revisar.');
   });
 
   it('la Mac cuenta en qué anda, y la app lo muestra en el video y en la cola', async () => {

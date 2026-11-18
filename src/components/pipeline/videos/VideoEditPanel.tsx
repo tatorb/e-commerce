@@ -6,7 +6,7 @@ import { AlertTriangle, Check, Hourglass, Loader2, RotateCcw, Scissors, SlidersH
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { NOTE_MAX, planSeconds, TARGET_DEFAULT, type VideoPlan } from '@/domain/video-edit';
-import { approveVideoEditAction, discardVideoEditAction, redoVideoEditAction, requestVideoEditAction } from '@/app/a/[cuenta]/pipeline/video-actions';
+import { approveVideoEditAction, discardVideoEditAction, redoVideoEditAction, requestVideoEditAction, setVideoEditAutoAction } from '@/app/a/[cuenta]/pipeline/video-actions';
 import type { EditRow } from '@/lib/video-edits';
 import type { VideoRow } from '@/lib/videos';
 import { VideoFacts, VideoPlayer } from './VideoCard';
@@ -26,7 +26,7 @@ export type EditorInfo = {
 };
 
 // stepId: un paso, null para no usar protocolo, o 'auto' para el que sale solo del tipo de producto.
-type Ask = { targetSeconds: number; note: string; stepId?: string | null | 'auto' };
+type Ask = { targetSeconds: number; note: string; stepId?: string | null | 'auto'; preApprove?: boolean; autoUpload?: boolean };
 const AUTO = 'auto';
 const NONE = 'none';
 type ActionResult = { ok: true } | { ok: false; error: string };
@@ -57,6 +57,8 @@ function AskForm({
   const [seconds, setSeconds] = useState(String(initial.targetSeconds));
   const [note, setNote] = useState(initial.note);
   const [stepId, setStepId] = useState(initial.stepId === null ? NONE : (initial.stepId ?? AUTO));
+  const [preApprove, setPreApprove] = useState(initial.preApprove === true);
+  const [autoUpload, setAutoUpload] = useState(initial.autoUpload === true);
   const n = Number(seconds);
   const valid = Number.isFinite(n) && n >= range.min && n <= range.max;
   return (
@@ -102,11 +104,34 @@ function AskForm({
           className="w-full rounded-md border bg-background px-2 py-1 text-sm"
         />
       </label>
+      <AutoChecks preApprove={preApprove} autoUpload={autoUpload} disabled={pending} onChange={(a) => (setPreApprove(a.preApprove), setAutoUpload(a.autoUpload))} />
       <div className="flex justify-end">
-        <Button size="sm" pending={pending} disabled={pending || !valid} onClick={() => onSubmit({ targetSeconds: Math.round(n), note, ...(steps ? { stepId: stepId === NONE ? null : stepId } : {}) })}>
+        <Button size="sm" pending={pending} disabled={pending || !valid} onClick={() => onSubmit({ targetSeconds: Math.round(n), note, preApprove, autoUpload, ...(steps ? { stepId: stepId === NONE ? null : stepId } : {}) })}>
           {submitLabel}
         </Button>
       </div>
+    </div>
+  );
+}
+
+/** Lo que se deja dicho antes de que la Mac termine: aprobarlo solo y subirlo. */
+function AutoChecks({ preApprove, autoUpload, disabled, onChange }: { preApprove: boolean; autoUpload: boolean; disabled: boolean; onChange: (a: { preApprove: boolean; autoUpload: boolean }) => void }) {
+  return (
+    <div className="space-y-1.5 text-sm">
+      <label className="flex items-start gap-2">
+        <input type="checkbox" className="mt-1" checked={preApprove} disabled={disabled} onChange={(e) => onChange({ preApprove: e.target.checked, autoUpload })} />
+        <span>
+          Aprobar solo al terminar
+          <span className="block text-xs text-muted-foreground">Salvo que salga sin la voz, la música o los subtítulos que la cuenta tiene prendidos: ahí queda para revisar.</span>
+        </span>
+      </label>
+      <label className="flex items-start gap-2">
+        <input type="checkbox" className="mt-1" checked={autoUpload} disabled={disabled} onChange={(e) => onChange({ preApprove, autoUpload: e.target.checked })} />
+        <span>
+          Subir apenas quede aprobado
+          <span className="block text-xs text-muted-foreground">Va a la cola de subida, que atiende la extensión de Chrome con «Subir sola la cola» prendido.</span>
+        </span>
+      </label>
     </div>
   );
 }
@@ -175,6 +200,8 @@ export function VideoEditPanel({
     note: '',
     // Lo que eligió una persona, si eligió; si no, automático.
     stepId: video.stepChosen ? video.stepId : AUTO,
+    preApprove: edit?.preApproved ?? false,
+    autoUpload: edit?.autoUpload ?? false,
   };
   const autoText = video.autoStep ? video.autoStep.label : 'sin protocolo';
   // Lo que falta para que la Mac lo tome, dicho antes de pedirlo.
@@ -383,6 +410,14 @@ export function VideoEditPanel({
         </div>
       ) : null}
 
+      {edit.status === 'QUEUED' || edit.status === 'PROCESSING' || edit.status === 'REVIEW' ? (
+        <AutoChecks
+          preApprove={edit.preApproved}
+          autoUpload={edit.autoUpload}
+          disabled={pending}
+          onChange={(a) => run(() => setVideoEditAutoAction(accountSlug, edit.id, a))}
+        />
+      ) : null}
       <div className="flex flex-wrap items-center gap-2">
         {edit.status === 'REVIEW' && clip ? (
           <>
@@ -402,7 +437,7 @@ export function VideoEditPanel({
           </Button>
         ) : null}
         {edit.status === 'REVIEW' || edit.status === 'FAILED'
-          ? askButton('Pedir de nuevo', 'redo', (ask) => redoVideoEditAction(accountSlug, edit.id, { targetSeconds: ask.targetSeconds, note: ask.note }))
+          ? askButton('Pedir de nuevo', 'redo', (ask) => redoVideoEditAction(accountSlug, edit.id, { targetSeconds: ask.targetSeconds, note: ask.note, preApprove: ask.preApprove, autoUpload: ask.autoUpload }))
           : null}
         {edit.status === 'REVIEW'
           ? discardButton('Descartar el clip', 'El clip va a la papelera del Drive. El video original queda como está.')

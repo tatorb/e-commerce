@@ -5,6 +5,7 @@ import { activeUploaders, chooseApprovedClip, claimQueuedUpload, finishQueuedUpl
 import { measuresOf } from '@/lib/media';
 import { findVideoMeasures, setVideoMeasure } from '@/lib/video-measure';
 import { markClipUploaded } from '@/lib/videos';
+import { approveEdit, setEditAuto } from '@/lib/video-edits';
 
 const url = process.env.TEST_DATABASE_URL;
 const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: url ?? 'postgresql://x' }) });
@@ -146,5 +147,17 @@ describe.skipIf(!url)('un video por medida', () => {
     expect(await activeUploaders(db, now)).toMatchObject([{ name: 'Martín', version: '0.4.0' }]);
     // Si dejó de preguntar, ya no cuenta.
     expect(await activeUploaders(db, new Date(now.getTime() + 10 * 60_000))).toEqual([]);
+  });
+  it('una edición con la orden de subir manda el clip a la cola apenas se aprueba', async () => {
+    const original = await db.productVideo.create({ data: { productId, driveFileId: 'd-x', name: 'SP-449-00.MP4', mimeType: 'video/mp4', origin: 'DRIVE' } });
+    const clip = await db.productVideo.create({ data: { productId, driveFileId: 'c-x', name: 'SP-449-00 · editado.mp4', mimeType: 'video/mp4', origin: 'DRIVE' } });
+    const edit = await db.videoEdit.create({ data: { videoId: original.id, openFor: original.id, status: 'REVIEW', targetSeconds: 45, clipId: clip.id } });
+    // Se deja dicho mientras espera la revisión; aprobarlo lo sube a la cola.
+    await setEditAuto(db, { accountId, editId: edit.id, autoUpload: true });
+    expect((await pendingClipUploads(db, accountId)).length).toBe(0);
+    await approveEdit(db, { accountId, editId: edit.id, userId: null });
+    expect(await pendingClipUploads(db, accountId)).toMatchObject([{ fileName: 'SP-449-00 · editado.mp4', queuedAt: expect.any(Date) }]);
+    // Una ya aprobada no se puede cambiar.
+    await expect(setEditAuto(db, { accountId, editId: edit.id, preApprove: true })).rejects.toThrow('no se puede cambiar');
   });
 });

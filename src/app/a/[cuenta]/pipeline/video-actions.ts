@@ -1,5 +1,6 @@
 'use server';
 
+import { setEditAuto } from '@/lib/video-edits';
 import { queueClipUploads } from '@/lib/clip-uploads';
 import { setVideoMeasure, VideoMeasureError } from '@/lib/video-measure';
 import { act } from '@/lib/auth/guard';
@@ -181,7 +182,7 @@ export async function requestVideoEditAction(
   accountSlug: string,
   videoId: string,
   // Con un plan, la Mac lo aplica tal cual. La voz dice el guión del producto.
-  ask: { targetSeconds?: number; note?: string; stepId?: string | null | 'auto'; plan?: unknown },
+  ask: { targetSeconds?: number; note?: string; stepId?: string | null | 'auto'; plan?: unknown; preApprove?: boolean; autoUpload?: boolean },
 ): Promise<Result> {
   return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Pidió editar un video' }, async () => {
     const user = await requireUser();
@@ -193,6 +194,8 @@ export async function requestVideoEditAction(
         targetSeconds: ask?.targetSeconds,
         note: ask?.note,
         plan: ask?.plan,
+        ...(ask?.preApprove !== undefined ? { preApprove: ask.preApprove === true } : {}),
+        ...(ask?.autoUpload !== undefined ? { autoUpload: ask.autoUpload === true } : {}),
         ...(ask?.stepId !== undefined ? { stepId: ask.stepId === 'auto' ? ('auto' as const) : ask.stepId ? String(ask.stepId) : null } : {}),
         userId: user.id,
       }));
@@ -221,13 +224,13 @@ export async function redoVideoEditAction(
   accountSlug: string,
   editId: string,
   // Con un plan, la Mac lo aplica tal cual. La voz dice el guión del producto, como está ahora.
-  ask: { targetSeconds?: number; note?: string; plan?: unknown },
+  ask: { targetSeconds?: number; note?: string; plan?: unknown; preApprove?: boolean; autoUpload?: boolean },
 ): Promise<Result> {
   return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Pidió de nuevo la edición de un video' }, async () => {
     const user = await requireUser();
     const accountId = await accountIdOf(accountSlug);
     if (!accountId) return NO_ACCOUNT;
-    const r = await guardEdit(() => redoEdit(prisma, { accountId, editId: String(editId), targetSeconds: ask?.targetSeconds, note: ask?.note, plan: ask?.plan, userId: user.id }));
+    const r = await guardEdit(() => redoEdit(prisma, { accountId, editId: String(editId), targetSeconds: ask?.targetSeconds, note: ask?.note, plan: ask?.plan, ...(ask?.preApprove !== undefined ? { preApprove: ask.preApprove === true } : {}), ...(ask?.autoUpload !== undefined ? { autoUpload: ask.autoUpload === true } : {}), userId: user.id }));
     if (r.ok) await trashClipFile(r.clipFileId);
     revalidatePath(`/a/${accountSlug}/pipeline`, 'layout');
     return r.ok ? { ok: true } : r;
@@ -310,5 +313,20 @@ export async function queueClipUploadsAction(accountSlug: string, items: { publi
     const r = await queueClipUploads(prisma, { accountId, items: items ? items.map((i) => ({ publicationId: String(i.publicationId), videoId: String(i.videoId) })) : undefined, queued: Boolean(queued) });
     revalidatePath(`/a/${accountSlug}/pipeline`, 'layout');
     return { ok: true, message: queued ? (r.changed === 1 ? 'Quedó en la cola.' : `Quedaron ${r.changed} en la cola.`) : 'Salió de la cola.' };
+  });
+}
+
+/** Deja dicho, en una edición que no se aprobó todavía, que se apruebe sola al terminar y que el clip se suba. */
+export async function setVideoEditAutoAction(accountSlug: string, editId: string, auto: { preApprove?: boolean; autoUpload?: boolean }): Promise<Result> {
+  return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Cambió lo que se hace solo con un clip' }, async () => {
+    await requireUser();
+    const accountId = await accountIdOf(accountSlug);
+    if (!accountId) return NO_ACCOUNT;
+    const r = await guardEdit(async () => {
+      await setEditAuto(prisma, { accountId, editId: String(editId), ...(auto?.preApprove !== undefined ? { preApprove: auto.preApprove === true } : {}), ...(auto?.autoUpload !== undefined ? { autoUpload: auto.autoUpload === true } : {}) });
+      return {};
+    });
+    revalidatePath(`/a/${accountSlug}/pipeline`, 'layout');
+    return r;
   });
 }

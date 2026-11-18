@@ -124,6 +124,15 @@ En Edición de videos, por cuenta:
 
   Si el producto no tiene tipo, su tipo no tiene protocolo o ningún paso está marcado, el editor marca los momentos por lo que ve.
 
+### Dejar un video pre-aprobado y con la orden de subir
+
+Al pedir la edición, o mientras el video espera en la cola, hay dos casillas:
+
+- **Aprobar solo al terminar.** El clip se aprueba sin que nadie lo mire, aunque traiga avisos leves. Si sale sin la voz, la música o los subtítulos que la cuenta tiene prendidos, no se aprueba: queda para revisar y dice por qué.
+- **Subir apenas quede aprobado.** El clip va a la cola de subida a Mercado Libre.
+
+Con las dos, el video se edita, se aprueba y se sube solo. Nadie ve ni escucha el clip antes: conviene usarlo cuando ya viste que los clips de ese tipo de producto salen bien.
+
 ## Cuándo edita la Mac
 
 Se elige en Equipo, en Editor de videos. Arranca apagado.

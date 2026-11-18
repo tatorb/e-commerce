@@ -51,6 +51,11 @@ export async function chooseApprovedClip(tx: Db, args: { clipId: string; userId:
   return own.length + empty.length;
 }
 
+/** El clip recién aprobado va a la cola de subida, en todas las publicaciones donde quedó elegido. */
+export async function queueApprovedClip(tx: Db, clipId: string, now = new Date()): Promise<void> {
+  await tx.publicationClip.updateMany({ where: { videoId: clipId, uploadedAt: null }, data: { uploadAskedAt: now, uploadTriedAt: null, uploadAttempts: 0, uploadError: null } });
+}
+
 /**
  * Ofrece los clips aprobados de la cuenta que todavía no se ofrecieron: los
  * que se aprobaron antes de que existiera Clips por subir. Los más viejos
