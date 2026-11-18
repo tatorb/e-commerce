@@ -37,6 +37,13 @@ class Clip:
 
 
 @cache
+def puede_subtitular() -> bool:
+    """Si este ffmpeg sabe escribir subtítulos sobre el video. Algunas instalaciones no traen esa parte."""
+    filtros = correr([programa("ffmpeg"), "-hide_banner", "-filters"]).stdout.decode("utf-8", "replace")
+    return any(renglon.split()[1:2] == ["subtitles"] for renglon in filtros.splitlines())
+
+
+@cache
 def _codificadores() -> str:
     return correr([programa("ffmpeg"), "-hide_banner", "-encoders"]).stdout.decode("utf-8", "replace")
 

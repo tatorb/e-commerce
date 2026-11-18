@@ -365,3 +365,25 @@ def test_un_cuadro_por_tramo_para_el_guion(video):
         assert hoja.size == (3 * 90, 160)
 
 
+
+
+@con_ffmpeg
+def test_los_subtitulos_van_con_el_nombre_de_la_opcion_y_si_fallan_el_clip_sale_sin_ellos(video, tmp_path, monkeypatch):
+    from mrb_videos import linea
+    from mrb_videos.filtros import grafo
+
+    fuente = leer(video)
+    plan = Plan(imagen=Imagen(cuartos=1), tramos=[Tramo(inicio=0, fin=40, velocidad=3)])
+    assert "subtitles=filename=subtitulos.ass" in grafo(fuente, plan, subtitulos="subtitulos.ass")
+
+    # Un ffmpeg que no puede con los subtítulos: el clip sale igual, con su aviso.
+    real = linea.exportar
+    monkeypatch.setattr(linea, "exportar", lambda *a, **k: (_ for _ in ()).throw(linea.VideoIlegible("no option name")) if k.get("subtitulos") else real(*a, **k))
+    r = armar(fuente, fuente, Pedido(plan=plan, guion=["Hola a todos."], voz="v", subtitulos=True), InspectorDeVideo(simulado=True), tmp_path / "t", tmp_path / "clip.mp4", eleven=lambda: ElevenFalso(tmp_path))
+    assert not r.con_subtitulos and r.guion and r.avisos[-1] == "El clip salió sin subtítulos: ffmpeg no los pudo escribir."
+
+    # Un ffmpeg que no trae esa parte: ni lo intenta.
+    monkeypatch.setattr(linea, "exportar", real)
+    monkeypatch.setattr(linea, "puede_subtitular", lambda: False)
+    r = armar(fuente, fuente, Pedido(plan=plan, guion=["Hola a todos."], voz="v", subtitulos=True), InspectorDeVideo(simulado=True), tmp_path / "t2", tmp_path / "clip2.mp4", eleven=lambda: ElevenFalso(tmp_path))
+    assert not r.con_subtitulos and any("brew reinstall ffmpeg" in a for a in r.avisos)

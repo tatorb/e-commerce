@@ -20,9 +20,9 @@ from pathlib import Path
 
 from . import hojas
 from .cortes import Momento, plan_de_cortes, tiempos_en_el_clip
-from .editar import Clip, exportar
+from .editar import Clip, exportar, puede_subtitular
 from .inspector import Contexto, InspectorDeVideo, escribir_guion, mosaico, palabras_que_entran, proponer_cortes
-from .medios import Cancelado, Fuente
+from .medios import Cancelado, Fuente, VideoIlegible
 from .medir import Medidas, cuadros, medir
 from .plan import MERCADOLIBRE, Imagen, Plan, ReglasDelClip, plan_parejo
 from .sonido import ElevenLabs, Linea, SinElevenLabs, decir_guion, mezclar, subtitulos, volumen
@@ -150,8 +150,11 @@ def armar(
             if dichas or archivo_musica:
                 pista = mezclar(dichas, archivo_musica, plan.dura, carpeta / "sonido.wav", cancelado)
             if pedido.subtitulos and dichas:
-                escrito = carpeta / "subtitulos.ass"
-                escrito.write_text(subtitulos(dichas, pedido.reglas.ancho, pedido.reglas.alto), encoding="utf-8")
+                if puede_subtitular():
+                    escrito = carpeta / "subtitulos.ass"
+                    escrito.write_text(subtitulos(dichas, pedido.reglas.ancho, pedido.reglas.alto), encoding="utf-8")
+                else:
+                    avisos.append("El clip salió sin subtítulos: el ffmpeg de esta Mac no sabe escribirlos. Se arregla con brew reinstall ffmpeg.")
         except SinElevenLabs as e:
             log.info(str(e))
             avisos.append(f"El clip salió sin sonido. {e}")
@@ -159,7 +162,16 @@ def armar(
     _frenar(cancelado)
 
     # 4. El clip.
-    clip = exportar(fuente, plan, salida, reglas=pedido.reglas, cancelado=cancelado, sonido=pista, subtitulos=escrito)
+    try:
+        clip = exportar(fuente, plan, salida, reglas=pedido.reglas, cancelado=cancelado, sonido=pista, subtitulos=escrito)
+    except VideoIlegible as e:
+        if escrito is None:
+            raise
+        # Si lo que falló son los subtítulos, el clip sale igual, sin ellos, y lo avisa.
+        log.info(f"No se pudo exportar con subtítulos ({e}): se exporta sin ellos.")
+        clip = exportar(fuente, plan, salida, reglas=pedido.reglas, cancelado=cancelado, sonido=pista, subtitulos=None)
+        avisos.append("El clip salió sin subtítulos: ffmpeg no los pudo escribir.")
+        escrito = None
     avisos += list(clip.avisos)
     return Resultado(
         plan=plan,

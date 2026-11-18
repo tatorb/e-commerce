@@ -85,7 +85,8 @@ def grafo(fuente: Fuente, plan: Plan, reglas: ReglasDelClip = MERCADOLIBRE, subt
         cola.append(f"tpad=stop_mode=clone:stop_duration={plan.cierre:.3f}")
     if subtitulos:
         # Después del cierre, para que se escriban también sobre la imagen quieta.
-        cola.append(f"ass={subtitulos}")
+        # Con el nombre de la opción: las versiones nuevas de ffmpeg no aceptan el archivo suelto.
+        cola.append(f"subtitles=filename={subtitulos}")
     cola += ["format=yuv420p", "setsar=1"]
     partes.append("".join(f"[t{i}]" for i in range(n)) + ",".join(cola) + "[v]")
     return ";".join(partes)

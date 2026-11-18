@@ -314,8 +314,9 @@ export async function buildVideoJob(db: PrismaClient, editId: string, deps: Vide
     reglas: {
       min_segundos: rules?.minSeconds ?? 10,
       max_segundos: rules?.maxSeconds ?? 60,
-      ancho: rules?.idealSize.short ?? 1080,
-      alto: rules?.idealSize.long ?? 1920,
+      // Lo que recomienda el canal es un piso: el clip sale en 1080 × 1920, que se ve mejor y pesa poco.
+      ancho: Math.max(rules?.idealSize.short ?? 0, 1080),
+      alto: Math.max(rules?.idealSize.long ?? 0, 1920),
       max_bytes: rules?.maxBytes ?? 280 * 1024 ** 2,
     },
     original: source('original', video.name, video.size),
