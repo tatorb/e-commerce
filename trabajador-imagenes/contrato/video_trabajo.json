@@ -38,7 +38,8 @@
       "musica": {
         "estilo": "Instrumental suave, sin voces."
       },
-      "subtitulos": true
+      "subtitulos": true,
+      "color_subtitulos": "#6FA82C"
     },
     "reglas": {
       "min_segundos": 10,

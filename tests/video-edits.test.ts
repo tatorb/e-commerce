@@ -463,7 +463,7 @@ describe.skipIf(!url)('la cola del editor de videos en la base', () => {
     const step = await db.shootStep.create({ data: { protocolId: protocol.id, title: 'Unboxing cenital', kind: 'VIDEO', moments } });
     expect(await videoSteps(db, accountId)).toEqual([{ id: step.id, label: 'Unboxing: Unboxing cenital', moments: 2 }]);
     expect(await loadAccountVideo(db, accountId)).toEqual(DEFAULT_ACCOUNT_VIDEO);
-    const settings = { ...DEFAULT_ACCOUNT_VIDEO, targetSeconds: 40, voiceOn: true, voiceId: 'voz1', musicOn: true, subtitlesOn: true, defaultStepId: step.id };
+    const settings = { ...DEFAULT_ACCOUNT_VIDEO, targetSeconds: 40, voiceOn: true, voiceId: 'voz1', musicOn: true, subtitlesOn: true, subtitleColor: '#6fa82c', defaultStepId: step.id };
     await saveAccountVideo(db, { accountId, values: settings, userId });
     expect(await loadAccountVideo(db, accountId)).toEqual(settings);
 
@@ -477,7 +477,7 @@ describe.skipIf(!url)('la cola del editor de videos en la base', () => {
     expect(job.momentos).toEqual(moments);
     expect(job.ficha).toBe('Producto: Camisa 384675\nTipo: Camisa de cilindro\nMarca: Esteem\nNúmero de pieza: 384675-030\nMedida: 0.50\nContenido: 4 camisas\nDiámetro: 95 mm');
     expect(job.guion).toBeNull();
-    expect(job.sonido).toEqual({ voz: { id: 'voz1' }, musica: { estilo: DEFAULT_ACCOUNT_VIDEO.musicStyle }, subtitulos: true });
+    expect(job.sonido).toEqual({ voz: { id: 'voz1' }, musica: { estilo: DEFAULT_ACCOUNT_VIDEO.musicStyle }, subtitulos: true, color_subtitulos: '#6FA82C' });
   });
 
   it('los ajustes de video de la cuenta se revisan antes de guardarse', async () => {
@@ -487,6 +487,11 @@ describe.skipIf(!url)('la cola del editor de videos en la base', () => {
     await expect(saveAccountVideo(db, { accountId, values: { ...base, musicOn: true, musicStyle: '' }, userId })).rejects.toThrow('estilo');
     await expect(saveAccountVideo(db, { accountId, values: { ...base, defaultStepId: 'no-existe' }, userId })).rejects.toThrow('ya no está en los protocolos');
     await expect(saveAccountVideo(db, { accountId, values: { ...base, targetSeconds: 500 }, userId })).rejects.toThrow(VideoEditError);
+    await expect(saveAccountVideo(db, { accountId, values: { ...base, subtitleColor: 'verde' }, userId })).rejects.toThrow(VideoEditError);
+    // Unos ajustes guardados antes de que existiera el color siguen valiendo, con el de siempre.
+    await db.videoAccountSettings.create({ data: { accountId, values: { targetSeconds: 30, musicOn: true } } });
+    expect(await loadAccountVideo(db, accountId)).toMatchObject({ targetSeconds: 30, musicOn: true, subtitleColor: '#FFE633' });
+    await db.videoAccountSettings.deleteMany();
     expect(await db.videoAccountSettings.count()).toBe(0);
   });
 

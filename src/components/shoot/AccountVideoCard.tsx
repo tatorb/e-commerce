@@ -82,6 +82,25 @@ export function AccountVideoCard({ accountSlug, settings, steps }: { accountSlug
             </div>
           ) : null}
           <Check checked={v.subtitlesOn} disabled={!v.voiceOn} onChange={(subtitlesOn) => set({ subtitlesOn })} label="Subtítulos" help="El guión escrito sobre el video, con la palabra que se dice resaltada. Necesita la voz en off." />
+          {v.subtitlesOn ? (
+            <div className="space-y-1.5 pl-6">
+              <Label htmlFor="video-color">Color de la palabra que se está diciendo</Label>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  id="video-color"
+                  type="color"
+                  value={/^#[0-9a-fA-F]{6}$/.test(v.subtitleColor) ? v.subtitleColor : '#FFE633'}
+                  onChange={(e) => set({ subtitleColor: e.target.value.toUpperCase() })}
+                  className="h-9 w-12 cursor-pointer rounded-md border bg-background p-1"
+                />
+                <Input aria-label="Color, en letras y números" value={v.subtitleColor} onChange={(e) => set({ subtitleColor: e.target.value })} placeholder="#6FA82C" className="w-32 font-mono" />
+                <span className="rounded-md bg-neutral-600 px-3 py-1.5 text-sm font-bold text-white" style={{ WebkitTextStroke: '0.5px black' }}>
+                  Así <span style={{ color: /^#[0-9a-fA-F]{6}$/.test(v.subtitleColor) ? v.subtitleColor : '#FFE633' }}>se ve</span>
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground">El color de la marca. Las demás palabras van en blanco, con borde negro.</p>
+            </div>
+          ) : null}
           <Check checked={v.musicOn} onChange={(musicOn) => set({ musicOn })} label="Música de fondo" help="ElevenLabs la genera para cada clip, del largo justo. Baja sola cuando habla la voz." />
           {v.musicOn ? (
             <div className="space-y-1.5 pl-6">

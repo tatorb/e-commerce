@@ -121,6 +121,7 @@ def procesar_video(
             voz=sonido.voz.id if sonido and sonido.voz else None,
             musica=sonido.musica.estilo if sonido and sonido.musica else None,
             subtitulos=bool(sonido and sonido.subtitulos),
+            color_subtitulos=sonido.color_subtitulos if sonido else None,
             cuartos=_giro_sin_claude(mirar),
         )
         r = armar(fuente, mirar, pedido, inspector, carpeta, carpeta / "clip.mp4", cancelado, informar=informar)

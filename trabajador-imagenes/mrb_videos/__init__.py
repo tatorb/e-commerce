@@ -9,4 +9,4 @@ Regla de oro: solo se edita el video original. Nada se genera ni se inventa
 en la imagen, y el original nunca se pisa ni se borra.
 """
 
-VERSION = "0.3.1"
+VERSION = "0.3.2"

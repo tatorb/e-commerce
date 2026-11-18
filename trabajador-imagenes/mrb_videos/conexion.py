@@ -66,6 +66,8 @@ class Sonido(BaseModel):
     voz: Voz | None = None
     musica: Musica | None = None
     subtitulos: bool = False
+    # El color de la palabra que se está diciendo en los subtítulos, como "#6FA82C".
+    color_subtitulos: str | None = None
 
 
 class TrabajoDeVideo(BaseModel):

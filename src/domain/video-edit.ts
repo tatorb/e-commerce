@@ -141,6 +141,8 @@ export const accountVideoSchema = z.object({
   musicStyle: z.string().trim().max(500),
   // El guión escrito sobre el video, palabra por palabra.
   subtitlesOn: z.boolean(),
+  // El color de la palabra que se está diciendo, como #6FA82C: el de la marca.
+  subtitleColor: z.string().trim().regex(/^#[0-9a-fA-F]{6}$/, 'El color va como #6FA82C.'),
   // Editar solo cada video nuevo, y aprobar solo el clip que no tuvo avisos.
   autoEdit: z.boolean(),
   autoApprove: z.boolean(),
@@ -148,6 +150,9 @@ export const accountVideoSchema = z.object({
   defaultStepId: z.string().max(60).nullable(),
 });
 export type AccountVideoSettings = z.infer<typeof accountVideoSchema>;
+
+// Amarillo: se lee sobre casi cualquier imagen.
+export const DEFAULT_SUBTITLE_COLOR = '#FFE633';
 
 export const DEFAULT_MUSIC_STYLE = 'Instrumental suave y moderno de fondo, electrónica lo-fi tranquila, sin voces, unos 95 BPM, para un video de producto.';
 
@@ -158,6 +163,7 @@ export const DEFAULT_ACCOUNT_VIDEO: AccountVideoSettings = {
   musicOn: false,
   musicStyle: DEFAULT_MUSIC_STYLE,
   subtitlesOn: false,
+  subtitleColor: DEFAULT_SUBTITLE_COLOR,
   autoEdit: false,
   autoApprove: false,
   defaultStepId: null,
@@ -254,7 +260,7 @@ export type VideoJob = {
   // El guión que pidió la persona, una línea por tramo. Sin pedido, lo escribe Claude.
   guion: string[] | null;
   // El sonido del clip. Null: sale en silencio.
-  sonido: { voz: { id: string } | null; musica: { estilo: string } | null; subtitulos: boolean } | null;
+  sonido: { voz: { id: string } | null; musica: { estilo: string } | null; subtitulos: boolean; color_subtitulos: string } | null;
   reglas: { min_segundos: number; max_segundos: number; ancho: number; alto: number; max_bytes: number };
   original: VideoSource;
   liviana: VideoSource | null;

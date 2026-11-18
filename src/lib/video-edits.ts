@@ -312,7 +312,7 @@ export async function buildVideoJob(db: PrismaClient, editId: string, deps: Vide
     momentos,
     ficha: productFacts(video.product, video.variantLabel),
     guion: parseRequestedScript(edit.requestedScript),
-    sonido: voice || music ? { voz: voice, musica: music, subtitulos: Boolean(voice) && settings.subtitlesOn } : null,
+    sonido: voice || music ? { voz: voice, musica: music, subtitulos: Boolean(voice) && settings.subtitlesOn, color_subtitulos: settings.subtitleColor.toUpperCase() } : null,
     reglas: {
       min_segundos: rules?.minSeconds ?? 10,
       max_segundos: rules?.maxSeconds ?? 60,

@@ -42,6 +42,7 @@ def test_entiende_el_trabajo_de_ejemplo():
     assert [m.importancia for m in t.momentos] == ["IMPORTANTE", "NORMAL", "IMPORTANTE", "REPETIDO"]
     assert t.ficha.startswith("Producto: Camisa") and t.guion is None
     assert (t.sonido.voz.id, t.sonido.musica.estilo, t.sonido.subtitulos) == ("voz-de-prueba", "Instrumental suave, sin voces.", True)
+    assert t.sonido.color_subtitulos == "#6FA82C"
 
 
 def test_un_trabajo_de_una_app_anterior_se_entiende_igual():

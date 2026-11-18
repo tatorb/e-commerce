@@ -31,7 +31,7 @@ Se prenden por cuenta, en Ajustes, Protocolos de fotos, Edición de videos.
 
 - **Voz en off.** Claude escribe una línea por tramo, con la ficha del producto, y cada línea entra en lo que dura su tramo. ElevenLabs la dice con la voz que elijas. Hace falta el ID de la voz: en ElevenLabs, en Voices, abrí el menú de la voz y elegí Copy voice ID.
 - **Música.** ElevenLabs la genera para cada clip, del largo justo, con el estilo que describas. Baja sola cuando habla la voz.
-- **Subtítulos.** El guión escrito sobre el video, de a pocas palabras, con la que se está diciendo resaltada.
+- **Subtítulos.** El guión escrito sobre el video, de a pocas palabras, con la que se está diciendo resaltada en el color de la marca, que se elige ahí mismo. Los dibuja el programa, con la letra Poppins Bold que viene con él, así que se ven igual en cualquier Mac y no dependen de cómo esté instalado ffmpeg.
 
 La mezcla lleva la voz a -14 LUFS, el volumen de las redes, y la música a un 16 %.
 

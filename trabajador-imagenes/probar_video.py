@@ -20,6 +20,7 @@ El clip:
     --voz ID                La voz de ElevenLabs que dice el guión.
     --musica ESTILO         El estilo de la música de fondo.
     --subtitulos            Escribir el guión sobre el video.
+    --color #RRGGBB         El color de la palabra que se está diciendo.
     --salida CARPETA
 
 En la carpeta quedan las hojas de cuadros, lo que se midió, el plan usado, el
@@ -61,6 +62,7 @@ def main() -> int:
     p.add_argument("--voz")
     p.add_argument("--musica")
     p.add_argument("--subtitulos", action="store_true")
+    p.add_argument("--color", help="El color de la palabra que se está diciendo en los subtítulos, como #6FA82C.")
     p.add_argument("--salida", type=Path)
     args = p.parse_args()
 
@@ -88,6 +90,7 @@ def main() -> int:
             voz=args.voz,
             musica=args.musica,
             subtitulos=args.subtitulos,
+            color_subtitulos=args.color,
             cuartos=args.cuartos,
         )
         inspector = InspectorDeVideo.desde_entorno(simulado=args.sin_claude)

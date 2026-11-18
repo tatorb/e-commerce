@@ -299,6 +299,25 @@ def test_una_frase_larga_achica_la_letra_para_entrar(tmp_path):
     # La palabra que se dice va en amarillo y las otras en blanco.
     colores = {franja.getpixel((x, 80))[:3] for x in range(0, 1080, 2) if franja.getpixel((x, 80))[3] == 255}
     assert (255, 230, 51) in colores and (255, 255, 255) in colores
+    # Con el color de la cuenta, va en ese.
+    verde = dibujar_franja(["Caja", "sellada"], 1, 1080, 160, 70, "#6FA82C")
+    colores = {verde.getpixel((x, 80))[:3] for x in range(0, 1080, 2) if verde.getpixel((x, 80))[3] == 255}
+    assert (111, 168, 44) in colores and (255, 230, 51) not in colores
+
+
+def test_un_color_que_no_vale_deja_el_de_siempre():
+    from mrb_videos.sonido import color_de
+
+    assert color_de("#6FA82C") == (111, 168, 44, 255) and color_de("6fa82c") == (111, 168, 44, 255)
+    for malo in (None, "", "verde", "#12", "#GGGGGG"):
+        assert color_de(malo) == (255, 230, 51, 255)
+
+
+def test_la_letra_de_los_subtitulos_viene_con_el_programa():
+    from mrb_videos.sonido import LETRAS, _letra
+
+    assert LETRAS[0].endswith("letras/Poppins-Bold.woff")
+    assert _letra(60).getname()[0] == "Poppins"
 
 
 # ───────────────────────────── De punta a punta ─────────────────────────────

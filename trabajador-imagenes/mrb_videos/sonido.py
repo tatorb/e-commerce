@@ -284,10 +284,10 @@ class Subtitulos:
     y: int
 
 
-# La letra de los subtítulos viene con el programa, así se ven igual en cualquier máquina: Montserrat
-# ExtraBold, de uso libre (su licencia está al lado). Si no se pudiera leer, se prueba con las del sistema.
+# La letra de los subtítulos viene con el programa, así se ven igual en cualquier máquina: Poppins Bold,
+# de uso libre (su licencia está al lado). Si no se pudiera leer, se prueba con las del sistema.
 LETRAS = (
-    str(Path(__file__).resolve().parent / "letras" / "Montserrat-ExtraBold.woff"),
+    str(Path(__file__).resolve().parent / "letras" / "Poppins-Bold.woff"),
     "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
     "/Library/Fonts/Arial Bold.ttf",
     "/System/Library/Fonts/Helvetica.ttc",
@@ -295,8 +295,20 @@ LETRAS = (
     "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
 )
 BLANCO = (255, 255, 255, 255)
-AMARILLO = (255, 230, 51, 255)
 NEGRO = (0, 0, 0, 255)
+# El color de la palabra que se está diciendo, si la cuenta no eligió el suyo.
+COLOR_RESALTADO = "#FFE633"
+
+
+def color_de(texto: str | None) -> tuple[int, int, int, int]:
+    """De "#6FA82C" a sus tres componentes. Si no vale, el de siempre."""
+    limpio = (texto or "").strip().lstrip("#")
+    if len(limpio) != 6:
+        limpio = COLOR_RESALTADO.lstrip("#")
+    try:
+        return (int(limpio[0:2], 16), int(limpio[2:4], 16), int(limpio[4:6], 16), 255)
+    except ValueError:
+        return color_de(COLOR_RESALTADO)
 
 
 def _letra(tamano: int):
@@ -331,8 +343,9 @@ def momentos_de(lineas: list[Linea]) -> list[tuple[float, float, list[str], int]
     return [(d, min(h, momentos[n + 1][0]) if n + 1 < len(momentos) else h, palabras, i) for n, (d, h, palabras, i) in enumerate(momentos)]
 
 
-def dibujar_franja(palabras: list[str], resaltada: int, ancho: int, alto_franja: int, tamano: int):
-    """Una franja transparente con las palabras al medio, en blanco con borde negro, y la que se dice en amarillo."""
+def dibujar_franja(palabras: list[str], resaltada: int, ancho: int, alto_franja: int, tamano: int, color: str | None = None):
+    """Una franja transparente con las palabras al medio, en blanco con borde negro, y la que se dice en su color."""
+    resaltado = color_de(color)
     from PIL import Image, ImageDraw
 
     franja = Image.new("RGBA", (ancho, alto_franja), (0, 0, 0, 0))
@@ -350,12 +363,12 @@ def dibujar_franja(palabras: list[str], resaltada: int, ancho: int, alto_franja:
         tamano = int(tamano * 0.9)
     x = (ancho - total) / 2
     for i, (palabra, w) in enumerate(zip(palabras, anchos)):
-        lapiz.text((x, alto_franja / 2), palabra, font=letra, fill=AMARILLO if i == resaltada else BLANCO, stroke_width=borde, stroke_fill=NEGRO, anchor="lm")
+        lapiz.text((x, alto_franja / 2), palabra, font=letra, fill=resaltado if i == resaltada else BLANCO, stroke_width=borde, stroke_fill=NEGRO, anchor="lm")
         x += w + espacio
     return franja
 
 
-def subtitulos(lineas: list[Linea], carpeta: Path, segundos: float, ancho: int = 1080, alto: int = 1920) -> Subtitulos:
+def subtitulos(lineas: list[Linea], carpeta: Path, segundos: float, ancho: int = 1080, alto: int = 1920, color: str | None = None) -> Subtitulos:
     """
     El guión escrito sobre el video, de a pocas palabras, con la que se está diciendo resaltada.
 
@@ -382,7 +395,7 @@ def subtitulos(lineas: list[Linea], carpeta: Path, segundos: float, ancho: int =
         if desde - t > 0.02:
             poner(vacia, desde - t)
         archivo = carpeta / f"s{n:04d}.png"
-        dibujar_franja([_limpio(p) for p in palabras], resaltada, ancho, alto_franja, tamano).save(archivo)
+        dibujar_franja([_limpio(p) for p in palabras], resaltada, ancho, alto_franja, tamano, color).save(archivo)
         hasta = min(hasta, segundos)
         poner(archivo, hasta - desde)
         t = hasta

@@ -53,6 +53,8 @@ class Pedido:
     voz: str | None = None
     musica: str | None = None
     subtitulos: bool = False
+    # El color de la palabra que se está diciendo, como "#6FA82C". None: el de siempre.
+    color_subtitulos: str | None = None
     # El giro que se usa si Claude no decide la imagen.
     cuartos: int = 0
 
@@ -160,7 +162,7 @@ def armar(
                 pista = mezclar(dichas, archivo_musica, plan.dura, carpeta / "sonido.wav", cancelado)
             if pedido.subtitulos and dichas:
                 informar("Dibujando los subtítulos", None)
-                escrito = subtitulos(dichas, carpeta / "subtitulos", plan.dura, pedido.reglas.ancho, pedido.reglas.alto)
+                escrito = subtitulos(dichas, carpeta / "subtitulos", plan.dura, pedido.reglas.ancho, pedido.reglas.alto, pedido.color_subtitulos)
         except SinElevenLabs as e:
             log.info(str(e))
             avisos.append(f"El clip salió sin sonido. {e}")
