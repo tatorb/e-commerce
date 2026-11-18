@@ -240,6 +240,24 @@ describe.skipIf(!url)('el editor de videos desde Claude', () => {
     expect(approved.data.siguiente).toContain('set_publication_media');
     expect((await call('review_video_edit', { publicacion: 'MLA1110001', video: videoId, decision: 'descartar' })).text).toContain('ya está aprobado');
 
+    // El clip aprobado queda elegido en la publicación activa, que no tenía clip, y en la lista de los que falta subir.
+    const list = await call('list_clips_to_upload');
+    expect(list.data.faltan).toBe(1);
+    expect(list.data.clips[0]).toMatchObject({
+      codigo: 'MLA1110001',
+      titulo: 'Kit 4 Camisas',
+      subir_en: 'https://www.mercadolibre.com.ar/publicaciones/listado?search=MLA1110001',
+      bajar: expect.stringContaining('https://drive.google.com/uc?export=download&id='),
+    });
+    // Anotarlo como subido lo saca de la lista; desmarcarlo lo devuelve.
+    const marked = await call('mark_clip_uploaded', { publicacion: 'MLA1110001', video: list.data.clips[0].video });
+    expect(marked.data).toMatchObject({ subido: true, faltan: 0 });
+    expect((await call('mark_clip_uploaded', { publicacion: 'MLA1110001', video: list.data.clips[0].video, subido: false })).data.faltan).toBe(1);
+    // Una publicación pausada no entra: Mercado Libre solo acepta clips en las activas.
+    await db.publication.updateMany({ data: { channelStatus: 'PAUSED' } });
+    expect((await call('list_clips_to_upload')).data.faltan).toBe(0);
+    await db.publication.updateMany({ data: { channelStatus: 'ACTIVE' } });
+
     // Una edición en cola se descarta sin más.
     await call('request_video_edit', { publicacion: 'MLA1110001', video: videoId });
     const discarded = await call('review_video_edit', { publicacion: 'MLA1110001', video: videoId, decision: 'descartar' });

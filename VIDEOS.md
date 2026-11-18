@@ -80,6 +80,16 @@ bash configurar.sh
 6. **Aprobalo, o corregilo.** Con Ajustar los cortes cambiás a mano dónde corta cada tramo y su velocidad, y la Mac lo rehace tal cual. Con Pedir de nuevo, Claude lo propone otra vez con tu indicación. Lo que dice la voz se corrige arriba, en Guión del clip.
 7. **Elegilo como clip** de la publicación, con Usar como clip.
 
+## Subir el clip a Mercado Libre
+
+Mercado Libre no deja subir clips desde la app a las cuentas locales. Se lo preguntamos con la conexión de Insur y respondió que la cuenta no tiene permiso: la subida por programa es solo para vendedores internacionales. Tampoco acepta ya videos de YouTube en las publicaciones, los desactivó en septiembre de 2024. Por eso el clip se sube a mano, pero con todo a un clic:
+
+1. Al aprobar un clip, queda elegido solo en las publicaciones activas del producto que no tenían clip.
+2. En el menú, **Clips por subir** muestra todo lo que falta, con un número.
+3. De cada clip: **Bajar el clip**, **Abrir en Mercado Libre** (lleva a esa publicación en tu listado, donde en el menú de opciones está subir el video) y **Ya lo subí**, que lo saca de la lista.
+
+Si Mercado Libre algún día habilita el permiso, Claude lo puede comprobar con `check_channel_clips`.
+
 ## En automático
 
 En Edición de videos, por cuenta:

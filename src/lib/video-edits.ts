@@ -3,6 +3,7 @@ import { Prisma } from '@/generated/prisma/client';
 import type { VideoEditStatus } from '@/generated/prisma/enums';
 import { getChannelAdapter } from '@/channels';
 import type { ClipRules } from '@/domain/videos';
+import { chooseApprovedClip } from '@/lib/clip-uploads';
 import { proposeVideoScript, scriptLinesOf } from '@/lib/video-script';
 import {
   accountVideoSchema,
@@ -442,6 +443,7 @@ export async function submitEditResult(
         error: null,
       },
     });
+    if (auto) await chooseApprovedClip(tx, { clipId: clip.id, userId: null });
     return { aceptado: true as const };
   });
 }
@@ -473,11 +475,15 @@ async function openEdit(tx: Tx, accountId: string, editId: string, allowed: Vide
   return fresh;
 }
 
-/** Aprueba el clip: queda como un video más del producto, listo para elegirlo. */
+/**
+ * Aprueba el clip: queda como un video más del producto, y elegido en sus
+ * publicaciones activas que no tienen clip, para subirlo desde Clips por subir.
+ */
 export async function approveEdit(db: PrismaClient, args: { accountId: string; editId: string; userId: string | null; now?: Date }): Promise<void> {
   await db.$transaction(async (tx) => {
     const edit = await openEdit(tx, args.accountId, args.editId, ['REVIEW'], 'aprobar');
     await tx.videoEdit.update({ where: { id: edit.id }, data: { status: 'APPROVED', openFor: null, reviewedById: args.userId, reviewedAt: args.now ?? new Date() } });
+    if (edit.clipId) await chooseApprovedClip(tx, { clipId: edit.clipId, userId: args.userId, now: args.now });
   });
 }
 

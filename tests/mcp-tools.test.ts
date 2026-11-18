@@ -48,6 +48,7 @@ describe('lista de herramientas', () => {
       'get_videos_step',
       'get_video_queue',
       'check_channel_clips',
+      'list_clips_to_upload',
       'check_photo_measures',
       'audit_compatibilities',
       'list_notes',
