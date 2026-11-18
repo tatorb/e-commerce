@@ -68,6 +68,22 @@ export function AccountVideoCard({ accountSlug, settings }: { accountSlug: strin
               <p className="text-xs text-muted-foreground">En ElevenLabs, en Voices, abrí el menú de la voz y elegí Copy voice ID.</p>
             </div>
           ) : null}
+          {v.voiceOn ? (
+            <div className="space-y-1.5 pl-6">
+              <Label htmlFor="video-script-rules">Reglas de redacción del guión</Label>
+              <Textarea
+                id="video-script-rules"
+                rows={5}
+                value={v.scriptRules}
+                maxLength={4000}
+                onChange={(e) => set({ scriptRules: e.target.value })}
+                placeholder={'Una regla por renglón, con tus palabras. Por ejemplo:\nDecí kit, no juego.\nNombrá siempre la marca en la última frase.\nEn el subtítulo, las cilindradas van en números: 1.3, 1.6.'}
+              />
+              <p className="text-xs text-muted-foreground">
+                Claude las sigue cada vez que escribe un guión, además de las reglas de siempre. También aprende de los guiones que corregís a mano: los usa de ejemplo en los productos que siguen.
+              </p>
+            </div>
+          ) : null}
           <Check checked={v.subtitlesOn} disabled={!v.voiceOn} onChange={(subtitlesOn) => set({ subtitlesOn })} label="Subtítulos" help="El guión escrito sobre el video, con la palabra que se dice resaltada. Necesita la voz en off." />
           {v.subtitlesOn ? (
             <div className="space-y-1.5 pl-6">

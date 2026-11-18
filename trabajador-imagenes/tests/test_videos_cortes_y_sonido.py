@@ -496,3 +496,30 @@ def test_lo_que_lleva_ffmpeg_se_lee_de_su_archivo_de_avance(tmp_path):
     assert _lleva(cuenta, 40) == 0
     cuenta.write_text("out_time_us=99000000\n")
     assert _lleva(cuenta, 40) == 1
+
+
+def test_el_subtitulo_puede_escribirse_distinto_de_lo_que_dice_la_voz(tmp_path):
+    from mrb_videos.sonido import Linea, Palabra, mostrar
+
+    dichas = [
+        Linea("Para motor uno punto tres ocho válvulas.", 1.0, 4.0, tmp_path / "a.mp3", [
+            Palabra("Para", 1.0, 1.3), Palabra("motor", 1.3, 1.8), Palabra("uno", 1.8, 2.1), Palabra("punto", 2.1, 2.5),
+            Palabra("tres", 2.5, 2.9), Palabra("ocho", 2.9, 3.3), Palabra("válvulas.", 3.3, 4.0),
+        ]),
+        Linea("Es Persan.", 4.5, 5.5, tmp_path / "b.mp3", [Palabra("Es", 4.5, 4.8), Palabra("Persan.", 4.8, 5.5)]),
+    ]
+    # Sin texto para la pantalla, queda igual.
+    assert mostrar(dichas, None) is dichas
+    escritas = mostrar(dichas, ["Para motor 1.3 8v.", ""])
+    primera = escritas[0]
+    assert [p.texto for p in primera.palabras] == ["Para", "motor", "1.3", "8v."]
+    # La línea ocupa el mismo tiempo, sin huecos, y el número se lleva más tiempo que una palabra corta.
+    assert primera.palabras[0].inicio == 1.0 and abs(primera.palabras[-1].fin - 4.0) < 1e-6
+    assert all(abs(a.fin - b.inicio) < 1e-6 for a, b in zip(primera.palabras, primera.palabras[1:]))
+    dura = {p.texto: p.fin - p.inicio for p in primera.palabras}
+    assert dura["1.3"] > dura["Para"]
+    # La frase sin texto propio queda como se dijo.
+    assert escritas[1] is dichas[1]
+    # Con la misma cantidad de palabras, cada una toma el momento de la que se dijo.
+    igual = mostrar([dichas[1]], ["Es PERSAN."])[0]
+    assert [(p.texto, p.inicio, p.fin) for p in igual.palabras] == [("Es", 4.5, 4.8), ("PERSAN.", 4.8, 5.5)]

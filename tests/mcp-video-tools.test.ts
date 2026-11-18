@@ -311,6 +311,17 @@ describe.skipIf(!url)('el editor de videos desde Claude', () => {
     expect(await claimNextEdit(db, workerId)).toBeNull();
   });
 
+  it('el guión lleva lo que dice la voz y cómo se lee en el subtítulo, y la cuenta tiene sus reglas de redacción', async () => {
+    const saved = await call('save_video_script', { publicacion: 'MLA1110001', frases: ['Para motor uno punto tres.', 'Vienen cuatro.'], en_los_subtitulos: ['Para motor 1.3.', 'Vienen cuatro.'] });
+    expect(saved.data.guion_del_clip).toMatchObject({ frases: ['Para motor uno punto tres.', 'Vienen cuatro.'], en_los_subtitulos: ['Para motor 1.3.', 'Vienen cuatro.'] });
+    await call('update_video_settings', { reglas_de_redaccion_del_guion: 'Decí kit, no juego.' });
+    const step = await call('get_videos_step', { publicacion: 'MLA1110001' });
+    expect(step.data.guion_del_clip.en_los_subtitulos).toEqual(['Para motor 1.3.', 'Vienen cuatro.']);
+    expect(step.data.como_se_editan_los_videos_de_la_cuenta.reglas_de_redaccion_del_guion).toBe('Decí kit, no juego.');
+    // Sin texto aparte, el subtítulo muestra lo que dice la voz.
+    expect((await call('save_video_script', { publicacion: 'MLA1110001', frases: ['Vienen cuatro.'] })).data.guion_del_clip).not.toHaveProperty('en_los_subtitulos');
+  });
+
   it('no edita un clip ya editado ni un video que no es del producto', async () => {
     await call('request_video_edit', { publicacion: 'MLA1110001', video: videoId });
     const editId = await macDelivers();

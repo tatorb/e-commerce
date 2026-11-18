@@ -53,6 +53,14 @@ Después, al editar un video, el editor se acomoda al guión y no al revés. Pri
 
 Un clip ya editado no cambia cuando se corrige el guión: para que diga el guión nuevo, hay que pedirlo de nuevo.
 
+### Cómo se calibra el guión
+
+Claude escribe el guión con la información del paso Información y de Preguntas y respuestas, siguiendo unas reglas fijas (no relata el video, frases cortas, sin precios ni envíos, no inventa nada). Encima de eso, lo ajustás de tres formas:
+
+1. **Reglas de redacción de la cuenta.** En Protocolos de fotos, Edición de videos, hay un cuadro para escribirlas con tus palabras, una por renglón: "decí kit, no juego", "nombrá la marca al final". Claude las sigue cada vez.
+2. **El subtítulo se escribe distinto de lo que se dice.** Cada frase tiene dos textos: el que dice la voz ("motor uno punto tres") y, debajo, el que se lee en el subtítulo ("motor 1.3"). Claude escribe los dos y los podés corregir. Si dejás vacío el del subtítulo, muestra lo mismo que dice la voz.
+3. **Aprende de lo que corregís.** Los guiones que escribís o corregís a mano van de ejemplo cuando Claude escribe el de otro producto, primero los del mismo tipo.
+
 ## Qué necesitás
 
 - **El trabajador de imágenes instalado y configurado.** Cómo, en [IMAGENES.md](IMAGENES.md). El editor usa su misma llave y su misma clave de Claude.

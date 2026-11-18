@@ -2021,6 +2021,9 @@ model VideoScript {
   // Las frases, en orden: ["...", "..."].
   lines       Json
   // claude: lo propuso Claude y nadie lo tocó. persona: se escribió o se corrigió a mano.
+  // Cómo se escribe cada frase en los subtítulos cuando no es igual a lo que
+  // dice la voz ("1.3" y no "uno punto tres"): una por frase, vacía si es igual.
+  shown       Json?
   source      String   @default("persona")
   updatedById String?
   updatedAt   DateTime @updatedAt

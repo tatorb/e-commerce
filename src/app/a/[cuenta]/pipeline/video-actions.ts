@@ -250,13 +250,13 @@ export async function discardVideoEditAction(accountSlug: string, editId: string
 // ───────────────────────────── Guión del clip ─────────────────────────────
 
 /** Guarda el guión de la voz en off de los clips del producto, escrito o corregido a mano. */
-export async function saveVideoScriptAction(accountSlug: string, productId: string, lines: string[]): Promise<Result> {
+export async function saveVideoScriptAction(accountSlug: string, productId: string, lines: string[], shown?: string[]): Promise<Result> {
   return act(accountSlug, { section: ['pipeline', 'productos'], does: 'Cambió el guión del clip', productId }, async () => {
     const user = await requireUser();
     const accountId = await accountIdOf(accountSlug);
     if (!accountId) return NO_ACCOUNT;
     const r = await guardEdit(async () => {
-      await saveVideoScript(prisma, { accountId, productId: String(productId), lines, userId: user.id, rules: await clipRulesFor(prisma, String(productId)) });
+      await saveVideoScript(prisma, { accountId, productId: String(productId), lines, shown, userId: user.id, rules: await clipRulesFor(prisma, String(productId)) });
       return {};
     });
     revalidatePath(`/a/${accountSlug}/pipeline`, 'layout');

@@ -85,6 +85,8 @@ class TrabajoDeVideo(BaseModel):
     momentos: list[Momento] = Field(default_factory=list)
     # El guión del clip, ya escrito y revisado: las frases que dice la voz, en orden. None: sin voz.
     guion: list[str] | None = None
+    # Cómo se escribe cada frase en los subtítulos, en el mismo orden. None o una frase vacía: igual a lo que se dice.
+    guion_en_pantalla: list[str] | None = None
     # El sonido del clip. None: sale en silencio.
     sonido: Sonido | None = None
     reglas: Reglas = Field(default_factory=Reglas)

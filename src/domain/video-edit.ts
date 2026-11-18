@@ -129,6 +129,19 @@ export function cleanScriptLines(raw: unknown): string[] {
   return r.success ? r.data.map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean) : [];
 }
 
+/**
+ * Cómo se escribe cada frase en los subtítulos: una por frase del guión, vacía
+ * cuando se escribe igual que lo que dice la voz. Null si todas son iguales.
+ */
+export function cleanShownLines(lines: string[], raw: unknown): string[] | null {
+  const list = Array.isArray(raw) ? raw : [];
+  const shown = lines.map((line, i) => {
+    const text = typeof list[i] === 'string' ? (list[i] as string).replace(/\s+/g, ' ').trim().slice(0, SCRIPT_LINE_MAX) : '';
+    return text === line ? '' : text;
+  });
+  return shown.some(Boolean) ? shown : null;
+}
+
 export const countWords = (text: string) => text.trim().split(/\s+/).filter(Boolean).length;
 
 /** Cuántos segundos lleva decir el guión, a ojo: sirve para avisar antes de editar. */
@@ -180,6 +193,8 @@ export const accountVideoSchema = z.object({
   autoEdit: z.boolean(),
   autoApprove: z.boolean(),
   autoScript: z.boolean(),
+  // Las reglas de redacción del guión de esta cuenta, en palabras: Claude las sigue además de las fijas.
+  scriptRules: z.string().max(4000).default(''),
 });
 export type AccountVideoSettings = z.infer<typeof accountVideoSchema>;
 
@@ -199,6 +214,7 @@ export const DEFAULT_ACCOUNT_VIDEO: AccountVideoSettings = {
   autoEdit: false,
   autoApprove: false,
   autoScript: false,
+  scriptRules: '',
 };
 
 export function parseAccountVideo(raw: unknown): AccountVideoSettings {
@@ -289,6 +305,8 @@ export type VideoJob = {
   momentos: VideoMoment[];
   // El guión del clip, ya escrito y revisado: las frases que dice la voz, en orden. Null: sin voz.
   guion: string[] | null;
+  // Cómo se escribe cada frase en los subtítulos, en el mismo orden; vacía si es igual. Null: todas iguales.
+  guion_en_pantalla: string[] | null;
   // El sonido del clip. Null: sale en silencio.
   sonido: { voz: { id: string } | null; musica: { estilo: string } | null; subtitulos: boolean; color_subtitulos: string } | null;
   reglas: { min_segundos: number; max_segundos: number; ancho: number; alto: number; max_bytes: number };

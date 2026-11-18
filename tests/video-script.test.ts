@@ -4,7 +4,7 @@ import { PrismaClient } from '@/generated/prisma/client';
 import { buildVideoScriptRequest, VIDEO_SCRIPT_INSTRUCTIONS, type VideoScriptInput, type VideoScriptResult } from '@/ai/video-script';
 import { ProposalError } from '@/ai/request';
 import { cleanScriptLines, countWords, scriptSeconds, scriptWordBudget } from '@/domain/video-edit';
-import { loadVideoScript, proposeVideoScript, saveVideoScript, scriptLinesOf, VideoScriptError } from '@/lib/video-script';
+import { loadVideoScript, proposeVideoScript, saveVideoScript, scriptLinesOf, scriptShownOf, VideoScriptError } from '@/lib/video-script';
 
 // Datos inventados.
 
@@ -57,7 +57,7 @@ describe.skipIf(!url)('el guión del clip en la base', () => {
   let publicationId = '';
 
   beforeEach(async () => {
-    await db.$executeRawUnsafe('TRUNCATE video_scripts, product_research, compatibilities, publications, stores, channels, products, accounts, users CASCADE');
+    await db.$executeRawUnsafe('TRUNCATE video_account_settings, video_scripts, product_research, compatibilities, publications, stores, channels, products, accounts, users CASCADE');
     accountId = (await db.account.create({ data: { slug: 'prueba', name: 'Cuenta de prueba' } })).id;
     await db.user.create({ data: { id: userId, name: 'Persona', email: 'persona@example.com' } });
     const product = await db.product.create({ data: { accountId, name: 'Camisa 384675', productType: 'Camisa de cilindro', brand: 'Esteem', kitContents: '4 camisas' } });
@@ -101,7 +101,7 @@ describe.skipIf(!url)('el guión del clip en la base', () => {
     const asked: VideoScriptInput[] = [];
     const request = async (input: VideoScriptInput): Promise<VideoScriptResult> => {
       asked.push(input);
-      return { output: { lineas: [...LINES, '  '] }, usage: { costUsd: 0.012 } as VideoScriptResult['usage'], model: 'claude' };
+      return { output: { lineas: [...LINES, '  '].map((voz) => ({ voz, subtitulo: voz })) }, usage: { costUsd: 0.012 } as VideoScriptResult['usage'], model: 'claude' };
     };
     const r = await proposeVideoScript(db, { accountId, publicationId, clipSeconds: 40, userId }, request);
     expect(r).toMatchObject({ ok: true, costUsd: 0.012, script: { lines: LINES, source: 'claude' } });
@@ -127,10 +127,33 @@ describe.skipIf(!url)('el guión del clip en la base', () => {
     expect((await loadVideoScript(db, productId))?.lines).toEqual(LINES);
   });
 
+  it('cada frase puede escribirse en el subtítulo distinto de como se dice, y Claude recibe las reglas y los ejemplos de la cuenta', async () => {
+    // Una persona corrigió el guión de otro producto del mismo tipo: es el ejemplo.
+    const other = await db.product.create({ data: { accountId, name: 'Camisa 384999', productType: (await db.product.findUniqueOrThrow({ where: { id: productId } })).productType } });
+    await saveVideoScript(db, { accountId, productId: other.id, lines: ['Para motor uno punto tres.', 'Es Esteem.'], shown: ['Para motor 1.3.', 'Es Esteem.'], userId });
+    expect(await loadVideoScript(db, other.id)).toMatchObject({ lines: ['Para motor uno punto tres.', 'Es Esteem.'], shown: ['Para motor 1.3.', ''], source: 'persona' });
+    await db.videoAccountSettings.create({ data: { accountId, values: { scriptRules: 'Decí kit, no juego.' } } });
+
+    const asked: VideoScriptInput[] = [];
+    const r = await proposeVideoScript(db, { accountId, publicationId, clipSeconds: 40, userId }, async (input) => {
+      asked.push(input);
+      return { output: { lineas: [{ voz: 'Camisas para Fiat uno punto siete.', subtitulo: 'Camisas para Fiat 1.7.' }, { voz: 'Vienen cuatro.', subtitulo: 'Vienen cuatro.' }] }, usage: { costUsd: 0.01 } as VideoScriptResult['usage'], model: 'claude' };
+    });
+    expect(r).toMatchObject({ ok: true, script: { lines: ['Camisas para Fiat uno punto siete.', 'Vienen cuatro.'], shown: ['Camisas para Fiat 1.7.', ''] } });
+    expect(asked[0].accountRules).toBe('Decí kit, no juego.');
+    expect(asked[0].examples).toEqual([{ producto: 'Camisa 384999', frases: [{ voz: 'Para motor uno punto tres.', subtitulo: 'Para motor 1.3.' }, { voz: 'Es Esteem.', subtitulo: 'Es Esteem.' }] }]);
+    // El pedido a la Mac lleva los dos textos mientras el guión no cambie.
+    expect(await scriptShownOf(db, productId, ['Camisas para Fiat uno punto siete.', 'Vienen cuatro.'])).toEqual(['Camisas para Fiat 1.7.', '']);
+    expect(await scriptShownOf(db, productId, ['Otra cosa.'])).toBeNull();
+    // Al sacar una frase, su texto para el subtítulo se va con ella.
+    await saveVideoScript(db, { accountId, productId, lines: ['', 'Vienen cuatro.'], shown: ['Camisas para Fiat 1.7.', 'Vienen 4.'], userId });
+    expect(await loadVideoScript(db, productId)).toMatchObject({ lines: ['Vienen cuatro.'], shown: ['Vienen 4.'] });
+  });
+
   it('si Claude se pasa del largo, se le sacan frases del final; si no responde o no dice nada, no se guarda', async () => {
     const long = Array.from({ length: 12 }, (_, i) => `Frase número ${i + 1} con unas quince palabras para que el guión entero quede demasiado largo.`);
     const r = await proposeVideoScript(db, { accountId, publicationId, clipSeconds: 40, userId, rules: { maxSeconds: 60 } }, async () => ({
-      output: { lineas: long },
+      output: { lineas: long.map((voz) => ({ voz, subtitulo: voz })) },
       usage: { costUsd: 0.02 } as VideoScriptResult['usage'],
       model: 'claude',
     }));
@@ -145,7 +168,7 @@ describe.skipIf(!url)('el guión del clip en la base', () => {
       throw new ProposalError('Claude está recibiendo demasiados pedidos. Probá de nuevo en un minuto.');
     };
     expect(await proposeVideoScript(db, { accountId, publicationId, clipSeconds: 40, userId }, failing)).toEqual({ ok: false, error: 'Claude está recibiendo demasiados pedidos. Probá de nuevo en un minuto.', costUsd: 0 });
-    const empty = await proposeVideoScript(db, { accountId, publicationId, clipSeconds: 40, userId }, async () => ({ output: { lineas: [' '] }, usage: { costUsd: 0.01 } as VideoScriptResult['usage'], model: 'claude' }));
+    const empty = await proposeVideoScript(db, { accountId, publicationId, clipSeconds: 40, userId }, async () => ({ output: { lineas: [{ voz: ' ', subtitulo: '' }] }, usage: { costUsd: 0.01 } as VideoScriptResult['usage'], model: 'claude' }));
     expect(empty).toMatchObject({ ok: false, costUsd: 0.01 });
     expect(await db.videoScript.count()).toBe(0);
     await expect(proposeVideoScript(db, { accountId, publicationId: 'no-existe', clipSeconds: 40, userId }, failing)).rejects.toThrow('no es de esta cuenta');

@@ -16,10 +16,21 @@ export type VideoScriptInput = {
   competitorQuestions: string | null;
   // Cuántas palabras entran en el clip, como mucho.
   maxWords: number;
+  // Las reglas de redacción de la cuenta, escritas por la persona. Mandan sobre las de estilo de acá.
+  accountRules?: string | null;
+  // Guiones que una persona corrigió en la cuenta: así le gustan.
+  examples?: { producto: string; frases: { voz: string; subtitulo: string }[] }[];
 };
 
 export const videoScriptOutputSchema = z.object({
-  lineas: z.array(z.string()).describe('Las frases del guión, en orden. Cada una se dice de corrido, con una pausa corta entre una y otra.'),
+  lineas: z
+    .array(
+      z.object({
+        voz: z.string().describe('La frase como la dice la voz: los números y las medidas en palabras, sin símbolos ni abreviaturas.'),
+        subtitulo: z.string().describe('La misma frase como se lee en el subtítulo: los números, las medidas y las cilindradas en cifras, como los escribe el comprador. Mismas palabras y mismo orden en lo demás.'),
+      }),
+    )
+    .describe('Las frases del guión, en orden. Cada una se dice de corrido, con una pausa corta entre una y otra.'),
 });
 
 export type VideoScriptOutput = z.infer<typeof videoScriptOutputSchema>;
@@ -49,6 +60,10 @@ Cómo escribir:
 - No uses abreviaturas, paréntesis, barras, rayas largas ni símbolos: la voz los lee mal.
 - No repitas la misma idea con otras palabras.
 
+Cada frase va dos veces: como la dice la voz y como se lee en el subtítulo. Dicen lo mismo, con las mismas palabras y en el mismo orden; solo cambia cómo se escriben los números, las medidas, las cilindradas y las siglas. En «voz» van en palabras, para que la voz los pronuncie bien: "motor uno punto tres ocho válvulas", "ochenta y dos coma sesenta milímetros". En «subtitulo» van como los escribe y los busca el comprador: "motor 1.3 8v", "82,60 mm". El subtítulo tampoco lleva paréntesis ni rayas largas.
+
+Si recibís reglas de redacción de la tienda, seguilas: mandan sobre las de estilo de acá, pero nunca sobre no inventar datos ni sobre lo que el canal rechaza. Si recibís guiones corregidos por la tienda, son el ejemplo de cómo le gustan: copiá su tono, su largo de frase y su forma de escribir los números, no sus datos.
+
 Largo: se te dice cuántas palabras entran en el clip, como mucho. Es un tope: no lo pases. Si hay poco para decir, decí menos. Mejor cinco frases que sirven que ocho de relleno.
 
 Nunca digas precios, descuentos, costos, plazos de entrega, envíos, teléfonos, direcciones, links ni nombres de otras tiendas o sitios: el canal los rechaza.`;
@@ -74,7 +89,9 @@ export function buildVideoScriptRequest(input: VideoScriptInput) {
         content: [
           `Datos del producto y de la publicación:\n<datos>\n${JSON.stringify(data, null, 2)}\n</datos>`,
           `Preguntas de los compradores en esta publicación:\n<preguntas>\n${qa(input.info.questions)}\n</preguntas>`,
-          `En el clip entran, como mucho, ${input.maxWords} palabras. Escribí el guión.`,
+          ...(input.accountRules ? [`Reglas de redacción de la tienda:\n<reglas_de_la_tienda>\n${input.accountRules}\n</reglas_de_la_tienda>`] : []),
+          ...(input.examples && input.examples.length > 0 ? [`Guiones de otros productos, corregidos por la tienda:\n<ejemplos>\n${JSON.stringify(input.examples, null, 2)}\n</ejemplos>`] : []),
+          `En el clip entran, como mucho, ${input.maxWords} palabras, contadas en «voz». Escribí el guión.`,
         ].join('\n\n'),
       },
     ],

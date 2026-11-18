@@ -175,7 +175,7 @@ describe('el contrato con la Mac', () => {
   it('el trabajo de ejemplo tiene las partes que arma la app', () => {
     const job = example('video_trabajo.json').trabajo;
     expect(Object.keys(job).sort()).toEqual(
-      ['guion', 'id', 'indicacion', 'liviana', 'momentos', 'objetivo_segundos', 'original', 'plan', 'producto', 'reglas', 'sonido', 'subidas', 'turno', 'video', 'video_del_protocolo'].sort(),
+      ['guion', 'guion_en_pantalla', 'id', 'indicacion', 'liviana', 'momentos', 'objetivo_segundos', 'original', 'plan', 'producto', 'reglas', 'sonido', 'subidas', 'turno', 'video', 'video_del_protocolo'].sort(),
     );
     expect(Object.keys(job.original).sort()).toEqual(['bajar', 'bytes', 'carpeta', 'nombre', 'pedazo']);
   });

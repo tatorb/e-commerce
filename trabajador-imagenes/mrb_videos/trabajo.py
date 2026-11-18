@@ -117,6 +117,7 @@ def procesar_video(
             plan=trabajo.plan,
             momentos=[m.model_dump() for m in trabajo.momentos],
             guion=trabajo.guion,
+            guion_en_pantalla=trabajo.guion_en_pantalla,
             voz=sonido.voz.id if sonido and sonido.voz else None,
             musica=sonido.musica.estilo if sonido and sonido.musica else None,
             subtitulos=bool(sonido and sonido.subtitulos),

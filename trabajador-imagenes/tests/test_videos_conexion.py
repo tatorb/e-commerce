@@ -41,6 +41,7 @@ def test_entiende_el_trabajo_de_ejemplo():
     assert t.subidas["clip"].metodo == "PUT"
     assert [m.importancia for m in t.momentos] == ["IMPORTANTE", "NORMAL", "IMPORTANTE", "REPETIDO"]
     assert t.guion[0] == "Camisas de cilindro para Fiat uno punto siete diésel." and len(t.guion) == 3
+    assert t.guion_en_pantalla == ["Camisas de cilindro para Fiat 1.7 diésel.", "", ""]
     assert (t.sonido.voz.id, t.sonido.musica.estilo, t.sonido.subtitulos) == ("voz-de-prueba", "Instrumental suave, sin voces.", True)
     assert t.sonido.color_subtitulos == "#6FA82C"
 
@@ -48,7 +49,7 @@ def test_entiende_el_trabajo_de_ejemplo():
 def test_un_trabajo_de_una_app_anterior_se_entiende_igual():
     # Una app sin los cortes ni el sonido no manda esos datos: el clip sale a una sola velocidad y en silencio.
     datos = ejemplo("video_trabajo.json")["trabajo"]
-    for clave in ("momentos", "guion", "sonido"):
+    for clave in ("momentos", "guion", "guion_en_pantalla", "sonido"):
         del datos[clave]
     t = conexion.TrabajoDeVideo.model_validate(datos)
     assert t.momentos == [] and t.sonido is None and t.guion is None

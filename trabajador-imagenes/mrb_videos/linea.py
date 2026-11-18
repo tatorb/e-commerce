@@ -29,7 +29,7 @@ from .inspector import Contexto, InspectorDeVideo, mosaico, proponer_cortes
 from .medios import Cancelado, Fuente, VideoIlegible
 from .medir import Medidas, cuadros, medir
 from .plan import MERCADOLIBRE, Imagen, Plan, ReglasDelClip, plan_parejo
-from .sonido import ElevenLabs, Linea, SinElevenLabs, Subtitulos, decir_guion, largo_de_la_voz, mezclar, subtitulos, ubicar, volumen
+from .sonido import ElevenLabs, Linea, SinElevenLabs, Subtitulos, decir_guion, largo_de_la_voz, mezclar, mostrar, subtitulos, ubicar, volumen
 
 log = logging.getLogger("trabajador")
 
@@ -53,6 +53,8 @@ class Pedido:
     cortes: list[dict] | None = None
     # El guión del clip, ya escrito y revisado: las frases que dice la voz, en orden.
     guion: list[str] | None = None
+    # Cómo se escribe cada frase en los subtítulos, cuando no es igual a lo que dice la voz ("1.3" y no "uno punto tres").
+    guion_en_pantalla: list[str] | None = None
     voz: str | None = None
     musica: str | None = None
     subtitulos: bool = False
@@ -196,7 +198,7 @@ def armar(
                 pista = mezclar(dichas, archivo_musica, plan.dura, carpeta / "sonido.wav", cancelado)
             if pedido.subtitulos and dichas:
                 informar("Dibujando los subtítulos", None)
-                escrito = subtitulos(dichas, carpeta / "subtitulos", plan.dura, reglas.ancho, reglas.alto, pedido.color_subtitulos)
+                escrito = subtitulos(mostrar(dichas, pedido.guion_en_pantalla), carpeta / "subtitulos", plan.dura, reglas.ancho, reglas.alto, pedido.color_subtitulos)
         except SinElevenLabs as e:
             # La música falló: si la voz ya está, el clip sale con la voz sola.
             log.info(str(e))
@@ -205,7 +207,7 @@ def armar(
             if dichas:
                 pista = mezclar(dichas, None, plan.dura, carpeta / "sonido.wav", cancelado)
                 if pedido.subtitulos:
-                    escrito = subtitulos(dichas, carpeta / "subtitulos", plan.dura, reglas.ancho, reglas.alto, pedido.color_subtitulos)
+                    escrito = subtitulos(mostrar(dichas, pedido.guion_en_pantalla), carpeta / "subtitulos", plan.dura, reglas.ancho, reglas.alto, pedido.color_subtitulos)
     _frenar(cancelado)
 
     # 5. El clip.

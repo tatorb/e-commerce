@@ -42,36 +42,50 @@ export function VideoScriptCard({
   const [pending, startTransition] = useTransition();
   const [which, setWhich] = useState<'save' | 'propose' | null>(null);
   const [lines, setLines] = useState<string[]>(script?.lines ?? []);
-  const [saved, setSaved] = useState<string[]>(script?.lines ?? []);
+  // Cómo se escribe cada frase en el subtítulo, cuando no es igual a lo que se dice. Vacío: igual.
+  const [shown, setShown] = useState<string[]>(script?.shown ?? []);
+  const [saved, setSaved] = useState<string>(JSON.stringify([script?.lines ?? [], script?.shown ?? []]));
   const [confirming, setConfirming] = useState(false);
   const [status, setStatus] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
 
   // Si el guión cambió en el servidor, por ejemplo porque lo propuso Claude, se muestra el nuevo.
-  const fromServer = script?.lines ?? [];
-  if (JSON.stringify(fromServer) !== JSON.stringify(saved)) {
+  const fromServer = JSON.stringify([script?.lines ?? [], script?.shown ?? []]);
+  if (fromServer !== saved) {
     setSaved(fromServer);
-    setLines(fromServer);
+    setLines(script?.lines ?? []);
+    setShown(script?.shown ?? []);
   }
 
-  const clean = lines.map((l) => l.trim()).filter(Boolean);
+  // Las frases que quedan, cada una con su texto para el subtítulo.
+  const kept = lines.map((l, i) => ({ line: l.trim(), shown: (shown[i] ?? '').trim() })).filter((x) => x.line);
+  const clean = kept.map((x) => x.line);
+  const cleanShown = kept.map((x) => (x.shown === x.line ? '' : x.shown));
   const seconds = scriptSeconds(clean);
   const words = clean.reduce((sum, l) => sum + countWords(l), 0);
-  const changed = JSON.stringify(clean) !== JSON.stringify(saved);
+  const changed = JSON.stringify([clean, cleanShown]) !== saved;
   const tooLong = seconds > maxSeconds;
   const set = (i: number, text: string) => setLines((old) => old.map((l, j) => (j === i ? text : l)));
-  const move = (i: number, by: number) =>
-    setLines((old) => {
-      const next = [...old];
-      const [l] = next.splice(i, 1);
-      next.splice(i + by, 0, l);
-      return next;
-    });
+  const setSub = (i: number, text: string) => setShown((old) => lines.map((_, j) => (j === i ? text : (old[j] ?? ''))));
+  const moved = <T,>(list: T[], i: number, by: number) => {
+    const next = [...list];
+    const [l] = next.splice(i, 1);
+    next.splice(i + by, 0, l);
+    return next;
+  };
+  const move = (i: number, by: number) => {
+    setShown((old) => moved(lines.map((_, j) => old[j] ?? ''), i, by));
+    setLines((old) => moved(old, i, by));
+  };
+  const remove = (i: number) => {
+    setShown((old) => lines.map((_, j) => old[j] ?? '').filter((_, j) => j !== i));
+    setLines((old) => old.filter((_, j) => j !== i));
+  };
 
   function save() {
     setStatus(null);
     setWhich('save');
     startTransition(async () => {
-      const r = await saveVideoScriptAction(accountSlug, productId, clean).catch(() => ({ ok: false as const, error: 'Se cortó la conexión con la app. Probá de nuevo.' }));
+      const r = await saveVideoScriptAction(accountSlug, productId, clean, cleanShown).catch(() => ({ ok: false as const, error: 'Se cortó la conexión con la app. Probá de nuevo.' }));
       setStatus(r.ok ? { kind: 'ok', text: clean.length > 0 ? 'Guión guardado.' : 'Guión borrado.' } : { kind: 'error', text: r.error });
       router.refresh();
     });
@@ -118,15 +132,26 @@ export function VideoScriptCard({
             {lines.map((line, i) => (
               <li key={i} className="flex items-start gap-2">
                 <span className="w-5 pt-2 text-right text-sm text-muted-foreground">{i + 1}.</span>
-                <textarea
-                  aria-label={`Frase ${i + 1}`}
-                  value={line}
-                  rows={2}
-                  maxLength={SCRIPT_LINE_MAX}
-                  onChange={(e) => set(i, e.target.value)}
-                  disabled={pending}
-                  className="min-h-[2.75rem] flex-1 rounded-md border bg-background px-2 py-1.5 text-sm"
-                />
+                <div className="flex-1 space-y-1">
+                  <textarea
+                    aria-label={`Frase ${i + 1}`}
+                    value={line}
+                    rows={2}
+                    maxLength={SCRIPT_LINE_MAX}
+                    onChange={(e) => set(i, e.target.value)}
+                    disabled={pending}
+                    className="min-h-[2.75rem] w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+                  />
+                  <input
+                    aria-label={`Frase ${i + 1} en el subtítulo`}
+                    value={shown[i] ?? ''}
+                    maxLength={SCRIPT_LINE_MAX}
+                    onChange={(e) => setSub(i, e.target.value)}
+                    disabled={pending}
+                    placeholder="En el subtítulo, si se escribe distinto: por ejemplo 1.3 en vez de uno punto tres"
+                    className="h-8 w-full rounded-md border bg-background px-2 text-xs text-muted-foreground"
+                  />
+                </div>
                 <div className="flex gap-0.5">
                   <Button type="button" variant="ghost" size="icon" title="Subir" disabled={pending || i === 0} onClick={() => move(i, -1)}>
                     <ArrowUp />
@@ -134,7 +159,7 @@ export function VideoScriptCard({
                   <Button type="button" variant="ghost" size="icon" title="Bajar" disabled={pending || i === lines.length - 1} onClick={() => move(i, 1)}>
                     <ArrowDown />
                   </Button>
-                  <Button type="button" variant="ghost" size="icon" title="Sacar la frase" disabled={pending} onClick={() => setLines((old) => old.filter((_, j) => j !== i))}>
+                  <Button type="button" variant="ghost" size="icon" title="Sacar la frase" disabled={pending} onClick={() => remove(i)}>
                     <Trash2 />
                   </Button>
                 </div>

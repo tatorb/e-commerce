@@ -4,7 +4,7 @@ import type { VideoEditStatus } from '@/generated/prisma/enums';
 import { getChannelAdapter } from '@/channels';
 import type { ClipRules } from '@/domain/videos';
 import { chooseApprovedClip } from '@/lib/clip-uploads';
-import { proposeVideoScript, scriptLinesOf } from '@/lib/video-script';
+import { proposeVideoScript, scriptLinesOf, scriptShownOf } from '@/lib/video-script';
 import {
   accountVideoSchema,
   cleanNote,
@@ -365,6 +365,7 @@ export async function buildVideoJob(db: PrismaClient, editId: string, deps: Vide
   const settings = await loadAccountVideo(db, video.product.accountId);
   const step = (await stepForVideo(db, { accountId: video.product.accountId, productType: video.product.productType, shootStepId: video.shootStepId, stepChosen: video.stepChosen })).step;
   const momentos: VideoMoment[] = parseMoments(step?.moments);
+  const script = parseRequestedScript(edit.requestedScript);
   const voice = settings.voiceOn && settings.voiceId ? { id: settings.voiceId } : null;
   const music = settings.musicOn && settings.musicStyle ? { estilo: settings.musicStyle } : null;
   const rules = await clipRulesFor(db, video.productId);
@@ -386,7 +387,8 @@ export async function buildVideoJob(db: PrismaClient, editId: string, deps: Vide
     objetivo_segundos: edit.targetSeconds,
     plan: parsePlan(edit.requested),
     momentos,
-    guion: parseRequestedScript(edit.requestedScript),
+    guion: script,
+    guion_en_pantalla: script ? await scriptShownOf(db, video.productId, script) : null,
     sonido: voice || music ? { voz: voice, musica: music, subtitulos: Boolean(voice) && settings.subtitlesOn, color_subtitulos: settings.subtitleColor.toUpperCase() } : null,
     reglas: {
       min_segundos: rules?.minSeconds ?? 10,

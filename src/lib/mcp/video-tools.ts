@@ -73,7 +73,7 @@ async function asToolError<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
-const SCRIPT_RULES = `Reglas del guión: es la voz en off de un clip de unboxing, pero NO relata lo que se ve. Aprovecha ese tiempo para dar las certezas que da la imagen con texto. En este orden, y solo lo que tenga datos: (1) qué es y para qué motor o vehículo; (2) con qué es compatible, lo confirmado en la ficha, lo más buscado primero; (3) con qué NO es compatible, si en preguntas, dolores u objeciones aparece una confusión real; (4) entre una y tres dudas que se repiten, con una certeza concreta cada una; (5) un cierre con una certeza más (contenido, marca, origen o garantía), si queda lugar. Frases cortas para escuchar, de 6 a 18 palabras, una idea cada una, hasta ${SCRIPT_LINES_MAX} frases de hasta ${SCRIPT_LINE_MAX} caracteres. Voseo rioplatense, sin signos de exclamación, sin saludos, sin "en este video", sin pedir que compren ni consulten. Números y medidas como se dicen en voz alta; sin abreviaturas, paréntesis, barras ni rayas largas. Nunca precios, descuentos, envíos, plazos, teléfonos, links ni otras tiendas. Todo sale del paso Información y de Preguntas y respuestas (get_publication): no inventes nada.`;
+const SCRIPT_RULES = `Reglas del guión: es la voz en off de un clip de unboxing, pero NO relata lo que se ve. Aprovecha ese tiempo para dar las certezas que da la imagen con texto. En este orden, y solo lo que tenga datos: (1) qué es y para qué motor o vehículo; (2) con qué es compatible, lo confirmado en la ficha, lo más buscado primero; (3) con qué NO es compatible, si en preguntas, dolores u objeciones aparece una confusión real; (4) entre una y tres dudas que se repiten, con una certeza concreta cada una; (5) un cierre con una certeza más (contenido, marca, origen o garantía), si queda lugar. Frases cortas para escuchar, de 6 a 18 palabras, una idea cada una, hasta ${SCRIPT_LINES_MAX} frases de hasta ${SCRIPT_LINE_MAX} caracteres. Voseo rioplatense, sin signos de exclamación, sin saludos, sin "en este video", sin pedir que compren ni consulten. Números y medidas como se dicen en voz alta; sin abreviaturas, paréntesis, barras ni rayas largas. Nunca precios, descuentos, envíos, plazos, teléfonos, links ni otras tiendas. Antes de escribir, leé en get_videos_step las reglas de redacción de la cuenta (reglas_de_redaccion_del_guion): mandan sobre las de estilo de acá. Mandá también en_los_subtitulos cuando alguna frase tiene números, medidas o cilindradas: el subtítulo los muestra en cifras. Todo sale del paso Información y de Preguntas y respuestas (get_publication): no inventes nada.`;
 
 const STATUS: Record<EditRow['status'], string> = {
   QUEUED: 'en cola',
@@ -149,6 +149,7 @@ const getStep = defineTool({
       guion_del_clip: s.script
         ? {
             frases: s.script.lines,
+            ...(s.script.shown.some(Boolean) ? { en_los_subtitulos: s.script.lines.map((l, i) => s.script!.shown[i] || l) } : {}),
             palabras: s.script.lines.reduce((n, l) => n + countWords(l), 0),
             segundos: Math.round(s.script.seconds),
             lo_escribio: s.script.source === 'claude' ? 'Claude, sin corregir' : 'una persona, o se corrigió a mano',
@@ -172,6 +173,7 @@ const getStep = defineTool({
         editar_solo_cada_video_nuevo: s.accountVideo.autoEdit,
         claude_escribe_el_guion_solo: s.accountVideo.autoScript,
         aprobar_solo_el_clip_sin_avisos: s.accountVideo.autoApprove,
+        reglas_de_redaccion_del_guion: s.accountVideo.scriptRules.trim() || null,
       },
       mac_del_estudio: { cuando_edita: s.editor.summary, conectada: s.editor.connected, tiene_llave: s.editor.hasKey },
       pasos_de_video_de_los_protocolos: s.videoSteps.map((st) => {
@@ -199,7 +201,12 @@ const saveScript = defineTool({
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg,
-    frases: z.array(z.string().max(SCRIPT_LINE_MAX)).max(SCRIPT_LINES_MAX).describe('Las frases del guión, en orden. Cada una se dice de corrido, con una pausa corta entre una y otra.'),
+    frases: z.array(z.string().max(SCRIPT_LINE_MAX)).max(SCRIPT_LINES_MAX).describe('Las frases del guión como las dice la voz, en orden: los números y las medidas en palabras. Cada una se dice de corrido, con una pausa corta entre una y otra.'),
+    en_los_subtitulos: z
+      .array(z.string().max(SCRIPT_LINE_MAX))
+      .max(SCRIPT_LINES_MAX)
+      .optional()
+      .describe('Las mismas frases como se leen en el subtítulo, una por frase y en el mismo orden: iguales en todo salvo que los números, las medidas, las cilindradas y las siglas van como los escribe el comprador, por ejemplo "motor 1.3 8v" donde la voz dice "motor uno punto tres ocho válvulas". Sin mandarlo, el subtítulo muestra lo mismo que dice la voz.'),
   }),
   readOnly: false,
   destructive: true,
@@ -207,12 +214,12 @@ const saveScript = defineTool({
     const { account, id } = await target(ctx, args);
     const pub = await ctx.db.publication.findUniqueOrThrow({ where: { id }, select: { productId: true } });
     const rules = await clipRulesFor(ctx.db, pub.productId);
-    const saved = await asToolError(() => saveVideoScript(ctx.db, { accountId: account.id, productId: pub.productId, lines: args.frases, userId: ctx.userId, rules, source: 'claude' }));
+    const saved = await asToolError(() => saveVideoScript(ctx.db, { accountId: account.id, productId: pub.productId, lines: args.frases, shown: args.en_los_subtitulos, userId: ctx.userId, rules, source: 'claude' }));
     if (!saved) return { guion_del_clip: null, aviso: 'El guión quedó borrado: los clips nuevos salen sin voz.' };
     const settings = await loadAccountVideo(ctx.db, account.id);
     const seconds = scriptSeconds(saved.lines);
     return {
-      guion_del_clip: { frases: saved.lines, palabras: saved.lines.reduce((n, l) => n + countWords(l), 0), segundos: Math.round(seconds) },
+      guion_del_clip: { frases: saved.lines, ...(saved.shown.some(Boolean) ? { en_los_subtitulos: saved.lines.map((l, i) => saved.shown[i] || l) } : {}), palabras: saved.lines.reduce((n, l) => n + countWords(l), 0), segundos: Math.round(seconds) },
       ...(seconds > settings.targetSeconds ? { aviso: `El guión lleva unos ${Math.round(seconds)} segundos y el clip se pide de ${settings.targetSeconds}: el editor lo va a hacer más largo para que entre.` } : {}),
       ...(!settings.voiceOn ? { voz_apagada: 'La voz en off está apagada en esta cuenta: el guión no se dice hasta prenderla con update_video_settings.' } : {}),
       link_app: `${appLink(ctx, account, id)}?paso=videos`,
@@ -354,6 +361,7 @@ const settingsTool = defineTool({
     editar_solo_cada_video_nuevo: z.boolean().optional(),
     claude_escribe_el_guion_solo: z.boolean().optional(),
     aprobar_solo_el_clip_sin_avisos: z.boolean().optional(),
+    reglas_de_redaccion_del_guion: z.string().max(4000).optional().describe('Las reglas de redacción del guión de esta cuenta, con las palabras de la persona, una por renglón. Reemplazan a las que había. Claude las sigue cada vez que escribe un guión.'),
     modo_de_la_mac: z
       .object({
         modo: z.enum(EDITOR_MODES).describe('OFF: no edita. ON: edita cuando hay un video en cola. SCHEDULE: solo entre las dos horas.'),
@@ -379,6 +387,7 @@ const settingsTool = defineTool({
       ...(args.editar_solo_cada_video_nuevo !== undefined ? { autoEdit: args.editar_solo_cada_video_nuevo } : {}),
       ...(args.claude_escribe_el_guion_solo !== undefined ? { autoScript: args.claude_escribe_el_guion_solo } : {}),
       ...(args.aprobar_solo_el_clip_sin_avisos !== undefined ? { autoApprove: args.aprobar_solo_el_clip_sin_avisos } : {}),
+      ...(args.reglas_de_redaccion_del_guion !== undefined ? { scriptRules: args.reglas_de_redaccion_del_guion } : {}),
     });
     const saved = await asToolError(() => saveAccountVideo(ctx.db, { accountId: account.id, values: next, userId: ctx.userId }));
     let editor = await loadEditorSettings(ctx.db);
@@ -407,6 +416,7 @@ const settingsTool = defineTool({
         editar_solo_cada_video_nuevo: saved.autoEdit,
         claude_escribe_el_guion_solo: saved.autoScript,
         aprobar_solo_el_clip_sin_avisos: saved.autoApprove,
+        reglas_de_redaccion_del_guion: saved.scriptRules.trim() || null,
       },
       mac_del_estudio: { cuando_edita: editorSummary(editor) },
       link_app: `${ctx.baseUrl}/a/${account.slug}/protocolos`,

@@ -286,6 +286,46 @@ def volumen(archivo: Path) -> float | None:
 PALABRAS_POR_GRUPO = 3
 LETRAS_POR_GRUPO = 22
 
+def _peso(palabra: str) -> float:
+    """Cuánto tarda en decirse una palabra escrita, a ojo: un número lleva más que sus pocos caracteres."""
+    digitos = sum(c.isdigit() for c in palabra)
+    letras = sum(c.isalpha() for c in palabra)
+    # "1.3" se dice "uno punto tres": cada dígito y cada punto o coma entre dígitos es una palabra.
+    separadores = sum(1 for i, c in enumerate(palabra) if c in ".,/x" and 0 < i < len(palabra) - 1 and palabra[i - 1].isdigit())
+    return max(1.0, letras + 4.0 * digitos + 5.0 * separadores)
+
+
+def mostrar(lineas: list[Linea], textos: list[str] | None) -> list[Linea]:
+    """
+    Las líneas como se escriben en pantalla, cuando no es lo mismo que dice la voz.
+
+    La voz dice "uno punto tres" y el subtítulo muestra "1.3". Cada línea conserva su tiempo; sus palabras
+    pasan a ser las escritas. Con la misma cantidad de palabras, cada una toma el momento de la que se dijo;
+    si no, se reparten en el tiempo de la línea según lo que tarda en decirse cada una.
+    """
+    if not textos:
+        return lineas
+    salida: list[Linea] = []
+    for n, linea in enumerate(lineas):
+        escrito = (textos[n] if n < len(textos) else "").split()
+        if not escrito or not linea.palabras or " ".join(escrito) == " ".join(p.texto for p in linea.palabras):
+            salida.append(linea)
+            continue
+        if len(escrito) == len(linea.palabras):
+            palabras = [Palabra(texto, dicha.inicio, dicha.fin) for texto, dicha in zip(escrito, linea.palabras)]
+        else:
+            desde, hasta = linea.palabras[0].inicio, linea.palabras[-1].fin
+            pesos = [_peso(p) for p in escrito]
+            total = sum(pesos)
+            palabras, t = [], desde
+            for texto, peso in zip(escrito, pesos):
+                fin = t + (hasta - desde) * peso / total
+                palabras.append(Palabra(texto, t, fin))
+                t = fin
+        salida.append(Linea(texto=" ".join(escrito), inicio=linea.inicio, fin=linea.fin, archivo=linea.archivo, palabras=palabras))
+    return salida
+
+
 def _limpio(texto: str) -> str:
     return texto.replace("\\", "").replace("{", "(").replace("}", ")").replace("\n", " ")
 

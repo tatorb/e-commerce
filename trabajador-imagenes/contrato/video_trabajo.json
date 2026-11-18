@@ -34,6 +34,11 @@
       "Sirven para Uno, Duna y Fiorino.",
       "Vienen las cuatro, con su garantía."
     ],
+    "guion_en_pantalla": [
+      "Camisas de cilindro para Fiat 1.7 diésel.",
+      "",
+      ""
+    ],
     "sonido": {
       "voz": {
         "id": "voz-de-prueba"
