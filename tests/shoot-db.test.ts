@@ -72,12 +72,14 @@ describe.skipIf(!url)('Registro de productos', () => {
 
   beforeEach(async () => {
     await db.$executeRawUnsafe(
-      'TRUNCATE drive_connections, drive_folders, shoot_protocols, photo_step_runs, photo_edits, product_videos, channel_copies, publications, stores, channels, products, accounts, users CASCADE',
+      'TRUNCATE product_options, drive_connections, drive_folders, shoot_protocols, photo_step_runs, photo_edits, product_videos, channel_copies, publications, stores, channels, products, accounts, users CASCADE',
     );
     google.files.clear();
     await db.user.create({ data: { id: userId, name: 'Operario de prueba', email: 'operario@prueba.com' } });
     accountId = (await db.account.create({ data: { slug: 'prueba', name: 'Cuenta de prueba' } })).id;
     otherAccountId = (await db.account.create({ data: { slug: 'otra', name: 'Otra cuenta' } })).id;
+    // Cada protocolo es de un tipo de producto de la lista de la cuenta.
+    await db.productOption.createMany({ data: ['Aros', 'Juntas', 'Bujía'].map((name) => ({ accountId, kind: 'TYPE' as const, name })) });
     productId = (
       await db.product.create({
         data: {
@@ -141,7 +143,7 @@ describe.skipIf(!url)('Registro de productos', () => {
   const mediaOf = async (id: string) => (await db.publication.findUniqueOrThrow({ where: { id }, select: { media: true } })).media;
 
   it('arma protocolos con pasos en orden; los pasos que se sacan y los archivados no se ofrecen', async () => {
-    const pid = await createProtocol(db, { accountId, input: { name: 'Aros', description: 'Para aros y juegos' }, userId });
+    const pid = await createProtocol(db, { accountId, input: { name: 'Aros', description: 'Para aros y juegos', productType: 'Aros' }, userId });
     const a = await addStep(db, { accountId, protocolId: pid, input: { title: 'Frente', kind: 'PHOTO', explanation: 'Sobre fondo blanco' } });
     const b = await addStep(db, { accountId, protocolId: pid, input: { title: 'Perfil', kind: 'PHOTO' } });
     const c = await addStep(db, { accountId, protocolId: pid, input: { title: 'Giro', kind: 'VIDEO' } });
@@ -153,7 +155,7 @@ describe.skipIf(!url)('Registro de productos', () => {
     [p] = await listProtocols(db, accountId);
     expect(p.steps.map((s) => s.id)).toEqual([a, c]);
 
-    const other = await createProtocol(db, { accountId, input: { name: 'Juntas' }, userId });
+    const other = await createProtocol(db, { accountId, input: { name: 'Juntas', productType: 'Juntas' }, userId });
     await archiveProtocol(db, { accountId, protocolId: pid, archived: true });
     expect((await listProtocols(db, accountId)).map((x) => x.id)).toEqual([other]);
     expect((await listProtocols(db, accountId, { archived: true })).map((x) => [x.name, x.archived])).toEqual([
@@ -167,7 +169,7 @@ describe.skipIf(!url)('Registro de productos', () => {
   });
 
   it('la ilustración va a la carpeta de la cuenta; al cambiarla, la anterior va a la papelera', async () => {
-    const pid = await createProtocol(db, { accountId, input: { name: 'Aros' }, userId });
+    const pid = await createProtocol(db, { accountId, input: { name: 'Aros', productType: 'Aros' }, userId });
     const step = await addStep(db, { accountId, protocolId: pid, input: { title: 'Frente', kind: 'PHOTO' } });
     await expect(startIllustrationUpload(db, { accountId, stepId: step, file: { name: 'guia.pdf', size: 10 }, origin: 'http://app.prueba' })).rejects.toThrow('JPG, PNG');
     const first = await upload(await startIllustrationUpload(db, { accountId, stepId: step, file: { name: 'frente.png', size: 7 }, origin: 'http://app.prueba' }));
@@ -188,7 +190,7 @@ describe.skipIf(!url)('Registro de productos', () => {
   });
 
   it('la foto del operario entra a la línea con su paso y su medida, y no se suma hasta estar lista', async () => {
-    const pid = await createProtocol(db, { accountId, input: { name: 'Aros' }, userId });
+    const pid = await createProtocol(db, { accountId, input: { name: 'Aros', productType: 'Aros' }, userId });
     const front = await addStep(db, { accountId, protocolId: pid, input: { title: 'Frente', kind: 'PHOTO' } });
     const spin = await addStep(db, { accountId, protocolId: pid, input: { title: 'Giro', kind: 'VIDEO' } });
     const editId = await shootPhoto('IMG_1.JPG', { stepId: front, variantKey: HALF });
@@ -242,7 +244,7 @@ describe.skipIf(!url)('Registro de productos', () => {
   });
 
   it('el orden en multimedia es aparte del orden en que se sacan, y las fotos se suman en ese orden', async () => {
-    const pid = await createProtocol(db, { accountId, input: { name: 'Aros' }, userId });
+    const pid = await createProtocol(db, { accountId, input: { name: 'Aros', productType: 'Aros' }, userId });
     const box = await addStep(db, { accountId, protocolId: pid, input: { title: 'Caja', kind: 'PHOTO' } });
     const spin = await addStep(db, { accountId, protocolId: pid, input: { title: 'Giro', kind: 'VIDEO' } });
     const front = await addStep(db, { accountId, protocolId: pid, input: { title: 'Frente', kind: 'PHOTO' } });
@@ -307,7 +309,7 @@ describe.skipIf(!url)('Registro de productos', () => {
   });
 
   it('el video queda marcado con su medida donde hay varias medidas, y se busca el producto', async () => {
-    const pid = await createProtocol(db, { accountId, input: { name: 'Aros' }, userId });
+    const pid = await createProtocol(db, { accountId, input: { name: 'Aros', productType: 'Aros' }, userId });
     const spin = await addStep(db, { accountId, protocolId: pid, input: { title: 'Giro', kind: 'VIDEO' } });
     const uploadUrl = await startShotUpload(db, { accountId, productId, kind: 'VIDEO', file: { name: 'giro.mov', size: 7, type: 'video/quicktime' }, origin: 'http://app.prueba' });
     const fileId = await upload(uploadUrl);
@@ -338,7 +340,7 @@ describe.skipIf(!url)('Registro de productos', () => {
   });
 
   it('un paso sin registro se marca Listo por medida, con quién y cuándo, y se deshace', async () => {
-    const pid = await createProtocol(db, { accountId, input: { name: 'Aros' }, userId });
+    const pid = await createProtocol(db, { accountId, input: { name: 'Aros', productType: 'Aros' }, userId });
     const clean = await addStep(db, { accountId, protocolId: pid, input: { title: 'Limpiar el lugar', kind: 'CHECK' } });
     const front = await addStep(db, { accountId, protocolId: pid, input: { title: 'Frente', kind: 'PHOTO' } });
     expect((await listProtocols(db, accountId))[0].steps.map((s) => s.kind)).toEqual(['CHECK', 'PHOTO']);
