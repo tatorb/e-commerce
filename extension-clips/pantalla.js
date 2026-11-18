@@ -40,6 +40,27 @@ const MRB = {
     }
   },
 
+  // Mientras Mercado Libre sube y procesa el video muestra un círculo girando.
+  CARGANDO: '.clip-preview__loading, .andes-progress-indicator-circular',
+
+  // Espera a que termine de cargar el video: sin círculo durante unos segundos seguidos.
+  async cargado(maximo = 600000, quieto = 3000) {
+    let sin = 0;
+    for (let t = 0; t < maximo; t += 500) {
+      await MRB.pausa(500);
+      sin = document.querySelector(MRB.CARGANDO) ? 0 : sin + 500;
+      if (sin >= quieto) return true;
+    }
+    return false;
+  },
+
+  // Un elemento, contado en pocas palabras.
+  contar(e) {
+    const corto = (t) => (t || '').replace(/\s+/g, ' ').trim().slice(0, 160);
+    const attrs = Object.fromEntries(['id', 'class', 'data-testid', 'aria-label', 'role', 'type', 'href'].filter((a) => e.hasAttribute(a)).map((a) => [a, corto(e.getAttribute(a))]));
+    return { tag: e.tagName.toLowerCase(), texto: corto(e.innerText || e.value), ...attrs };
+  },
+
   // Si Mercado Libre pide algo que solo puede hacer la persona.
   pidePersona() {
     const url = location.href.toLowerCase();

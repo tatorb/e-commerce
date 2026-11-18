@@ -30,7 +30,8 @@ export type ClipUploadRow = {
 };
 
 // Lo que cuenta la extensión de una subida.
-type Progress = { text: string | null; error: string | null; done: boolean; report: unknown };
+// Los informes se juntan: la pantalla al cargar el clip y lo que pasa después.
+type Progress = { text: string | null; error: string | null; done: boolean; reports: unknown[] };
 type FromExtension = { origen?: string; tipo?: string; version?: string; publicacion?: string; video?: string; texto?: string | null; error?: string | null; listo?: boolean; informe?: unknown };
 
 const rowKey = (c: { publicationId: string; videoId: string }) => `${c.publicationId}:${c.videoId}`;
@@ -47,7 +48,7 @@ export function ClipUploadList({ accountSlug, clips }: { accountSlug: string; cl
       if (d.tipo === 'hola' && d.version) setExtension(d.version);
       if (d.tipo === 'avance' && d.publicacion && d.video) {
         const key = `${d.publicacion}:${d.video}`;
-        setProgress((p) => ({ ...p, [key]: { text: d.texto ?? null, error: d.error ?? null, done: d.listo === true, report: d.informe ?? p[key]?.report ?? null } }));
+        setProgress((p) => ({ ...p, [key]: { text: d.texto ?? null, error: d.error ?? null, done: d.listo === true, reports: d.informe ? [...(p[key]?.reports ?? []), d.informe] : (p[key]?.reports ?? []) } }));
       }
     }
     window.addEventListener('message', hear);
@@ -56,7 +57,7 @@ export function ClipUploadList({ accountSlug, clips }: { accountSlug: string; cl
   }, []);
 
   function upload(c: ClipUploadRow) {
-    setProgress((p) => ({ ...p, [rowKey(c)]: { text: 'Pidiendo la subida a la extensión…', error: null, done: false, report: null } }));
+    setProgress((p) => ({ ...p, [rowKey(c)]: { text: 'Pidiendo la subida a la extensión…', error: null, done: false, reports: [] } }));
     window.postMessage(
       { origen: 'mrb-app', tipo: 'subir', publicacion: c.publicationId, video: c.videoId, codigo: c.externalId, nombre: c.fileName, tipoDeArchivo: c.mimeType },
       window.location.origin,
@@ -89,7 +90,7 @@ function Row({ accountSlug, clip, extension, progress, onUpload }: { accountSlug
   const working = progress !== null && !progress.done && !progress.error;
 
   async function copyReport() {
-    await navigator.clipboard.writeText(JSON.stringify(progress?.report, null, 2));
+    await navigator.clipboard.writeText(JSON.stringify(progress?.reports, null, 2));
     setCopied(true);
   }
 
@@ -143,10 +144,10 @@ function Row({ accountSlug, clip, extension, progress, onUpload }: { accountSlug
             <p role="status" className={progress.error ? 'text-sm text-destructive' : progress.done ? 'text-sm font-medium' : 'text-sm text-muted-foreground'}>
               {progress.error ?? progress.text}
             </p>
-            {progress.report ? (
+            {progress.reports.length > 0 ? (
               <Button size="sm" variant="ghost" onClick={copyReport}>
                 <ClipboardCopy />
-                {copied ? 'Informe copiado' : 'Copiar el informe de la pantalla'}
+                {copied ? 'Informe copiado' : `Copiar el informe de la pantalla (${progress.reports.length})`}
               </Button>
             ) : null}
           </div>

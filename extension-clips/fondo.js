@@ -77,7 +77,8 @@ chrome.runtime.onMessage.addListener((mensaje, sender, responder) => {
     }
     if (mensaje?.tipo === 'avance') {
       avisar(trabajo, { texto: mensaje.texto, error: mensaje.error ?? null, listo: mensaje.listo === true, informe: mensaje.informe ?? null });
-      if (mensaje.error || mensaje.listo) await borrar(trabajo.pestana);
+      // Con el clip cargado, el trabajo sigue hasta que se cierra la pestaña: la persona termina a mano.
+      if (mensaje.error) await borrar(trabajo.pestana);
       return { ok: true };
     }
     return { ok: false };
@@ -90,6 +91,6 @@ chrome.runtime.onMessage.addListener((mensaje, sender, responder) => {
 chrome.tabs.onRemoved.addListener(async (tabId) => {
   const trabajo = await leer(tabId);
   if (!trabajo) return;
-  avisar(trabajo, { texto: null, error: 'Se cerró la pestaña de Mercado Libre antes de terminar.' });
+  if (trabajo.etapa !== 'cargado') avisar(trabajo, { texto: null, error: 'Se cerró la pestaña de Mercado Libre antes de terminar.' });
   await borrar(tabId);
 });
