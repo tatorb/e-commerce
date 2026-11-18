@@ -175,6 +175,7 @@ def decir_guion(
     voz: str,
     carpeta: Path,
     cancelado: Callable[[], bool] | None = None,
+    informar: Callable[[str, float | None], None] | None = None,
 ) -> list[Linea]:
     """Dice cada línea y la ubica en el clip: donde empieza su tramo, y nunca encima de la anterior."""
     carpeta.mkdir(parents=True, exist_ok=True)
@@ -183,6 +184,8 @@ def decir_guion(
     for n, (i, texto) in enumerate(con_texto):
         if cancelado and cancelado():
             raise Cancelado()
+        if informar:
+            informar(f"Generando la voz, línea {n + 1} de {len(con_texto)}", 100 * n / len(con_texto))
         anterior = " ".join(t for _, t in con_texto[:n])
         siguiente = " ".join(t for _, t in con_texto[n + 1 :])
         audio, palabras = eleven.decir(texto, voz, anterior, siguiente)

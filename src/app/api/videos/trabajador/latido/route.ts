@@ -17,6 +17,6 @@ export async function POST(req: Request) {
   const settings = await loadEditorSettings(prisma);
   // Apagar corta el trabajo en curso. El horario no: lo que empezó, termina.
   const off = editorAllows({ ...settings, mode: settings.mode === 'OFF' ? 'OFF' : 'ON', pluggedOnly: false }, { minute: null, plugged: null });
-  const mine = await editHeartbeat(prisma, r.workerId, r.body.id, r.body.turno);
+  const mine = await editHeartbeat(prisma, r.workerId, r.body.id, r.body.turno, new Date(), r.body.avance ?? null);
   return NextResponse.json({ vigente: mine && off.allowed, ...(mine && !off.allowed ? { motivo: off.reason } : {}) });
 }

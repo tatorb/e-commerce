@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { StatusText } from '@/components/pipeline/StatusText';
@@ -16,7 +16,9 @@ const HELP: Record<EditorMode, string> = {
   SCHEDULE: 'La Mac edita solo entre esas dos horas, con la hora de la Mac. Lo que empezó dentro del horario, lo termina.',
 };
 
-export function VideoEditorCard({ settings, waiting }: { settings: EditorSettings; waiting: number }) {
+type QueueItem = { id: string; working: boolean; account: string; product: string; video: string; stage: string | null; percent: number | null };
+
+export function VideoEditorCard({ settings, waiting, queue }: { settings: EditorSettings; waiting: number; queue: QueueItem[] }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [mode, setMode] = useState<EditorMode>(settings.mode);
@@ -24,6 +26,13 @@ export function VideoEditorCard({ settings, waiting }: { settings: EditorSetting
   const [to, setTo] = useState(clockOf(settings.toMinute));
   const [pluggedOnly, setPluggedOnly] = useState(settings.pluggedOnly);
   const [status, setStatus] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+
+  // Mientras haya videos en la cola, la lista se pone al día sola.
+  useEffect(() => {
+    if (queue.length === 0) return;
+    const timer = setInterval(() => router.refresh(), 8_000);
+    return () => clearInterval(timer);
+  }, [queue.length, router]);
 
   const fromMinute = minuteOf(from);
   const toMinute = minuteOf(to);
@@ -47,6 +56,28 @@ export function VideoEditorCard({ settings, waiting }: { settings: EditorSetting
         {editorSummary(settings)}{' '}
         <span className="text-muted-foreground">{waiting === 0 ? 'No hay videos en la cola.' : waiting === 1 ? 'Hay 1 video en la cola.' : `Hay ${waiting} videos en la cola.`}</span>
       </p>
+      {queue.length > 0 ? (
+        <ol className="divide-y rounded-md border text-sm">
+          {queue.map((q, i) => (
+            <li key={q.id} className="space-y-1 px-3 py-2">
+              <p>
+                <span className="text-muted-foreground">{i + 1}.</span> <span className="font-medium">{q.product}</span>{' '}
+                <span className="text-muted-foreground">
+                  · {q.account} · {q.video}
+                </span>
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {q.working ? `Editando${q.stage ? `: ${q.stage}` : ''}${q.percent !== null ? `, ${q.percent} %` : ''}` : 'En cola'}
+              </p>
+              {q.working && q.percent !== null ? (
+                <div className="h-1.5 w-full max-w-sm overflow-hidden rounded-full bg-muted">
+                  <div className="h-full rounded-full bg-foreground" style={{ width: `${q.percent}%` }} />
+                </div>
+              ) : null}
+            </li>
+          ))}
+        </ol>
+      ) : null}
       <fieldset className="space-y-2">
         <legend className="sr-only">Cuándo edita la Mac</legend>
         {EDITOR_MODES.map((m) => (

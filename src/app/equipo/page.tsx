@@ -20,7 +20,7 @@ import { ClaudeConnections } from '@/components/team/ClaudeConnections';
 import { CopyButton } from '@/components/apply/CopyButton';
 import { ImageWorkerCard } from '@/components/team/ImageWorkerCard';
 import { VideoEditorCard } from '@/components/team/VideoEditorCard';
-import { loadEditorSettings, pendingEdits } from '@/lib/video-edits';
+import { editQueue, loadEditorSettings, pendingEdits } from '@/lib/video-edits';
 import { DEFAULT_EDITOR_SETTINGS } from '@/domain/video-edit';
 import { WorkerStatusLine } from '@/components/pipeline/images/WorkerStatusLine';
 import { workerState } from '@/lib/image-worker';
@@ -51,7 +51,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
     admin ? vercelLeft(prisma) : Promise.resolve(0),
     visibleAccounts(me.access),
   ]);
-  const [editorSettings, editsWaiting] = admin ? await Promise.all([loadEditorSettings(prisma), pendingEdits(prisma)]) : [DEFAULT_EDITOR_SETTINGS, 0];
+  const [editorSettings, editsWaiting, editsQueue] = admin ? await Promise.all([loadEditorSettings(prisma), pendingEdits(prisma), editQueue(prisma)]) : [DEFAULT_EDITOR_SETTINGS, 0, []];
   const storeConnected = isBlobConfigured();
   // Lo que dijo la vuelta de Google al conectar el Drive.
   const driveBack = back.drive === 'ok' || back.drive === 'error' ? { ok: back.drive === 'ok', text: back.detalle ?? '' } : null;
@@ -322,7 +322,11 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <VideoEditorCard settings={editorSettings} waiting={editsWaiting} />
+                <VideoEditorCard
+                  settings={editorSettings}
+                  waiting={editsWaiting}
+                  queue={editsQueue.map((q) => ({ id: q.id, working: q.status === 'PROCESSING', account: q.account, product: q.product, video: q.video, stage: q.progress?.stage ?? null, percent: q.progress?.percent ?? null }))}
+                />
               </CardContent>
             </Card>
           </>

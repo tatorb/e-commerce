@@ -277,7 +277,22 @@ export const videoNextSchema = z.object({
   enchufada: z.boolean().nullish(),
 });
 
-export const videoHeartbeatSchema = z.object({ protocolo: protocol, id: shortText(60), turno: z.number().int() });
+export const videoHeartbeatSchema = z.object({
+  protocolo: protocol,
+  id: shortText(60),
+  turno: z.number().int(),
+  // En qué anda: la etapa en palabras y, si se sabe, cuánto lleva de esa etapa.
+  avance: z.object({ etapa: shortText(120), porcentaje: z.number().min(0).max(100).nullish() }).nullish(),
+});
+
+export type EditProgress = { stage: string; percent: number | null; at: string };
+
+export function parseProgress(raw: unknown): EditProgress | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const p = raw as { etapa?: unknown; porcentaje?: unknown; at?: unknown };
+  if (typeof p.etapa !== 'string' || !p.etapa) return null;
+  return { stage: p.etapa, percent: typeof p.porcentaje === 'number' ? Math.round(p.porcentaje) : null, at: typeof p.at === 'string' ? p.at : '' };
+}
 
 const usage = z.object({ costo_usd: z.number().optional() }).loose();
 

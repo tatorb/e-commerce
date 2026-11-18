@@ -186,11 +186,41 @@ def entregar_video(cliente: ClienteApp, resultado) -> None:
             esperar(5 * 2**intento)
 
 
+# Cada cuánto se le cuenta a la app por dónde va una etapa larga, como exportar.
+AVANCE_CADA_S = 5
+
+
+class Avance:
+    """Le cuenta a la app en qué anda la edición: enseguida al cambiar de etapa, y cada tanto mientras dura."""
+
+    def __init__(self, cliente: ClienteApp, trabajo: videos.TrabajoDeVideo):
+        self.cliente, self.trabajo = cliente, trabajo
+        self.etapa: str | None = None
+        self.ultimo = 0.0
+        # La app también dice acá si la edición dejó de ser de este intento.
+        self.cortado = False
+
+    def __call__(self, etapa: str, porcentaje: float | None = None) -> None:
+        nueva = etapa != self.etapa
+        if nueva:
+            log.info(f"  {etapa}.")
+        elif time.monotonic() - self.ultimo < AVANCE_CADA_S:
+            return
+        self.etapa, self.ultimo = etapa, time.monotonic()
+        try:
+            if not videos.latido(self.cliente, self.trabajo.id, self.trabajo.turno, etapa, porcentaje):
+                self.cortado = True
+        except ErrorDeApp:
+            pass  # el avance es un extra: si no llega, la edición sigue
+
+
 def un_video(cliente: ClienteApp, trabajo: videos.TrabajoDeVideo, inspector: InspectorDeVideo) -> None:
     log.info(f"Video {trabajo.original.nombre}: se edita para un clip de {trabajo.objetivo_segundos:g} segundos (turno {trabajo.turno}).")
-    with despierto(), latiendo(cliente, trabajo, lambda id, turno: videos.latido(cliente, id, turno)) as cancelado:
+    avance = Avance(cliente, trabajo)
+    with despierto(), latiendo(cliente, trabajo, lambda id, turno: videos.latido(cliente, id, turno)) as latido_cortado:
+        cancelado = lambda: latido_cortado() or avance.cortado  # noqa: E731
         try:
-            hecho = procesar_video(trabajo, inspector, cliente, carpeta_de_datos() / "trabajo", cancelado)
+            hecho = procesar_video(trabajo, inspector, cliente, carpeta_de_datos() / "trabajo", cancelado, avance)
         except VideoCancelado:
             log.info("La edición se dejó: la app la sacó de la cola o se apagó la edición de videos.")
             return

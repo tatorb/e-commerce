@@ -58,7 +58,14 @@ def buscar_en_el_drive(archivo: ArchivoDelDrive) -> Path | None:
     return None
 
 
-def conseguir(cliente: ClienteApp, archivo: ArchivoDelDrive, carpeta: Path, cancelado: Callable[[], bool]) -> tuple[Path, bool]:
+Informar = Callable[[str, float | None], None]
+
+
+def _callado(etapa: str, porcentaje: float | None = None) -> None:
+    pass
+
+
+def conseguir(cliente: ClienteApp, archivo: ArchivoDelDrive, carpeta: Path, cancelado: Callable[[], bool], informar: Informar = _callado) -> tuple[Path, bool]:
     """El archivo listo para leer, y si hubo que bajarlo."""
     local = buscar_en_el_drive(archivo)
     if local:
@@ -66,7 +73,7 @@ def conseguir(cliente: ClienteApp, archivo: ArchivoDelDrive, carpeta: Path, canc
     destino = carpeta / archivo.nombre
     if not (destino.is_file() and archivo.bytes is not None and destino.stat().st_size == archivo.bytes):
         log.info(f"{archivo.nombre} no está en la carpeta de Google Drive de la Mac: se baja a través de la app.")
-        bajar_en_pedazos(cliente, archivo, destino, cancelado)
+        bajar_en_pedazos(cliente, archivo, destino, cancelado, lambda parte: informar(f"Bajando {archivo.nombre}", 100 * parte))
     return destino, True
 
 
@@ -75,17 +82,25 @@ def _giro_sin_claude(fuente: Fuente) -> int:
     return 0 if fuente.vertical else 1
 
 
-def procesar_video(trabajo: TrabajoDeVideo, inspector: InspectorDeVideo, cliente: ClienteApp, raiz: Path, cancelado: Callable[[], bool]) -> VideoHecho:
+def procesar_video(
+    trabajo: TrabajoDeVideo,
+    inspector: InspectorDeVideo,
+    cliente: ClienteApp,
+    raiz: Path,
+    cancelado: Callable[[], bool],
+    informar: Informar = _callado,
+) -> VideoHecho:
     empezo = time.monotonic()
+    informar("Buscando el video", None)
     carpeta = raiz / f"video-{trabajo.video}"
     carpeta.mkdir(parents=True, exist_ok=True)
     try:
-        original, _ = conseguir(cliente, trabajo.original, carpeta, cancelado)
+        original, _ = conseguir(cliente, trabajo.original, carpeta, cancelado, informar)
         fuente = leer(original)
         mirar = fuente
         if trabajo.liviana:
             try:
-                mirar = leer(conseguir(cliente, trabajo.liviana, carpeta, cancelado)[0])
+                mirar = leer(conseguir(cliente, trabajo.liviana, carpeta, cancelado, informar)[0])
             except Cancelado:
                 raise
             except Exception as e:  # sin la copia liviana se mira el original, que es más lento
@@ -108,9 +123,10 @@ def procesar_video(trabajo: TrabajoDeVideo, inspector: InspectorDeVideo, cliente
             subtitulos=bool(sonido and sonido.subtitulos),
             cuartos=_giro_sin_claude(mirar),
         )
-        r = armar(fuente, mirar, pedido, inspector, carpeta, carpeta / "clip.mp4", cancelado)
+        r = armar(fuente, mirar, pedido, inspector, carpeta, carpeta / "clip.mp4", cancelado, informar=informar)
         if cancelado():
             raise Cancelado()
+        informar("Subiendo el clip al Drive", None)
         subir_archivo(cliente, trabajo.subidas["clip"], r.clip.ruta)
         return VideoHecho(
             id=trabajo.id,

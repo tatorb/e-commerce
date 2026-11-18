@@ -14,10 +14,12 @@ import {
   parseAccountVideo,
   parseMoments,
   parsePlan,
+  parseProgress,
   parseRequestedScript,
   parseScript,
   planSeconds,
   type AccountVideoSettings,
+  type EditProgress,
   type EditorMode,
   type EditorSettings,
   type ScriptLine,
@@ -244,7 +246,7 @@ export async function claimNextEdit(db: PrismaClient, workerId: string, now = ne
       }
       await tx.videoEdit.update({
         where: { id: row.id },
-        data: { status: 'PROCESSING', workerId, lease: { increment: 1 }, attempts: { increment: 1 }, leaseUntil: new Date(now.getTime() + VIDEO_LEASE_MS) },
+        data: { status: 'PROCESSING', workerId, lease: { increment: 1 }, attempts: { increment: 1 }, leaseUntil: new Date(now.getTime() + VIDEO_LEASE_MS), progress: Prisma.DbNull },
       });
       return { editId: row.id };
     }
@@ -357,10 +359,21 @@ export async function releaseEditClaim(db: PrismaClient, editId: string, workerI
 }
 
 /** La Mac avisa que sigue con esta edición. Si ya no es suya, se lo dice. */
-export async function editHeartbeat(db: PrismaClient, workerId: string, editId: string, lease: number, now = new Date()): Promise<boolean> {
+export async function editHeartbeat(
+  db: PrismaClient,
+  workerId: string,
+  editId: string,
+  lease: number,
+  now = new Date(),
+  // En qué anda, para mostrarlo en la app.
+  progress?: { etapa: string; porcentaje?: number | null } | null,
+): Promise<boolean> {
   const r = await db.videoEdit.updateMany({
     where: { id: editId, status: 'PROCESSING', workerId, lease },
-    data: { leaseUntil: new Date(now.getTime() + VIDEO_LEASE_MS) },
+    data: {
+      leaseUntil: new Date(now.getTime() + VIDEO_LEASE_MS),
+      ...(progress ? { progress: { etapa: progress.etapa.slice(0, 120), porcentaje: progress.porcentaje ?? null, at: now.toISOString() } } : {}),
+    },
   });
   return r.count > 0;
 }
@@ -547,6 +560,8 @@ export type EditRow = {
   attempts: number;
   seconds: number | null;
   costUsd: number | null;
+  // En qué anda la Mac, mientras lo edita.
+  progress: EditProgress | null;
   askedBy: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -599,10 +614,43 @@ export async function editsOfProduct(db: PrismaClient, productId: string): Promi
       attempts: r.attempts,
       seconds: r.seconds,
       costUsd: typeof usage === 'number' ? usage : null,
+      progress: r.status === 'PROCESSING' ? parseProgress(r.progress) : null,
       askedBy: r.askedBy?.name ?? null,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
     });
   }
   return out;
+}
+
+export type QueueRow = { id: string; status: VideoEditStatus; account: string; accountSlug: string; product: string; video: string; progress: EditProgress | null; attempts: number; createdAt: Date };
+
+/** Los videos en la cola del editor y el que se está editando, de todas las cuentas, en el orden en que los toma la Mac. */
+export async function editQueue(db: PrismaClient, max = 30): Promise<QueueRow[]> {
+  const rows = await db.videoEdit.findMany({
+    where: { status: { in: ['QUEUED', 'PROCESSING'] }, video: { goneAt: null } },
+    orderBy: [{ status: 'desc' }, { createdAt: 'asc' }],
+    take: max,
+    select: {
+      id: true,
+      status: true,
+      progress: true,
+      attempts: true,
+      createdAt: true,
+      video: { select: { name: true, product: { select: { name: true, account: { select: { name: true, slug: true } } } } } },
+    },
+  });
+  return rows
+    .map((r) => ({
+      id: r.id,
+      status: r.status,
+      account: r.video.product.account.name,
+      accountSlug: r.video.product.account.slug,
+      product: r.video.product.name,
+      video: r.video.name,
+      progress: r.status === 'PROCESSING' ? parseProgress(r.progress) : null,
+      attempts: r.attempts,
+      createdAt: r.createdAt,
+    }))
+    .sort((a, b) => Number(b.status === 'PROCESSING') - Number(a.status === 'PROCESSING') || a.createdAt.getTime() - b.createdAt.getTime());
 }

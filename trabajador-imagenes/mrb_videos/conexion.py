@@ -160,16 +160,25 @@ def siguiente(cliente: ClienteApp, version: str, minuto: int | None, enchufada: 
     return SiguienteVideo.model_validate(cliente._post("/api/videos/trabajador/siguiente", cuerpo))
 
 
-def latido(cliente: ClienteApp, id: str, turno: int) -> bool:
-    r = cliente._post("/api/videos/trabajador/latido", {"protocolo": PROTOCOLO, "id": id, "turno": turno})
-    return bool(r.get("vigente"))
+def latido(cliente: ClienteApp, id: str, turno: int, etapa: str | None = None, porcentaje: float | None = None) -> bool:
+    """Avisa que sigue con la edición y, si se dice, en qué anda. Devuelve si la edición sigue siendo suya."""
+    cuerpo: dict = {"protocolo": PROTOCOLO, "id": id, "turno": turno}
+    if etapa:
+        cuerpo["avance"] = {"etapa": etapa[:120], "porcentaje": None if porcentaje is None else round(max(0.0, min(100.0, porcentaje)), 1)}
+    return bool(cliente._post("/api/videos/trabajador/latido", cuerpo).get("vigente"))
 
 
 def entregar(cliente: ClienteApp, resultado: VideoHecho | VideoFallido) -> dict:
     return cliente._post("/api/videos/trabajador/resultado", resultado.model_dump(mode="json"))
 
 
-def bajar_en_pedazos(cliente: ClienteApp, archivo: ArchivoDelDrive, destino: Path, cancelado: Callable[[], bool] | None = None) -> None:
+def bajar_en_pedazos(
+    cliente: ClienteApp,
+    archivo: ArchivoDelDrive,
+    destino: Path,
+    cancelado: Callable[[], bool] | None = None,
+    avance: Callable[[float], None] | None = None,
+) -> None:
     """Baja un archivo grande a través de la app, de a pedazos, sin cargarlo en memoria."""
     destino.parent.mkdir(parents=True, exist_ok=True)
     parcial = destino.with_name(destino.name + ".parcial")
@@ -189,6 +198,8 @@ def bajar_en_pedazos(cliente: ClienteApp, archivo: ArchivoDelDrive, destino: Pat
                 break
             f.write(pedazo)
             bajado += len(pedazo)
+            if avance and total:
+                avance(bajado / total)
             # "bytes 0-4194303/754155258": el total, por si la app no lo sabía.
             if "/" in rango and rango.rsplit("/", 1)[1].isdigit():
                 total = int(rango.rsplit("/", 1)[1])

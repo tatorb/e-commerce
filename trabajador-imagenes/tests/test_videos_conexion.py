@@ -139,8 +139,14 @@ def test_pregunta_con_la_hora_y_la_bateria_y_recibe_el_motivo(app):
     assert ruta == "/api/videos/trabajador/siguiente" and llave == "Bearer mrbimg_buena"
     assert cuerpo == {"protocolo": PROTOCOLO, "version": "0.1.0", "minuto": 1380, "enchufada": True}
     assert conexion.latido(cliente, "e1", 1) is True
+    # Con la etapa, el aviso cuenta en qué anda.
+    assert conexion.latido(cliente, "e1", 1, "Exportando el clip", 41.666) is True
+    assert _App.recibido[-1][2] == {"protocolo": PROTOCOLO, "id": "e1", "turno": 1, "avance": {"etapa": "Exportando el clip", "porcentaje": 41.7}}
+    conexion.latido(cliente, "e1", 1, "Claude mira la imagen")
+    assert _App.recibido[-1][2]["avance"] == {"etapa": "Claude mira la imagen", "porcentaje": None}
     _App.vigente = False
     assert conexion.latido(cliente, "e1", 1) is False
+    assert "avance" not in _App.recibido[-1][2]
 
 
 def test_baja_de_a_pedazos_con_la_llave(app, tmp_path):

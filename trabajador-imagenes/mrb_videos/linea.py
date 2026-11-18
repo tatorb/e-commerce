@@ -90,8 +90,11 @@ def armar(
     salida: Path,
     cancelado: Callable[[], bool] = lambda: False,
     eleven: Callable[[], ElevenLabs] = ElevenLabs.desde_entorno,
+    informar: Callable[[str, float | None], None] = lambda etapa, porcentaje=None: None,
 ) -> Resultado:
+    """`informar` recibe en qué anda, en palabras, y cuánto lleva de esa etapa, de 0 a 100, si se sabe."""
     carpeta.mkdir(parents=True, exist_ok=True)
+    informar("Midiendo la luz y el color", None)
     medidas = medir(cuadros(mirar))
     avisos = list(medidas.avisos)
     costo = 0.0
@@ -100,6 +103,7 @@ def armar(
     if pedido.plan:
         plan, razon, origen = pedido.plan, "Se aplicó el plan pedido, sin consultar a Claude.", "pedido"
     else:
+        informar("Claude mira la imagen", None)
         p = inspector.proponer(mosaico(mirar), medidas, pedido.contexto, cuartos=pedido.cuartos)
         avisos += list(p.avisos)
         costo += _costo(p.uso)
@@ -107,6 +111,7 @@ def armar(
         _frenar(cancelado)
         marcados = pedido.cortes
         if marcados is None:
+            informar("Claude marca los cortes", None)
             cada = max(CUADRO_CADA_S, math.ceil(mirar.duracion / CUADROS_MAX))
             archivos = hojas.armar(mirar, carpeta / "hojas", cada=cada, cuartos=p.imagen.cuartos)
             c = proponer_cortes(inspector, [a.read_bytes() for a in archivos], fuente.duracion, cada, pedido.momentos, pedido.contexto, pedido.objetivo)
@@ -133,21 +138,25 @@ def armar(
         try:
             cliente = eleven()
             if pedido.voz:
+                if not pedido.guion:
+                    informar("Claude escribe el guión", None)
                 lineas, de_guion, costo_guion = _guion(pedido, plan, mirar, inspector)
                 avisos += de_guion
                 costo += costo_guion
                 _frenar(cancelado)
                 if lineas:
-                    dichas = decir_guion(cliente, lineas, tiempos_en_el_clip(plan), pedido.voz, carpeta / "voz", cancelado)
+                    dichas = decir_guion(cliente, lineas, tiempos_en_el_clip(plan), pedido.voz, carpeta / "voz", cancelado, informar)
                     plan, dichas, de_largo = _que_entre(plan, dichas, pedido.reglas)
                     avisos += de_largo
             archivo_musica = None
             if pedido.musica:
                 _frenar(cancelado)
+                informar("Generando la música", None)
                 archivo_musica = carpeta / "musica.mp3"
                 archivo_musica.write_bytes(cliente.musica(pedido.musica, plan.dura))
                 con_musica = True
             if dichas or archivo_musica:
+                informar("Mezclando el sonido", None)
                 pista = mezclar(dichas, archivo_musica, plan.dura, carpeta / "sonido.wav", cancelado)
             if pedido.subtitulos and dichas:
                 if puede_subtitular():
@@ -162,14 +171,16 @@ def armar(
     _frenar(cancelado)
 
     # 4. El clip.
+    informar("Exportando el clip", 0)
+    al_exportar = lambda parte: informar("Exportando el clip", 100 * parte)  # noqa: E731
     try:
-        clip = exportar(fuente, plan, salida, reglas=pedido.reglas, cancelado=cancelado, sonido=pista, subtitulos=escrito)
+        clip = exportar(fuente, plan, salida, reglas=pedido.reglas, cancelado=cancelado, sonido=pista, subtitulos=escrito, avance=al_exportar)
     except VideoIlegible as e:
         if escrito is None:
             raise
         # Si lo que falló son los subtítulos, el clip sale igual, sin ellos, y lo avisa.
         log.info(f"No se pudo exportar con subtítulos ({e}): se exporta sin ellos.")
-        clip = exportar(fuente, plan, salida, reglas=pedido.reglas, cancelado=cancelado, sonido=pista, subtitulos=None)
+        clip = exportar(fuente, plan, salida, reglas=pedido.reglas, cancelado=cancelado, sonido=pista, subtitulos=None, avance=al_exportar)
         avisos.append("El clip salió sin subtítulos: ffmpeg no los pudo escribir.")
         escrito = None
     avisos += list(clip.avisos)

@@ -17,6 +17,7 @@ import {
   parsePlan,
   planSeconds,
   VIDEO_PROTOCOL,
+  videoHeartbeatSchema,
   videoNextSchema,
   videoResultSchema,
   type EditorSettings,
@@ -32,6 +33,7 @@ import {
   claimNextEdit,
   discardEdit,
   editHeartbeat,
+  editQueue,
   editsOfProduct,
   loadAccountVideo,
   loadEditorSettings,
@@ -145,6 +147,10 @@ describe('los mensajes con la Mac', () => {
     expect(videoNextSchema.safeParse({ protocolo: VIDEO_PROTOCOL, minuto: 1380, enchufada: true }).success).toBe(true);
     expect(videoNextSchema.safeParse({ protocolo: 99 }).success).toBe(false);
     expect(videoNextSchema.safeParse({ protocolo: VIDEO_PROTOCOL, minuto: 2000 }).success).toBe(false);
+    // El aviso de que sigue puede contar en qué anda.
+    expect(videoHeartbeatSchema.safeParse({ protocolo: VIDEO_PROTOCOL, id: 'e1', turno: 1 }).success).toBe(true);
+    expect(videoHeartbeatSchema.safeParse({ protocolo: VIDEO_PROTOCOL, id: 'e1', turno: 1, avance: { etapa: 'Exportando el clip', porcentaje: 41.7 } }).success).toBe(true);
+    expect(videoHeartbeatSchema.safeParse({ protocolo: VIDEO_PROTOCOL, id: 'e1', turno: 1, avance: { etapa: 'x', porcentaje: 140 } }).success).toBe(false);
   });
 
   it('el resultado trae el plan y el clip, o el motivo del fallo', () => {
@@ -533,6 +539,33 @@ describe.skipIf(!url)('la cola del editor de videos en la base', () => {
     uploaded.set(second.id, { ...clipFile(second.id), name: 'b · editado.mp4' });
     await submitEditResult(db, workerId, done(second.id, 1), { collect });
     expect((await db.videoEdit.findUniqueOrThrow({ where: { id: second.id } })).status).toBe('REVIEW');
+  });
+
+  it('la Mac cuenta en qué anda, y la app lo muestra en el video y en la cola', async () => {
+    const a = await video('a.mp4');
+    const b = await video('b.mp4');
+    const first = await requestEdit(db, { accountId, videoId: a.id, userId });
+    await requestEdit(db, { accountId, videoId: b.id, userId });
+    await claimNextEdit(db, workerId);
+    const now = new Date('2026-11-18T03:00:00Z');
+    expect(await editHeartbeat(db, workerId, first.editId, 1, now, { etapa: 'Exportando el clip', porcentaje: 41.7 })).toBe(true);
+    const rows = await editsOfProduct(db, productId);
+    expect(rows.find((r) => r.videoId === a.id)?.progress).toEqual({ stage: 'Exportando el clip', percent: 42, at: now.toISOString() });
+    expect(rows.find((r) => r.videoId === b.id)?.progress).toBeNull();
+    // Un aviso sin etapa no borra la última.
+    await editHeartbeat(db, workerId, first.editId, 1, now);
+    // La cola: primero el que se está editando, después los que esperan.
+    expect(await editQueue(db)).toMatchObject([
+      { status: 'PROCESSING', account: 'Cuenta de prueba', product: 'Camisa 384675', video: 'a.mp4', progress: { stage: 'Exportando el clip', percent: 42 } },
+      { status: 'QUEUED', video: 'b.mp4', progress: null },
+    ]);
+    // Un aviso con otro turno no cuenta.
+    expect(await editHeartbeat(db, workerId, first.editId, 9, now, { etapa: 'Otra', porcentaje: 1 })).toBe(false);
+    // Al entregar sale de la cola, y si se vuelve a tomar arranca sin avance.
+    uploaded.set(first.editId, clipFile(first.editId));
+    await submitEditResult(db, workerId, done(first.editId, 1), { collect });
+    expect((await editQueue(db)).map((q) => q.video)).toEqual(['b.mp4']);
+    expect((await editsOfProduct(db, productId)).find((r) => r.videoId === a.id)?.progress).toBeNull();
   });
 
   it('una edición descartada mientras la Mac trabajaba ya no acepta su resultado', async () => {

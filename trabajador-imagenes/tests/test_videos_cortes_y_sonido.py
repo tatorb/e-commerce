@@ -387,3 +387,48 @@ def test_los_subtitulos_van_con_el_nombre_de_la_opcion_y_si_fallan_el_clip_sale_
     monkeypatch.setattr(linea, "puede_subtitular", lambda: False)
     r = armar(fuente, fuente, Pedido(plan=plan, guion=["Hola a todos."], voz="v", subtitulos=True), InspectorDeVideo(simulado=True), tmp_path / "t2", tmp_path / "clip2.mp4", eleven=lambda: ElevenFalso(tmp_path))
     assert not r.con_subtitulos and any("brew reinstall ffmpeg" in a for a in r.avisos)
+
+
+@con_ffmpeg
+def test_la_edicion_va_contando_en_que_anda(video, tmp_path):
+    fuente = leer(video)
+    claude = ClienteFalso(
+        [
+            json.dumps({"valores": {"cuartos": 1, "enderezado": 0, "zoom": 1, "centro_x": 0.5, "centro_y": 0.5, "rojo": 1, "verde": 1, "azul": 1, "contraste": 1, "saturacion": 1}, "razon": "Girado."}),
+            json.dumps({"momentos": CORTES, "razon": "Tres momentos."}),
+            json.dumps({"lineas": ["Así llega la caja.", "", "Todo listo."]}),
+        ]
+    )
+    dicho = []
+    eleven = ElevenFalso(tmp_path)
+    armar(
+        fuente, fuente, Pedido(objetivo=20, voz="v", musica="Suave.", subtitulos=True), InspectorDeVideo(cliente=claude),
+        tmp_path / "t", tmp_path / "clip.mp4", eleven=lambda: eleven, informar=lambda etapa, porcentaje=None: dicho.append((etapa, porcentaje)),
+    )
+    etapas = list(dict.fromkeys(e for e, _ in dicho))
+    assert etapas == [
+        "Midiendo la luz y el color",
+        "Claude mira la imagen",
+        "Claude marca los cortes",
+        "Claude escribe el guión",
+        "Generando la voz, línea 1 de 2",
+        "Generando la voz, línea 2 de 2",
+        "Generando la música",
+        "Mezclando el sonido",
+        "Exportando el clip",
+    ]
+    de_exportar = [p for e, p in dicho if e == "Exportando el clip"]
+    assert de_exportar[0] == 0 and all(0 <= p <= 100 for p in de_exportar) and de_exportar == sorted(de_exportar)
+
+
+def test_lo_que_lleva_ffmpeg_se_lee_de_su_archivo_de_avance(tmp_path):
+    from mrb_videos.editar import _lleva
+
+    cuenta = tmp_path / "clip.mp4.avance"
+    assert _lleva(cuenta, 40) == 0
+    cuenta.write_text("frame=10\nout_time_us=10000000\nprogress=continue\nframe=20\nout_time_us=20000000\nout_time_ms=20000000\nprogress=continue\n")
+    assert _lleva(cuenta, 40) == 0.5
+    cuenta.write_text("out_time_us=N/A\n")
+    assert _lleva(cuenta, 40) == 0
+    cuenta.write_text("out_time_us=99000000\n")
+    assert _lleva(cuenta, 40) == 1

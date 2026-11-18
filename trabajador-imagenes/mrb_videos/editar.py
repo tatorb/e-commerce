@@ -21,6 +21,22 @@ from .plan import MERCADOLIBRE, Plan, ReglasDelClip, revisar
 MEGABITS = 8
 
 
+def _lleva(cuenta: Path, total: float) -> float:
+    """Qué parte del clip ya exportó ffmpeg, de 0 a 1, según lo último que anotó."""
+    try:
+        renglones = cuenta.read_text(errors="replace").splitlines()
+    except OSError:
+        return 0.0
+    for renglon in reversed(renglones):
+        if renglon.startswith("out_time_us=") or renglon.startswith("out_time_ms="):
+            try:
+                # Los dos vienen en millonésimas de segundo.
+                return max(0.0, min(1.0, int(renglon.split("=", 1)[1]) / 1_000_000 / max(total, 0.1)))
+            except ValueError:
+                return 0.0
+    return 0.0
+
+
 class PlanInvalido(ValueError):
     pass
 
@@ -89,6 +105,7 @@ def exportar(
     cancelado: Callable[[], bool] | None = None,
     sonido: Path | None = None,
     subtitulos: Path | None = None,
+    avance: Callable[[float], None] | None = None,
 ) -> Clip:
     """`sonido` es la pista ya mezclada, del largo del clip. `subtitulos` es un archivo .ass."""
     salida = Path(salida).resolve()
@@ -99,17 +116,22 @@ def exportar(
         raise PlanInvalido("El clip no puede guardarse encima del original.")
     salida.parent.mkdir(parents=True, exist_ok=True)
     codificador = codificador or elegir_codificador()
+    orden = comando(fuente, plan, salida, codificador, reglas, sonido.resolve() if sonido else None, subtitulos.name if subtitulos else None)
+    cuenta = salida.with_name(salida.name + ".avance")
+    mirar_avance = None
+    if avance:
+        # ffmpeg va anotando por dónde va en un archivo: se lee cada segundo.
+        orden[1:1] = ["-nostats", "-progress", str(cuenta)]
+        mirar_avance = lambda: avance(_lleva(cuenta, plan.dura))  # noqa: E731
     try:
         # ffmpeg corre en la carpeta de los subtítulos: así su nombre no necesita escapes.
-        correr(
-            comando(fuente, plan, salida, codificador, reglas, sonido.resolve() if sonido else None, subtitulos.name if subtitulos else None),
-            cancelado=cancelado,
-            carpeta=subtitulos.resolve().parent if subtitulos else None,
-        )
+        correr(orden, cancelado=cancelado, carpeta=subtitulos.resolve().parent if subtitulos else None, cada_segundo=mirar_avance)
     except BaseException:
         # Un clip a medio hacer no queda en el disco.
         salida.unlink(missing_ok=True)
         raise
+    finally:
+        cuenta.unlink(missing_ok=True)
     hecho = leer(salida)
     peso = salida.stat().st_size
     avisos = []

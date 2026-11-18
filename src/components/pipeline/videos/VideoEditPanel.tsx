@@ -149,9 +149,10 @@ export function VideoEditPanel({
   // Mientras la Mac trabaja, la pantalla se pone al día sola.
   useEffect(() => {
     if (!waiting) return;
-    const timer = setInterval(() => router.refresh(), 20_000);
+    // Mientras lo edita, más seguido, para ver el avance.
+    const timer = setInterval(() => router.refresh(), edit?.status === 'PROCESSING' ? 6_000 : 20_000);
     return () => clearInterval(timer);
-  }, [waiting, router]);
+  }, [waiting, router, edit?.status]);
 
   function run(action: () => Promise<ActionResult>) {
     setError(null);
@@ -253,10 +254,27 @@ export function VideoEditPanel({
       ) : null}
 
       {edit.status === 'PROCESSING' ? (
-        <p className="flex items-center gap-2 text-sm font-medium">
-          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-          La Mac lo está editando
-        </p>
+        <div className="space-y-1.5 text-sm">
+          <p className="flex items-center gap-2 font-medium">
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            La Mac lo está editando
+          </p>
+          {edit.progress ? (
+            <>
+              <p className="text-xs text-muted-foreground">
+                {edit.progress.stage}
+                {edit.progress.percent !== null ? `, ${edit.progress.percent} %` : ''}
+              </p>
+              {edit.progress.percent !== null ? (
+                <div className="h-1.5 w-full max-w-sm overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={edit.progress.percent} aria-valuemin={0} aria-valuemax={100}>
+                  <div className="h-full rounded-full bg-foreground transition-all" style={{ width: `${edit.progress.percent}%` }} />
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <p className="text-xs text-muted-foreground">Recién lo tomó.</p>
+          )}
+        </div>
       ) : null}
 
       {edit.status === 'FAILED' ? (

@@ -1958,6 +1958,8 @@ model VideoEdit {
   clip          ProductVideo?   @relation("VideoEditClip", fields: [clipId], references: [id], onDelete: SetNull)
   aiUsage       Json?
   seconds       Int?
+  // En qué anda la Mac mientras lo edita: { etapa, porcentaje, at }.
+  progress      Json?
   // La cola: quién lo tiene, el turno, los intentos y hasta cuándo es suyo.
   workerId      String?
   worker        ImageWorker?    @relation(fields: [workerId], references: [id], onDelete: SetNull)

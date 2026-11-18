@@ -59,7 +59,7 @@ bash configurar.sh
 1. **Copiá el video a la carpeta del producto.** En el Drive, `E-commerce Studio MRB / la cuenta / el producto / Videos`. Si la cámara es una DJI, copiá también el archivo `.LRF` que graba al lado de cada video: es una copia liviana y el editor la usa para mirar más rápido.
 2. **Abrí el paso Videos** de una publicación del producto. La app lee la carpeta y muestra el video.
 3. **Tocá Editar para clip.** Elegí cuántos segundos tiene que durar, con qué paso del protocolo se grabó y, si hace falta, escribí una indicación para el editor.
-4. **Esperá a que la Mac lo tome.** La pantalla se pone al día sola.
+4. **Esperá a que la Mac lo tome.** La pantalla se pone al día sola y muestra en qué etapa va: si Claude está mirando la imagen, marcando los cortes o escribiendo el guión, qué línea de la voz se está generando, y cuánto lleva exportado el clip. En Equipo, en Editor de videos, se ve la cola entera, de todas las cuentas.
 5. **Mirá el clip.** Abajo se ve cómo se editó, lo que dice la voz y los avisos.
 6. **Aprobalo, o corregilo.** Con Ajustar los cortes y el guión cambiás a mano dónde corta cada tramo, su velocidad y lo que dice la voz, y la Mac lo rehace tal cual. Con Pedir de nuevo, Claude lo propone otra vez con tu indicación.
 7. **Elegilo como clip** de la publicación, con Usar como clip.
