@@ -260,14 +260,6 @@ def volumen(archivo: Path) -> float | None:
 # Cuántas palabras se ven a la vez, y hasta cuántas letras.
 PALABRAS_POR_GRUPO = 3
 LETRAS_POR_GRUPO = 22
-# Blanco con borde negro, y la palabra que se está diciendo en amarillo.
-COLOR_DE_LA_PALABRA = "&H0033E6FF&"
-
-
-def _reloj(segundos: float) -> str:
-    cs = int(round(max(0.0, segundos) * 100))
-    return f"{cs // 360000}:{cs // 6000 % 60:02d}:{cs // 100 % 60:02d}.{cs % 100:02d}"
-
 
 def _limpio(texto: str) -> str:
     return texto.replace("\\", "").replace("{", "(").replace("}", ")").replace("\n", " ")
@@ -284,24 +276,43 @@ def grupos_de(palabras: list[Palabra]) -> list[list[Palabra]]:
     return grupos
 
 
-def subtitulos(lineas: list[Linea], ancho: int = 1080, alto: int = 1920) -> str:
-    """El guión escrito sobre el video, de a pocas palabras, con la que se está diciendo resaltada."""
-    tamano = round(alto * 0.036)
-    encabezado = f"""[Script Info]
-ScriptType: v4.00+
-PlayResX: {ancho}
-PlayResY: {alto}
-WrapStyle: 2
-ScaledBorderAndShadow: yes
+@dataclass
+class Subtitulos:
+    """Los subtítulos ya dibujados: la lista de imágenes para ffmpeg, y dónde van sobre el video."""
 
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Voz,Arial,{tamano},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,{max(3, tamano // 14)},1,2,{round(ancho * 0.08)},{round(ancho * 0.08)},{round(alto * 0.2)},1
+    lista: Path
+    y: int
 
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-"""
-    eventos = []
+
+# La letra de los subtítulos viene con el programa, así se ven igual en cualquier máquina: Montserrat
+# ExtraBold, de uso libre (su licencia está al lado). Si no se pudiera leer, se prueba con las del sistema.
+LETRAS = (
+    str(Path(__file__).resolve().parent / "letras" / "Montserrat-ExtraBold.woff"),
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+    "/Library/Fonts/Arial Bold.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+)
+BLANCO = (255, 255, 255, 255)
+AMARILLO = (255, 230, 51, 255)
+NEGRO = (0, 0, 0, 255)
+
+
+def _letra(tamano: int):
+    from PIL import ImageFont
+
+    for ruta in LETRAS:
+        try:
+            return ImageFont.truetype(ruta, tamano)
+        except OSError:
+            continue
+    return ImageFont.load_default(size=tamano)
+
+
+def momentos_de(lineas: list[Linea]) -> list[tuple[float, float, list[str], int]]:
+    """Cada momento de los subtítulos: desde y hasta cuándo, las palabras que se ven y cuál se está diciendo."""
+    momentos = []
     for linea in lineas:
         grupos = grupos_de(linea.palabras)
         for g, grupo in enumerate(grupos):
@@ -314,6 +325,71 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     hasta = linea.inicio + grupos[g + 1][0].inicio
                 else:
                     hasta = linea.inicio + palabra.fin + 0.25
-                texto = " ".join(f"{{\\c{COLOR_DE_LA_PALABRA}}}{_limpio(x.texto)}{{\\c&HFFFFFF&}}" if x is palabra else _limpio(x.texto) for x in grupo)
-                eventos.append(f"Dialogue: 0,{_reloj(desde)},{_reloj(max(hasta, desde + 0.05))},Voz,,0,0,0,,{texto}")
-    return encabezado + "\n".join(eventos) + "\n"
+                momentos.append((desde, max(hasta, desde + 0.05), [x.texto for x in grupo], i))
+    # En orden y sin pisarse: cada uno termina, a lo sumo, donde empieza el siguiente.
+    momentos.sort(key=lambda m: m[0])
+    return [(d, min(h, momentos[n + 1][0]) if n + 1 < len(momentos) else h, palabras, i) for n, (d, h, palabras, i) in enumerate(momentos)]
+
+
+def dibujar_franja(palabras: list[str], resaltada: int, ancho: int, alto_franja: int, tamano: int):
+    """Una franja transparente con las palabras al medio, en blanco con borde negro, y la que se dice en amarillo."""
+    from PIL import Image, ImageDraw
+
+    franja = Image.new("RGBA", (ancho, alto_franja), (0, 0, 0, 0))
+    lapiz = ImageDraw.Draw(franja)
+    margen = round(ancho * 0.06)
+    while True:
+        letra = _letra(tamano)
+        borde = max(3, tamano // 12)
+        espacio = lapiz.textlength(" ", font=letra)
+        anchos = [lapiz.textlength(p, font=letra) for p in palabras]
+        total = sum(anchos) + espacio * (len(palabras) - 1)
+        if total <= ancho - 2 * margen or tamano <= 24:
+            break
+        # Si no entra, se achica la letra.
+        tamano = int(tamano * 0.9)
+    x = (ancho - total) / 2
+    for i, (palabra, w) in enumerate(zip(palabras, anchos)):
+        lapiz.text((x, alto_franja / 2), palabra, font=letra, fill=AMARILLO if i == resaltada else BLANCO, stroke_width=borde, stroke_fill=NEGRO, anchor="lm")
+        x += w + espacio
+    return franja
+
+
+def subtitulos(lineas: list[Linea], carpeta: Path, segundos: float, ancho: int = 1080, alto: int = 1920) -> Subtitulos:
+    """
+    El guión escrito sobre el video, de a pocas palabras, con la que se está diciendo resaltada.
+
+    Lo dibuja el programa, imagen por imagen, y ffmpeg las pega sobre el video: no depende de que ffmpeg
+    sepa escribir subtítulos, que en algunas instalaciones no viene.
+    """
+    from PIL import Image
+
+    carpeta.mkdir(parents=True, exist_ok=True)
+    tamano = round(alto * 0.036)
+    alto_franja = (round(tamano * 2.4) // 2) * 2
+    vacia = carpeta / "vacia.png"
+    Image.new("RGBA", (ancho, alto_franja), (0, 0, 0, 0)).save(vacia)
+    renglones = ["ffconcat version 1.0"]
+    t = 0.0
+
+    def poner(archivo: Path, dura: float) -> None:
+        renglones.append(f"file '{archivo.name}'")
+        renglones.append(f"duration {dura:.3f}")
+
+    for n, (desde, hasta, palabras, resaltada) in enumerate(momentos_de(lineas)):
+        if desde >= segundos:
+            break
+        if desde - t > 0.02:
+            poner(vacia, desde - t)
+        archivo = carpeta / f"s{n:04d}.png"
+        dibujar_franja([_limpio(p) for p in palabras], resaltada, ancho, alto_franja, tamano).save(archivo)
+        hasta = min(hasta, segundos)
+        poner(archivo, hasta - desde)
+        t = hasta
+    poner(vacia, max(0.5, segundos - t + 0.5))
+    # La última imagen va dos veces: así ffmpeg respeta su duración.
+    renglones.append(f"file '{vacia.name}'")
+    lista = carpeta / "subtitulos.txt"
+    lista.write_text("\n".join(renglones) + "\n", encoding="utf-8")
+    # Un poco por debajo del medio de la parte de abajo, lejos de los botones del canal.
+    return Subtitulos(lista=lista, y=round(alto * 0.8) - alto_franja)

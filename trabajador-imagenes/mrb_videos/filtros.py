@@ -71,8 +71,12 @@ def de_imagen(fuente: Fuente, imagen: Imagen, reglas: ReglasDelClip = MERCADOLIB
     return pasos
 
 
-def grafo(fuente: Fuente, plan: Plan, reglas: ReglasDelClip = MERCADOLIBRE, subtitulos: str | None = None) -> str:
-    """El filtro completo: deja el video terminado en la salida [v]. `subtitulos` es el nombre del archivo, en la carpeta donde corre ffmpeg."""
+def grafo(fuente: Fuente, plan: Plan, reglas: ReglasDelClip = MERCADOLIBRE, subtitulos_y: int | None = None) -> str:
+    """
+    El filtro completo: deja el video terminado en la salida [v].
+
+    Con `subtitulos_y`, pega encima las imágenes de los subtítulos, que llegan como la entrada 2, a esa altura.
+    """
     fps = cuadros_por_segundo(fuente)
     n = len(plan.tramos)
     partes = [f"[0:v:0]split={n}" + "".join(f"[e{i}]" for i in range(n))] if n > 1 else []
@@ -83,10 +87,12 @@ def grafo(fuente: Fuente, plan: Plan, reglas: ReglasDelClip = MERCADOLIBRE, subt
     cola += de_imagen(fuente, plan.imagen, reglas)
     if plan.cierre > 0:
         cola.append(f"tpad=stop_mode=clone:stop_duration={plan.cierre:.3f}")
-    if subtitulos:
-        # Después del cierre, para que se escriban también sobre la imagen quieta.
-        # Con el nombre de la opción: las versiones nuevas de ffmpeg no aceptan el archivo suelto.
-        cola.append(f"subtitles=filename={subtitulos}")
-    cola += ["format=yuv420p", "setsar=1"]
-    partes.append("".join(f"[t{i}]" for i in range(n)) + ",".join(cola) + "[v]")
+    entradas = "".join(f"[t{i}]" for i in range(n))
+    if subtitulos_y is None:
+        partes.append(entradas + ",".join([*cola, "format=yuv420p", "setsar=1"]) + "[v]")
+    else:
+        # Después del cierre, para que se vean también sobre la imagen quieta.
+        partes.append(entradas + ",".join(cola) + "[base]")
+        partes.append("[2:v]format=rgba[sub]")
+        partes.append(f"[base][sub]overlay=0:{subtitulos_y}:eof_action=pass,format=yuv420p,setsar=1[v]")
     return ";".join(partes)

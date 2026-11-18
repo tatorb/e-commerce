@@ -15,7 +15,7 @@ from mrb_videos.inspector import ESQUEMA_CORTES, Contexto, InspectorDeVideo, esc
 from mrb_videos.linea import Pedido, armar
 from mrb_videos.medios import hay_ffmpeg, leer
 from mrb_videos.plan import Imagen, Plan, Tramo
-from mrb_videos.sonido import ElevenLabs, Linea, Palabra, SinElevenLabs, _motivo, decir_guion, grupos_de, mezclar, palabras_de, subtitulos, volumen
+from mrb_videos.sonido import ElevenLabs, Linea, Palabra, SinElevenLabs, _motivo, decir_guion, dibujar_franja, grupos_de, mezclar, momentos_de, palabras_de, subtitulos, volumen
 
 con_ffmpeg = pytest.mark.skipif(not hay_ffmpeg(), reason="Falta ffmpeg")
 
@@ -262,17 +262,43 @@ def leer_audio(ruta) -> float:
 
 
 def test_los_subtitulos_van_de_a_pocas_palabras_con_la_que_se_dice_resaltada(tmp_path):
+    from PIL import Image
+
     palabras = [Palabra(p, i * 0.4, i * 0.4 + 0.35) for i, p in enumerate("Así llega tu juego de camisas: caja {sellada}.".split())]
     assert [[p.texto for p in g] for g in grupos_de(palabras)] == [["Así", "llega", "tu"], ["juego", "de", "camisas:"], ["caja", "{sellada}."]]
-    ass = subtitulos([Linea("x", 10.0, 13.6, tmp_path / "a.mp3", palabras)])
-    eventos = [r for r in ass.splitlines() if r.startswith("Dialogue:")]
-    assert len(eventos) == len(palabras)
-    assert "PlayResX: 1080" in ass and "PlayResY: 1920" in ass
+    linea = Linea("x", 10.0, 13.6, tmp_path / "a.mp3", palabras)
+    momentos = momentos_de([linea])
+    assert len(momentos) == len(palabras)
     # La primera palabra, resaltada desde el segundo 10 hasta que empieza la segunda.
-    assert eventos[0].startswith("Dialogue: 0,0:00:10.00,0:00:10.40,Voz")
-    assert eventos[0].endswith("{\\c&H0033E6FF&}Así{\\c&HFFFFFF&} llega tu")
-    # Las llaves del texto no rompen el formato.
-    assert "(sellada)." in eventos[-1] and "{sellada}" not in ass
+    assert momentos[0] == (pytest.approx(10.0), pytest.approx(10.4), ["Así", "llega", "tu"], 0)
+    assert momentos[3][2:] == (["juego", "de", "camisas:"], 0)
+    assert all(a[1] <= b[0] + 1e-9 for a, b in zip(momentos, momentos[1:]))
+
+    s = subtitulos([linea], tmp_path / "subs", 20.0)
+    renglones = s.lista.read_text().splitlines()
+    assert renglones[0] == "ffconcat version 1.0"
+    # Empieza con la franja vacía hasta la primera palabra, y la última imagen va dos veces.
+    assert renglones[1:3] == ["file 'vacia.png'", "duration 10.000"]
+    assert renglones[3:5] == ["file 's0000.png'", "duration 0.400"]
+    assert renglones[-1] == "file 'vacia.png'" and renglones[-3] == "file 'vacia.png'"
+    duraciones = [float(r.split()[1]) for r in renglones if r.startswith("duration")]
+    assert sum(duraciones) >= 20.0 and all(d > 0 for d in duraciones)
+    # Las franjas son transparentes, del ancho del clip, y tienen algo dibujado.
+    with Image.open(tmp_path / "subs" / "s0000.png") as franja:
+        assert franja.mode == "RGBA" and franja.width == 1080 and franja.height % 2 == 0
+        assert franja.getpixel((2, 2))[3] == 0 and franja.getbbox() is not None
+        assert s.y + franja.height == round(1920 * 0.8)
+    with Image.open(tmp_path / "subs" / "vacia.png") as vacia:
+        assert vacia.getbbox() is None
+
+
+def test_una_frase_larga_achica_la_letra_para_entrar(tmp_path):
+    franja = dibujar_franja(["Extraordinariamente", "larguísima", "palabrota"], 1, 1080, 160, 70)
+    caja = franja.getbbox()
+    assert caja is not None and caja[0] > 20 and caja[2] < 1060
+    # La palabra que se dice va en amarillo y las otras en blanco.
+    colores = {franja.getpixel((x, 80))[:3] for x in range(0, 1080, 2) if franja.getpixel((x, 80))[3] == 255}
+    assert (255, 230, 51) in colores and (255, 255, 255) in colores
 
 
 # ───────────────────────────── De punta a punta ─────────────────────────────
@@ -368,25 +394,34 @@ def test_un_cuadro_por_tramo_para_el_guion(video):
 
 
 @con_ffmpeg
-def test_los_subtitulos_van_con_el_nombre_de_la_opcion_y_si_fallan_el_clip_sale_sin_ellos(video, tmp_path, monkeypatch):
+def test_los_subtitulos_se_pegan_como_imagenes_y_si_fallan_el_clip_sale_sin_ellos(video, tmp_path, monkeypatch):
     from mrb_videos import linea
     from mrb_videos.filtros import grafo
 
     fuente = leer(video)
     plan = Plan(imagen=Imagen(cuartos=1), tramos=[Tramo(inicio=0, fin=40, velocidad=3)])
-    assert "subtitles=filename=subtitulos.ass" in grafo(fuente, plan, subtitulos="subtitulos.ass")
+    # No se usa nada de ffmpeg que escriba texto: las imágenes llegan como una entrada más y se pegan encima.
+    g = grafo(fuente, plan, subtitulos_y=1400)
+    assert "[2:v]format=rgba[sub]" in g and "[base][sub]overlay=0:1400:eof_action=pass" in g
+    assert "subtitles" not in g and "ass=" not in g and "drawtext" not in g
+    assert "overlay" not in grafo(fuente, plan)
 
-    # Un ffmpeg que no puede con los subtítulos: el clip sale igual, con su aviso.
+    pedido = Pedido(plan=plan, guion=["Hola a todos, así llega la caja."], voz="v", subtitulos=True)
+    r = armar(fuente, fuente, pedido, InspectorDeVideo(simulado=True), tmp_path / "t0", tmp_path / "clip0.mp4", eleven=lambda: ElevenFalso(tmp_path))
+    assert r.con_subtitulos and r.avisos == [a for a in r.avisos if "subtítulos" not in a]
+    # En el momento en que se dice la primera palabra hay algo amarillo en la franja de los subtítulos.
+    cuadro = subprocess.run(
+        ["ffmpeg", "-v", "error", "-ss", f"{r.guion[0].inicio + 0.1:.2f}", "-i", str(r.clip.ruta), "-frames:v", "1", "-vf", "crop=1080:200:0:1380", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+        capture_output=True, check=True,
+    ).stdout
+    puntos = [cuadro[i : i + 3] for i in range(0, len(cuadro), 3 * 7)]
+    assert sum(1 for p in puntos if p[0] > 200 and p[1] > 180 and p[2] < 120) > 20
+
+    # Si pegar los subtítulos falla, el clip sale igual, con su aviso.
     real = linea.exportar
-    monkeypatch.setattr(linea, "exportar", lambda *a, **k: (_ for _ in ()).throw(linea.VideoIlegible("no option name")) if k.get("subtitulos") else real(*a, **k))
-    r = armar(fuente, fuente, Pedido(plan=plan, guion=["Hola a todos."], voz="v", subtitulos=True), InspectorDeVideo(simulado=True), tmp_path / "t", tmp_path / "clip.mp4", eleven=lambda: ElevenFalso(tmp_path))
+    monkeypatch.setattr(linea, "exportar", lambda *a, **k: (_ for _ in ()).throw(linea.VideoIlegible("no se pudo")) if k.get("subtitulos") else real(*a, **k))
+    r = armar(fuente, fuente, pedido, InspectorDeVideo(simulado=True), tmp_path / "t", tmp_path / "clip.mp4", eleven=lambda: ElevenFalso(tmp_path))
     assert not r.con_subtitulos and r.guion and r.avisos[-1] == "El clip salió sin subtítulos: ffmpeg no los pudo escribir."
-
-    # Un ffmpeg que no trae esa parte: ni lo intenta.
-    monkeypatch.setattr(linea, "exportar", real)
-    monkeypatch.setattr(linea, "puede_subtitular", lambda: False)
-    r = armar(fuente, fuente, Pedido(plan=plan, guion=["Hola a todos."], voz="v", subtitulos=True), InspectorDeVideo(simulado=True), tmp_path / "t2", tmp_path / "clip2.mp4", eleven=lambda: ElevenFalso(tmp_path))
-    assert not r.con_subtitulos and any("brew reinstall ffmpeg" in a for a in r.avisos)
 
 
 @con_ffmpeg
@@ -415,6 +450,7 @@ def test_la_edicion_va_contando_en_que_anda(video, tmp_path):
         "Generando la voz, línea 2 de 2",
         "Generando la música",
         "Mezclando el sonido",
+        "Dibujando los subtítulos",
         "Exportando el clip",
     ]
     de_exportar = [p for e, p in dicho if e == "Exportando el clip"]

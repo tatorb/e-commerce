@@ -53,13 +53,6 @@ class Clip:
 
 
 @cache
-def puede_subtitular() -> bool:
-    """Si este ffmpeg sabe escribir subtítulos sobre el video. Algunas instalaciones no traen esa parte."""
-    filtros = correr([programa("ffmpeg"), "-hide_banner", "-filters"]).stdout.decode("utf-8", "replace")
-    return any(renglon.split()[1:2] == ["subtitles"] for renglon in filtros.splitlines())
-
-
-@cache
 def _codificadores() -> str:
     return correr([programa("ffmpeg"), "-hide_banner", "-encoders"]).stdout.decode("utf-8", "replace")
 
@@ -77,14 +70,26 @@ def _de_video(codificador: str) -> list[str]:
     return ["-c:v", "libx264", "-preset", "medium", "-crf", "19", "-maxrate", f"{MEGABITS * 3 // 2}M", "-bufsize", f"{MEGABITS * 3}M", "-profile:v", "high"]
 
 
-def comando(fuente: Fuente, plan: Plan, salida: Path, codificador: str, reglas: ReglasDelClip = MERCADOLIBRE, sonido: Path | None = None, subtitulos: str | None = None) -> list[str]:
+def comando(
+    fuente: Fuente,
+    plan: Plan,
+    salida: Path,
+    codificador: str,
+    reglas: ReglasDelClip = MERCADOLIBRE,
+    sonido: Path | None = None,
+    subtitulos: Path | None = None,
+    subtitulos_y: int = 0,
+) -> list[str]:
+    """`subtitulos` es la lista de imágenes ya dibujadas, y `subtitulos_y` la altura a la que van."""
     # Sin sonido propio, una pista en silencio.
     pista = ["-i", str(sonido)] if sonido else ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]
+    escrito = ["-f", "concat", "-safe", "0", "-i", str(subtitulos)] if subtitulos else []
     return [
         programa("ffmpeg"), "-v", "error", "-y",
         "-i", str(fuente.ruta),
         *pista,
-        "-filter_complex", grafo(fuente, plan, reglas, subtitulos),
+        *escrito,
+        "-filter_complex", grafo(fuente, plan, reglas, subtitulos_y if subtitulos else None),
         "-map", "[v]", "-map", "1:a",
         *_de_video(codificador),
         "-r", f"{cuadros_por_segundo(fuente):g}",
@@ -105,9 +110,10 @@ def exportar(
     cancelado: Callable[[], bool] | None = None,
     sonido: Path | None = None,
     subtitulos: Path | None = None,
+    subtitulos_y: int = 0,
     avance: Callable[[float], None] | None = None,
 ) -> Clip:
-    """`sonido` es la pista ya mezclada, del largo del clip. `subtitulos` es un archivo .ass."""
+    """`sonido` es la pista ya mezclada, del largo del clip. `subtitulos` es la lista de imágenes ya dibujadas."""
     salida = Path(salida).resolve()
     problemas = revisar(plan, fuente, reglas)
     if problemas:
@@ -116,7 +122,7 @@ def exportar(
         raise PlanInvalido("El clip no puede guardarse encima del original.")
     salida.parent.mkdir(parents=True, exist_ok=True)
     codificador = codificador or elegir_codificador()
-    orden = comando(fuente, plan, salida, codificador, reglas, sonido.resolve() if sonido else None, subtitulos.name if subtitulos else None)
+    orden = comando(fuente, plan, salida, codificador, reglas, sonido.resolve() if sonido else None, subtitulos.resolve() if subtitulos else None, subtitulos_y)
     cuenta = salida.with_name(salida.name + ".avance")
     mirar_avance = None
     if avance:
@@ -124,8 +130,7 @@ def exportar(
         orden[1:1] = ["-nostats", "-progress", str(cuenta)]
         mirar_avance = lambda: avance(_lleva(cuenta, plan.dura))  # noqa: E731
     try:
-        # ffmpeg corre en la carpeta de los subtítulos: así su nombre no necesita escapes.
-        correr(orden, cancelado=cancelado, carpeta=subtitulos.resolve().parent if subtitulos else None, cada_segundo=mirar_avance)
+        correr(orden, cancelado=cancelado, cada_segundo=mirar_avance)
     except BaseException:
         # Un clip a medio hacer no queda en el disco.
         salida.unlink(missing_ok=True)

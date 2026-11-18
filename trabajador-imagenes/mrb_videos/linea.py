@@ -20,12 +20,12 @@ from pathlib import Path
 
 from . import hojas
 from .cortes import Momento, plan_de_cortes, tiempos_en_el_clip
-from .editar import Clip, exportar, puede_subtitular
+from .editar import Clip, exportar
 from .inspector import Contexto, InspectorDeVideo, escribir_guion, mosaico, palabras_que_entran, proponer_cortes
 from .medios import Cancelado, Fuente, VideoIlegible
 from .medir import Medidas, cuadros, medir
 from .plan import MERCADOLIBRE, Imagen, Plan, ReglasDelClip, plan_parejo
-from .sonido import ElevenLabs, Linea, SinElevenLabs, decir_guion, mezclar, subtitulos, volumen
+from .sonido import ElevenLabs, Linea, SinElevenLabs, Subtitulos, decir_guion, mezclar, subtitulos, volumen
 
 log = logging.getLogger("trabajador")
 
@@ -132,7 +132,7 @@ def armar(
     # 3. El sonido.
     dichas: list[Linea] = []
     pista: Path | None = None
-    escrito: Path | None = None
+    escrito: Subtitulos | None = None
     con_musica = False
     if pedido.voz or pedido.musica:
         try:
@@ -159,11 +159,8 @@ def armar(
                 informar("Mezclando el sonido", None)
                 pista = mezclar(dichas, archivo_musica, plan.dura, carpeta / "sonido.wav", cancelado)
             if pedido.subtitulos and dichas:
-                if puede_subtitular():
-                    escrito = carpeta / "subtitulos.ass"
-                    escrito.write_text(subtitulos(dichas, pedido.reglas.ancho, pedido.reglas.alto), encoding="utf-8")
-                else:
-                    avisos.append("El clip salió sin subtítulos: el ffmpeg de esta Mac no sabe escribirlos. Se arregla con brew reinstall ffmpeg.")
+                informar("Dibujando los subtítulos", None)
+                escrito = subtitulos(dichas, carpeta / "subtitulos", plan.dura, pedido.reglas.ancho, pedido.reglas.alto)
         except SinElevenLabs as e:
             log.info(str(e))
             avisos.append(f"El clip salió sin sonido. {e}")
@@ -174,7 +171,10 @@ def armar(
     informar("Exportando el clip", 0)
     al_exportar = lambda parte: informar("Exportando el clip", 100 * parte)  # noqa: E731
     try:
-        clip = exportar(fuente, plan, salida, reglas=pedido.reglas, cancelado=cancelado, sonido=pista, subtitulos=escrito, avance=al_exportar)
+        clip = exportar(
+            fuente, plan, salida, reglas=pedido.reglas, cancelado=cancelado, sonido=pista,
+            subtitulos=escrito.lista if escrito else None, subtitulos_y=escrito.y if escrito else 0, avance=al_exportar,
+        )
     except VideoIlegible as e:
         if escrito is None:
             raise
