@@ -256,6 +256,16 @@ describe.skipIf(!url)('el editor de videos desde Claude', () => {
     const both = await call('list_clips_to_upload');
     expect(both.data.faltan).toBe(1);
     expect(both.data.clips[0].publicaciones_del_producto).toBe(2);
+    expect(both.data.clips[0].va_en).toBe('todas las medidas del producto');
+    // Si el clip está solo en una de las dos medidas, es una subida para esa medida sola.
+    await db.publicationClip.delete({ where: { publicationId_videoId: { publicationId: second.id, videoId: list.data.clips[0].video } } });
+    const one = await call('list_clips_to_upload');
+    expect(one.data.clips.map((c: { va_en: string; codigo: string }) => [c.codigo, c.va_en])).toEqual([['MLA1110001', 'solo la medida de esta publicación']]);
+    await db.publicationClip.create({ data: { publicationId: second.id, videoId: list.data.clips[0].video } });
+    // Subido solo para la medida 060: la otra sigue pendiente.
+    await call('mark_clip_uploaded', { publicacion: 'MLA1110002', video: list.data.clips[0].video, solo_esta_medida: true });
+    expect((await call('list_clips_to_upload')).data.clips.map((c: { codigo: string }) => c.codigo)).toEqual(['MLA1110001']);
+    await call('mark_clip_uploaded', { publicacion: 'MLA1110002', video: list.data.clips[0].video, subido: false, solo_esta_medida: true });
     // Anotarlo como subido lo saca de la lista en las dos; desmarcarlo lo devuelve.
     const marked = await call('mark_clip_uploaded', { publicacion: 'MLA1110001', video: list.data.clips[0].video });
     expect(marked.data).toMatchObject({ subido: true, faltan: 0 });

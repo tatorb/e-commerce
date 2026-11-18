@@ -1,3 +1,6 @@
+import { ClipUploadList } from '@/components/clips/ClipUploadList';
+import { clipRows } from '@/components/clips/rows';
+import { offerApprovedClips, pendingClipUploads } from '@/lib/clip-uploads';
 import Link from 'next/link';
 import { loadProductOptions } from '@/lib/product-options';
 import { ListChecks } from 'lucide-react';
@@ -47,11 +50,14 @@ export default async function PipelinePage({
   const kinds = parseKinds(tipo);
   const toPushView = vista === 'por-subir';
   // Por subir mira todas las publicaciones de la cuenta: se carga solo en su pestaña.
-  const [all, stores, toPush, compatibilities, questions, options] = await Promise.all([
+  // Los clips aprobados antes de que entraran a Por subir se ofrecen acá, una sola vez.
+  if (toPushView) await offerApprovedClips(prisma, account.id);
+  const [all, stores, toPush, compatibilities, clips, questions, options] = await Promise.all([
     toPushView ? Promise.resolve([]) : listBoard(account.id),
     listStores(account.id),
     toPushView ? listToPush(account.id) : Promise.resolve([]),
     toPushView ? listCompatibilitiesToPush(prisma, account.id) : Promise.resolve([]),
+    toPushView ? pendingClipUploads(prisma, account.id) : Promise.resolve([]),
     unansweredSummary(account.id),
     loadProductOptions(prisma, account.id),
   ]);
@@ -109,7 +115,7 @@ export default async function PipelinePage({
             href: key ? `?vista=${key}` : '?',
             label,
             active: (key === 'por-subir') === toPushView,
-            count: key === 'por-subir' && toPushView ? toPush.length + compatibilities.length : null,
+            count: key === 'por-subir' && toPushView ? toPush.length + compatibilities.length + clips.length : null,
           }))}
         />
         {toPushView ? (
@@ -120,10 +126,22 @@ export default async function PipelinePage({
             </p>
             {toPush.length > 0 ? (
               <ToPushList accountSlug={account.slug} rows={toPush} />
-            ) : compatibilities.length === 0 ? (
+            ) : compatibilities.length === 0 && clips.length === 0 ? (
               <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">
                 No hay cambios para subir: todo lo de la app ya está en el canal.
               </div>
+            ) : null}
+            {clips.length > 0 ? (
+              <>
+                <div className="space-y-1 pt-2">
+                  <h2 className="text-base font-semibold">Clips</h2>
+                  <p className="text-sm text-muted-foreground">
+                    Los clips aprobados y elegidos que todavía no están en el canal. Mercado Libre no deja subirlos desde la app a las cuentas locales: se
+                    suben desde tu Chrome, con la extensión de Studio MRB o a mano. Va uno por producto, o uno por medida si cada medida tiene el suyo.
+                  </p>
+                </div>
+                <ClipUploadList accountSlug={account.slug} clips={clipRows(clips)} />
+              </>
             ) : null}
             {compatibilities.length > 0 ? (
               <>

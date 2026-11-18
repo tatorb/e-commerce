@@ -1,3 +1,6 @@
+import { ClipUploadList } from '@/components/clips/ClipUploadList';
+import { clipRows } from '@/components/clips/rows';
+import { pendingClipUploads } from '@/lib/clip-uploads';
 import Link from 'next/link';
 import { loadProductOptions } from '@/lib/product-options';
 import { notFound, redirect } from 'next/navigation';
@@ -155,6 +158,8 @@ export default async function PipelineStepPage({
   // Lo que usa el paso que se mira, pedido todo junto: con la base lejos, cada
   // consulta en fila suma una ida y vuelta.
   const canTask = can(user.access, 'tareas', 'write');
+  // En Publicación, los clips del producto que falta subir al canal.
+  const pendingClips = viewing === 'PUBLISH' ? await pendingClipUploads(prisma, account.id, pub.productId) : [];
   const [ctx, info, images, channel, faces, media, create, videos, description, qa, price, decision, tasks, people, stockPlans, factsOf, family, cover, textImage, notes] = await Promise.all([
     // Información y Título usan la ficha, la competencia y lo leído del buscador.
     viewing === 'INFO' || viewing === 'TITLE' ? loadTitleContext(prisma, account.id, pub.id) : null,
@@ -494,7 +499,7 @@ export default async function PipelineStepPage({
         ) : media && viewing === 'MEDIA' ? (
           <SectionCard
             title="Fotos y videos de la publicación"
-            description={`Arriba marcás qué fotos y videos van${media.measures.length > 0 ? ' y en qué medidas' : ''}; abajo los ordenás. La primera foto es la portada. Lo que guardes queda en el borrador hasta que lo subas a ${media.channelName}.${media.clip ? ` Los videos que van son los ${media.clip.name}s, y se suben a mano desde el paso Videos.` : ''}`}
+            description={`Arriba marcás qué fotos y videos van${media.measures.length > 0 ? ' y en qué medidas' : ''}; abajo los ordenás. La primera foto es la portada. Lo que guardes queda en el borrador hasta que lo subas a ${media.channelName}.${media.clip ? ` Los videos que van son los ${media.clip.name}s, y se suben desde Por subir o desde el paso Publicación.` : ''}`}
           >
             <SectionBody>
               <MediaOrganizer accountSlug={account.slug} publicationId={pub.id} sources={media} />
@@ -624,6 +629,13 @@ export default async function PipelineStepPage({
               url={pub.url}
             />
             {faces ? <PendingChangesCard accountSlug={account.slug} faces={faces} campaigns={pendingCampaignTexts} /> : null}
+            {pendingClips.length > 0 ? (
+              <SectionCard title="Clips sin subir" description="Los clips aprobados y elegidos de este producto que todavía no están en el canal. Se suben desde acá o desde Por subir.">
+                <SectionBody>
+                  <ClipUploadList accountSlug={account.slug} clips={clipRows(pendingClips)} />
+                </SectionBody>
+              </SectionCard>
+            ) : null}
           </>
         ) : viewing ? (
           <Card>

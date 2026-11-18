@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { cookies } from 'next/headers';
-import { AlignLeft, BellRing, Calculator, Camera, CarFront, ClipboardList, Clapperboard, DollarSign, History, Image as ImageIcon, KanbanSquare, ListChecks, ListTodo, MessageCircleQuestion, MessageSquareText, Package, PlugZap, Receipt, RefreshCw, Shapes, ShieldCheck, SlidersHorizontal, TrendingUp, Type, Upload, Users } from 'lucide-react';
+import { AlignLeft, BellRing, Calculator, Camera, CarFront, ClipboardList, DollarSign, History, Image as ImageIcon, KanbanSquare, ListChecks, ListTodo, MessageCircleQuestion, MessageSquareText, Package, PlugZap, Receipt, RefreshCw, Shapes, ShieldCheck, SlidersHorizontal, TrendingUp, Type, Upload, Users } from 'lucide-react';
 import { NavLink } from '@/components/dashboard/NavLink';
 import { SidebarShell } from '@/components/dashboard/SidebarShell';
 import { SidebarToggle } from '@/components/dashboard/SidebarToggle';
@@ -27,7 +27,6 @@ export async function Sidebar({
   shipments = 0,
   sync = 0,
   unread = 0,
-  clips = 0,
   className,
 }: {
   user: CurrentUser;
@@ -44,8 +43,6 @@ export async function Sidebar({
   shipments?: number;
   // Publicaciones con datos para elegir entre la app y el canal, fuera del pipeline.
   sync?: number;
-  // Clips aprobados que falta subir a mano al canal.
-  clips?: number;
   // Notificaciones sin leer, para la campanita.
   unread?: number;
   className?: string;
@@ -143,11 +140,6 @@ export async function Sidebar({
           {sees('pipeline') ? (
             <NavLink href={`${accountHome}/simulador-precio`} label="Simulador de precio">
               <Calculator className="h-4 w-4" />
-            </NavLink>
-          ) : null}
-          {sees('pipeline') ? (
-            <NavLink href={`${accountHome}/clips-por-subir`} label="Clips por subir" badge={clips}>
-              <Clapperboard className="h-4 w-4" />
             </NavLink>
           ) : null}
           {sees('preguntas') ? (

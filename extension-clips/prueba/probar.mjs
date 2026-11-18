@@ -23,11 +23,22 @@ const fila = (opcion = 'Crear video', href = SUBIDA) => `
   <div><button class="sll-list-row-secondary-actions-trigger" aria-label="Acciones secundarias" onclick="this.nextElementSibling.hidden=false"></button>
   <ul hidden><li><a class="sll-list-row-secondary-action__label--link" href="https://www.mercadolibre.com.ar/publicar/kit">Publicar en kit</a></li>
   <li><a class="sll-list-row-secondary-action__label--link" target="_self" href="${href}">${opcion}</a></li></ul></div>`;
-const CREAR = `<title>Crear clip con IA</title><h1>Crear video</h1>
+// Un producto con dos medidas, como lo muestra Mercado Libre: una fila general con su flechita y,
+// al desplegarla, una fila por medida con sus códigos y su propio menú (duplicado, uno escondido).
+const menu = (item) => `<button class="sll-list-row-secondary-actions-trigger" style="display:none"></button>
+  <button class="sll-list-row-secondary-actions-trigger" onclick="document.querySelectorAll('ul.menu').forEach((u) => u.remove()); document.body.insertAdjacentHTML('beforeend', '<ul class=menu><li><a class=sll-list-row-secondary-action__label--link href=${SUBIDA.replace('MLA4188931774', item)}>Crear video</a></li></ul>')"></button>`;
+const medida = (id, nombre, codigos, item = id) => `<div id="${id}" class="sll-list-grid-row sll-list-expanded-row__row sll-list-grid-row--item"><h2>${nombre}</h2>
+  ${codigos.map((c) => `<span class="sc-copyable-element__text">#${c}</span>`).join('')}<span class="sc-copyable-element__text">SKU SP-1</span>${menu(item)}</div>`;
+const familia = (medidas) => `<div id="TR1" class="sll-list-grid-row sll-list-grid-row--family">
+  <button class="sll-list-chevron-button__icon" aria-expanded="false" onclick="this.setAttribute('aria-expanded','true'); document.querySelector('#medidas').hidden=false"></button>${menu('MLA900')}</div>
+  <div id="medidas" class="sll-list-expanded-row" hidden>${medidas}</div>`;
+const DOS_MEDIDAS = familia(medida('MLA2265591717', '0,60 mm', ['2265591717', '2273471309']) + medida('MLA2265637921', 'STD', ['2265637921', '2273516303']));
+
+const CREAR = `<title>Crear clip con IA</title><h1>Crear video</h1><input type="checkbox" id="CHECKBOX_SHOW_VIDEO_IN_ALL_VARIANTS" checked>
   <div class="clip-dropzone" role="button">Subir más<input type="file" class="clip-dropzone__file-input" accept=".mp4,.mpeg,.avi,.mov" style="display:none"></div>
   <div class="clip-preview"><div class="clip-preview__pill">PUBLICADO</div></div>
   <div id="paso"></div>
-  <script>document.querySelector('input').addEventListener('change', async (e) => {
+  <script>document.querySelector('input[type=file]').addEventListener('change', async (e) => {
     const f = e.target.files[0];
     const h = [...new Uint8Array(await crypto.subtle.digest('SHA-256', await f.arrayBuffer()))].map((b) => b.toString(16).padStart(2, '0')).join('');
     // Como el de verdad: primero un círculo girando, y recién después lo que sigue.
@@ -93,7 +104,7 @@ const pagina = await contexto.newPage();
 await pagina.goto(`${APP}/a/insur/clips-por-subir`);
 await pagina.evaluate(() => postMessage({ origen: 'mrb-app', tipo: 'hola' }, location.origin));
 await pagina.waitForFunction(() => window.avances.some((a) => a.tipo === 'hola'), null, { timeout: 10000 });
-comprobar('la app ve que la extensión está', (await pagina.evaluate(() => window.avances.find((a) => a.tipo === 'hola').version)) === '0.2.0');
+comprobar('la app ve que la extensión está', (await pagina.evaluate(() => window.avances.find((a) => a.tipo === 'hola').version)) === '0.3.0');
 
 async function correr(codigo) {
   await pagina.evaluate(() => (window.avances = []));
@@ -127,6 +138,35 @@ async function correr(codigo) {
   comprobar('si el video no aparece en Tus videos, no lo da por subido', /no sumó el video/.test(fin.error ?? '') && fin.subido !== true, JSON.stringify(fin).slice(0, 200));
   crear = CREAR;
   await ml.close();
+}
+// 1c. Un producto con medidas: despliega, entra por la medida de la publicación y, si el clip es solo de esa medida, destilda la casilla.
+{
+  listado = DOS_MEDIDAS;
+  const antes = pedidosML.length;
+  await pagina.evaluate(() => (window.subirSolo = (codigo) => postMessage({ origen: 'mrb-app', tipo: 'subir', publicacion: 'pub123456', video: 'vid123456', codigo, nombre: 'clip.mp4', tipoDeArchivo: 'video/mp4', todasLasVariantes: false }, location.origin)));
+  await pagina.evaluate(() => (window.avances = []));
+  const espera = contexto.waitForEvent('page');
+  await pagina.evaluate(() => window.subirSolo('MLA2273516303'));
+  const ml = await espera;
+  await pagina.waitForFunction(() => window.avances.some((a) => a.tipo === 'avance' && (a.error || a.listo)), null, { timeout: 60000 });
+  const fin = await pagina.evaluate(() => window.avances.at(-1));
+  comprobar('con medidas, sube por la medida de la publicación', fin.subido === true && pedidosML.slice(antes).some((p) => p.includes('item_id=MLA2265637921')) && !pedidosML.slice(antes).some((p) => p.includes('item_id=MLA2265591717')), JSON.stringify(fin).slice(0, 200) + pedidosML.slice(antes).join(' , '));
+  comprobar('y destilda «todas las variantes» cuando el clip es de una sola medida', (await ml.locator('#CHECKBOX_SHOW_VIDEO_IN_ALL_VARIANTS').isChecked()) === false);
+  await ml.close();
+  // Con el clip para todas las medidas, la casilla queda tildada.
+  const r = await correr('MLA2265591717');
+  comprobar('y la deja tildada cuando es para todas', r.avances.at(-1).subido === true && (await r.ml.locator('#CHECKBOX_SHOW_VIDEO_IN_ALL_VARIANTS').isChecked()) === true);
+  await r.ml.close();
+  // El link de la medida apunta a una publicación de otra medida: no sigue.
+  listado = familia(medida('MLA2265591717', '0,60 mm', ['2265591717']) + medida('MLA2265637921', 'STD', ['2265637921'], 'MLA2265591717'));
+  const mal = await correr('MLA2265637921');
+  comprobar('si el link de la medida apunta a otra medida, se frena', /otra medida/.test(mal.avances.at(-1).error ?? ''), JSON.stringify(mal.avances.at(-1)).slice(0, 200));
+  await mal.ml.close();
+  // La publicación no está en ninguna medida.
+  listado = DOS_MEDIDAS;
+  const no = await correr('MLA7777777');
+  comprobar('si ninguna medida tiene la publicación, se frena', /hay 0 con la publicación/.test(no.avances.at(-1).error ?? ''));
+  await no.ml.close();
 }
 // 2. Dos publicaciones en el listado: no elige.
 {

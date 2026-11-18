@@ -5,6 +5,23 @@ const MRB = {
   OPCION: 'a.sll-list-row-secondary-action__label--link',
   TEXTO_OPCION: 'Crear video',
   ARCHIVO: 'input.clip-dropzone__file-input',
+  // Un producto con varias medidas: la flechita que las despliega y la fila de cada medida.
+  // Cada fila de medida lista los códigos de sus publicaciones, como #2265637921.
+  FLECHA: 'button.sll-list-chevron-button__icon',
+  MEDIDA: '.sll-list-expanded-row__row',
+  CODIGO_EN_FILA: '.sc-copyable-element__text',
+  TODAS: '#CHECKBOX_SHOW_VIDEO_IN_ALL_VARIANTS',
+
+  visible(e) {
+    const r = e.getBoundingClientRect();
+    const s = getComputedStyle(e);
+    return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
+  },
+
+  // Los códigos de publicación que lista una fila, sin el numeral: ["2265637921", ...].
+  codigosDe(fila) {
+    return [...fila.querySelectorAll(MRB.CODIGO_EN_FILA)].map((e) => e.textContent.trim()).filter((t) => /^#\d+$/.test(t)).map((t) => t.slice(1));
+  },
   // Cada video de "Tus videos".
   VIDEO: '.clip-preview',
 

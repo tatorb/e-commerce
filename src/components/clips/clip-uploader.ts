@@ -10,7 +10,10 @@ import { markClipUploadedAction } from '@/app/a/[cuenta]/pipeline/video-actions'
 // el video, lo anota como subido.
 
 /** Lo que hace falta para pedir una subida. */
-export type ClipUploadAsk = { publicationId: string; videoId: string; externalId: string; fileName: string; mimeType: string };
+export type ClipUploadAsk = { publicationId: string; videoId: string; externalId: string; fileName: string; mimeType: string; allMeasures: boolean };
+
+/** La clave de una subida: el mismo clip puede subirse una vez por medida. */
+export const uploadKey = (c: { publicationId: string; videoId: string }) => `${c.publicationId}:${c.videoId}`;
 // Los informes se juntan, para copiarlos si algo no sale.
 export type ClipProgress = { text: string | null; error: string | null; done: boolean; uploaded: boolean; reports: unknown[] };
 
@@ -21,7 +24,7 @@ let state: State = { extension: null, progress: {} };
 const EMPTY: State = { extension: null, progress: {} };
 const listeners = new Set<() => void>();
 // Qué cuenta y qué hacer al terminar, por cada subida pedida desde esta pestaña.
-const asked = new Map<string, { accountSlug: string; onUploaded?: () => void }>();
+const asked = new Map<string, { accountSlug: string; allMeasures: boolean; onUploaded?: () => void }>();
 let listening = false;
 
 function set(next: State) {
@@ -30,7 +33,7 @@ function set(next: State) {
 }
 
 const BLANK: ClipProgress = { text: null, error: null, done: false, uploaded: false, reports: [] };
-const setProgress = (videoId: string, p: Partial<ClipProgress>) => set({ ...state, progress: { ...state.progress, [videoId]: { ...(state.progress[videoId] ?? BLANK), ...p } } });
+const setProgress = (key: string, p: Partial<ClipProgress>) => set({ ...state, progress: { ...state.progress, [key]: { ...(state.progress[key] ?? BLANK), ...p } } });
 
 function hear(e: MessageEvent<FromExtension>) {
   if (e.source !== window || e.origin !== window.location.origin || e.data?.origen !== 'mrb-clips') return;
@@ -40,20 +43,20 @@ function hear(e: MessageEvent<FromExtension>) {
     return;
   }
   if (d.tipo !== 'avance' || !d.publicacion || !d.video) return;
-  const videoId = d.video;
-  const before = state.progress[videoId];
-  setProgress(videoId, { text: d.texto ?? null, error: d.error ?? null, done: d.listo === true, reports: d.informe ? [...(before?.reports ?? []), d.informe] : (before?.reports ?? []) });
+  const key = uploadKey({ publicationId: d.publicacion, videoId: d.video });
+  const before = state.progress[key];
+  setProgress(key, { text: d.texto ?? null, error: d.error ?? null, done: d.listo === true, reports: d.informe ? [...(before?.reports ?? []), d.informe] : (before?.reports ?? []) });
   if (d.subido !== true) return;
   // Mercado Libre ya tiene el video: se anota solo.
-  const from = asked.get(videoId);
+  const from = asked.get(key);
   if (!from) return;
-  markClipUploadedAction(from.accountSlug, d.publicacion, videoId, true).then(
+  markClipUploadedAction(from.accountSlug, d.publicacion, d.video, true, !from.allMeasures).then(
     (r) => {
-      if (!r.ok) return setProgress(videoId, { error: `Se subió a Mercado Libre, pero no se pudo anotar acá: ${r.error} Tocá Ya lo subí.` });
-      setProgress(videoId, { uploaded: true });
+      if (!r.ok) return setProgress(key, { error: `Se subió a Mercado Libre, pero no se pudo anotar acá: ${r.error} Tocá Ya lo subí.` });
+      setProgress(key, { uploaded: true });
       from.onUploaded?.();
     },
-    () => setProgress(videoId, { error: 'Se subió a Mercado Libre, pero se cortó la conexión con la app al anotarlo. Tocá Ya lo subí.' }),
+    () => setProgress(key, { error: 'Se subió a Mercado Libre, pero se cortó la conexión con la app al anotarlo. Tocá Ya lo subí.' }),
   );
 }
 
@@ -81,10 +84,20 @@ export const hasClipExtension = () => state.extension !== null;
 
 /** Le pide a la extensión que suba el clip. `onUploaded` corre cuando Mercado Libre ya lo tiene y quedó anotado. */
 export function askClipUpload(accountSlug: string, ask: ClipUploadAsk, onUploaded?: () => void) {
-  asked.set(ask.videoId, { accountSlug, onUploaded });
-  setProgress(ask.videoId, { text: 'Pidiendo la subida a la extensión…', error: null, done: false, uploaded: false, reports: [] });
+  const key = uploadKey(ask);
+  asked.set(key, { accountSlug, allMeasures: ask.allMeasures, onUploaded });
+  setProgress(key, { text: 'Pidiendo la subida a la extensión…', error: null, done: false, uploaded: false, reports: [] });
   window.postMessage(
-    { origen: 'mrb-app', tipo: 'subir', publicacion: ask.publicationId, video: ask.videoId, codigo: ask.externalId, nombre: ask.fileName, tipoDeArchivo: ask.mimeType },
+    {
+      origen: 'mrb-app',
+      tipo: 'subir',
+      publicacion: ask.publicationId,
+      video: ask.videoId,
+      codigo: ask.externalId,
+      nombre: ask.fileName,
+      tipoDeArchivo: ask.mimeType,
+      todasLasVariantes: ask.allMeasures,
+    },
     window.location.origin,
   );
 }

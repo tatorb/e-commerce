@@ -42,6 +42,8 @@ async function empezar(pedido, sender) {
     video: pedido.video,
     nombre: String(pedido.nombre ?? 'clip.mp4').slice(0, 200),
     tipoDeArchivo: String(pedido.tipoDeArchivo ?? 'video/mp4').slice(0, 60),
+    // Si el video se ve en todas las medidas del producto o solo en la de esta publicación.
+    todas: pedido.todasLasVariantes !== false,
     etapa: 'listado',
   });
   return { ok: true };

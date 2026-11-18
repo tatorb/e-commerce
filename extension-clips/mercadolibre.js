@@ -32,17 +32,37 @@
       await decir(`Buscando la publicación ${trabajo.codigo}…`);
       if (!(await MRB.esperar(MRB.MENU))) return await frenar(MRB.pidePersona() ?? `La publicación ${trabajo.codigo} no aparece en tu listado de Mercado Libre.`);
       await MRB.pausa(800);
-      const filas = document.querySelectorAll(MRB.MENU);
+      const numero = trabajo.codigo.replace(/^[A-Z]+/, '');
+      // Lo que se ve antes de desplegar nada: tiene que ser una sola fila, la del producto.
+      const arriba = [...document.querySelectorAll(MRB.MENU)].filter((b) => MRB.visible(b) && !b.closest(MRB.MEDIDA));
       // Con más de una fila no se sabe cuál es: mejor no tocar.
-      if (filas.length !== 1) return await frenar(`El listado mostró ${filas.length} publicaciones al buscar ${trabajo.codigo}: no se sabe a cuál subirle el clip.`);
-      filas[0].click();
+      if (arriba.length !== 1) return await frenar(`El listado mostró ${arriba.length} publicaciones al buscar ${trabajo.codigo}: no se sabe a cuál subirle el clip.`);
+      let boton = arriba[0];
+      let codigos = null;
+      // Un producto con varias medidas: se despliega y se entra por la medida que tiene esta publicación.
+      const flecha = [...document.querySelectorAll(MRB.FLECHA)].find(MRB.visible);
+      if (flecha) {
+        if (flecha.getAttribute('aria-expanded') !== 'true') flecha.click();
+        await MRB.esperar(MRB.MEDIDA, 15000);
+        await MRB.pausa(800);
+        const medidas = [...document.querySelectorAll(MRB.MEDIDA)].filter((f) => f.id === trabajo.codigo || MRB.codigosDe(f).includes(numero));
+        if (medidas.length !== 1) return await frenar(`Entre las medidas del producto hay ${medidas.length} con la publicación ${trabajo.codigo}: no se sabe a cuál subirle el clip.`);
+        codigos = MRB.codigosDe(medidas[0]);
+        boton = [...medidas[0].querySelectorAll(MRB.MENU)].find(MRB.visible);
+        if (!boton) return await frenar('La medida no tiene su menú de opciones. Puede que Mercado Libre haya cambiado la pantalla: no se tocó nada.');
+      }
+      boton.click();
       await MRB.esperar(MRB.OPCION, 10000);
-      const opcion = [...document.querySelectorAll(MRB.OPCION)].find((a) => a.textContent.trim() === MRB.TEXTO_OPCION);
-      if (!opcion) return await frenar(`El menú de la publicación no ofrece «${MRB.TEXTO_OPCION}». Puede que Mercado Libre haya cambiado la pantalla: no se tocó nada.`);
-      const destino = new URL(opcion.getAttribute('href') ?? '', location.href);
-      if (!/(^|\.)mercadolibre\.com\.ar$/.test(destino.hostname) || !destino.pathname.includes('/video/creator/upload') || !destino.searchParams.get('item_id')) {
+      await MRB.pausa(300);
+      const opciones = [...document.querySelectorAll(MRB.OPCION)].filter((a) => MRB.visible(a) && a.textContent.trim() === MRB.TEXTO_OPCION);
+      if (opciones.length !== 1) return await frenar(`El menú de la publicación no ofrece «${MRB.TEXTO_OPCION}». Puede que Mercado Libre haya cambiado la pantalla: no se tocó nada.`);
+      const destino = new URL(opciones[0].getAttribute('href') ?? '', location.href);
+      const item = destino.searchParams.get('item_id') ?? '';
+      if (!/(^|\.)mercadolibre\.com\.ar$/.test(destino.hostname) || !destino.pathname.includes('/video/creator/upload') || !item) {
         return await frenar('El link de Crear video no lleva a la subida de videos. Puede que Mercado Libre haya cambiado la pantalla: no se tocó nada.');
       }
+      // En un producto con medidas, el link tiene que ser de una publicación de esa medida.
+      if (codigos && !codigos.includes(item.replace(/^[A-Z]+/, ''))) return await frenar('El link de Crear video apunta a otra medida del producto: no se tocó nada.');
       await pedir({ tipo: 'etapa', etapa: 'crear' });
       location.assign(destino.href);
       return;
@@ -52,6 +72,15 @@
       await decir('Preparando el clip…');
       const campo = await MRB.esperar(MRB.ARCHIVO);
       if (!campo) return await frenar(MRB.pidePersona() ?? 'La pantalla Crear video no tiene dónde elegir el archivo. Puede que Mercado Libre la haya cambiado: no se tocó nada.');
+      // El clip se ve en todas las medidas del producto, o solo en esta.
+      const casilla = document.querySelector(MRB.TODAS);
+      if (casilla && casilla.checked !== trabajo.todas) {
+        casilla.click();
+        await MRB.pausa(500);
+      }
+      if (casilla ? casilla.checked !== trabajo.todas : !trabajo.todas) {
+        return await frenar('No se pudo elegir si el video se ve en todas las medidas o solo en esta. Puede que Mercado Libre haya cambiado la pantalla: no se subió nada.');
+      }
       const antes = MRB.mirar();
       const videosAntes = document.querySelectorAll(MRB.VIDEO).length;
 

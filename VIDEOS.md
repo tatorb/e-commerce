@@ -82,19 +82,15 @@ bash configurar.sh
 
 ## Subir el clip a Mercado Libre
 
-Mercado Libre no deja subir clips desde la app a las cuentas locales. Se lo preguntamos con la conexión de Insur y respondió que la cuenta no tiene permiso: la subida por programa es solo para vendedores internacionales. Tampoco acepta ya videos de YouTube en las publicaciones, los desactivó en septiembre de 2024. Por eso el clip se sube a mano, pero con todo a un clic:
+El clip sigue la misma lógica que el resto del pipeline: se aprueba, queda en **Por subir** y lo subís cuando quieras. Aprobar no sube nada.
 
-1. Al aprobar un clip, queda elegido solo en las publicaciones activas del producto que no tenían clip.
-2. En el menú, **Clips por subir** muestra todo lo que falta, con un número.
-3. De cada clip: **Bajar el clip**, **Abrir en Mercado Libre** (lleva a esa publicación en tu listado, donde en el menú de opciones está subir el video) y **Ya lo subí**, que lo saca de la lista.
+1. Al aprobar un clip, queda elegido en las publicaciones activas del producto que no tenían clip. Qué clips van y en qué medidas se cambia en **Organización de multimedia**.
+2. En el Pipeline, la pestaña **Por subir** tiene la sección **Clips**. También aparecen en el paso **Publicación** de cada publicación.
+3. Va una subida por producto: Mercado Libre muestra el mismo video en todas sus medidas y formas de cobro. Si un clip está elegido solo en algunas medidas, va una subida por medida y se ve solo en esa.
+
+Mercado Libre no deja subir clips por programa a las cuentas locales (se lo preguntamos con la conexión de Insur y respondió que la cuenta no tiene permiso) y desde septiembre de 2024 tampoco acepta videos de YouTube. Por eso la subida sale de tu Chrome, con la extensión de Studio MRB: el botón **Subir a Mercado Libre** abre la publicación con tu sesión de siempre, despliega el producto, entra por **Crear video** de la medida que corresponde y carga el archivo. Cuando Mercado Libre suma el video a Tus videos queda en revisión, y la app lo marca sola como subido. Cómo instalarla está en `extension-clips/LEEME.md`. Sin la extensión, cada clip tiene **Bajar el clip**, **Abrir en Mercado Libre** y **Ya lo subí**.
 
 Si Mercado Libre algún día habilita el permiso, Claude lo puede comprobar con `check_channel_clips`.
-
-### Con la extensión de Chrome
-
-Con la extensión de Studio MRB instalada, en **Clips por subir** aparece el botón **Subir a Mercado Libre**: abre la publicación en tu Chrome, con tu sesión de siempre, entra por **Crear video** y carga el archivo solo. Cuando Mercado Libre suma el video a Tus videos queda en revisión, y la app lo marca sola como subido. Cómo instalarla y qué hace está en `extension-clips/LEEME.md`.
-
-Se probó primero un Chrome aparte manejado por la Mac (`probar_subida.sh`), pero Mercado Libre no deja iniciar sesión ahí. Por eso la subida va por la extensión.
 
 ## En automático
 

@@ -8,7 +8,7 @@ import { StatusText } from '@/components/pipeline/StatusText';
 import { useStepAction } from '@/components/pipeline/useStepAction';
 import { VideoFacts, VideoThumb } from '@/components/pipeline/videos/VideoCard';
 import { markClipUploadedAction } from '@/app/a/[cuenta]/pipeline/video-actions';
-import { askClipUpload, useClipUploader } from './clip-uploader';
+import { askClipUpload, uploadKey, useClipUploader } from './clip-uploader';
 import { ClipUploadStatus } from './ClipUploadStatus';
 
 // La lista de clips que falta subir al canal. Con la extensión de Chrome de
@@ -23,6 +23,8 @@ export type ClipUploadRow = {
   product: string;
   externalId: string;
   publications: number;
+  allMeasures: boolean;
+  measure: string | null;
   channelLink: string;
   fileName: string;
   mimeType: string;
@@ -36,7 +38,7 @@ export function ClipUploadList({ accountSlug, clips }: { accountSlug: string; cl
   const { extension, progress } = useClipUploader();
 
   if (clips.length === 0) {
-    return <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">No hay clips por subir. Cuando apruebes un clip, aparece acá.</p>;
+    return null;
   }
   return (
     <div className="space-y-3">
@@ -48,15 +50,15 @@ export function ClipUploadList({ accountSlug, clips }: { accountSlug: string; cl
       </p>
       <ul className="space-y-3">
         {clips.map((c) => {
-          const p = progress[c.videoId];
+          const p = progress[uploadKey(c)];
           return (
             <Row
-              key={`${c.publicationId}:${c.videoId}`}
+              key={uploadKey(c)}
               accountSlug={accountSlug}
               clip={c}
               extension={extension !== null}
               working={p !== undefined && !p.done && !p.error}
-              onUpload={() => askClipUpload(accountSlug, { publicationId: c.publicationId, videoId: c.videoId, externalId: c.externalId, fileName: c.fileName, mimeType: c.mimeType }, () => router.refresh())}
+              onUpload={() => askClipUpload(accountSlug, { publicationId: c.publicationId, videoId: c.videoId, externalId: c.externalId, fileName: c.fileName, mimeType: c.mimeType, allMeasures: c.allMeasures }, () => router.refresh())}
             />
           );
         })}
@@ -77,7 +79,7 @@ function Row({ accountSlug, clip, extension, working, onUpload }: { accountSlug:
           </Link>
           <p className="text-xs text-muted-foreground">
             {clip.externalId} · {clip.product}
-            {clip.publications > 1 ? ` · se ve en sus ${clip.publications} publicaciones` : ''}
+            {clip.allMeasures ? (clip.publications > 1 ? ' · se ve en todas sus medidas' : '') : ` · solo en la medida ${clip.measure ?? 'de esta publicación'}`}
           </p>
           <p className="break-all text-xs text-muted-foreground">{clip.fileName}</p>
           <VideoFacts video={{ durationMs: clip.durationMs, width: null, height: null, size: clip.size }} />
@@ -104,7 +106,7 @@ function Row({ accountSlug, clip, extension, working, onUpload }: { accountSlug:
           <Button
             size="sm"
             variant={extension ? 'outline' : 'default'}
-            onClick={() => action.run(() => markClipUploadedAction(accountSlug, clip.publicationId, clip.videoId, true), undefined, 'done')}
+            onClick={() => action.run(() => markClipUploadedAction(accountSlug, clip.publicationId, clip.videoId, true, !clip.allMeasures), undefined, 'done')}
             pending={action.running('done')}
             disabled={action.pending}
           >
@@ -112,7 +114,7 @@ function Row({ accountSlug, clip, extension, working, onUpload }: { accountSlug:
           </Button>
           <StatusText status={action.status} />
         </div>
-        <ClipUploadStatus videoId={clip.videoId} />
+        <ClipUploadStatus uploadKey={uploadKey(clip)} />
       </div>
     </li>
   );

@@ -268,7 +268,7 @@ export function MediaOrganizer({ accountSlug, publicationId, sources }: { accoun
         clips: videosDirty ? state.clips : undefined,
       },
       'save',
-      `Guardado. Las fotos quedan en el borrador y se suben a ${channelName} desde la publicación o desde Por subir.${videosDirty && clip ? ` Los ${clip.name}s se suben a mano, desde el paso Videos.` : ''}`,
+      `Guardado. Las fotos quedan en el borrador y se suben a ${channelName} desde la publicación o desde Por subir.${videosDirty && clip ? ` Los ${clip.name}s se suben desde Por subir.` : ''}`,
     );
   }
 

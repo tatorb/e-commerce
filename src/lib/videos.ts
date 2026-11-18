@@ -345,15 +345,18 @@ export async function moveClip(db: PrismaClient, args: { accountId: string; publ
 /**
  * Anota que un clip ya se subió al canal, o lo desmarca. El canal lleva un
  * video por producto, que se ve en todas sus medidas y formas de cobro: queda
- * anotado en todas las publicaciones del producto que lo tienen elegido.
+ * anotado en todas las publicaciones del producto que lo tienen elegido, o
+ * solo en las de la medida de esta publicación si se subió para esa medida.
  */
 export async function markClipUploaded(
   db: PrismaClient,
-  args: { accountId: string; publicationId: string; videoId: string; uploaded: boolean; userId: string | null; now?: Date },
+  args: { accountId: string; publicationId: string; videoId: string; uploaded: boolean; userId: string | null; now?: Date; onlyMeasure?: boolean },
 ): Promise<void> {
   const pub = await publicationFor(db, args.accountId, args.publicationId);
+  // Subido para una sola medida: se anota en las publicaciones de esa medida, sus formas de cobro.
+  const measure = args.onlyMeasure ? (await db.publication.findUniqueOrThrow({ where: { id: pub.id }, select: { variantKey: true } })).variantKey : undefined;
   const r = await db.publicationClip.updateMany({
-    where: { videoId: args.videoId, publication: { productId: pub.productId } },
+    where: { videoId: args.videoId, publication: { productId: pub.productId, ...(measure !== undefined ? { variantKey: measure } : {}) } },
     data: args.uploaded ? { uploadedAt: args.now ?? new Date(), uploadedById: args.userId } : { uploadedAt: null, uploadedById: null },
   });
   if (r.count === 0) throw new VideoError('Primero elegí el clip.');

@@ -59,6 +59,10 @@ export type ClipUpload = {
   externalId: string;
   // En cuántas publicaciones del producto está elegido: se sube una sola vez.
   publications: number;
+  // Si el clip va en todas las medidas del producto, o solo en la de esta publicación.
+  allMeasures: boolean;
+  // La medida, cuando va en una sola.
+  measure: string | null;
   storeName: string;
   // La publicación en el listado del vendedor, donde está la opción de subir el video.
   channelLink: string;
@@ -95,53 +99,75 @@ const pending = (accountId: string) =>
   ({ uploadedAt: null, video: { goneAt: null }, publication: { ...LIVE, product: { accountId } } }) satisfies Prisma.PublicationClipWhereInput;
 
 /**
- * Cuántos clips faltan subir en la cuenta, para el menú. Mercado Libre lleva
- * un video por producto, que se ve en todas sus medidas y formas de cobro: un
- * clip elegido en varias publicaciones del producto es una sola subida.
+ * Los clips que faltan subir, los más viejos primero. Mercado Libre lleva el
+ * video por producto y deja mostrarlo en todas sus medidas o en una sola:
+ * - un clip elegido en todas las medidas activas del producto es una sola
+ *   subida, para todas;
+ * - un clip elegido solo en algunas es una subida por medida.
+ * Las formas de cobro de una medida comparten el video. De las publicaciones
+ * de cada grupo se muestra una, la que está en el pipeline si hay.
+ * Con `productId`, solo los de ese producto.
  */
-export async function clipUploadCount(db: Db, accountId: string): Promise<number> {
-  return (await db.publicationClip.findMany({ where: pending(accountId), distinct: ['videoId'], select: { videoId: true } })).length;
-}
-
-/**
- * Los clips que faltan subir, uno por producto y clip, los más viejos primero.
- * De las publicaciones del producto que lo tienen elegido se muestra una, la
- * que está en el pipeline si hay: en el listado de Mercado Libre cualquiera de
- * ellas lleva a la misma fila, la del producto.
- */
-export async function pendingClipUploads(db: Db, accountId: string): Promise<ClipUpload[]> {
+export async function pendingClipUploads(db: Db, accountId: string, productId?: string): Promise<ClipUpload[]> {
   const rows = await db.publicationClip.findMany({
-    where: pending(accountId),
+    where: { ...pending(accountId), ...(productId ? { publication: { ...LIVE, productId, product: { accountId } } } : {}) },
     orderBy: [{ chosenAt: 'asc' }, { publicationId: 'asc' }, { position: 'asc' }],
     select: {
       publicationId: true,
       videoId: true,
       chosenAt: true,
       video: { select: { name: true, mimeType: true, driveFileId: true, webViewLink: true, durationMs: true, size: true } },
-      publication: { select: { title: true, externalId: true, url: true, pipelineStatus: true, store: { select: { name: true } }, product: { select: { name: true } } } },
+      publication: {
+        select: { title: true, externalId: true, url: true, pipelineStatus: true, variantKey: true, productId: true, store: { select: { name: true } }, product: { select: { name: true } } },
+      },
     },
   });
+  if (rows.length === 0) return [];
+  // Las medidas activas de cada producto, para saber si un clip las cubre todas.
+  const live = await db.publication.findMany({
+    where: { ...LIVE, productId: { in: [...new Set(rows.map((r) => r.publication.productId))] } },
+    select: { productId: true, variantKey: true },
+  });
+  const measuresOf = new Map<string, Set<string | null>>();
+  for (const p of live) measuresOf.set(p.productId, (measuresOf.get(p.productId) ?? new Set()).add(p.variantKey));
+
   const byVideo = new Map<string, typeof rows>();
   for (const r of rows) byVideo.set(r.videoId, [...(byVideo.get(r.videoId) ?? []), r]);
-  return [...byVideo.values()].map((group) => {
-    const r = group.find((g) => g.publication.pipelineStatus === 'IN_PIPELINE') ?? group[0];
-    return {
-      publicationId: r.publicationId,
-      videoId: r.videoId,
-      title: r.publication.title,
-      product: r.publication.product.name,
-      externalId: r.publication.externalId!,
-      publications: group.length,
-      storeName: r.publication.store.name,
-      channelLink: sellerListingLink(r.publication.externalId!),
-      publicationLink: r.publication.url,
-      fileName: r.video.name,
-      mimeType: r.video.mimeType,
-      downloadLink: driveDownloadLink(r.video.driveFileId),
-      driveLink: r.video.webViewLink,
-      durationMs: r.video.durationMs,
-      size: r.video.size === null ? null : Number(r.video.size),
-      chosenAt: group[0].chosenAt,
-    };
-  });
+  const out: ClipUpload[] = [];
+  for (const group of byVideo.values()) {
+    const all = measuresOf.get(group[0].publication.productId) ?? new Set();
+    const chosen = new Set(group.map((g) => g.publication.variantKey));
+    const covers = [...all].every((m) => chosen.has(m));
+    // Para todas las medidas, una fila; si no, una por medida.
+    const parts = covers ? [group] : [...chosen].map((m) => group.filter((g) => g.publication.variantKey === m));
+    for (const part of parts) {
+      const r = part.find((g) => g.publication.pipelineStatus === 'IN_PIPELINE') ?? part[0];
+      out.push({
+        publicationId: r.publicationId,
+        videoId: r.videoId,
+        title: r.publication.title,
+        product: r.publication.product.name,
+        externalId: r.publication.externalId!,
+        publications: part.length,
+        allMeasures: covers,
+        measure: covers ? null : r.publication.variantKey,
+        storeName: r.publication.store.name,
+        channelLink: sellerListingLink(r.publication.externalId!),
+        publicationLink: r.publication.url,
+        fileName: r.video.name,
+        mimeType: r.video.mimeType,
+        downloadLink: driveDownloadLink(r.video.driveFileId),
+        driveLink: r.video.webViewLink,
+        durationMs: r.video.durationMs,
+        size: r.video.size === null ? null : Number(r.video.size),
+        chosenAt: part[0].chosenAt,
+      });
+    }
+  }
+  return out.sort((x, y) => x.chosenAt.getTime() - y.chosenAt.getTime());
+}
+
+/** Cuántos clips faltan subir en la cuenta. */
+export async function clipUploadCount(db: Db, accountId: string): Promise<number> {
+  return (await pendingClipUploads(db, accountId)).length;
 }

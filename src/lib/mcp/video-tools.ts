@@ -284,7 +284,7 @@ const reviewTool = defineTool({
     if (!edit || edit.status === 'APPROVED') throw new McpToolError(edit ? 'El clip de ese video ya está aprobado.' : 'Ese video no tiene ninguna edición.');
     if (args.decision === 'aprobar') {
       await asToolError(() => approveEdit(ctx.db, { accountId: account.id, editId: edit.id, userId: ctx.userId }));
-      return { estado: 'clip aprobado', clip: edit.clipId, siguiente: 'Quedó elegido en las publicaciones activas del producto que no tenían clip, y en Clips por subir (list_clips_to_upload): hay que subirlo a mano a Mercado Libre. Para sumarlo a una publicación que ya tenía otro clip, usá set_publication_media.' };
+      return { estado: 'clip aprobado', clip: edit.clipId, siguiente: 'Quedó elegido en las publicaciones activas del producto que no tenían clip, y en Por subir (list_clips_to_upload): la persona lo sube a Mercado Libre cuando quiera, desde su Chrome. Para sumarlo a una publicación que ya tenía otro clip, usá set_publication_media.' };
     }
     const r = await asToolError(() => discardEdit(ctx.db, { accountId: account.id, editId: edit.id, userId: ctx.userId }));
     await trashClip(ctx, r.clipFileId);
@@ -465,7 +465,7 @@ const uploadsList = defineTool({
   section: ['pipeline', 'publicaciones'],
   title: 'Ver los clips que falta subir a Mercado Libre',
   description:
-    'Lista los clips aprobados y elegidos que falta subir a mano a Mercado Libre, de las publicaciones activas de la cuenta, como la pantalla Clips por subir. Mercado Libre no deja subirlos por programa a las cuentas locales. Mercado Libre lleva un video por producto, que se ve en todas sus medidas y formas de cobro: hay una fila por producto y clip, aunque esté elegido en varias publicaciones, y se sube una sola vez. De cada uno da el link para bajar el archivo y el link a la publicación en el listado del vendedor, donde está la opción de subir el video. Al aprobar un clip, queda elegido solo en las publicaciones activas del producto que no tienen clip.',
+    'Lista los clips aprobados y elegidos que falta subir a mano a Mercado Libre, de las publicaciones activas de la cuenta, como la sección Clips de Por subir. Mercado Libre no deja subirlos por programa a las cuentas locales. Mercado Libre lleva un video por producto, que se ve en todas sus medidas y formas de cobro: hay una fila por producto y clip, aunque esté elegido en varias publicaciones, y se sube una sola vez. Si el clip está elegido solo en algunas medidas del producto, hay una fila por medida y se sube una vez por medida (va_en lo dice). Aprobar un clip no lo sube: queda en Por subir hasta que la persona lo suba. De cada uno da el link para bajar el archivo y el link a la publicación en el listado del vendedor, donde está la opción de subir el video. Al aprobar un clip, queda elegido solo en las publicaciones activas del producto que no tienen clip.',
   input: z.object({ cuenta: accountArg }),
   readOnly: true,
   async run(ctx, args) {
@@ -478,6 +478,7 @@ const uploadsList = defineTool({
         publicacion: c.publicationId,
         codigo: c.externalId,
         publicaciones_del_producto: c.publications,
+        va_en: c.allMeasures ? 'todas las medidas del producto' : `solo la medida ${c.measure ?? 'de esta publicación'}`,
         titulo: c.title,
         producto: c.product,
         video: c.videoId,
@@ -486,7 +487,7 @@ const uploadsList = defineTool({
         subir_en: c.channelLink,
         elegido: when(c.chosenAt, account),
       })),
-      link_app: `${ctx.baseUrl}/a/${account.slug}/clips-por-subir`,
+      link_app: `${ctx.baseUrl}/a/${account.slug}/pipeline?vista=por-subir`,
     };
   },
 });
@@ -502,12 +503,13 @@ const uploadedTool = defineTool({
     publicacion: publicationArg,
     video: z.string().min(1).describe('El clip: el id que da list_clips_to_upload o get_videos_step.'),
     subido: z.boolean().default(true).describe('true = ya se subió; false = desmarcarlo.'),
+    solo_esta_medida: z.boolean().default(false).describe('true cuando list_clips_to_upload dice que el clip va solo en la medida de esta publicación: se anota en esa medida y no en las demás.'),
   }),
   readOnly: false,
   destructive: false,
   async run(ctx, args) {
     const { account, id } = await target(ctx, args);
-    await asToolError(() => markClipUploaded(ctx.db, { accountId: account.id, publicationId: id, videoId: args.video, uploaded: args.subido, userId: ctx.userId }));
+    await asToolError(() => markClipUploaded(ctx.db, { accountId: account.id, publicationId: id, videoId: args.video, uploaded: args.subido, userId: ctx.userId, onlyMeasure: args.solo_esta_medida }));
     return { publicacion: id, video: args.video, subido: args.subido, faltan: (await pendingClipUploads(ctx.db, account.id)).length };
   },
 });

@@ -8,15 +8,15 @@ Carga en Mercado Libre los clips aprobados en la app, desde tu propio Chrome y c
 2. En Chrome, abrí `chrome://extensions`.
 3. Arriba a la derecha, prendé **Modo de desarrollador**.
 4. Tocá **Cargar descomprimida** y elegí la carpeta `extension-clips`.
-5. Recargá la app. En **Clips por subir** tiene que decir que la extensión está instalada.
+5. Recargá la app. En el Pipeline, pestaña **Por subir**, sección **Clips**, tiene que decir que la extensión está instalada.
 
 No muevas ni borres la carpeta después: Chrome la lee de ahí. Para actualizarla, reemplazá la carpeta y tocá la flecha de recargar en `chrome://extensions`.
 
 ## Usarla
 
 1. Tené la sesión de Mercado Libre iniciada en ese Chrome.
-2. Aprobá el clip en el paso Videos: se sube solo. Si quedó alguno pendiente, en **Clips por subir** tocá **Subir a Mercado Libre**.
-3. Se abre una pestaña de Mercado Libre. Un cartel abajo a la derecha cuenta qué va haciendo.
+2. En el Pipeline, pestaña **Por subir**, o en el paso **Publicación**, tocá **Subir a Mercado Libre** en el clip.
+3. Se abre una pestaña de Mercado Libre. Si el producto tiene varias medidas, las despliega y entra por la de la publicación. Un cartel abajo a la derecha cuenta qué va haciendo.
 4. Cuando Mercado Libre suma el video a **Tus videos**, la subida terminó: queda en revisión y la app lo marca sola como subido.
 
 ## Qué hace y qué no

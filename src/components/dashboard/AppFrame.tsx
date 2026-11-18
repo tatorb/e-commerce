@@ -11,7 +11,6 @@ import { outOfStockCount } from '@/lib/stock-alarms';
 import { syncBadgeCount } from '@/lib/channel-sync';
 import { dispatchDueCount } from '@/lib/sales/queries';
 import { unreadCount } from '@/lib/notifications';
-import { clipUploadCount } from '@/lib/clip-uploads';
 
 // Arma la pantalla con sesión: menú lateral con la cuenta y el área central.
 // Sin cuenta en la dirección (por ejemplo en Equipo), muestra la primera que
@@ -36,8 +35,7 @@ export async function AppFrame({
   // Y los envíos que hay que despachar hoy o ya vencidos.
   // Y las publicaciones con datos para elegir entre la app y el canal, fuera del pipeline.
   // Y las notificaciones sin leer, para la campanita.
-  // Y los clips aprobados que falta subir a mano al canal.
-  const [questions, tasks, alarms, shipments, sync, unread, clips] = await Promise.all([
+  const [questions, tasks, alarms, shipments, sync, unread] = await Promise.all([
     account && can(user.access, 'preguntas', 'read')
       ? prisma.buyerQuestion.count({ where: { status: 'UNANSWERED', store: { accountId: account.id } } })
       : 0,
@@ -46,7 +44,6 @@ export async function AppFrame({
     account && can(user.access, 'ventas', 'read') ? dispatchDueCount(prisma, account.id, new Date(), account.timezone) : 0,
     account && can(user.access, 'sincronizacion', 'read') ? syncBadgeCount(prisma, account.id) : 0,
     unreadCount(prisma, user.id),
-    account && can(user.access, 'pipeline', 'read') ? clipUploadCount(prisma, account.id) : 0,
   ]);
   const sidebar = (
     <Sidebar
@@ -59,7 +56,6 @@ export async function AppFrame({
       shipments={shipments}
       sync={sync}
       unread={unread}
-      clips={clips}
     />
   );
   return (

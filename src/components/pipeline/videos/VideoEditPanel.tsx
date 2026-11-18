@@ -6,8 +6,6 @@ import { AlertTriangle, Check, Hourglass, Loader2, RotateCcw, Scissors, SlidersH
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { NOTE_MAX, planSeconds, TARGET_DEFAULT, type VideoPlan } from '@/domain/video-edit';
-import { askClipUpload, hasClipExtension, useClipUploader } from '@/components/clips/clip-uploader';
-import { ClipUploadStatus } from '@/components/clips/ClipUploadStatus';
 import { approveVideoEditAction, discardVideoEditAction, redoVideoEditAction, requestVideoEditAction } from '@/app/a/[cuenta]/pipeline/video-actions';
 import type { EditRow } from '@/lib/video-edits';
 import type { VideoRow } from '@/lib/videos';
@@ -141,8 +139,6 @@ export function VideoEditPanel({
   range: { min: number; max: number };
 }) {
   const router = useRouter();
-  // Escucha a la extensión desde que se abre el paso, para saber si está antes de aprobar.
-  useClipUploader();
   const [pending, startTransition] = useTransition();
   const [open, setOpen] = useState<'ask' | 'redo' | 'discard' | null>(null);
   const [watching, setWatching] = useState(false);
@@ -165,16 +161,6 @@ export function VideoEditPanel({
       if (!r.ok) setError(r.error);
       setOpen(null);
       router.refresh();
-    });
-  }
-
-  // Al aprobar, si la extensión está en este navegador, el clip se sube a Mercado Libre sin pasar por Clips por subir.
-  function approve() {
-    if (!edit) return;
-    run(async () => {
-      const r = await approveVideoEditAction(accountSlug, edit.id);
-      if (r.ok && r.upload && hasClipExtension()) askClipUpload(accountSlug, r.upload, () => router.refresh());
-      return r;
     });
   }
 
@@ -277,9 +263,8 @@ export function VideoEditPanel({
           <div className="space-y-2 rounded-md border bg-muted/30 p-3">
             <p className="flex items-center gap-1 text-sm">
               <Check className="h-4 w-4" aria-hidden />
-              Ya tiene un clip editado y aprobado{clip ? `: ${clip.name}` : ''}.
+              Ya tiene un clip editado y aprobado{clip ? `: ${clip.name}` : ''}. Se sube al canal desde Por subir, cuando quieras.
             </p>
-            {edit.clipId ? <ClipUploadStatus videoId={edit.clipId} /> : null}
             {scriptAndPlan}
             {adjusting && edit.plan ? (
               <>
@@ -396,7 +381,7 @@ export function VideoEditPanel({
             <Button access="view" size="sm" variant="outline" onClick={() => setWatching((w) => !w)}>
               {watching ? 'Cerrar el clip' : 'Ver el clip'}
             </Button>
-            <Button size="sm" pending={pending && open === null} disabled={pending} onClick={approve}>
+            <Button size="sm" pending={pending && open === null} disabled={pending} onClick={() => run(() => approveVideoEditAction(accountSlug, edit.id))}>
               <Check />
               Aprobar
             </Button>

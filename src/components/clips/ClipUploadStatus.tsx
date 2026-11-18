@@ -6,8 +6,8 @@ import { Button } from '@/components/ui/button';
 import { useClipUploader } from './clip-uploader';
 
 /** Cómo va la subida de un clip a Mercado Libre por la extensión. Nada si no se pidió. */
-export function ClipUploadStatus({ videoId }: { videoId: string }) {
-  const progress = useClipUploader().progress[videoId];
+export function ClipUploadStatus({ uploadKey }: { uploadKey: string }) {
+  const progress = useClipUploader().progress[uploadKey];
   const [copied, setCopied] = useState(false);
   if (!progress) return null;
   return (

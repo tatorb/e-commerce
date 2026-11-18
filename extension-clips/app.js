@@ -8,9 +8,9 @@
     if (e.source !== window || e.origin !== location.origin || e.data?.origen !== 'mrb-app') return;
     if (e.data.tipo === 'hola') return decir({ tipo: 'hola', version });
     if (e.data.tipo !== 'subir') return;
-    const { publicacion, video, codigo, nombre, tipoDeArchivo } = e.data;
+    const { publicacion, video, codigo, nombre, tipoDeArchivo, todasLasVariantes } = e.data;
     chrome.runtime
-      .sendMessage({ tipo: 'subir', publicacion, video, codigo, nombre, tipoDeArchivo })
+      .sendMessage({ tipo: 'subir', publicacion, video, codigo, nombre, tipoDeArchivo, todasLasVariantes })
       .then((r) => decir({ tipo: 'avance', publicacion, video, texto: r?.ok ? 'Abriendo la publicación en Mercado Libre…' : null, error: r?.ok ? null : (r?.error ?? 'La extensión no respondió.') }))
       .catch(() => decir({ tipo: 'avance', publicacion, video, texto: null, error: 'La extensión se actualizó: recargá esta página.' }));
   });
