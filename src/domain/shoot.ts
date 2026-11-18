@@ -1,3 +1,4 @@
+import { momentsSchema } from './video-edit';
 import { z } from 'zod';
 
 // Registro de productos: el operario saca las fotos y los videos de un
@@ -26,6 +27,8 @@ export const stepInput = z.object({
   explanation: z.string().trim().max(4000, 'La explicación es muy larga.').default(''),
   // Para Claude, en el trabajador de imágenes: qué tener en cuenta al corregir las fotos de este paso.
   editorNotes: z.string().trim().max(2000, 'Las indicaciones para el editor son muy largas.').default(''),
+  // En un paso de video, los momentos del video en orden y qué tan importante es cada uno.
+  moments: momentsSchema.default([]),
 });
 
 // ───────────────────────────── Orden en multimedia ─────────────────────────────

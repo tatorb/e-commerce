@@ -77,13 +77,40 @@ def configurar_claude() -> bool:
     return True
 
 
+def configurar_elevenlabs() -> bool:
+    """La clave de ElevenLabs, para la voz en off y la música de los videos. Es opcional."""
+    from mrb_videos.sonido import obtener_clave_elevenlabs
+
+    hay = obtener_clave_elevenlabs()
+    print("Pegá la clave de ElevenLabs, para la voz en off y la música de los videos. No se va a ver mientras la pegás.")
+    print("Con Enter queda la que ya hay." if hay else "Si no editás videos con sonido, dejala vacía con Enter.")
+    clave = getpass.getpass("Clave: ").strip()
+    if not clave:
+        return True
+    try:
+        import keyring
+
+        keyring.set_password(SERVICIO_LLAVERO, "elevenlabs", clave)
+    except Exception as e:
+        print(f"No se pudo guardar en el Llavero ({e}).")
+        return False
+    print("La clave de ElevenLabs quedó guardada en el Llavero.")
+    return True
+
+
 def main() -> int:
     solo_claude = "--solo-claude" in sys.argv
+    solo_elevenlabs = "--solo-elevenlabs" in sys.argv
+    if solo_elevenlabs:
+        return 0 if configurar_elevenlabs() else 1
     ok = True
     if not solo_claude:
         ok = configurar_app() and ok
         print()
     ok = configurar_claude() and ok
+    if not solo_claude:
+        print()
+        ok = configurar_elevenlabs() and ok
     return 0 if ok else 1
 
 

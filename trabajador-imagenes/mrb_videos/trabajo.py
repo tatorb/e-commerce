@@ -20,12 +20,11 @@ from pathlib import Path
 
 from mrb_imagenes.app import ClienteApp
 
-from .conexion import ArchivoDelDrive, ClipHecho, PropuestaParaApp, TrabajoDeVideo, VideoHecho, bajar_en_pedazos, subir_archivo
-from .editar import exportar
-from .inspector import Contexto, InspectorDeVideo, mosaico
+from .conexion import ArchivoDelDrive, ClipHecho, LineaDicha, PropuestaParaApp, SonidoHecho, TrabajoDeVideo, VideoHecho, bajar_en_pedazos, subir_archivo
+from .inspector import Contexto, InspectorDeVideo
+from .linea import Pedido, armar
 from .medios import Cancelado, Fuente, leer
-from .medir import cuadros, medir
-from .plan import Plan, ReglasDelClip, plan_parejo
+from .plan import ReglasDelClip
 
 log = logging.getLogger("trabajador")
 
@@ -80,7 +79,6 @@ def procesar_video(trabajo: TrabajoDeVideo, inspector: InspectorDeVideo, cliente
     empezo = time.monotonic()
     carpeta = raiz / f"video-{trabajo.video}"
     carpeta.mkdir(parents=True, exist_ok=True)
-    reglas = ReglasDelClip(**trabajo.reglas.model_dump())
     try:
         original, _ = conseguir(cliente, trabajo.original, carpeta, cancelado)
         fuente = leer(original)
@@ -95,37 +93,35 @@ def procesar_video(trabajo: TrabajoDeVideo, inspector: InspectorDeVideo, cliente
         if cancelado():
             raise Cancelado()
 
-        medidas = medir(cuadros(mirar))
-        avisos = list(medidas.avisos)
-        if trabajo.plan:
-            plan: Plan = trabajo.plan
-            propuesta = PropuestaParaApp(razon="Se aplicó el plan pedido, sin consultar a Claude.", origen="pedido")
-        else:
-            contexto = Contexto(
-                producto=trabajo.producto,
-                paso=trabajo.video_del_protocolo.titulo if trabajo.video_del_protocolo else None,
-                indicaciones=trabajo.video_del_protocolo.indicaciones if trabajo.video_del_protocolo else None,
-                indicacion=trabajo.indicacion,
-            )
-            p = inspector.proponer(mosaico(mirar), medidas, contexto, cuartos=_giro_sin_claude(mirar))
-            plan = plan_parejo(fuente, p.imagen, trabajo.objetivo_segundos, reglas)
-            propuesta = PropuestaParaApp(razon=p.razon, origen=p.origen, avisos=list(p.avisos), uso=p.uso)
+        protocolo = trabajo.video_del_protocolo
+        sonido = trabajo.sonido
+        pedido = Pedido(
+            objetivo=trabajo.objetivo_segundos,
+            reglas=ReglasDelClip(**trabajo.reglas.model_dump()),
+            contexto=Contexto(producto=trabajo.producto, paso=protocolo.titulo if protocolo else None, indicaciones=protocolo.indicaciones if protocolo else None, indicacion=trabajo.indicacion),
+            plan=trabajo.plan,
+            momentos=[m.model_dump() for m in trabajo.momentos],
+            ficha=trabajo.ficha,
+            guion=trabajo.guion,
+            voz=sonido.voz.id if sonido and sonido.voz else None,
+            musica=sonido.musica.estilo if sonido and sonido.musica else None,
+            subtitulos=bool(sonido and sonido.subtitulos),
+            cuartos=_giro_sin_claude(mirar),
+        )
+        r = armar(fuente, mirar, pedido, inspector, carpeta, carpeta / "clip.mp4", cancelado)
         if cancelado():
             raise Cancelado()
-
-        clip = exportar(fuente, plan, carpeta / "clip.mp4", reglas=reglas, cancelado=cancelado)
-        avisos += list(clip.avisos)
-        if cancelado():
-            raise Cancelado()
-        subir_archivo(cliente, trabajo.subidas["clip"], clip.ruta)
+        subir_archivo(cliente, trabajo.subidas["clip"], r.clip.ruta)
         return VideoHecho(
             id=trabajo.id,
             turno=trabajo.turno,
-            plan=plan,
-            medidas=medidas.como_dict(),
-            propuesta=propuesta,
-            clip=ClipHecho(ancho=clip.ancho, alto=clip.alto, segundos=round(clip.duracion, 2), bytes=clip.bytes),
-            avisos=avisos,
+            plan=r.plan,
+            medidas=r.medidas.como_dict(),
+            propuesta=PropuestaParaApp(razon=r.razon, origen=r.origen, uso={"costo_usd": r.costo_usd} if r.costo_usd else None),
+            clip=ClipHecho(ancho=r.clip.ancho, alto=r.clip.alto, segundos=round(r.clip.duracion, 2), bytes=r.clip.bytes),
+            guion=[LineaDicha(inicio=linea.inicio, fin=linea.fin, texto=linea.texto) for linea in r.guion] or None,
+            sonido=SonidoHecho(voz=bool(r.guion), musica=r.con_musica, subtitulos=r.con_subtitulos) if sonido else None,
+            avisos=r.avisos,
             segundos=int(time.monotonic() - empezo),
         )
     finally:

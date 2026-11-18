@@ -4,19 +4,27 @@ import type { VideoEditStatus } from '@/generated/prisma/enums';
 import { getChannelAdapter } from '@/channels';
 import type { ClipRules } from '@/domain/videos';
 import {
+  accountVideoSchema,
   cleanNote,
   cleanTarget,
   clipName,
   DEFAULT_EDITOR_SETTINGS,
   EDITOR_MODES,
   editorSettingsSchema,
+  parseAccountVideo,
+  parseMoments,
   parsePlan,
+  parseRequestedScript,
+  parseScript,
   planSeconds,
+  type AccountVideoSettings,
   type EditorMode,
   type EditorSettings,
+  type ScriptLine,
   type Transfer,
   type VideoDone,
   type VideoJob,
+  type VideoMoment,
   type VideoPlan,
   type VideoSource,
 } from '@/domain/video-edit';
@@ -72,6 +80,38 @@ export async function saveEditorSettings(db: PrismaClient, values: unknown, user
   return parsed.data;
 }
 
+// ───────────────────────────── Cómo se editan los videos de una cuenta ─────────────────────────────
+
+export async function loadAccountVideo(db: PrismaClient | Tx, accountId: string): Promise<AccountVideoSettings> {
+  const row = await db.videoAccountSettings.findUnique({ where: { accountId } });
+  return parseAccountVideo(row?.values);
+}
+
+/** Los pasos de video de los protocolos de la cuenta, para elegir con cuál se grabó un video. */
+export async function videoSteps(db: PrismaClient | Tx, accountId: string): Promise<{ id: string; label: string; moments: number }[]> {
+  const steps = await db.shootStep.findMany({
+    where: { kind: 'VIDEO', archivedAt: null, protocol: { accountId, archivedAt: null } },
+    orderBy: [{ protocol: { position: 'asc' } }, { position: 'asc' }],
+    select: { id: true, title: true, moments: true, protocol: { select: { name: true } } },
+  });
+  return steps.map((s) => ({ id: s.id, label: `${s.protocol.name}: ${s.title}`, moments: parseMoments(s.moments).length }));
+}
+
+export async function saveAccountVideo(db: PrismaClient, args: { accountId: string; values: unknown; userId: string | null }): Promise<AccountVideoSettings> {
+  const parsed = accountVideoSchema.safeParse(args.values);
+  if (!parsed.success) throw new VideoEditError(`Revisá los ajustes de video: ${parsed.error.issues[0]?.path.join('.')}.`);
+  const v = parsed.data;
+  if (v.voiceOn && !v.voiceId) throw new VideoEditError('Para prender la voz en off hace falta el ID de la voz de ElevenLabs.');
+  if (v.subtitlesOn && !v.voiceOn) throw new VideoEditError('Los subtítulos escriben lo que dice la voz en off: prendé la voz primero.');
+  if (v.musicOn && !v.musicStyle) throw new VideoEditError('Para prender la música hace falta describir el estilo.');
+  if (v.defaultStepId && !(await videoSteps(db, args.accountId)).some((s) => s.id === v.defaultStepId)) {
+    throw new VideoEditError('Ese paso de video ya no está en los protocolos de la cuenta.');
+  }
+  const data = { values: v as unknown as Prisma.InputJsonValue, updatedById: args.userId };
+  await db.videoAccountSettings.upsert({ where: { accountId: args.accountId }, create: { accountId: args.accountId, ...data }, update: data });
+  return v;
+}
+
 // ───────────────────────────── Pedir una edición ─────────────────────────────
 
 /** Lo que pide para un clip el canal más exigente donde está el producto. Null si ninguno tiene clips. */
@@ -85,7 +125,7 @@ export async function clipRulesFor(db: PrismaClient | Tx, productId: string): Pr
 async function videoOf(db: PrismaClient | Tx, accountId: string, videoId: string) {
   const video = await db.productVideo.findFirst({
     where: { id: videoId, product: { accountId } },
-    select: { id: true, productId: true, name: true, goneAt: true, editedBy: { select: { id: true } } },
+    select: { id: true, productId: true, name: true, goneAt: true, shootStepId: true, editedBy: { select: { id: true } } },
   });
   if (!video) throw new VideoEditError('El video no es de esta cuenta.');
   return video;
@@ -101,9 +141,17 @@ async function lockVideo(tx: Tx, videoId: string) {
  */
 export async function requestEdit(
   db: PrismaClient,
-  args: { accountId: string; videoId: string; targetSeconds?: unknown; note?: unknown; plan?: unknown; userId: string | null },
+  args: { accountId: string; videoId: string; targetSeconds?: unknown; note?: unknown; plan?: unknown; script?: unknown; stepId?: string | null; userId: string | null },
 ): Promise<{ editId: string }> {
   const video = await videoOf(db, args.accountId, args.videoId);
+  const settings = await loadAccountVideo(db, args.accountId);
+  // Con qué paso del protocolo se grabó, si la persona lo dice.
+  if (args.stepId !== undefined && args.stepId !== video.shootStepId) {
+    if (args.stepId !== null && !(await videoSteps(db, args.accountId)).some((st) => st.id === args.stepId)) {
+      throw new VideoEditError('Ese paso de video ya no está en los protocolos de la cuenta.');
+    }
+    await db.productVideo.update({ where: { id: video.id }, data: { shootStepId: args.stepId } });
+  }
   if (video.goneAt) throw new VideoEditError('Ese video ya no está en la carpeta del Drive.');
   if (video.editedBy) throw new VideoEditError('Ese video ya es un clip editado. Editá el original.');
   const rules = await clipRulesFor(db, video.productId);
@@ -124,14 +172,41 @@ export async function requestEdit(
       data: {
         videoId: video.id,
         openFor: video.id,
-        targetSeconds: cleanTarget(args.targetSeconds, rules),
+        targetSeconds: cleanTarget(args.targetSeconds ?? settings.targetSeconds, rules),
         note: cleanNote(args.note),
         requested: json(plan),
+        requestedScript: json(parseRequestedScript(args.script)),
         askedById: args.userId,
       },
     });
     return { editId: edit.id };
   });
+}
+
+/**
+ * Si la cuenta edita sola, pone en cola los videos del producto que nunca se
+ * editaron. No falla: es un extra de leer la carpeta o de registrar un video.
+ */
+export async function queueNewVideos(db: PrismaClient, args: { accountId: string; productId: string }): Promise<number> {
+  try {
+    const settings = await loadAccountVideo(db, args.accountId);
+    if (!settings.autoEdit) return 0;
+    const fresh = await db.productVideo.findMany({
+      where: { productId: args.productId, product: { accountId: args.accountId }, goneAt: null, editedBy: null, edits: { none: {} } },
+      select: { id: true },
+    });
+    let queued = 0;
+    for (const v of fresh) {
+      await requestEdit(db, { accountId: args.accountId, videoId: v.id, userId: null }).then(
+        () => queued++,
+        () => undefined,
+      );
+    }
+    return queued;
+  } catch (e) {
+    console.error('No se pudieron poner en cola los videos nuevos.', e);
+    return 0;
+  }
 }
 
 // ───────────────────────────── La Mac ─────────────────────────────
@@ -195,13 +270,25 @@ export async function buildVideoJob(db: PrismaClient, editId: string, deps: Vide
     include: {
       video: {
         include: {
-          product: { select: { id: true, name: true, productType: true } },
-          shootStep: { select: { title: true, editorNotes: true } },
+          product: {
+            select: { id: true, accountId: true, name: true, productType: true, brand: true, partNumber: true, line: true, engineSystem: true, origin: true, kitContents: true, specs: true },
+          },
+          shootStep: { select: { title: true, editorNotes: true, moments: true } },
         },
       },
     },
   });
   const { video } = edit;
+  const settings = await loadAccountVideo(db, video.product.accountId);
+  // Un video copiado al Drive no dice con qué paso se grabó: vale el de la cuenta.
+  const step =
+    video.shootStep ??
+    (settings.defaultStepId
+      ? await db.shootStep.findFirst({ where: { id: settings.defaultStepId, kind: 'VIDEO', archivedAt: null }, select: { title: true, editorNotes: true, moments: true } })
+      : null);
+  const momentos: VideoMoment[] = parseMoments(step?.moments);
+  const voice = settings.voiceOn && settings.voiceId ? { id: settings.voiceId } : null;
+  const music = settings.musicOn && settings.musicStyle ? { estilo: settings.musicStyle } : null;
   const rules = await clipRulesFor(db, video.productId);
   const carpeta = await deps.folderPath(video.productId);
   const source = (which: 'original' | 'liviana', nombre: string, bytes: bigint | null): VideoSource => ({
@@ -216,10 +303,14 @@ export async function buildVideoJob(db: PrismaClient, editId: string, deps: Vide
     turno: edit.lease,
     video: video.id,
     producto: [video.product.productType, video.product.name].filter(Boolean).join(': ') || null,
-    video_del_protocolo: video.shootStep ? { titulo: video.shootStep.title, indicaciones: video.shootStep.editorNotes.trim() || null } : null,
+    video_del_protocolo: step ? { titulo: step.title, indicaciones: step.editorNotes.trim() || null } : null,
     indicacion: edit.note?.trim() || null,
     objetivo_segundos: edit.targetSeconds,
     plan: parsePlan(edit.requested),
+    momentos,
+    ficha: productFacts(video.product, video.variantLabel),
+    guion: parseRequestedScript(edit.requestedScript),
+    sonido: voice || music ? { voz: voice, musica: music, subtitulos: Boolean(voice) && settings.subtitlesOn } : null,
     reglas: {
       min_segundos: rules?.minSeconds ?? 10,
       max_segundos: rules?.maxSeconds ?? 60,
@@ -231,6 +322,29 @@ export async function buildVideoJob(db: PrismaClient, editId: string, deps: Vide
     liviana: video.lightFileId ? source('liviana', video.name.replace(/\.[^.]+$/, '') + '.LRF', video.lightSize) : null,
     subidas: { clip: await deps.upload({ productId: video.productId, editId: edit.id, lease: edit.lease, name: clipName(video.name) }) },
   };
+}
+
+type Facts = { name: string; productType: string | null; brand: string | null; partNumber: string | null; line: string | null; engineSystem: string | null; origin: string | null; kitContents: string | null; specs: unknown };
+
+/** Lo que se sabe del producto, en pocas líneas, para que Claude escriba el guión. Nunca precios ni datos del cliente. */
+export function productFacts(p: Facts, measure: string | null): string | null {
+  const lines = [
+    ['Producto', p.name],
+    ['Tipo', p.productType],
+    ['Marca', p.brand],
+    ['Número de pieza', p.partNumber],
+    ['Medida', measure],
+    ['Línea', p.line],
+    ['Sistema', p.engineSystem],
+    ['Origen', p.origin],
+    ['Contenido', p.kitContents],
+  ].flatMap(([k, v]) => (v && v.trim() ? [`${k}: ${v.trim().slice(0, 400)}`] : []));
+  const specs = Array.isArray(p.specs) ? p.specs : [];
+  for (const sp of specs.slice(0, 15)) {
+    const { name, value } = (sp ?? {}) as { name?: unknown; value?: unknown };
+    if (typeof name === 'string' && typeof value === 'string' && name.trim() && value.trim()) lines.push(`${name.trim().slice(0, 80)}: ${value.trim().slice(0, 200)}`);
+  }
+  return lines.length > 0 ? lines.join('\n') : null;
 }
 
 /** No se pudo armar el trabajo, por ejemplo porque el Drive no respondió: vuelve a la cola sin contar el intento. */
@@ -264,8 +378,12 @@ export async function submitEditResult(
   done: VideoDone,
   deps: { collect: (edit: { editId: string; lease: number }) => Promise<UploadedClip | null> },
 ): Promise<SubmitOutcome> {
-  const edit = await db.videoEdit.findUnique({ where: { id: done.id }, include: { video: { select: { productId: true, variantKey: true, variantLabel: true } } } });
+  const edit = await db.videoEdit.findUnique({
+    where: { id: done.id },
+    include: { video: { select: { productId: true, variantKey: true, variantLabel: true, product: { select: { accountId: true } } } } },
+  });
   if (!edit || edit.status !== 'PROCESSING' || edit.lease !== done.turno || edit.workerId !== workerId) return { aceptado: false, motivo: STALE };
+  const settings = await loadAccountVideo(db, edit.video.product.accountId);
   const file = await deps.collect({ editId: edit.id, lease: edit.lease });
   if (!file) return { aceptado: false, motivo: 'Falta subir el clip al Drive.' };
 
@@ -291,11 +409,18 @@ export async function submitEditResult(
       variantLabel: edit.video.variantLabel,
     };
     const clip = await tx.productVideo.upsert({ where: { driveFileId: file.fileId }, create: { driveFileId: file.fileId, ...fields }, update: fields });
-    const cost = typeof done.propuesta?.uso?.costo_usd === 'number' ? done.propuesta.uso.costo_usd : 0;
+    const cost = (typeof done.propuesta?.uso?.costo_usd === 'number' ? done.propuesta.uso.costo_usd : 0) + (typeof done.sonido?.costo_usd === 'number' ? done.sonido.costo_usd : 0);
+    const warnings = [...(done.propuesta?.avisos ?? []), ...done.avisos];
+    // Con la cuenta en automático, un clip que salió sin avisos no espera a nadie.
+    const auto = settings.autoApprove && warnings.length === 0;
     await tx.videoEdit.update({
       where: { id: edit.id },
       data: {
-        status: 'REVIEW',
+        status: auto ? 'APPROVED' : 'REVIEW',
+        openFor: auto ? null : edit.videoId,
+        reviewedAt: auto ? new Date() : null,
+        script: json(done.guion && done.guion.length > 0 ? done.guion : null),
+        sound: json(done.sonido ? { voz: done.sonido.voz, musica: done.sonido.musica, subtitulos: done.sonido.subtitulos } : null),
         plan: json(done.plan),
         measures: json(done.medidas ?? null),
         proposal: json(done.propuesta ? { razon: done.propuesta.razon, origen: done.propuesta.origen, avisos: [...done.propuesta.avisos, ...done.avisos] } : { razon: '', origen: 'pedido', avisos: done.avisos }),
@@ -373,7 +498,7 @@ async function discardIn(tx: Tx, args: { accountId: string; editId: string; user
  */
 export async function redoEdit(
   db: PrismaClient,
-  args: { accountId: string; editId: string; targetSeconds?: unknown; note?: unknown; plan?: unknown; userId: string | null; now?: Date },
+  args: { accountId: string; editId: string; targetSeconds?: unknown; note?: unknown; plan?: unknown; script?: unknown; userId: string | null; now?: Date },
 ): Promise<{ editId: string; clipFileId: string | null }> {
   const before = await db.videoEdit.findFirst({ where: { id: args.editId, video: { product: { accountId: args.accountId } } }, include: { video: { select: { productId: true } } } });
   if (!before) throw new VideoEditError('Esa edición ya no existe.');
@@ -392,6 +517,7 @@ export async function redoEdit(
         targetSeconds: cleanTarget(args.targetSeconds ?? before.targetSeconds, rules),
         note: cleanNote(args.note),
         requested: json(plan),
+        requestedScript: json(parseRequestedScript(args.script)),
         askedById: args.userId,
       },
     });
@@ -408,6 +534,9 @@ export type EditRow = {
   targetSeconds: number;
   note: string | null;
   plan: VideoPlan | null;
+  // El guión que se dijo, y el sonido que se le puso.
+  script: ScriptLine[];
+  sound: { voz: boolean; musica: boolean; subtitulos: boolean } | null;
   reason: string | null;
   // claude, medido, simulado o pedido.
   origin: string | null;
@@ -432,6 +561,12 @@ function proposalOf(raw: unknown): { razon: string; origen: string; avisos: stri
   };
 }
 
+function soundOf(raw: unknown): { voz: boolean; musica: boolean; subtitulos: boolean } | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const x = raw as Record<string, unknown>;
+  return { voz: x.voz === true, musica: x.musica === true, subtitulos: x.subtitulos === true };
+}
+
 /** La última edición de cada video del producto: la abierta, o la última aprobada. */
 export async function editsOfProduct(db: PrismaClient, productId: string): Promise<EditRow[]> {
   const rows = await db.videoEdit.findMany({
@@ -453,6 +588,8 @@ export async function editsOfProduct(db: PrismaClient, productId: string): Promi
       targetSeconds: r.targetSeconds,
       note: r.note,
       plan: parsePlan(r.plan ?? r.requested),
+      script: parseScript(r.script),
+      sound: soundOf(r.sound),
       reason: proposal?.razon || null,
       origin: proposal?.origen || null,
       warnings: proposal?.avisos ?? [],

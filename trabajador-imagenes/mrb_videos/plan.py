@@ -56,6 +56,8 @@ class Tramo(BaseModel):
     fin: float = Field(gt=0.0)
     velocidad: float = Field(default=1.0, ge=VELOCIDAD_MIN, le=VELOCIDAD_MAX)
     nombre: str = ""
+    # Qué tan importante es lo que se ve: IMPORTANTE, NORMAL o REPETIDO. De ahí sale la velocidad cuando la elige el código.
+    importancia: str | None = None
 
     @model_validator(mode="after")
     def _ordenado(self) -> Tramo:

@@ -52,14 +52,14 @@ class Cancelado(Exception):
     """La app avisó que la edición ya no es de este intento, o que se apagó la edición de videos."""
 
 
-def correr(args: list[str], *, entrada: bytes | None = None, cancelado: Callable[[], bool] | None = None) -> subprocess.CompletedProcess:
+def correr(args: list[str], *, entrada: bytes | None = None, cancelado: Callable[[], bool] | None = None, carpeta: Path | None = None) -> subprocess.CompletedProcess:
     """Corre ffmpeg o ffprobe y, si falla, cuenta el final de lo que dijo. Con `cancelado`, lo corta apenas se pide."""
     if cancelado is None:
-        res = subprocess.run(args, input=entrada, capture_output=True)
+        res = subprocess.run(args, input=entrada, capture_output=True, cwd=carpeta)
     else:
         # Lo que dice va a un archivo: una exportación larga no tiene que trabarse por llenar la salida.
         with tempfile.TemporaryFile() as dicho:
-            proceso = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=dicho)
+            proceso = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=dicho, cwd=carpeta)
             while True:
                 try:
                     proceso.wait(timeout=1)

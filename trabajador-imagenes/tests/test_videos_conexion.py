@@ -39,6 +39,18 @@ def test_entiende_el_trabajo_de_ejemplo():
     assert t.video_del_protocolo.indicaciones == "Mostrar bien la primera pieza."
     assert t.original.carpeta[-1] == "Videos" and t.liviana.nombre == "DJI_0073_D.LRF"
     assert t.subidas["clip"].metodo == "PUT"
+    assert [m.importancia for m in t.momentos] == ["IMPORTANTE", "NORMAL", "IMPORTANTE", "REPETIDO"]
+    assert t.ficha.startswith("Producto: Camisa") and t.guion is None
+    assert (t.sonido.voz.id, t.sonido.musica.estilo, t.sonido.subtitulos) == ("voz-de-prueba", "Instrumental suave, sin voces.", True)
+
+
+def test_un_trabajo_de_una_app_anterior_se_entiende_igual():
+    # Una app sin los cortes ni el sonido no manda esos datos: el clip sale a una sola velocidad y en silencio.
+    datos = ejemplo("video_trabajo.json")["trabajo"]
+    for clave in ("momentos", "ficha", "guion", "sonido"):
+        del datos[clave]
+    t = conexion.TrabajoDeVideo.model_validate(datos)
+    assert t.momentos == [] and t.sonido is None and t.guion is None
 
 
 def test_el_resultado_tiene_la_forma_del_ejemplo():
@@ -235,6 +247,7 @@ def test_edita_un_video_de_la_carpeta_del_drive_y_sube_el_clip(app, video, tmp_p
     assert (carpeta / video.name).read_bytes() == video.read_bytes()
     # El resultado tiene la forma que espera la app.
     assert sorted(hecho.model_dump(mode="json")) == sorted(ejemplo("video_resultado.json"))
+    assert hecho.guion is None and hecho.sonido is None
 
 
 @con_ffmpeg

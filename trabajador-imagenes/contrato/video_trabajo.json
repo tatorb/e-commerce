@@ -4,26 +4,90 @@
     "turno": 1,
     "video": "video1",
     "producto": "Camisa de cilindro: Camisa 384675",
-    "video_del_protocolo": { "titulo": "Unboxing", "indicaciones": "Mostrar bien la primera pieza." },
+    "video_del_protocolo": {
+      "titulo": "Unboxing",
+      "indicaciones": "Mostrar bien la primera pieza."
+    },
     "indicacion": "Que se lea la etiqueta de la caja.",
     "objetivo_segundos": 40,
     "plan": null,
-    "reglas": { "min_segundos": 10, "max_segundos": 60, "ancho": 1080, "alto": 1920, "max_bytes": 293601280 },
+    "momentos": [
+      {
+        "texto": "Mostrar la caja cerrada y la etiqueta",
+        "importancia": "IMPORTANTE"
+      },
+      {
+        "texto": "Abrir la caja",
+        "importancia": "NORMAL"
+      },
+      {
+        "texto": "Sacar la primera pieza y mostrarla en detalle",
+        "importancia": "IMPORTANTE"
+      },
+      {
+        "texto": "Sacar las demás piezas",
+        "importancia": "REPETIDO"
+      }
+    ],
+    "ficha": "Producto: Camisa 384675\nTipo: Camisa de cilindro\nContenido: 4 camisas",
+    "guion": null,
+    "sonido": {
+      "voz": {
+        "id": "voz-de-prueba"
+      },
+      "musica": {
+        "estilo": "Instrumental suave, sin voces."
+      },
+      "subtitulos": true
+    },
+    "reglas": {
+      "min_segundos": 10,
+      "max_segundos": 60,
+      "ancho": 1080,
+      "alto": 1920,
+      "max_bytes": 293601280
+    },
     "original": {
       "nombre": "DJI_0073_D.MP4",
       "bytes": 754155258,
-      "carpeta": ["E-commerce Studio MRB", "Cuenta de prueba", "Camisa 384675", "Videos"],
-      "bajar": { "url": "https://app.example/api/videos/trabajador/original?video=video1&cual=original", "metodo": "GET", "encabezados": {} },
+      "carpeta": [
+        "E-commerce Studio MRB",
+        "Cuenta de prueba",
+        "Camisa 384675",
+        "Videos"
+      ],
+      "bajar": {
+        "url": "https://app.example/api/videos/trabajador/original?video=video1&cual=original",
+        "metodo": "GET",
+        "encabezados": {}
+      },
       "pedazo": 4194304
     },
     "liviana": {
       "nombre": "DJI_0073_D.LRF",
       "bytes": 89485333,
-      "carpeta": ["E-commerce Studio MRB", "Cuenta de prueba", "Camisa 384675", "Videos"],
-      "bajar": { "url": "https://app.example/api/videos/trabajador/original?video=video1&cual=liviana", "metodo": "GET", "encabezados": {} },
+      "carpeta": [
+        "E-commerce Studio MRB",
+        "Cuenta de prueba",
+        "Camisa 384675",
+        "Videos"
+      ],
+      "bajar": {
+        "url": "https://app.example/api/videos/trabajador/original?video=video1&cual=liviana",
+        "metodo": "GET",
+        "encabezados": {}
+      },
       "pedazo": 4194304
     },
-    "subidas": { "clip": { "url": "https://subir.example/?edicion=edicion1", "metodo": "PUT", "encabezados": { "Content-Type": "video/mp4" } } }
+    "subidas": {
+      "clip": {
+        "url": "https://subir.example/?edicion=edicion1",
+        "metodo": "PUT",
+        "encabezados": {
+          "Content-Type": "video/mp4"
+        }
+      }
+    }
   },
   "volver_en": 10
 }

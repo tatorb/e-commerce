@@ -71,8 +71,8 @@ def de_imagen(fuente: Fuente, imagen: Imagen, reglas: ReglasDelClip = MERCADOLIB
     return pasos
 
 
-def grafo(fuente: Fuente, plan: Plan, reglas: ReglasDelClip = MERCADOLIBRE) -> str:
-    """El filtro completo: deja el video terminado en la salida [v]."""
+def grafo(fuente: Fuente, plan: Plan, reglas: ReglasDelClip = MERCADOLIBRE, subtitulos: str | None = None) -> str:
+    """El filtro completo: deja el video terminado en la salida [v]. `subtitulos` es el nombre del archivo, en la carpeta donde corre ffmpeg."""
     fps = cuadros_por_segundo(fuente)
     n = len(plan.tramos)
     partes = [f"[0:v:0]split={n}" + "".join(f"[e{i}]" for i in range(n))] if n > 1 else []
@@ -83,6 +83,9 @@ def grafo(fuente: Fuente, plan: Plan, reglas: ReglasDelClip = MERCADOLIBRE) -> s
     cola += de_imagen(fuente, plan.imagen, reglas)
     if plan.cierre > 0:
         cola.append(f"tpad=stop_mode=clone:stop_duration={plan.cierre:.3f}")
+    if subtitulos:
+        # Después del cierre, para que se escriban también sobre la imagen quieta.
+        cola.append(f"ass={subtitulos}")
     cola += ["format=yuv420p", "setsar=1"]
     partes.append("".join(f"[t{i}]" for i in range(n)) + ",".join(cola) + "[v]")
     return ";".join(partes)

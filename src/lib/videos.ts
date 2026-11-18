@@ -3,7 +3,7 @@ import { videoUploadType } from '@/domain/videos';
 import { shotText } from '@/domain/shoot';
 import { editorSummary, isLightCopy, pairKey } from '@/domain/video-edit';
 import { workerState } from '@/lib/image-worker';
-import { editsOfProduct, loadEditorSettings } from '@/lib/video-edits';
+import { editsOfProduct, loadAccountVideo, loadEditorSettings, queueNewVideos, videoSteps } from '@/lib/video-edits';
 import {
   DriveError,
   driveEmail,
@@ -66,6 +66,13 @@ export type SyncResult = { folderId: string; folderUrl: string; added: number; g
  * anota las medidas que informa Google. Crea la carpeta si no está.
  */
 export async function syncProductVideos(db: PrismaClient, args: { accountId: string; productId: string; now?: Date }): Promise<SyncResult> {
+  const result = await readVideosFolder(db, args);
+  // Con la cuenta en automático, los videos nuevos van solos a la cola del editor.
+  await queueNewVideos(db, { accountId: args.accountId, productId: args.productId });
+  return result;
+}
+
+async function readVideosFolder(db: PrismaClient, args: { accountId: string; productId: string; now?: Date }): Promise<SyncResult> {
   const now = args.now ?? new Date();
   const product = await productFor(db, args.accountId, args.productId);
   return withDriveToken(db, async (token, email) => {
@@ -367,6 +374,8 @@ export type VideoRow = {
   editedFrom: { name: string; approved: boolean } | null;
   // Si tiene al lado la copia liviana de la cámara.
   hasLightCopy: boolean;
+  // El paso del protocolo con que se grabó, si se sabe.
+  stepId: string | null;
 };
 
 /** Lo que muestra el paso Videos: los videos del producto, el clip de la publicación y la conexión con el Drive. */
@@ -402,7 +411,13 @@ export async function loadVideosStep(db: PrismaClient, args: { accountId: string
     }),
     db.publication.count({ where: { productId: pub.productId } }),
   ]);
-  const [edits, editor, worker] = await Promise.all([editsOfProduct(db, pub.productId), loadEditorSettings(db), workerState(db)]);
+  const [edits, editor, worker, accountVideo, steps] = await Promise.all([
+    editsOfProduct(db, pub.productId),
+    loadEditorSettings(db),
+    workerState(db),
+    loadAccountVideo(db, args.accountId),
+    videoSteps(db, args.accountId),
+  ]);
   const folderId = email ? await knownFolderId(db, `videos:${pub.productId}`, email) : null;
   const videos: VideoRow[] = rows.map((v) => ({
     id: v.id,
@@ -420,6 +435,7 @@ export async function loadVideosStep(db: PrismaClient, args: { accountId: string
     gone: v.goneAt !== null,
     shot: v.shot ? shotText(v.variantLabel, v.shootStep?.title ?? null) : null,
     editedFrom: v.editedBy ? { name: v.editedBy.video.name, approved: v.editedBy.status === 'APPROVED' } : null,
+    stepId: v.shootStepId,
     hasLightCopy: v.lightFileId !== null,
   }));
   return {
@@ -442,6 +458,9 @@ export async function loadVideosStep(db: PrismaClient, args: { accountId: string
     // El editor de videos: la última edición de cada video, cuándo edita la Mac y si está conectada.
     edits,
     editor: { settings: editor, summary: editorSummary(editor), connected: worker.kind === 'connected', hasKey: worker.kind !== 'none' },
+    // Cómo se editan los videos de la cuenta, y los pasos de video de sus protocolos.
+    accountVideo,
+    videoSteps: steps,
   };
 }
 

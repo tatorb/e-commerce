@@ -54,33 +54,51 @@ def _de_video(codificador: str) -> list[str]:
     return ["-c:v", "libx264", "-preset", "medium", "-crf", "19", "-maxrate", f"{MEGABITS * 3 // 2}M", "-bufsize", f"{MEGABITS * 3}M", "-profile:v", "high"]
 
 
-def comando(fuente: Fuente, plan: Plan, salida: Path, codificador: str, reglas: ReglasDelClip = MERCADOLIBRE) -> list[str]:
+def comando(fuente: Fuente, plan: Plan, salida: Path, codificador: str, reglas: ReglasDelClip = MERCADOLIBRE, sonido: Path | None = None, subtitulos: str | None = None) -> list[str]:
+    # Sin sonido propio, una pista en silencio.
+    pista = ["-i", str(sonido)] if sonido else ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]
     return [
         programa("ffmpeg"), "-v", "error", "-y",
         "-i", str(fuente.ruta),
-        "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
-        "-filter_complex", grafo(fuente, plan, reglas),
+        *pista,
+        "-filter_complex", grafo(fuente, plan, reglas, subtitulos),
         "-map", "[v]", "-map", "1:a",
         *_de_video(codificador),
         "-r", f"{cuadros_por_segundo(fuente):g}",
         "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
-        "-c:a", "aac", "-b:a", "128k",
+        "-c:a", "aac", "-b:a", "192k" if sonido else "128k",
         "-shortest", "-movflags", "+faststart",
         str(salida),
     ]
 
 
-def exportar(fuente: Fuente, plan: Plan, salida: Path | str, *, codificador: str | None = None, reglas: ReglasDelClip = MERCADOLIBRE, cancelado: Callable[[], bool] | None = None) -> Clip:
-    salida = Path(salida)
+def exportar(
+    fuente: Fuente,
+    plan: Plan,
+    salida: Path | str,
+    *,
+    codificador: str | None = None,
+    reglas: ReglasDelClip = MERCADOLIBRE,
+    cancelado: Callable[[], bool] | None = None,
+    sonido: Path | None = None,
+    subtitulos: Path | None = None,
+) -> Clip:
+    """`sonido` es la pista ya mezclada, del largo del clip. `subtitulos` es un archivo .ass."""
+    salida = Path(salida).resolve()
     problemas = revisar(plan, fuente, reglas)
     if problemas:
         raise PlanInvalido(" ".join(problemas))
-    if salida.resolve() == fuente.ruta.resolve():
+    if salida == fuente.ruta.resolve():
         raise PlanInvalido("El clip no puede guardarse encima del original.")
     salida.parent.mkdir(parents=True, exist_ok=True)
     codificador = codificador or elegir_codificador()
     try:
-        correr(comando(fuente, plan, salida, codificador, reglas), cancelado=cancelado)
+        # ffmpeg corre en la carpeta de los subtítulos: así su nombre no necesita escapes.
+        correr(
+            comando(fuente, plan, salida, codificador, reglas, sonido.resolve() if sonido else None, subtitulos.name if subtitulos else None),
+            cancelado=cancelado,
+            carpeta=subtitulos.resolve().parent if subtitulos else None,
+        )
     except BaseException:
         # Un clip a medio hacer no queda en el disco.
         salida.unlink(missing_ok=True)

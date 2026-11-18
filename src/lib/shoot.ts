@@ -1,3 +1,5 @@
+import { parseMoments } from '@/domain/video-edit';
+import { queueNewVideos } from '@/lib/video-edits';
 import type { z } from 'zod';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { addInOrder, parseMedia, photoKey, placeFixedPhotos, withVariants, type PhotoRef } from '@/domain/media';
@@ -58,7 +60,7 @@ export async function listProtocols(db: Db, accountId: string, opts: { archived?
       steps: {
         where: { archivedAt: null },
         orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
-        select: { id: true, title: true, kind: true, mediaPosition: true, position: true, explanation: true, editorNotes: true, illustrationUrl: true, illustrationName: true, updatedAt: true },
+        select: { id: true, title: true, kind: true, mediaPosition: true, position: true, explanation: true, editorNotes: true, moments: true, illustrationUrl: true, illustrationName: true, updatedAt: true },
       },
     },
   });
@@ -73,6 +75,7 @@ export async function listProtocols(db: Db, accountId: string, opts: { archived?
       kind: s.kind as ShootKind,
       explanation: s.explanation,
       editorNotes: s.editorNotes,
+      moments: parseMoments(s.moments),
       illustration: s.illustrationUrl ? { href: illustrationHref(s.id, s.updatedAt), name: s.illustrationName ?? 'Ilustración' } : null,
     })),
     // Los pasos de foto en el orden en que aparecen sus fotos en Organización de multimedia.
@@ -433,6 +436,8 @@ export async function finishShotVideo(
   });
   await db.productVideo.update({ where: { id: videoId }, data: { shot: true, ...marks } });
   await markShotVideo(db, videoId);
+  // Con la cuenta en automático, el video recién grabado va solo a la cola del editor.
+  await queueNewVideos(db, { accountId: args.accountId, productId: args.productId });
   return videoId;
 }
 

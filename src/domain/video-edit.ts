@@ -9,6 +9,35 @@ import type { ClipRules } from './videos';
 export const VIDEO_PROTOCOL = 1;
 export const VIDEO_PROTOCOLS = [1] as const;
 
+// ───────────────────────────── Los momentos del video ─────────────────────────────
+
+// En el protocolo, cada paso de video cuenta sus momentos en orden y qué tan
+// importante es cada uno. Lo importante va a velocidad normal, lo normal se
+// acelera y lo repetido, que ya se mostró antes, va lo más rápido.
+export const MOMENT_LEVELS = ['IMPORTANTE', 'NORMAL', 'REPETIDO'] as const;
+export type MomentLevel = (typeof MOMENT_LEVELS)[number];
+
+export const MOMENT_LEVEL_LABEL: Record<MomentLevel, string> = { IMPORTANTE: 'Importante', NORMAL: 'Normal', REPETIDO: 'Repetido' };
+export const MOMENT_LEVEL_HELP: Record<MomentLevel, string> = {
+  IMPORTANTE: 'Va a velocidad normal.',
+  NORMAL: 'Se acelera.',
+  REPETIDO: 'Ya se mostró antes: va lo más rápido.',
+};
+
+export const MOMENTS_MAX = 30;
+export const momentSchema = z.object({ texto: z.string().trim().min(1).max(300), importancia: z.enum(MOMENT_LEVELS) });
+export const momentsSchema = z.array(momentSchema).max(MOMENTS_MAX, 'Son demasiados momentos.');
+export type VideoMoment = z.infer<typeof momentSchema>;
+
+/** Los momentos guardados de un paso. Lo que no vale se saltea. */
+export function parseMoments(raw: unknown): VideoMoment[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((m) => {
+    const r = momentSchema.safeParse(m);
+    return r.success ? [r.data] : [];
+  });
+}
+
 // ───────────────────────────── El plan ─────────────────────────────
 
 export const SPEED_MIN = 0.5;
@@ -36,6 +65,8 @@ export const segmentSchema = z
     fin: z.number().positive(),
     velocidad: z.number().min(SPEED_MIN).max(SPEED_MAX),
     nombre: z.string().max(120).default(''),
+    // Qué tan importante es lo que se ve: de ahí sale la velocidad cuando la elige el código.
+    importancia: z.enum(MOMENT_LEVELS).nullish(),
   })
   .refine((t) => t.fin - t.inicio >= 0.2, { error: 'Un tramo tiene que durar al menos 0,2 segundos.' });
 
@@ -75,6 +106,67 @@ export function cleanTarget(seconds: unknown, rules: Pick<ClipRules, 'minSeconds
 export function cleanNote(note: unknown): string | null {
   const text = typeof note === 'string' ? note.trim().slice(0, NOTE_MAX) : '';
   return text || null;
+}
+
+// ───────────────────────────── El guión y el sonido ─────────────────────────────
+
+export const SCRIPT_LINE_MAX = 400;
+
+// El guión que pide la persona: una línea por tramo del plan, en orden. Una línea vacía es un tramo en silencio.
+export const requestedScriptSchema = z.array(z.string().trim().max(SCRIPT_LINE_MAX)).max(60);
+
+// El guión que se dijo: cada línea con los segundos del clip en que empieza y termina.
+export const scriptLineSchema = z.object({ inicio: z.number().min(0), fin: z.number().min(0), texto: z.string().max(SCRIPT_LINE_MAX) });
+export type ScriptLine = z.infer<typeof scriptLineSchema>;
+
+export function parseScript(raw: unknown): ScriptLine[] {
+  const r = z.array(scriptLineSchema).max(60).safeParse(raw);
+  return r.success ? r.data : [];
+}
+
+export function parseRequestedScript(raw: unknown): string[] | null {
+  const r = requestedScriptSchema.safeParse(raw);
+  return r.success && r.data.some((l) => l) ? r.data : null;
+}
+
+// Cómo se editan los videos de una cuenta.
+export const accountVideoSchema = z.object({
+  // Cuánto dura el clip, si no se pide otra cosa.
+  targetSeconds: z.number().int().min(10).max(60),
+  // La voz en off: Claude escribe el guión y ElevenLabs lo dice con esta voz.
+  voiceOn: z.boolean(),
+  voiceId: z.string().trim().max(80),
+  // La música de fondo, que genera ElevenLabs con este estilo.
+  musicOn: z.boolean(),
+  musicStyle: z.string().trim().max(500),
+  // El guión escrito sobre el video, palabra por palabra.
+  subtitlesOn: z.boolean(),
+  // Editar solo cada video nuevo, y aprobar solo el clip que no tuvo avisos.
+  autoEdit: z.boolean(),
+  autoApprove: z.boolean(),
+  // El paso de protocolo que vale para los videos copiados al Drive, que no dicen con cuál se grabaron.
+  defaultStepId: z.string().max(60).nullable(),
+});
+export type AccountVideoSettings = z.infer<typeof accountVideoSchema>;
+
+export const DEFAULT_MUSIC_STYLE = 'Instrumental suave y moderno de fondo, electrónica lo-fi tranquila, sin voces, unos 95 BPM, para un video de producto.';
+
+export const DEFAULT_ACCOUNT_VIDEO: AccountVideoSettings = {
+  targetSeconds: TARGET_DEFAULT,
+  voiceOn: false,
+  voiceId: '',
+  musicOn: false,
+  musicStyle: DEFAULT_MUSIC_STYLE,
+  subtitlesOn: false,
+  autoEdit: false,
+  autoApprove: false,
+  defaultStepId: null,
+};
+
+export function parseAccountVideo(raw: unknown): AccountVideoSettings {
+  const merged = { ...DEFAULT_ACCOUNT_VIDEO, ...(raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}) };
+  const r = accountVideoSchema.safeParse(merged);
+  return r.success ? r.data : DEFAULT_ACCOUNT_VIDEO;
 }
 
 // ───────────────────────────── Cuándo edita la Mac ─────────────────────────────
@@ -155,6 +247,14 @@ export type VideoJob = {
   objetivo_segundos: number;
   // El plan que pidió la persona: se aplica tal cual, sin consultar a Claude.
   plan: VideoPlan | null;
+  // Los momentos del video según el protocolo, para que Claude ubique los cortes.
+  momentos: VideoMoment[];
+  // Lo que se sabe del producto, para el guión.
+  ficha: string | null;
+  // El guión que pidió la persona, una línea por tramo. Sin pedido, lo escribe Claude.
+  guion: string[] | null;
+  // El sonido del clip. Null: sale en silencio.
+  sonido: { voz: { id: string } | null; musica: { estilo: string } | null; subtitulos: boolean } | null;
   reglas: { min_segundos: number; max_segundos: number; ancho: number; alto: number; max_bytes: number };
   original: VideoSource;
   liviana: VideoSource | null;
@@ -198,6 +298,9 @@ export const videoDoneSchema = z.object({
     })
     .nullish(),
   clip: z.object({ ancho: z.number().int().positive(), alto: z.number().int().positive(), segundos: z.number().positive(), bytes: z.number().int().positive() }),
+  // El guión que se dijo y el sonido que se le puso.
+  guion: z.array(scriptLineSchema).max(60).nullish(),
+  sonido: z.object({ voz: z.boolean(), musica: z.boolean(), subtitulos: z.boolean(), costo_usd: z.number().nullish() }).nullish(),
   avisos: z.array(shortText(600)).max(20).default([]),
   segundos: z.number().int().min(0).max(24 * 3600),
 });

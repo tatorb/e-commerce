@@ -233,6 +233,7 @@ model Account {
   titleRuleSets       TitleRuleSet[]
   suggestions         SearchSuggestion[]
   photoSettings       PhotoSettings?
+  videoSettings       VideoAccountSettings?
   questionSettings    QuestionSettings?
   descriptionSettings DescriptionSettings?
   members             UserAccount[]
@@ -1946,6 +1947,13 @@ model VideoEdit {
   measures      Json?
   proposal      Json?
   // El clip: el video del producto que dejó la edición.
+  // El guión que pidió la persona, para decirlo tal cual: una línea por tramo.
+  // Sin pedido, lo escribe Claude.
+  requestedScript Json?
+  // El guión que se dijo, con el segundo del clip en que va cada línea, y el
+  // sonido que se le puso: voz, música y subtítulos.
+  script        Json?
+  sound         Json?
   clipId        String?         @unique
   clip          ProductVideo?   @relation("VideoEditClip", fields: [clipId], references: [id], onDelete: SetNull)
   aiUsage       Json?
@@ -1985,6 +1993,20 @@ model VideoEditorSettings {
   updatedAt   DateTime @updatedAt
 
   @@map("video_editor_settings")
+}
+
+// Cómo se editan los videos de una cuenta: la voz, la música, los subtítulos,
+// cuánto dura el clip y qué se hace solo. Sin fila, valen los de
+// src/domain/video-edit.ts.
+model VideoAccountSettings {
+  id          String   @id @default(cuid())
+  accountId   String   @unique
+  account     Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  values      Json
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("video_account_settings")
 }
 
 // Un clip elegido para una publicación, y la marca de que ya se subió a mano
@@ -2053,6 +2075,10 @@ model ShootStep {
   // Indicaciones para el editor: Claude las recibe en cada foto de este paso,
   // en el trabajador de imágenes, junto con el título.
   editorNotes      String         @default("")
+  // En un paso de video, los momentos del video en orden, para el editor:
+  // [{ texto, importancia }]. Lo importante va a velocidad normal, lo demás
+  // se acelera y lo repetido va lo más rápido (src/domain/video-edit.ts).
+  moments          Json           @default("[]")
   // La ilustración, en el Drive (drive:<id>), con su tipo y su nombre.
   illustrationUrl  String?
   illustrationType String?

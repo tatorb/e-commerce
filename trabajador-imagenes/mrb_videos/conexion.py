@@ -47,6 +47,27 @@ class Reglas(BaseModel):
     max_bytes: int = 280 * 1024**2
 
 
+class Momento(BaseModel):
+    """Un momento del video según el protocolo."""
+
+    texto: str
+    importancia: str = "NORMAL"
+
+
+class Voz(BaseModel):
+    id: str
+
+
+class Musica(BaseModel):
+    estilo: str
+
+
+class Sonido(BaseModel):
+    voz: Voz | None = None
+    musica: Musica | None = None
+    subtitulos: bool = False
+
+
 class TrabajoDeVideo(BaseModel):
     id: str
     turno: int
@@ -58,6 +79,14 @@ class TrabajoDeVideo(BaseModel):
     objetivo_segundos: float = 45
     # El plan que pidió la persona: se aplica tal cual, sin consultar a Claude.
     plan: Plan | None = None
+    # Los momentos del video según el protocolo, para que Claude ubique los cortes.
+    momentos: list[Momento] = Field(default_factory=list)
+    # Lo que se sabe del producto, para el guión.
+    ficha: str | None = None
+    # El guión que pidió la persona, una línea por tramo. Sin pedido, lo escribe Claude.
+    guion: list[str] | None = None
+    # El sonido del clip. None: sale en silencio.
+    sonido: Sonido | None = None
     reglas: Reglas = Field(default_factory=Reglas)
     original: ArchivoDelDrive
     liviana: ArchivoDelDrive | None = None
@@ -86,6 +115,21 @@ class ClipHecho(BaseModel):
     bytes: int
 
 
+class LineaDicha(BaseModel):
+    """Una línea del guión, con los segundos del clip en que empieza y termina."""
+
+    inicio: float
+    fin: float
+    texto: str
+
+
+class SonidoHecho(BaseModel):
+    voz: bool = False
+    musica: bool = False
+    subtitulos: bool = False
+    costo_usd: float | None = None
+
+
 class VideoHecho(BaseModel):
     protocolo: int = PROTOCOLO
     id: str
@@ -95,6 +139,8 @@ class VideoHecho(BaseModel):
     medidas: dict | None = None
     propuesta: PropuestaParaApp | None = None
     clip: ClipHecho
+    guion: list[LineaDicha] | None = None
+    sonido: SonidoHecho | None = None
     avisos: list[str] = Field(default_factory=list)
     segundos: int
 
