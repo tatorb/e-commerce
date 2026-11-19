@@ -4,7 +4,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@/generated/prisma/client';
 import { getChannelResearch } from '@/channels/research';
-import { listingIds, parseSearchIds, parseSearchResults, parseSuggestions, toPagePosition } from '@/channels/mercadolibre/research';
+import { listingIds, listingPageUrl, parseListingPage, parseSearchIds, parseSearchResults, parseSuggestions, toPagePosition } from '@/channels/mercadolibre/research';
 import { autoAvailable, measureSearchPositions, readPosition, readSuggestions, runProbe } from '@/lib/research';
 import { encrypt } from '@/lib/crypto';
 
@@ -36,6 +36,23 @@ describe('respuestas de Mercado Libre', () => {
     ]);
   });
 
+  it('lee la página pública de resultados: código, producto, publicidad y título, y reconoce la página anti robots', () => {
+    const card = (id: string, pad: boolean, title: string, up = '') =>
+      `{"polycard":{"metadata":{"id":"${id}","product_id":"MLA99","is_pad":"${pad}"${up ? `,"user_product_id":"${up}"` : ''},"url":"x"},"components":[{"type":"title","title":{"text":"${title}"}}]}}`;
+    const html = `<script>window.__PRELOADED_STATE__={"results":[${card('MLA1110000001', true, 'Subconjunto \\u00d1and\\u00fa')},${card('MLA2220000002', false, 'Otro', 'MLAU9')},${card('MLA1110000001', true, 'Repetido')}]}</script>`;
+    expect(parseListingPage(html)).toEqual({
+      blocked: false,
+      results: [
+        { code: 'MLA1110000001', title: 'Subconjunto Ñandú', seller: null, productCode: null, sponsored: true },
+        { code: 'MLA2220000002', title: 'Otro', seller: null, productCode: 'MLAU9', sponsored: false },
+      ],
+    });
+    expect(parseListingPage('<html><div id="micro-landing">Verificá que no sos un robot</div></html>')).toEqual({ results: [], blocked: true });
+    expect(parseListingPage('<html>Sin resultados</html>')).toEqual({ results: [], blocked: false });
+    expect(listingPageUrl('Subconjunto  THP', 1)).toBe('https://listado.mercadolibre.com.ar/subconjunto-thp_NoIndex_True');
+    expect(listingPageUrl('pistón 1.6', 49)).toBe('https://listado.mercadolibre.com.ar/pist%C3%B3n-1.6_Desde_49_NoIndex_True');
+  });
+
   it('pasa el puesto a página y posición, de a 48 por página', () => {
     expect(toPagePosition(1)).toEqual({ page: 1, position: 1 });
     expect(toPagePosition(48)).toEqual({ page: 1, position: 48 });
@@ -50,6 +67,8 @@ describe('leer de Mercado Libre', () => {
   let blockAfter = Infinity;
   // Como hoy en Mercado Libre: la búsqueda sin cuenta da 403.
   let searchNeedsAccount = false;
+  // Como pasa con algunas apps: la búsqueda da 403 aunque vaya con la cuenta.
+  let searchClosed = false;
   const ids = Array.from({ length: 150 }, (_, i) => `MLA${1000000000 + i}`);
 
   beforeAll(async () => {
@@ -73,7 +92,7 @@ describe('leer de Mercado Libre', () => {
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ paging: { total: 3 }, results: ['MLA1'] }));
       } else if (u.pathname === '/api/sites/MLA/search') {
-        if (searchNeedsAccount && !bearer) {
+        if (searchClosed || (searchNeedsAccount && !bearer)) {
           res.writeHead(403).end();
           return;
         }
@@ -81,9 +100,15 @@ describe('leer de Mercado Libre', () => {
         const limit = Number(u.searchParams.get('limit') ?? 50);
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ results: ids.slice(offset, offset + limit).map((id) => ({ id, title: `Kit ${id}`, seller: { nickname: 'OTRO' }, ...(id === 'MLA1000000070' ? { user_product_id: 'MLAU555' } : {}) })) }));
+      } else if (u.pathname.startsWith('/listado/kit-gol')) {
+        // La página de resultados: 48 por página, la primera con una publicidad arriba.
+        const from = Number(/_Desde_(\d+)/.exec(u.pathname)?.[1] ?? 1);
+        const cards = ids.slice(from - 1, from - 1 + 48).map((id, i) => `{"metadata":{"id":"${id}","is_pad":"${from === 1 && i === 0}"${id === 'MLA1000000070' ? ',"user_product_id":"MLAU555"' : ''}},"x":{"title":{"text":"Kit ${id}"}}}`);
+        res.writeHead(200, { 'content-type': 'text/html' });
+        res.end(`<script>var s={"results":[${cards.join(',')}]}</script>`);
       } else {
         res.writeHead(200, { 'content-type': 'text/html' });
-        res.end('<html>Verificá que no sos un robot</html>');
+        res.end('<html><div class="micro-landing">Verificá que no sos un robot</div></html>');
       }
     });
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
@@ -98,6 +123,7 @@ describe('leer de Mercado Libre', () => {
     authorized = [];
     blockAfter = Infinity;
     searchNeedsAccount = false;
+    searchClosed = false;
   });
 
   afterAll(async () => {
@@ -248,6 +274,15 @@ describe('leer de Mercado Libre', () => {
       const second = await measureSearchPositions(db, { accountId, publicationId, queries: ['kit'] });
       expect(second.searches[0]).toMatchObject({ found: { page: 2, position: 23, code: 'MLAU555' }, before: { page: 1, position: 31 } });
       expect(await db.searchPosition.count({ where: { publicationId, query: 'kit' } })).toBe(2);
+
+      // La API no deja buscar ni con la cuenta: lee la página pública. Si muestra la página
+      // anti robots, lo dice en esa búsqueda y sigue con las demás.
+      searchClosed = true;
+      const third = await measureSearchPositions(db, { accountId, publicationId, queries: ['kit', 'kit gol'] });
+      expect(third.searches[0]).toMatchObject({ query: 'kit', found: null, source: null });
+      expect(third.searches[0].error).toContain('anti robots');
+      expect(third.searches[1]).toMatchObject({ query: 'kit gol', source: 'listado', found: { page: 2, position: 23, code: 'MLAU555', organic: true }, error: null });
+      expect(third.searches[1].top[0]).toMatchObject({ code: 'MLA1000000000', sponsored: true });
     });
 
     it('lee la posición y la guarda', async () => {

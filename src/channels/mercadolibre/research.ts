@@ -132,13 +132,97 @@ export function parseSearchResults(body: unknown): SearchResult[] {
   });
 }
 
+// La página que muestra Mercado Libre cuando sospecha de un robot, en vez de los resultados.
+const ANTI_ROBOT = /micro-?landing|suspicious[-_ ]traffic|account-verification|g-recaptcha|captcha|no sos un robot|not a robot/i;
+
+/**
+ * Los resultados de la página pública de resultados, en orden: salen del JSON
+ * que trae la página, con el código, el producto del canal y si es
+ * publicidad (is_pad). blocked: Mercado Libre mostró la página anti robots.
+ */
+export function parseListingPage(html: string): { results: SearchResult[]; blocked: boolean } {
+  const results: SearchResult[] = [];
+  const seen = new Set<string>();
+  const text = (raw: string | undefined) => {
+    if (raw === undefined) return '';
+    try {
+      return JSON.parse(`"${raw}"`) as string;
+    } catch {
+      return raw;
+    }
+  };
+  for (const m of html.matchAll(/"metadata":\{([^{}]*)\}/g)) {
+    const body = m[1];
+    const code = /"id":"(MLA\d{6,})"/i.exec(body)?.[1]?.toUpperCase();
+    if (!code || seen.has(code)) continue;
+    seen.add(code);
+    const pad = /"is_pad":"?(true|false)"?/i.exec(body)?.[1];
+    const after = html.slice(m.index! + m[0].length, m.index! + m[0].length + 4000);
+    results.push({
+      code,
+      title: text(/"title":\{"text":"((?:[^"\\]|\\.)*)"/.exec(after)?.[1]),
+      seller: null,
+      productCode: /"user_product_id":"(MLAU\d+)"/i.exec(body)?.[1]?.toUpperCase() ?? null,
+      sponsored: pad === undefined ? null : pad.toLowerCase() === 'true',
+    });
+  }
+  // Sin el JSON, por lo menos los códigos de los links, en orden.
+  if (results.length === 0) for (const code of listingIds(html)) results.push({ code, title: '', seller: null, productCode: null, sponsored: null });
+  return { results, blocked: results.length === 0 && ANTI_ROBOT.test(html) };
+}
+
+/** La dirección de una página de resultados: "subconjunto thp", desde el resultado 49. */
+export function listingPageUrl(query: string, from: number): string {
+  const slug = query
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .map((w) => encodeURIComponent(w))
+    .join('-');
+  return `${listingUrl()}/${slug}${from > 1 ? `_Desde_${from}` : ''}_NoIndex_True`;
+}
+
+/** Lo mismo que ranking, pero leyendo la página pública de resultados. */
+async function rankingFromListing(query: string, wanted: Set<string>, pages: number): Promise<SearchRanking> {
+  const top: SearchResult[] = [];
+  for (let page = 1; page <= pages; page++) {
+    if (page > 1) await pause(800);
+    const html = await (await get(listingPageUrl(query, (page - 1) * PAGE_SIZE + 1), 'text/html')).text();
+    const { results, blocked } = parseListingPage(html);
+    if (blocked) throw new ResearchError('Mercado Libre mostró su página anti robots en vez de los resultados: no se pudo medir.', true);
+    if (page === 1) top.push(...results.slice(0, 5));
+    const i = results.findIndex((r) => wanted.has(r.code) || (r.productCode !== null && wanted.has(r.productCode)));
+    if (i >= 0) {
+      const r = results[i];
+      return { found: { page, position: i + 1, code: wanted.has(r.code) ? r.code : r.productCode!, organic: r.sponsored === null || r.sponsored === undefined ? null : !r.sponsored }, top, source: 'listado' };
+    }
+    if (results.length === 0) break;
+  }
+  return { found: null, top, source: 'listado' };
+}
+
 /**
  * Dónde aparece por primera vez cualquiera de los códigos (de publicación o de
- * producto del canal) y los primeros 5. La API oficial no trae la publicidad:
- * lo que encuentra es orgánico.
+ * producto del canal) y los primeros 5. Primero con la API oficial, que no
+ * trae la publicidad: lo que encuentra es orgánico. Si la API no deja buscar,
+ * con la página pública de resultados, que sí dice qué es publicidad.
  */
 async function ranking(query: string, codes: string[], pages: number, accessToken?: string): Promise<SearchRanking> {
   const wanted = new Set(codes.map((c) => c.toUpperCase().replace('-', '')));
+  try {
+    return await rankingFromApi(query, wanted, pages, accessToken);
+  } catch (e) {
+    if (!(e instanceof ResearchError) || !e.blocked) throw e;
+    try {
+      return await rankingFromListing(query, wanted, pages);
+    } catch (e2) {
+      if (e2 instanceof ResearchError) throw new ResearchError(`La API oficial de búsqueda no deja buscar (${e.message.replace(/^Mercado Libre /, '').replace(/\.$/, '')}), y la página de resultados tampoco: ${e2.message}`, e2.blocked);
+      throw e2;
+    }
+  }
+}
+
+async function rankingFromApi(query: string, wanted: Set<string>, pages: number, accessToken?: string): Promise<SearchRanking> {
   const total = pages * PAGE_SIZE;
   const top: SearchResult[] = [];
   for (let offset = 0; offset < total; offset += API_LIMIT) {
@@ -149,13 +233,13 @@ async function ranking(query: string, codes: string[], pages: number, accessToke
     const i = results.findIndex((r) => wanted.has(r.code) || (r.productCode !== null && wanted.has(r.productCode)));
     if (i >= 0) {
       const rank = offset + i + 1;
-      if (rank > total) return { found: null, top };
+      if (rank > total) return { found: null, top, source: 'api' };
       const r = results[i];
-      return { found: { ...toPagePosition(rank), code: wanted.has(r.code) ? r.code : r.productCode!, organic: true }, top };
+      return { found: { ...toPagePosition(rank), code: wanted.has(r.code) ? r.code : r.productCode!, organic: true }, top, source: 'api' };
     }
     if (results.length < API_LIMIT) break;
   }
-  return { found: null, top };
+  return { found: null, top, source: 'api' };
 }
 
 async function check(check: string, label: string, run: () => Promise<string>): Promise<ProbeResult> {

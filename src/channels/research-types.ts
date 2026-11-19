@@ -15,12 +15,16 @@ export class ResearchError extends Error {
 }
 
 /** Un resultado de la búsqueda. */
-export type SearchResult = { code: string; title: string; seller: string | null; productCode: string | null };
+// sponsored: si es publicidad. Null si la respuesta no lo dice.
+export type SearchResult = { code: string; title: string; seller: string | null; productCode: string | null; sponsored?: boolean | null };
 
 /** Dónde aparece la publicación en una búsqueda y quiénes van primero. */
 export type SearchRanking = {
-  found: { page: number; position: number; code: string; organic: boolean } | null;
+  // organic null: la respuesta no dice si es publicidad.
+  found: { page: number; position: number; code: string; organic: boolean | null } | null;
   top: SearchResult[];
+  // De dónde salió: la API oficial o la página pública de resultados.
+  source: 'api' | 'listado';
 };
 
 export interface ChannelResearch {

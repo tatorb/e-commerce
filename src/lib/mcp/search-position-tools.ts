@@ -13,7 +13,7 @@ const measureTool = defineTool({
   section: 'pipeline',
   title: 'Medir la posición en las búsquedas',
   description:
-    'Mide dónde aparece la publicación en sus búsquedas principales (las del paso Título), desde el servidor de la app con la API oficial del canal y la llave de la tienda conectada, no con la sesión del vendedor en el navegador, que personaliza los resultados. Busca cualquier código de la familia, de sus opciones de venta y del producto del canal, en las primeras 3 páginas. Por cada búsqueda guarda la página, la posición, con qué código apareció, si es orgánico y la fecha, como save_search_position, y devuelve los primeros 5 y la medición anterior, para ver el antes y el después de cambiar el título. La API oficial no trae la publicidad: lo que encuentra es orgánico. El histórico se ve en get_title_workspace.',
+    'Mide dónde aparece la publicación en sus búsquedas principales (las del paso Título), desde el servidor de la app con la API oficial del canal y la llave de la tienda conectada, no con la sesión del vendedor en el navegador, que personaliza los resultados. Busca cualquier código de la familia, de sus opciones de venta y del producto del canal, en las primeras 3 páginas. Por cada búsqueda guarda la página, la posición, con qué código apareció, si es orgánico y la fecha, como save_search_position, y devuelve los primeros 5 y la medición anterior, para ver el antes y el después de cambiar el título. Primero con la API oficial, que no trae la publicidad; si Mercado Libre no deja usarla, con la página pública de resultados, que sí dice qué es publicidad. Si Mercado Libre muestra su página anti robots lo dice como error, no como que no aparece. Un error en una búsqueda no corta las demás. El histórico se ve en get_title_workspace.',
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg,
@@ -39,12 +39,16 @@ const measureTool = defineTool({
         ...(s.error
           ? { error: s.error }
           : {
-              aparece: s.found ? { pagina: s.found.page, posicion: s.found.position, con_el_codigo: s.found.code, organico: s.found.organic } : 'No aparece en las primeras 3 páginas.',
+              leido_de: s.source === 'api' ? 'la API oficial de búsqueda' : 'la página pública de resultados',
+              aparece: s.found
+                ? { pagina: s.found.page, posicion: s.found.position, con_el_codigo: s.found.code, organico: s.found.organic ?? 'la página no lo dice' }
+                : 'No aparece en las primeras 3 páginas.',
               primeros_5: s.top.map((t, i) => ({
                 puesto: i + 1,
                 codigo: t.code,
                 titulo: t.title,
                 vendedor: t.seller,
+                ...(t.sponsored !== undefined && t.sponsored !== null ? { publicidad: t.sponsored } : {}),
                 es_nuestra: ours.has(t.code) || (t.productCode !== null && ours.has(t.productCode)),
               })),
             }),

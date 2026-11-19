@@ -161,8 +161,10 @@ export async function readPosition(
 export type MeasuredSearch = {
   query: string;
   // Dónde apareció, o null si no está en las páginas que se miran.
-  found: { page: number; position: number; code: string; organic: boolean } | null;
+  found: { page: number; position: number; code: string; organic: boolean | null } | null;
   top: SearchResult[];
+  // De dónde salió: la API oficial o la página pública de resultados.
+  source: 'api' | 'listado' | null;
   // La medición anterior de la misma búsqueda, para ver el antes y el después.
   before: { page: number | null; position: number | null; at: Date } | null;
   error: string | null;
@@ -217,11 +219,11 @@ export async function measureSearchPositions(
           top: r.top,
           at: args.now,
         });
-        searches.push({ query, found: r.found, top: r.top, before, error: null });
+        searches.push({ query, found: r.found, top: r.top, source: r.source, before, error: null });
       } catch (e) {
         if (!(e instanceof ResearchError)) throw e;
-        searches.push({ query, found: null, top: [], before, error: e.message });
-        if (e.blocked) break;
+        // Un error en una búsqueda no corta las demás: queda dicho en la suya.
+        searches.push({ query, found: null, top: [], source: null, before, error: e.message });
       }
     }
   });
