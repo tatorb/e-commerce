@@ -165,6 +165,21 @@ export function planFor(p: PlanRow): StockPlan {
   return plan;
 }
 
+/**
+ * Lo que hay de verdad en el stock del producto para lo que vende la publicación,
+ * sin "Mostrar más de 5", aunque su cantidad no lo siga. Null si el producto no
+ * tiene stock en la app o no se sabe qué medida vende.
+ */
+export function productStockOf(p: PlanRow): number | null {
+  const source = sourceOf(p.product);
+  if (!isManaged(source)) return null;
+  const copy = p.channelCopy && !p.channelCopy.missingSince ? p.channelCopy : null;
+  const variations = copy ? parseVariations(copy.variations) : [];
+  const single = variations.length === 0 ? singleMeasure(p.product, copy, p.variantKey) : null;
+  const planned = plannedQuantities(variations, realSource(source), single);
+  return 'lines' in planned ? planned.lines.reduce((sum, l) => sum + Math.max(l.quantity, 0), 0) : null;
+}
+
 /** Si la cantidad de la publicación sale del stock del producto. */
 export async function stockManaged(db: Db, publicationId: string): Promise<boolean> {
   const p = await db.publication.findUnique({ where: { id: publicationId }, select: PLAN_SELECT });

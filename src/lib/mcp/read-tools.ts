@@ -34,6 +34,7 @@ import {
 import { listBoard, listPipelineMovements } from '@/lib/queries/pipeline';
 import { listScoredPublications, type ScoredPublication } from '@/lib/queries/scoring';
 import { optionKey } from '@/domain/product-options';
+import { PLAN_SELECT, productStockOf } from '@/lib/stock-plan';
 import { KIND_OPTIONS, parseKinds } from '@/lib/queries/catalog-filters';
 import { fileHref } from '@/lib/file-rules';
 import { loadKnowledge, loadResearch } from '@/lib/queries/research';
@@ -220,7 +221,7 @@ const searchCatalog = defineTool({
   section: ['publicaciones', 'pipeline'],
   title: 'Buscar en Publicaciones',
   description:
-    'Busca en la lista de Publicaciones de una cuenta, con los mismos filtros de la pantalla. Devuelve título, código, si es individual o combo, familia (familia_id y es_principal), marca, medida, puntaje, visitas y ventas de 90 días, si el título está bloqueado y el estado en el pipeline. Los filtros con varios valores aceptan cualquiera de ellos.',
+    'Busca en la lista de Publicaciones de una cuenta, con los mismos filtros de la pantalla. Devuelve título, código, si es individual o combo, familia (familia_id y es_principal), producto (producto_id y si está optimizado), marca, medida, stock del producto, cantidad en el canal, puntaje, visitas y ventas de 90 días, si el título está bloqueado y el estado en el pipeline. Los filtros con varios valores aceptan cualquiera de ellos.',
   input: z.object({
     cuenta: accountArg,
     texto: z.string().optional().describe('Busca en el título, el código del canal y los SKU.'),
@@ -272,10 +273,26 @@ const searchCatalog = defineTool({
       .boolean()
       .optional()
       .describe('true = una sola fila por familia, la principal, y el total cuenta familias. Una publicación sin familia cuenta como una familia.'),
+    agrupar_por_producto: z
+      .boolean()
+      .optional()
+      .describe('true = una sola fila por producto, y el total cuenta productos. Va primero la principal de una familia.'),
+    stock: z
+      .array(asEnum(['con', 'sin', 'sin-dato']))
+      .optional()
+      .describe('Stock del producto para la medida de la publicación: con = más de 0; sin = 0; sin-dato = el producto no tiene stock en la app o no se sabe qué medida vende.'),
+    cantidad_distinta_al_stock: z
+      .boolean()
+      .optional()
+      .describe('true = solo las publicaciones cuya cantidad en el canal no coincide con el stock del producto. Las que no tienen uno de los dos datos no entran.'),
+    producto_optimizado: z
+      .boolean()
+      .optional()
+      .describe('true = solo las de productos con alguna publicación Corregida o en el paso Publicación; false = solo las de productos sin ninguna.'),
     incluir_tipos: z
       .boolean()
       .optional()
-      .describe('Suma la lista de tipos de producto con cuántas publicaciones tiene cada uno, con los filtros de la búsqueda. Agrupando por familia, cuenta familias.'),
+      .describe('Suma la lista de tipos de producto con cuántas publicaciones tiene cada uno, con los filtros de la búsqueda. Agrupando por familia, cuenta familias; por producto, productos.'),
     incluir_marcas: z.boolean().optional().describe('Suma la lista de marcas con cuántas familias tiene cada una, con los filtros de la búsqueda.'),
   }),
   readOnly: true,
@@ -309,11 +326,28 @@ const searchCatalog = defineTool({
     });
     const steps = new Set<PipelineStep>(args.paso ?? []);
     const brands = new Set((args.marca ?? []).map(optionKey).filter(Boolean));
-    const matching = filterPublications(all, filters).filter(
+    // Un producto optimizado: alguna de sus publicaciones está Corregida o en el paso Publicación.
+    const optimized = new Set(all.filter((p) => p.pipelineStatus === 'CORRECTED' || (p.pipelineStatus === 'IN_PIPELINE' && p.pipelineStep === 'PUBLISH')).map((p) => p.productId));
+    const filtered = filterPublications(all, filters).filter(
       (p) =>
         (steps.size === 0 || (p.pipelineStatus === 'IN_PIPELINE' && p.pipelineStep !== null && steps.has(p.pipelineStep))) &&
-        (brands.size === 0 || (p.brand !== null && brands.has(optionKey(p.brand)))),
+        (brands.size === 0 || (p.brand !== null && brands.has(optionKey(p.brand)))) &&
+        (args.producto_optimizado === undefined || optimized.has(p.productId) === args.producto_optimizado),
     );
+    // El stock del producto para la medida de cada una, como lo calcula la app.
+    const stockOf = new Map(
+      (await ctx.db.publication.findMany({ where: { id: { in: filtered.map((p) => p.id) } }, select: PLAN_SELECT })).map((r) => [r.id, productStockOf(r)]),
+    );
+    const stockWanted = new Set(args.stock ?? []);
+    const differs = (p: ScoredPublication) => {
+      const stock = stockOf.get(p.id) ?? null;
+      return stock !== null && p.quantity.channel !== null && stock !== p.quantity.channel;
+    };
+    const matching = filtered.filter((p) => {
+      const stock = stockOf.get(p.id) ?? null;
+      const band = stock === null ? 'sin-dato' : stock > 0 ? 'con' : 'sin';
+      return (stockWanted.size === 0 || stockWanted.has(band)) && (!args.cantidad_distinta_al_stock || differs(p));
+    });
     // Una publicación sin familia es una familia sola.
     const familyOf = (p: ScoredPublication) => p.familyId ?? p.id;
     // Agrupando, una fila por familia: la principal o, si no pasa los filtros, la primera que sí.
@@ -322,7 +356,15 @@ const searchCatalog = defineTool({
       const seen = leads.get(familyOf(p));
       if (!seen || (p.familyLeadId === p.id && seen.familyLeadId !== seen.id)) leads.set(familyOf(p), p);
     }
-    const found = args.agrupar_por_familia ? matching.filter((p) => leads.get(familyOf(p)) === p) : matching;
+    const byFamily = args.agrupar_por_familia || args.agrupar_por_producto ? matching.filter((p) => leads.get(familyOf(p)) === p) : matching;
+    // Por producto, una fila: la primera principal de familia o, si no hay, la primera.
+    const products = new Map<string, ScoredPublication>();
+    for (const p of byFamily) {
+      const seen = products.get(p.productId);
+      if (!seen || (p.familyLeadId === p.id && seen.familyLeadId !== seen.id)) products.set(p.productId, p);
+    }
+    const found = args.agrupar_por_producto ? byFamily.filter((p) => products.get(p.productId) === p) : byFamily;
+    const unit = args.agrupar_por_producto ? 'productos' : args.agrupar_por_familia ? 'familias' : 'publicaciones';
     const from = args.desde ?? 0;
     const page = found.slice(from, from + (args.limite ?? 50));
     return {
@@ -335,10 +377,14 @@ const searchCatalog = defineTool({
         es_principal: p.familyId !== null && p.familyLeadId === p.id,
         marca: p.brand,
         medida: p.measure,
+        producto_id: p.productId,
+        producto_optimizado: optimized.has(p.productId),
+        stock_del_producto: stockOf.get(p.id) ?? null,
+        cantidad_en_el_canal: p.quantity.channel,
       })),
       ...(args.incluir_tipos
         ? {
-            tipos_de_producto: countBy(found, (p) => p.productType).map(([tipo, n]) => (args.agrupar_por_familia ? { tipo, familias: n } : { tipo, publicaciones: n })),
+            tipos_de_producto: countBy(found, (p) => p.productType).map(([tipo, n]) => ({ tipo, [unit]: n })),
           }
         : {}),
       ...(args.incluir_marcas

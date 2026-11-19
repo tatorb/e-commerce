@@ -1,6 +1,7 @@
 import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { variantKey } from '@/domain/media';
+import { stockSlots } from '@/domain/stock';
 import { PrismaClient } from '@/generated/prisma/client';
 import { addToPipeline, advanceStep } from '@/domain/pipeline';
 import type { McpContext } from '@/lib/mcp/tool';
@@ -254,6 +255,36 @@ describe.skipIf(!url)('herramientas para Claude', () => {
     expect(active.publicaciones.find((p: { familia_id: string | null }) => p.familia_id === family.id)).toMatchObject({ codigo: 'MLA3330002', es_principal: false });
     const paused = (await call('search_catalog', { estado_en_canal: ['PAUSED'], incluir_tipos: true, incluir_marcas: true })).data;
     expect(paused).toMatchObject({ total: 1, tipos_de_producto: [{ tipo: 'Camisa de cilindro', publicaciones: 1 }], marcas: [{ marca: 'Sabó', familias: 1 }] });
+
+    // El stock: la camisa tiene 3 en STD y 0 en 0,50; el canal muestra 3 y 2. El kit no tiene stock en la app.
+    const slots = stockSlots([{ sku: 'CM-1', measure: 'STD' }, { sku: 'CM-1', measure: '0,50' }]);
+    await db.product.update({
+      where: { id: camisa.id },
+      data: { stockSince: new Date(), stock: { create: [{ key: slots[0].key, label: 'STD', quantity: 3 }, { key: slots[1].key, label: '0,50', quantity: 0 }] } },
+    });
+    const copy = { readAt: new Date(), status: 'ACTIVE' as const };
+    await db.channelCopy.create({ data: { publicationId: std.id, quantity: 3, ...copy } });
+    const halfId = (await db.publication.findFirstOrThrow({ where: { externalId: 'MLA3330002' } })).id;
+    await db.channelCopy.create({ data: { publicationId: halfId, quantity: 2, ...copy } });
+    const stock = (await call('search_catalog', { marca: ['sabo'] })).data.publicaciones;
+    const one = (code: string) => stock.find((p: { codigo: string }) => p.codigo === code);
+    expect(one('MLA3330001')).toMatchObject({ producto_id: camisa.id, producto_optimizado: false, stock_del_producto: 3, cantidad_en_el_canal: 3 });
+    expect(one('MLA3330002')).toMatchObject({ stock_del_producto: 0, cantidad_en_el_canal: 2 });
+    const codes = async (extra: Record<string, unknown>) => (await call('search_catalog', { orden: 'titulo', ...extra })).data.publicaciones.map((p: { codigo: string }) => p.codigo).sort();
+    expect(await codes({ stock: ['con'] })).toEqual(['MLA3330001']);
+    expect(await codes({ stock: ['sin'] })).toEqual(['MLA3330002']);
+    expect(await codes({ stock: ['sin-dato'] })).toEqual(['MLA1110001', 'MLA2220002']);
+    expect(await codes({ cantidad_distinta_al_stock: true })).toEqual(['MLA3330002']);
+
+    // Optimizado: el producto tiene alguna publicación corregida.
+    await db.publication.update({ where: { id: halfId }, data: { pipelineStatus: 'CORRECTED' } });
+    expect(await codes({ producto_optimizado: true })).toEqual(['MLA3330001', 'MLA3330002']);
+    expect(await codes({ producto_optimizado: false })).toEqual(['MLA1110001', 'MLA2220002']);
+
+    // Por producto: una fila por producto, y el total cuenta productos.
+    const byProduct = (await call('search_catalog', { agrupar_por_familia: true, agrupar_por_producto: true, incluir_tipos: true })).data;
+    expect(byProduct.total).toBe(3);
+    expect(byProduct.tipos_de_producto).toContainEqual({ tipo: 'Camisa de cilindro', productos: 1 });
   });
 
   it('get_pipeline_board: cada paso con sus publicaciones y los días', async () => {
