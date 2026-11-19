@@ -120,6 +120,14 @@ describe('cobertura y reglas', () => {
     expect(r.missing).toEqual(['subconjunto partner']);
   });
 
+  it('una cilindrada con punto cubre la misma sin punto, como la sugiere el buscador', () => {
+    const r = titleCoverage('Subconjunto Peugeot 308 1.6 Thp', ['subconjunto peugeot 308 thp 16', 'subconjunto thp 16', 'subconjunto 20 16v', 'subconjunto 1.6']);
+    expect(r.covered).toEqual(['subconjunto peugeot 308 thp 16', 'subconjunto thp 16', 'subconjunto 1.6']);
+    expect(titleCoverage('Subconjunto Vectra 2.0 16v', ['subconjunto vectra 20 16v']).covered).toEqual(['subconjunto vectra 20 16v']);
+    // Al revés no: "16" en el título no es "1.6".
+    expect(titleCoverage('Subconjunto Thp 16', ['subconjunto 1.6']).covered).toEqual([]);
+  });
+
   it('marca lo que impide aprobar y lo que es solo un aviso', () => {
     const long = 'Subconjunto Pistones Aros Peugeot 405 306 Partner 1.9 Diesel Xud9 Persan';
     const r = checkTitle(`${long} Oferta!`, rules);

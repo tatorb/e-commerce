@@ -163,9 +163,14 @@ export function wordKey(word: string): string {
 
 // ───────────────────────────── Cobertura y reglas ─────────────────────────────
 
-/** Qué búsquedas cubre un título: las que tienen todas sus palabras en el título. */
+/**
+ * Qué búsquedas cubre un título: las que tienen todas sus palabras en el
+ * título. Una cilindrada con punto cubre la misma sin punto, porque el
+ * buscador la sugiere así: "1.6" cubre "16" y "2.0" cubre "20".
+ */
 export function titleCoverage(title: string, searches: string[]): { covered: string[]; missing: string[] } {
   const words = new Set(meaningful(tokenize(title)).map(stem));
+  for (const w of [...words]) if (/^\d+[.,]\d+$/.test(w)) words.add(w.replace(/[.,]/, ''));
   const covered: string[] = [];
   const missing: string[] = [];
   for (const search of searches) {

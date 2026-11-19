@@ -1191,6 +1191,12 @@ model SearchPosition {
   position      Int?
   pagesChecked  Int           @default(3)
   source        CaptureSource
+  // Al medir desde la app: el código que apareció (de la publicación, de otra
+  // medida u opción de venta de la familia, o el del producto del canal), si
+  // es un resultado orgánico o publicidad, y los primeros 5 de la búsqueda.
+  matchedCode   String?
+  organic       Boolean?
+  top           Json?
   checkedAt     DateTime      @default(now())
 
   @@index([publicationId, checkedAt])

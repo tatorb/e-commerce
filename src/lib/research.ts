@@ -2,7 +2,9 @@ import type { PrismaClient } from '@/generated/prisma/client';
 import type { ChannelKind } from '@/generated/prisma/enums';
 import { ConnectError } from '@/channels/connect';
 import { getChannelResearch, pause, ResearchError, type ProbeResult } from '@/channels/research';
-import { MAX_PAGES, savePosition, saveSuggestions } from '@/domain/title-work';
+import type { SearchResult } from '@/channels/research-types';
+import { listingTargets } from '@/lib/variant-listings';
+import { MAX_PAGES, parseStrings, savePosition, saveSuggestions } from '@/domain/title-work';
 import { withAccessToken } from '@/lib/connections';
 
 // Lecturas automáticas del canal, con lo que ya se leyó guardado para no
@@ -154,4 +156,74 @@ export async function readPosition(
     if (e instanceof ResearchError || e instanceof ConnectError) return { ok: false, error: e.message };
     return { ok: false, error: 'No se pudo leer la búsqueda.' };
   }
+}
+
+export type MeasuredSearch = {
+  query: string;
+  // Dónde apareció, o null si no está en las páginas que se miran.
+  found: { page: number; position: number; code: string; organic: boolean } | null;
+  top: SearchResult[];
+  // La medición anterior de la misma búsqueda, para ver el antes y el después.
+  before: { page: number | null; position: number | null; at: Date } | null;
+  error: string | null;
+};
+
+/**
+ * Mide la publicación en sus búsquedas principales con la API oficial del
+ * canal y la llave de la tienda conectada: busca cualquier código de la
+ * familia y de sus opciones de venta, y el del producto del canal. Guarda cada
+ * medición con su fecha, como el histórico de posiciones.
+ */
+export async function measureSearchPositions(
+  db: PrismaClient,
+  args: { accountId: string; publicationId: string; queries?: string[]; now?: Date },
+): Promise<{ codes: string[]; searches: MeasuredSearch[] }> {
+  const pub = await db.publication.findFirst({
+    where: { id: args.publicationId, product: { accountId: args.accountId } },
+    select: { id: true, familyId: true, mainOptionId: true, storeId: true, store: { select: { channel: { select: { kind: true } } } }, titleWork: { select: { mainSearches: true } } },
+  });
+  if (!pub) throw new ResearchError('La publicación no está en la cuenta.');
+  const research = getChannelResearch(pub.store.channel.kind);
+  if (!research?.ranking) throw new ResearchError('Este canal no tiene buscador para medir.');
+  const queries = (args.queries ?? parseStrings(pub.titleWork?.mainSearches)).map((q) => q.toLowerCase().replace(/\s+/g, ' ').trim()).filter(Boolean);
+  if (queries.length === 0) throw new ResearchError('La publicación no tiene búsquedas principales: elegilas en el paso Título.');
+
+  // Toda la familia y las opciones de venta de cada medida.
+  const mainIds = new Set([pub.mainOptionId ?? pub.id]);
+  if (pub.familyId) for (const m of await db.publication.findMany({ where: { familyId: pub.familyId }, select: { id: true, mainOptionId: true } })) mainIds.add(m.mainOptionId ?? m.id);
+  const related = await db.publication.findMany({
+    where: { OR: [{ id: { in: [...mainIds] } }, { mainOptionId: { in: [...mainIds] } }] },
+    select: { externalId: true, variantListings: true, channelCopy: { select: { channelProductId: true } } },
+  });
+  const codes = [...new Set(related.flatMap((r) => [...listingTargets(r), ...(r.channelCopy?.channelProductId ? [r.channelCopy.channelProductId] : [])]).map((c) => c.toUpperCase()))];
+  if (codes.length === 0) throw new ResearchError('Todavía no está publicada en el canal.');
+
+  const searches: MeasuredSearch[] = [];
+  await withAccessToken(db, pub.storeId, async (token) => {
+    for (const [i, query] of queries.entries()) {
+      if (i > 0) await pause(PAUSE_MS);
+      const last = await db.searchPosition.findFirst({ where: { publicationId: pub.id, query }, orderBy: { checkedAt: 'desc' }, select: { page: true, position: true, checkedAt: true } });
+      const before = last ? { page: last.page, position: last.position, at: last.checkedAt } : null;
+      try {
+        const r = await research.ranking!(query, codes, MAX_PAGES, token);
+        await savePosition(db, {
+          publicationId: pub.id,
+          query,
+          page: r.found?.page ?? null,
+          position: r.found?.position ?? null,
+          source: 'AUTO',
+          matchedCode: r.found?.code ?? null,
+          organic: r.found?.organic ?? null,
+          top: r.top,
+          at: args.now,
+        });
+        searches.push({ query, found: r.found, top: r.top, before, error: null });
+      } catch (e) {
+        if (!(e instanceof ResearchError)) throw e;
+        searches.push({ query, found: null, top: [], before, error: e.message });
+        if (e.blocked) break;
+      }
+    }
+  });
+  return { codes, searches };
 }

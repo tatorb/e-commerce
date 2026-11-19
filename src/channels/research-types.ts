@@ -14,6 +14,15 @@ export class ResearchError extends Error {
   }
 }
 
+/** Un resultado de la búsqueda. */
+export type SearchResult = { code: string; title: string; seller: string | null; productCode: string | null };
+
+/** Dónde aparece la publicación en una búsqueda y quiénes van primero. */
+export type SearchRanking = {
+  found: { page: number; position: number; code: string; organic: boolean } | null;
+  top: SearchResult[];
+};
+
 export interface ChannelResearch {
   /** Prueba qué se puede leer del canal desde el servidor de la app. */
   probe(): Promise<ProbeResult[]>;
@@ -31,6 +40,12 @@ export interface ChannelResearch {
     pages: number,
     accessToken?: string,
   ): Promise<{ page: number; position: number } | null>;
+  /**
+   * La búsqueda con la API oficial: dónde aparece por primera vez cualquiera
+   * de esos códigos (de publicación o de producto del canal) y los primeros 5
+   * resultados. Con la llave de la cuenta conectada, si se pasa.
+   */
+  ranking?(query: string, codes: string[], pages: number, accessToken?: string): Promise<SearchRanking>;
   /**
    * Qué prueba tiene que haber salido bien para leer cada cosa sola. Las
    * posiciones se pueden leer sin cuenta o con la cuenta conectada.

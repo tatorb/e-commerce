@@ -8,7 +8,7 @@ import { LATEST_MEASUREMENTS, latestMetrics } from '@/domain/measurements';
 import { parseVariations } from '@/domain/media';
 import { channelQuantities, totalQuantity } from '@/domain/quantities';
 import { resolveTitleLock } from '@/domain/title-lock';
-import { FAMILY_LOCK_SELECT, titleLockFromData } from '@/lib/family-lock';
+import { FAMILY_LOCK_SELECT, OPTIONS_LOCK_SELECT, titleLockFromData } from '@/lib/family-lock';
 import { measuresOf } from '@/lib/media';
 import { scorePublication, type RuleConfig, type ScoreResult } from '@/domain/standard';
 import { toScoreInput } from './score-input';
@@ -63,7 +63,9 @@ export async function listScoredPublications(
         variantKey: true,
         familyId: true,
         mainOptionId: true,
-        mainOption: { select: { externalId: true } },
+        // La principal de la medida y sus otras opciones de venta: el código, y sus ventas para el candado del título.
+        mainOption: { select: { ...OPTIONS_LOCK_SELECT.mainOption.select, externalId: true } },
+        saleOptions: OPTIONS_LOCK_SELECT.saleOptions,
         pipelineRemoval: true,
         titleLockedManual: true,
         updatedAt: true,

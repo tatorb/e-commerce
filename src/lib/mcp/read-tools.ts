@@ -912,6 +912,7 @@ const getTitleWorkspace = defineTool({
         posicion: p.position,
         paginas_revisadas: p.pagesChecked,
         origen: p.source === 'AUTO' ? 'leído por la app' : 'cargado a mano',
+        ...(p.matchedCode ? { aparece_con: p.matchedCode, organico: p.organic } : {}),
         fecha: when(p.checkedAt, account),
       })),
       propuestas: tc.proposals.map((p) => ({ titulo: p.title, motivo: p.reason })),

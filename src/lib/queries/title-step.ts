@@ -4,7 +4,7 @@ import type { PrismaClient } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
 import { LATEST_MEASUREMENTS } from '@/domain/measurements';
 import { resolveTitleLock } from '@/domain/title-lock';
-import { FAMILY_LOCK_SELECT, titleLockFromData } from '@/lib/family-lock';
+import { FAMILY_LOCK_SELECT, OPTIONS_LOCK_SELECT, titleLockFromData } from '@/lib/family-lock';
 import { buildSeeds, buildWordMap, sameText } from '@/domain/titles';
 import { parseProposals, parseStrings, parseWordStatuses } from '@/domain/title-work';
 import { loadTitleRules } from '@/lib/title-rules';
@@ -63,6 +63,7 @@ export async function loadTitleContext(db: PrismaClient, accountId: string, publ
       store: { select: { id: true, channel: { select: { id: true, kind: true, name: true } } } },
       measurements: { orderBy: { takenAt: 'desc' }, take: LATEST_MEASUREMENTS, select: { metrics: true } },
       family: FAMILY_LOCK_SELECT,
+      ...OPTIONS_LOCK_SELECT,
       product: {
         select: {
           name: true,

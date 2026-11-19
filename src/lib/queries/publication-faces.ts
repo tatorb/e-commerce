@@ -17,7 +17,7 @@ import {
 } from '@/domain/channel-sync';
 import { LATEST_MEASUREMENTS, latestMetrics } from '@/domain/measurements';
 import { resolveTitleLock } from '@/domain/title-lock';
-import { FAMILY_LOCK_SELECT, titleLockFromData } from '@/lib/family-lock';
+import { FAMILY_LOCK_SELECT, OPTIONS_LOCK_SELECT, titleLockFromData } from '@/lib/family-lock';
 import { loadBuyerFacts } from '@/lib/buyers';
 
 // La página de una publicación: sus dos caras, lo que está en el canal y el
@@ -51,6 +51,7 @@ export async function loadPublicationFaces(accountId: string, publicationId: str
       store: { select: { name: true, channel: { select: { kind: true, name: true } }, connection: { select: { status: true } } } },
       measurements: { orderBy: { takenAt: 'desc' }, take: LATEST_MEASUREMENTS, select: { metrics: true } },
       family: FAMILY_LOCK_SELECT,
+      ...OPTIONS_LOCK_SELECT,
       channelCopy: true,
       syncChanges: { orderBy: { createdAt: 'desc' }, take: HISTORY, include: { user: { select: { name: true } } } },
       buyerQuestions: {

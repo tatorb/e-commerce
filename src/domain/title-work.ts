@@ -157,7 +157,18 @@ export const MAX_PAGES = 3;
 /** Guarda en qué página y posición aparece. Sin página: no aparece en las páginas revisadas. */
 export async function savePosition(
   tx: Tx,
-  args: { publicationId: string; query: string; page: number | null; position: number | null; source: CaptureSource; at?: Date },
+  args: {
+    publicationId: string;
+    query: string;
+    page: number | null;
+    position: number | null;
+    source: CaptureSource;
+    at?: Date;
+    // Al medir desde la app: el código que apareció, si es orgánico y los primeros 5.
+    matchedCode?: string | null;
+    organic?: boolean | null;
+    top?: { code: string; title: string; seller: string | null; productCode: string | null }[] | null;
+  },
 ) {
   const query = args.query.toLowerCase().replace(/\s+/g, ' ').trim();
   if (!query) throw new TitleError('Falta la búsqueda.');
@@ -175,6 +186,9 @@ export async function savePosition(
       position: args.page === null ? null : args.position,
       pagesChecked: MAX_PAGES,
       source: args.source,
+      matchedCode: args.page === null ? null : (args.matchedCode ?? null),
+      organic: args.page === null ? null : (args.organic ?? null),
+      ...(args.top ? { top: args.top } : {}),
       checkedAt: args.at ?? new Date(),
     },
   });

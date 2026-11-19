@@ -36,7 +36,7 @@ import { writeContentField } from '@/domain/content';
 import { LATEST_MEASUREMENTS } from '@/domain/measurements';
 import { resolveTitleLock } from '@/domain/title-lock';
 import { channelFamilyNameOf } from '@/domain/families';
-import { FAMILY_LOCK_SELECT, titleLockFromData } from '@/lib/family-lock';
+import { FAMILY_LOCK_SELECT, OPTIONS_LOCK_SELECT, titleLockFromData } from '@/lib/family-lock';
 import { isInstallmentPlan, planLabel } from '@/domain/pricing';
 import { LIVE_OPTION } from '@/domain/sale-options';
 import { WARRANTY_TYPE_LABEL, type Warranty } from '@/domain/warranty';
@@ -111,6 +111,7 @@ async function loadForPush(db: Db, accountId: string, publicationId: string) {
       store: { select: { id: true, channel: { select: { id: true, kind: true, name: true } }, connection: { select: { status: true } } } },
       measurements: { orderBy: { takenAt: 'desc' }, take: LATEST_MEASUREMENTS, select: { metrics: true } },
       family: FAMILY_LOCK_SELECT,
+      ...OPTIONS_LOCK_SELECT,
       channelCopy: {
         select: {
           title: true,

@@ -4,8 +4,8 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@/generated/prisma/client';
 import { getChannelResearch } from '@/channels/research';
-import { listingIds, parseSearchIds, parseSuggestions, toPagePosition } from '@/channels/mercadolibre/research';
-import { autoAvailable, readPosition, readSuggestions, runProbe } from '@/lib/research';
+import { listingIds, parseSearchIds, parseSearchResults, parseSuggestions, toPagePosition } from '@/channels/mercadolibre/research';
+import { autoAvailable, measureSearchPositions, readPosition, readSuggestions, runProbe } from '@/lib/research';
 import { encrypt } from '@/lib/crypto';
 
 // Mercado Libre simulado en la computadora: desde las pruebas no se llega al
@@ -26,6 +26,13 @@ describe('respuestas de Mercado Libre', () => {
     expect(listingIds('<a href="/MLA-123456789-kit">x</a><a href="/MLA-123456789-kit">y</a> MLA987654321')).toEqual([
       'MLA123456789',
       'MLA987654321',
+    ]);
+  });
+
+  it('lee los resultados de la búsqueda con su vendedor y su producto del canal', () => {
+    expect(parseSearchResults({ results: [{ id: 'mla1', title: 'Kit', seller: { nickname: 'TIENDA' }, user_product_id: 'mlau9' }, { id: 2 }, { title: 'sin código' }] })).toEqual([
+      { code: 'MLA1', title: 'Kit', seller: 'TIENDA', productCode: 'MLAU9' },
+      { code: '2', title: '', seller: null, productCode: null },
     ]);
   });
 
@@ -73,7 +80,7 @@ describe('leer de Mercado Libre', () => {
         const offset = Number(u.searchParams.get('offset') ?? 0);
         const limit = Number(u.searchParams.get('limit') ?? 50);
         res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ results: ids.slice(offset, offset + limit).map((id) => ({ id })) }));
+        res.end(JSON.stringify({ results: ids.slice(offset, offset + limit).map((id) => ({ id, title: `Kit ${id}`, seller: { nickname: 'OTRO' }, ...(id === 'MLA1000000070' ? { user_product_id: 'MLAU555' } : {}) })) }));
       } else {
         res.writeHead(200, { 'content-type': 'text/html' });
         res.end('<html>Verificá que no sos un robot</html>');
@@ -209,6 +216,38 @@ describe('leer de Mercado Libre', () => {
       expect(r.error).toContain('no dejó leer');
       expect(requests).toHaveLength(4);
       expect((await db.searchSuggestion.findMany({ orderBy: { capturedAt: 'asc' } })).map((s) => s.query)).toEqual(['kit a', 'kit b', 'kit c']);
+    });
+
+    it('mide las búsquedas principales con la cuenta conectada, por cualquier código de la medida, y guarda el histórico', async () => {
+      process.env.CHANNEL_TOKEN_KEY = 'clave-de-prueba-para-cifrar';
+      const store = await db.store.findFirstOrThrow();
+      await db.channelConnection.create({
+        data: { storeId: store.id, appId: '1', appSecret: encrypt('s'), appSecretHint: 's', status: 'ACTIVE', externalUserId: '77', accessToken: encrypt('acc'), refreshToken: encrypt('ref'), expiresAt: new Date(Date.now() + 3 * 3600_000) },
+      });
+      const pub = await db.publication.findUniqueOrThrow({ where: { id: publicationId } });
+      // Otra opción de venta de la misma medida aparece antes que la principal.
+      await db.publication.create({ data: { productId: pub.productId, storeId: store.id, externalId: 'MLA1000000030', mainOptionId: publicationId } });
+      await db.titleWork.create({ data: { publicationId, mainSearches: ['Kit', 'kit gol'] } });
+      await expect(measureSearchPositions(db, { accountId, publicationId: 'otra' })).rejects.toThrow('no está en la cuenta');
+      authorized = [];
+      const first = await measureSearchPositions(db, { accountId, publicationId });
+      expect(first.codes.sort()).toEqual(['MLA1000000030', 'MLA1000000061']);
+      expect(first.searches[0]).toMatchObject({ query: 'kit', found: { page: 1, position: 31, code: 'MLA1000000030', organic: true }, before: null, error: null });
+      expect(first.searches[0].top.map((t) => t.code)).toEqual(ids.slice(0, 5));
+      expect(first.searches[0].top[0]).toMatchObject({ title: 'Kit MLA1000000000', seller: 'OTRO' });
+      expect(authorized.length).toBeGreaterThan(0);
+      const saved = await db.searchPosition.findFirstOrThrow({ where: { query: 'kit' } });
+      expect(saved).toMatchObject({ page: 1, position: 31, matchedCode: 'MLA1000000030', organic: true, source: 'AUTO' });
+      expect((saved.top as unknown[]).length).toBe(5);
+
+      // Por el código del producto del canal, y con la medición anterior para comparar.
+      await db.publication.deleteMany({ where: { externalId: 'MLA1000000030' } });
+      // Su propio código no está en la búsqueda: aparece por el del producto.
+      await db.publication.update({ where: { id: publicationId }, data: { externalId: 'MLA9999999999' } });
+      await db.channelCopy.create({ data: { publicationId, readAt: new Date(), status: 'ACTIVE', channelProductId: 'MLAU555' } });
+      const second = await measureSearchPositions(db, { accountId, publicationId, queries: ['kit'] });
+      expect(second.searches[0]).toMatchObject({ found: { page: 2, position: 23, code: 'MLAU555' }, before: { page: 1, position: 31 } });
+      expect(await db.searchPosition.count({ where: { publicationId, query: 'kit' } })).toBe(2);
     });
 
     it('lee la posición y la guarda', async () => {

@@ -1,4 +1,4 @@
-import { pause, ResearchError, type ChannelResearch, type ProbeResult } from '../research-types';
+import { pause, ResearchError, type ChannelResearch, type ProbeResult, type SearchRanking, type SearchResult } from '../research-types';
 import { apiUrl, listingUrl, suggestUrl } from './urls';
 
 // Lectura de Mercado Libre Argentina desde el servidor de la app.
@@ -118,6 +118,46 @@ async function findPosition(query: string, externalId: string, pages: number, ac
   return null;
 }
 
+/** Los resultados de una respuesta de la búsqueda de la API: código, título, vendedor y producto del canal. */
+export function parseSearchResults(body: unknown): SearchResult[] {
+  const results = body && typeof body === 'object' ? (body as { results?: unknown }).results : null;
+  if (!Array.isArray(results)) return [];
+  const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : typeof v === 'number' ? String(v) : null);
+  return results.flatMap((r) => {
+    if (!r || typeof r !== 'object') return [];
+    const x = r as { id?: unknown; title?: unknown; seller?: { nickname?: unknown; id?: unknown } | null; user_product_id?: unknown };
+    const code = str(x.id);
+    if (!code) return [];
+    return [{ code: code.toUpperCase(), title: str(x.title) ?? '', seller: str(x.seller?.nickname) ?? str(x.seller?.id), productCode: str(x.user_product_id)?.toUpperCase() ?? null }];
+  });
+}
+
+/**
+ * Dónde aparece por primera vez cualquiera de los códigos (de publicación o de
+ * producto del canal) y los primeros 5. La API oficial no trae la publicidad:
+ * lo que encuentra es orgánico.
+ */
+async function ranking(query: string, codes: string[], pages: number, accessToken?: string): Promise<SearchRanking> {
+  const wanted = new Set(codes.map((c) => c.toUpperCase().replace('-', '')));
+  const total = pages * PAGE_SIZE;
+  const top: SearchResult[] = [];
+  for (let offset = 0; offset < total; offset += API_LIMIT) {
+    if (offset > 0) await pause(400);
+    const url = `${apiUrl()}/sites/MLA/search?q=${encodeURIComponent(query)}&offset=${offset}&limit=${API_LIMIT}`;
+    const results = parseSearchResults(await json(await get(url, 'application/json', accessToken)));
+    if (offset === 0) top.push(...results.slice(0, 5));
+    const i = results.findIndex((r) => wanted.has(r.code) || (r.productCode !== null && wanted.has(r.productCode)));
+    if (i >= 0) {
+      const rank = offset + i + 1;
+      if (rank > total) return { found: null, top };
+      const r = results[i];
+      return { found: { ...toPagePosition(rank), code: wanted.has(r.code) ? r.code : r.productCode!, organic: true }, top };
+    }
+    if (results.length < API_LIMIT) break;
+  }
+  return { found: null, top };
+}
+
 async function check(check: string, label: string, run: () => Promise<string>): Promise<ProbeResult> {
   try {
     return { check, label, ok: true, detail: await run() };
@@ -182,5 +222,6 @@ export const mercadolibreResearch: ChannelResearch = {
   probeConnected,
   suggest,
   findPosition,
+  ranking,
   checks: { suggestions: 'suggestions', positions: 'search_api', positionsConnected: 'search_connected' },
 };
