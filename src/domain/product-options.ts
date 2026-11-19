@@ -44,3 +44,19 @@ export function optionNameProblem(kind: OptionKind, name: string, options: reado
   );
   return same ? `Ya está «${same}» en la lista.` : null;
 }
+
+/**
+ * Los tipos de la lista que corresponden a cada texto pedido: el igual, sin
+ * importar mayúsculas ni acentos, o si no hay ninguno igual, los que lo
+ * contienen. "Aros" toma "Aros" y no "Subconjunto (pistones + aros)".
+ */
+export function matchTypes(list: readonly string[], wanted: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const raw of wanted) {
+    const key = optionKey(raw);
+    if (!key) continue;
+    const exact = list.filter((t) => optionKey(t) === key);
+    for (const t of exact.length > 0 ? exact : list.filter((t) => optionKey(t).includes(key))) if (!out.includes(t)) out.push(t);
+  }
+  return out;
+}

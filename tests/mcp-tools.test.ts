@@ -198,7 +198,9 @@ describe.skipIf(!url)('herramientas para Claude', () => {
       pipeline: 'En pipeline · Título',
       link_app: `https://app.ejemplo.com/a/prueba/pipeline/${kitId}`,
     });
-    expect((await call('search_catalog', { tipo_de_producto: ['embrague'] })).data.total).toBe(1);
+    expect((await call('search_catalog', { tipo_de_producto: ['embrague'] })).data).toMatchObject({ total: 1, tipos_usados: ['Kit de embrague'] });
+    expect((await call('search_catalog', { tipo_de_producto: ['KIT DE EMBRAGUE'] })).data.tipos_usados).toEqual(['Kit de embrague']);
+    expect((await call('search_catalog')).data).not.toHaveProperty('tipos_usados');
     expect((await call('search_catalog', { tipo_de_producto: ['no existe'] })).isError).toBe(true);
     expect((await call('search_catalog', { ventas: ['con'] })).data.total).toBe(1);
     expect((await call('search_catalog', { texto: 'sku-1' })).data.total).toBe(1);

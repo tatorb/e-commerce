@@ -1,7 +1,7 @@
 import type { PrismaClient } from '@/generated/prisma/client';
 import type { ActivitySource } from '@/generated/prisma/enums';
 import { buildName, NAME_FIELD_LABEL, nameKey, parseNameFormat } from '@/domain/product-names';
-import { cleanOptionName, optionKey } from '@/domain/product-options';
+import { cleanOptionName, matchTypes, optionKey } from '@/domain/product-options';
 import { logActivity } from '@/lib/activity';
 
 // Renombrar productos en tanda con un formato, y el nombre corto de cada tipo
@@ -20,6 +20,8 @@ export type RenamePlan = {
   cannot: { id: string; name: string; reason: string }[];
   // Los que quedarían con el mismo nombre que otro producto: no se renombra ninguno.
   conflicts: { id: string; from: string; to: string; with: string[] }[];
+  // Con filtro de tipo: los tipos que tomó.
+  usedTypes?: string[];
 };
 
 export type RenameFilters = { brands?: string[]; types?: string[]; productIds?: string[] };
@@ -59,16 +61,20 @@ export async function planRenames(db: Db, args: { accountId: string; format: str
   const all = await db.product.findMany({ where: { accountId: args.accountId }, select: { id: true, name: true, productType: true, brand: true, partNumber: true }, orderBy: { name: 'asc' } });
   const f = args.filters ?? {};
   const brands = new Set((f.brands ?? []).map(optionKey).filter(Boolean));
-  const types = (f.types ?? []).map(optionKey).filter(Boolean);
+  // Cada tipo pedido: el exacto, sin importar mayúsculas ni acentos, o si no hay, los que lo contienen.
+  const allTypes = [...new Set(all.flatMap((p) => (p.productType?.trim() ? [p.productType.trim()] : [])))];
+  const usedTypes = matchTypes(allTypes, f.types ?? []);
+  const typeSet = new Set(usedTypes);
+  const askedTypes = (f.types ?? []).some((t) => optionKey(t));
   const ids = new Set(f.productIds ?? []);
   const wanted = all.filter(
     (p) =>
       (brands.size === 0 || (p.brand !== null && brands.has(optionKey(p.brand)))) &&
-      (types.length === 0 || (p.productType !== null && types.some((t) => optionKey(p.productType!) === t || optionKey(p.productType!).includes(t)))) &&
+      (!askedTypes || (p.productType !== null && typeSet.has(p.productType.trim()))) &&
       (ids.size === 0 || ids.has(p.id)),
   );
 
-  const plan: RenamePlan = { toRename: [], alreadyOk: [], cannot: [], conflicts: [] };
+  const plan: RenamePlan = { toRename: [], alreadyOk: [], cannot: [], conflicts: [], ...(askedTypes ? { usedTypes } : {}) };
   const candidates: { id: string; from: string; to: string }[] = [];
   for (const p of wanted) {
     const type = p.productType?.trim() || null;

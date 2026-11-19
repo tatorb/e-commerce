@@ -15,6 +15,7 @@ const asToolError = async <T>(work: () => Promise<T>): Promise<T> => {
 };
 
 const planOut = (plan: RenamePlan) => ({
+  ...(plan.usedTypes ? { tipos_usados: plan.usedTypes } : {}),
   a_renombrar: plan.toRename.length,
   ya_cumplen: plan.alreadyOk.length,
   no_se_pueden: plan.cannot.length,
@@ -35,7 +36,7 @@ const renameProductsTool = defineTool({
     cuenta: accountArg,
     formato: z.string().min(1).max(200).describe('Por ejemplo "[tipo_corto] [numero_de_pieza]".'),
     marca: z.array(z.string()).optional().describe('Solo los productos de esas marcas, sin importar mayúsculas ni acentos.'),
-    tipo_de_producto: z.array(z.string()).optional().describe('Solo los productos de esos tipos. Si no coincide exacto, los tipos que lo contienen.'),
+    tipo_de_producto: z.array(z.string()).optional().describe('Solo los productos de esos tipos. Primero el exacto, sin importar mayúsculas ni acentos; si no hay ninguno exacto, los tipos que lo contienen. tipos_usados dice cuáles tomó.'),
     producto_ids: z.array(z.string()).max(2000).optional().describe('Solo esos productos: el producto_id de search_catalog.'),
     nombres_cortos: z
       .array(z.object({ tipo: z.string().min(1), nombre_corto: z.string().max(100) }))

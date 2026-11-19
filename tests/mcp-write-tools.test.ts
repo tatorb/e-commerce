@@ -268,6 +268,18 @@ describe.skipIf(!url)('herramientas de escritura', () => {
     // No cambió nada.
     expect((await db.product.findUniqueOrThrow({ where: { id: a.id } })).name).toBe('Subconjunto Gol viejo');
 
+    // El tipo exacto primero: "Aros" no toma "Subconjunto (pistones + aros)".
+    await db.productOption.create({ data: { accountId, kind: 'TYPE', name: 'Aros', shortName: 'Aros' } });
+    const aros = await db.product.create({ data: { accountId, name: 'Juego de aros', productType: 'Aros', partNumber: 'AR-1' } });
+    const onlyRings = (await call('rename_products', { formato: '[tipo_corto] [numero_de_pieza]', tipo_de_producto: ['ÁROS'] })).data;
+    expect(onlyRings.tipos_usados).toEqual(['Aros']);
+    expect(onlyRings.cambios).toEqual([{ producto_id: aros.id, nombre_actual: 'Juego de aros', nombre_nuevo: 'Aros AR-1' }]);
+    // Sin uno exacto, los que lo contienen.
+    const partial = (await call('rename_products', { formato: '[tipo_corto] [numero_de_pieza]', tipo_de_producto: ['pistones'] })).data;
+    expect(partial.tipos_usados).toEqual(['Subconjunto (pistones + aros)']);
+    expect(partial.a_renombrar + partial.ya_cumplen + partial.no_se_pueden + partial.en_conflicto).toBe(6);
+    await db.product.delete({ where: { id: aros.id } });
+
     // Un tipo sin nombre corto no se puede; se puede probar uno sin guardarlo.
     const kit = (await call('rename_products', { formato: '[tipo_corto] [numero_de_pieza]', producto_ids: [productId] })).data;
     expect(kit.sin_renombrar[0].motivo).toContain('no tiene nombre corto');

@@ -33,7 +33,7 @@ import {
 } from '@/lib/queries/catalog-filters';
 import { listBoard, listPipelineMovements } from '@/lib/queries/pipeline';
 import { listScoredPublications, type ScoredPublication } from '@/lib/queries/scoring';
-import { optionKey } from '@/domain/product-options';
+import { matchTypes, optionKey } from '@/domain/product-options';
 import { PLAN_SELECT, productStockOf } from '@/lib/stock-plan';
 import { KIND_OPTIONS, parseKinds } from '@/lib/queries/catalog-filters';
 import { fileHref } from '@/lib/file-rules';
@@ -240,7 +240,7 @@ const searchCatalog = defineTool({
     tipo_de_producto: z
       .array(z.string())
       .optional()
-      .describe('Tipo de producto, por ejemplo "Kit de embrague". Si no coincide exacto, busca los tipos que lo contienen.'),
+      .describe('Tipo de producto, por ejemplo "Kit de embrague". Primero el exacto, sin importar mayúsculas ni acentos; si no hay ninguno exacto, los tipos que lo contienen. tipos_usados dice cuáles tomó.'),
     visitas: z
       .array(asEnum(VISIT_RANGES.map((r) => r.value)))
       .optional()
@@ -301,12 +301,8 @@ const searchCatalog = defineTool({
     const all = await listScoredPublications(account.id, {}, ctx.db);
     const types = [...new Set(all.flatMap((p) => (p.productType ? [p.productType] : [])))];
 
-    // Cada tipo pedido: el exacto o, si no hay, los que lo contienen.
-    const wantedTypes = (args.tipo_de_producto ?? []).flatMap((raw) => {
-      const f = raw.trim().toLowerCase();
-      const exact = types.filter((x) => x.toLowerCase() === f);
-      return exact.length > 0 ? exact : types.filter((x) => x.toLowerCase().includes(f));
-    });
+    // Cada tipo pedido: el exacto, sin importar mayúsculas ni acentos, o si no hay, los que lo contienen.
+    const wantedTypes = matchTypes(types, args.tipo_de_producto ?? []);
     if ((args.tipo_de_producto ?? []).length > 0 && wantedTypes.length === 0) {
       throw new McpToolError(`No hay publicaciones del tipo ${args.tipo_de_producto!.join(', ')}. Usá incluir_tipos para ver cuáles hay.`);
     }
@@ -371,6 +367,7 @@ const searchCatalog = defineTool({
       cuenta: account.slug,
       total: found.length,
       mostrando: page.length > 0 ? `${from + 1} a ${from + page.length}` : 'ninguna',
+      ...((args.tipo_de_producto ?? []).length > 0 ? { tipos_usados: wantedTypes } : {}),
       publicaciones: page.map((p) => ({
         ...summary(ctx, account, p),
         familia_id: p.familyId,
