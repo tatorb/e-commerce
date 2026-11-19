@@ -1,3 +1,4 @@
+import { loadSavedCategories } from '@/lib/catalog-categories';
 import type { PrismaClient } from '@/generated/prisma/client';
 import { Prisma } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
@@ -302,6 +303,8 @@ export async function pushDrafts(
   const p = await loadForPush(db, args.accountId, args.publicationId);
   const channelName = p.store.channel.name;
   const publisher = getChannelPublisher(p.store.channel.kind);
+  // Las categorías que se trajeron del canal, para conocer su formulario.
+  await loadSavedCategories(db, p.store.channel.kind);
   if (!p.externalId) throw new PushError(`Todavía no está publicada en ${channelName}: primero hay que crearla allá.`);
   if (!publisher) throw new PushError(`Todavía no se pueden subir cambios a ${channelName}.`);
   if (p.store.connection?.status !== 'ACTIVE') throw new PushError(`La tienda no está conectada con ${channelName}: conectala en Conexión.`);

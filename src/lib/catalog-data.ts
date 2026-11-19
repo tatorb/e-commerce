@@ -1,3 +1,4 @@
+import { ensureChannelCategory, loadSavedCategories } from '@/lib/catalog-categories';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
 import {
@@ -39,6 +40,8 @@ async function load(db: Db, publicationId: string) {
   if (!pub) throw new CatalogError('La publicación no existe.');
   const channel = pub.store.channel;
   const adapter = getChannelAdapter(channel.kind, channel.name);
+  // Las categorías que se trajeron del canal: cualquiera, no solo las de la lista fija.
+  await loadSavedCategories(db, channel.kind);
   return { pub, adapter, channelName: channel.name, catalog: adapter.catalog };
 }
 
@@ -148,6 +151,14 @@ export async function saveCatalogData(
     values: Record<string, string | string[] | null | undefined>;
   },
 ) {
+  // Cualquier categoría del canal: si es un código que la app todavía no tiene, se lee del canal y se guarda.
+  if (typeof args.category === 'string' && args.category.trim()) {
+    const first = await load(db, args.publicationId);
+    if (first.catalog && !findCategory(first.catalog, args.category) && first.catalog.fetchCategory) {
+      const looksLikeCode = /^[A-Z]{3}\d{3,}$/i.test(args.category.trim());
+      if (looksLikeCode) await ensureChannelCategory(db, { storeId: first.pub.storeId, kind: first.pub.store.channel.kind, categoryId: args.category });
+    }
+  }
   return db.$transaction(async (tx) => {
     // De a un cambio por publicación a la vez, así no se pisan los atributos.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`attributes:${args.publicationId}`}))`;
@@ -162,7 +173,7 @@ export async function saveCatalogData(
       const wanted = args.category === null ? null : findCategory(catalog, args.category);
       if (args.category !== null && !wanted) {
         const names = catalog.categories.map((c) => `${c.name} (${c.id})`).join(', ');
-        throw new CatalogError(`No hay una categoría «${args.category}». Pueden ser: ${names}.`);
+        throw new CatalogError(`No hay una categoría «${args.category}». Pasá el código de cualquier categoría de ${channelName}, por ejemplo MLA458790, o una de estas: ${names}.`);
       }
       // Si es la misma que la de la familia, no queda fijada: sigue a la familia.
       chosen = wanted && wanted.id !== catalog.categoryForFamily(family) ? wanted.id : null;

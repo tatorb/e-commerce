@@ -42,6 +42,16 @@ export interface ChannelCatalog {
   /** Al revés: la familia de una categoría. Si varias comparten la categoría, decide el título. */
   familyForCategory(categoryId: string, title: string | null): string | null;
   category(id: string): CatalogCategory | null;
+  /**
+   * Suma una categoría que no está en la lista fija, por ejemplo una leída de
+   * la API del canal y guardada en la app: desde ahí category la encuentra.
+   */
+  register?(category: CatalogCategory & { path?: string | null }): void;
+  /**
+   * Lee del canal cualquier categoría con su formulario. Null si no existe.
+   * leaf: si se puede publicar en ella (no tiene subcategorías).
+   */
+  fetchCategory?(id: string, accessToken: string): Promise<(CatalogCategory & { path: string | null; leaf: boolean }) | null>;
 }
 
 export class CatalogError extends Error {}

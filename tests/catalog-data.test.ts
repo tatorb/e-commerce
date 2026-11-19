@@ -1,5 +1,5 @@
 import { PrismaPg } from '@prisma/adapter-pg';
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PrismaClient } from '@/generated/prisma/client';
 import { mercadolibreCatalog } from '@/channels/mercadolibre/catalog';
 import {
@@ -13,6 +13,10 @@ import {
   type CatalogField,
 } from '@/domain/catalog-data';
 import { loadCatalogData, saveCatalogData } from '@/lib/catalog-data';
+import { categoryFromApi } from '@/channels/mercadolibre/catalog/remote';
+import { forgetSavedCategories } from '@/lib/catalog-categories';
+import { catalogForClaude } from '@/lib/mcp/catalog';
+import { encrypt } from '@/lib/crypto';
 
 // Datos inventados.
 
@@ -84,6 +88,38 @@ describe('categorías de Mercado Libre', () => {
     expect(findCategory(mercadolibreCatalog, 'mla47083')?.name).toBe('Bielas');
     expect(findCategory(mercadolibreCatalog, 'bombas de agua')?.id).toBe('MLA60598');
     expect(findCategory(mercadolibreCatalog, 'Escapes')).toBeNull();
+  });
+});
+
+describe('cualquier categoría de Mercado Libre', () => {
+  it('lee la categoría y su formulario de la API, con los mismos criterios que la lista fija', () => {
+    const info = { id: 'MLA458790', name: 'Kits de Reconstrucción', children_categories: [], settings: { listing_allowed: true }, path_from_root: [{ name: 'Accesorios para Vehículos' }, { name: 'Kits de Reconstrucción' }] };
+    const attributes = [
+      { id: 'BRAND', name: 'Marca', value_type: 'string', tags: { required: true } },
+      { id: 'KIT_TYPE', name: 'Tipo de kit', value_type: 'list', values: [{ name: 'Completo' }, { name: 'Parcial' }], tags: { required: true } },
+      { id: 'INCLUDES_GASKETS', name: 'Incluye juntas', value_type: 'boolean', tags: {} },
+      { id: 'BORE', name: 'Diámetro', value_type: 'number_unit', allowed_units: [{ id: 'mm', name: 'mm' }, { id: 'cm', name: 'cm' }], default_unit: 'mm', tags: {} },
+      { id: 'OEM', name: 'Código OEM', value_type: 'string', tags: { multivalued: true } },
+      { id: 'HIDDEN_ONE', name: 'Oculto', value_type: 'string', tags: { hidden: true } },
+      { id: 'ITEM_CONDITION', name: 'Condición', value_type: 'list', values: [{ name: 'Nuevo' }], tags: {} },
+      { id: 'SELLER_PACKAGE_WEIGHT', name: 'Peso', value_type: 'number_unit', tags: {} },
+    ];
+    const c = categoryFromApi('mla458790', info, attributes)!;
+    expect(c).toMatchObject({ id: 'MLA458790', name: 'Kits de Reconstrucción', path: 'Accesorios para Vehículos > Kits de Reconstrucción', leaf: true });
+    expect(c.fields.slice(0, 5)).toEqual([
+      { id: 'BRAND', label: 'Marca', type: 'text', required: true, fromProduct: 'brand' },
+      { id: 'KIT_TYPE', label: 'Tipo de kit', type: 'list', options: ['Completo', 'Parcial'], required: true },
+      { id: 'INCLUDES_GASKETS', label: 'Incluye juntas', type: 'boolean' },
+      { id: 'BORE', label: 'Diámetro', type: 'number_unit', units: ['mm', 'cm'], defaultUnit: 'mm' },
+      { id: 'OEM', label: 'Código OEM', type: 'text', multiple: true },
+    ]);
+    // Sin los ocultos ni la condición; el paquete y los impuestos van siempre, una sola vez.
+    expect(c.fields.map((f) => f.id)).not.toContain('HIDDEN_ONE');
+    expect(c.fields.map((f) => f.id)).not.toContain('ITEM_CONDITION');
+    expect(c.fields.filter((f) => f.id === 'SELLER_PACKAGE_WEIGHT')).toHaveLength(1);
+    expect(c.fields.map((f) => f.id)).toContain('VALUE_ADDED_TAX');
+    expect(categoryFromApi('MLA1', { ...info, children_categories: [{ id: 'x' }] }, [])!.leaf).toBe(false);
+    expect(categoryFromApi('MLA1', { error: 'not_found' }, [])).toBeNull();
   });
 });
 
@@ -179,12 +215,17 @@ describe.skipIf(!url)('datos de catálogo de una publicación', () => {
   let webId = '';
 
   beforeEach(async () => {
-    await db.$executeRawUnsafe('TRUNCATE publications, products, stores, channels, accounts CASCADE');
+    await db.$executeRawUnsafe('TRUNCATE publications, products, stores, channels, accounts, channel_categories CASCADE');
+    forgetSavedCategories();
     const ml = await db.channel.create({ data: { kind: 'MERCADOLIBRE', name: 'Mercado Libre' } });
     const web = await db.channel.create({ data: { kind: 'WEB_STORE', name: 'Tienda web' } });
     const accountId = (await db.account.create({ data: { slug: 'prueba', name: 'Cuenta de prueba' } })).id;
     const store = await db.store.create({ data: { accountId, channelId: ml.id, name: 'TIENDA' } });
     const webStore = await db.store.create({ data: { accountId, channelId: web.id, name: 'WEB' } });
+    process.env.CHANNEL_TOKEN_KEY = 'clave-de-prueba-para-cifrar';
+    await db.channelConnection.create({
+      data: { storeId: store.id, appId: '1', appSecret: encrypt('s'), appSecretHint: 's', status: 'ACTIVE', externalUserId: '77', accessToken: encrypt('acc'), refreshToken: encrypt('ref'), expiresAt: new Date(Date.now() + 3 * 3600_000) },
+    });
     const kit = await db.product.create({
       data: { accountId, name: 'Kit de embrague Gol', productType: 'Kit de embrague', brand: 'Marca Uno', partNumber: 'P-100', origin: 'Brasil' },
     });
@@ -252,5 +293,41 @@ describe.skipIf(!url)('datos de catálogo de una publicación', () => {
 
     await expect(saveCatalogData(db, { publicationId: kitId, category: 'Escapes', values: {} })).rejects.toThrow('No hay una categoría «Escapes»');
     await expect(saveCatalogData(db, { publicationId: webId, values: { A: 'b' } })).rejects.toThrow('Tienda web todavía no tiene datos de catálogo');
+  });
+
+  it('cualquier categoría del canal: la trae, la guarda y ofrece usar la del canal', async () => {
+    const remote = {
+      id: 'MLA458790',
+      name: 'Kits de Reconstrucción',
+      path: 'Accesorios > Kits de Reconstrucción',
+      leaf: true,
+      fields: [{ id: 'KIT_TYPE', label: 'Tipo de kit', type: 'list' as const, options: ['Completo', 'Parcial'] }],
+    };
+    const fetch = vi.spyOn(mercadolibreCatalog, 'fetchCategory').mockImplementation(async (id) =>
+      id === 'MLA458790' ? remote : id === 'MLA1747' ? { ...remote, id, name: 'Accesorios', leaf: false } : null,
+    );
+    // El canal la tiene en una categoría que la app no conoce: el aviso ofrece usarla.
+    await db.channelCopy.create({ data: { publicationId: otherId, readAt: new Date(), status: 'ACTIVE', categoryId: 'MLA458790' } });
+    await saveCatalogData(db, { publicationId: otherId, category: 'MLA47083', values: {} });
+    const before = catalogForClaude(await loadCatalogData(db, otherId))!;
+    expect(before.aviso_de_categoria).toContain('MLA458790');
+    expect(before.usar_la_del_canal).toMatchObject({ herramienta: 'save_catalog_data', categoria: 'MLA458790' });
+
+    // Con el código, la lee del canal con la llave de la tienda, la guarda y trae su formulario.
+    await saveCatalogData(db, { publicationId: otherId, category: 'mla458790', values: { KIT_TYPE: 'Completo' } });
+    const after = (await loadCatalogData(db, otherId))!;
+    expect(after).toMatchObject({ category: { id: 'MLA458790', name: 'Kits de Reconstrucción' }, values: { KIT_TYPE: 'Completo' }, categoryWarning: null });
+    expect(catalogForClaude(after)).not.toHaveProperty('usar_la_del_canal');
+    expect(await db.channelCategory.findUniqueOrThrow({ where: { kind_categoryId: { kind: 'MERCADOLIBRE', categoryId: 'MLA458790' } } })).toMatchObject({ name: 'Kits de Reconstrucción' });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    // Ya guardada, no se vuelve a pedir, aunque el servidor arranque de cero.
+    forgetSavedCategories();
+    await saveCatalogData(db, { publicationId: kitId, category: 'MLA458790', values: {} });
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    // Un código que no existe, o una categoría con subcategorías, no se usa.
+    await expect(saveCatalogData(db, { publicationId: kitId, category: 'MLA999999', values: {} })).rejects.toThrow('no es una categoría de Mercado Libre');
+    await expect(saveCatalogData(db, { publicationId: kitId, category: 'MLA1747', values: {} })).rejects.toThrow('tiene subcategorías');
+    fetch.mockRestore();
   });
 });

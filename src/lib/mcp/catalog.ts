@@ -26,7 +26,19 @@ export function catalogForClaude(data: CatalogData | null) {
       ? { categorias_del_producto_en_el_canal: data.productInChannel.map((g) => ({ categoria: `${g.name} (${g.categoryId})`, publicaciones_activas: g.externalIds })) }
       : {}),
     ...(data.categoryWarning ? { aviso_de_categoria: data.categoryWarning } : {}),
-    ...(data.category ? {} : { categorias_para_elegir: data.categories.map(name) }),
+    // La acción directa para resolver el aviso: tomar en la app la categoría del canal.
+    ...(data.categoryWarning && data.inChannel && data.productInChannel.length <= 1 && data.inChannel.id !== data.category?.id
+      ? {
+          usar_la_del_canal: {
+            herramienta: 'save_catalog_data',
+            categoria: data.inChannel.id,
+            que_hace: `Pone en la app la categoría de ${data.channelName}, ${name(data.inChannel)}, en toda la familia, con los campos de su formulario. No cambia nada en ${data.channelName}.`,
+          },
+        }
+      : {}),
+    ...(data.category
+      ? {}
+      : { categorias_para_elegir: data.categories.map(name), otra_categoria: `Sirve cualquier categoría de ${data.channelName}: pasá su código en save_catalog_data.` }),
     de_la_ficha: data.fromProduct.map(({ field, value }) => ({ nombre: field.label, valor: value })),
     campos: data.fields.map((f) => ({
       campo: f.id,

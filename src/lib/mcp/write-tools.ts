@@ -935,7 +935,7 @@ const saveCatalogTool = defineTool({
       .string()
       .nullable()
       .optional()
-      .describe('Para cambiar la categoría: su código o su nombre. null vuelve a la que le toca por el tipo de producto. Si el tipo no tiene una, hay que elegirla antes de cargar los campos.'),
+      .describe('Para cambiar la categoría: su código o su nombre. Sirve el código de cualquier categoría del canal, por ejemplo MLA458790: si la app todavía no la tiene, la lee del canal, revisa que exista y que no tenga subcategorías, y trae los campos de su formulario. Para resolver el aviso de categoría distinta, mandá la del canal (usar_la_del_canal en get_publication). null vuelve a la que le toca por el tipo de producto. Si el tipo no tiene una, hay que elegirla antes de cargar los campos.'),
     valores: z
       .record(z.string(), z.union([z.string(), z.array(z.string()), z.null()]))
       .optional()

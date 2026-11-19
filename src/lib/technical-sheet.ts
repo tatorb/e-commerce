@@ -1,3 +1,4 @@
+import { loadSavedCategories } from '@/lib/catalog-categories';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
 import { parseNameValueList } from '@/domain/name-value';
@@ -28,6 +29,7 @@ export async function technicalSheetState(db: Db, accountId: string, productId: 
   const specs = parseNameValueList(product.specs);
   const family = product.productType?.trim() || null;
   const channels = [...new Map(product.publications.map((p) => [p.store.channel.id, p.store.channel])).values()];
+  for (const c of channels) await loadSavedCategories(db, c.kind);
 
   const expected: ExpectedSpecs[] = [];
   for (const channel of channels) {

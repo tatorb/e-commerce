@@ -1,6 +1,8 @@
-import { normalizeText, type ChannelCatalog } from '@/domain/catalog-data';
+import { normalizeText, type CatalogCategory, type ChannelCatalog } from '@/domain/catalog-data';
 import { familyBase } from '@/domain/titles';
 import { ML_CATEGORIES } from './categories';
+import { categoryFromApi, isMlaCategoryId } from './remote';
+import { MercadoLibreRequestError, mlGet } from '../http';
 
 // La categoría de Mercado Libre de cada familia de producto. La familia es el
 // tipo de producto de la ficha. Las que no están acá, por ejemplo "Otros", se
@@ -31,6 +33,8 @@ const byBase = new Map(
   Object.entries(FAMILY_CATEGORY).map(([family, id]) => [normalizeText(familyBase(family) ?? family), id]),
 );
 const byId = new Map(ML_CATEGORIES.map((c) => [c.id, c]));
+// Las que se trajeron del canal y quedaron guardadas en la app: se suman con register.
+const extra = new Map<string, CatalogCategory & { path?: string | null }>();
 const familiesOf = new Map<string, string[]>();
 for (const [family, id] of Object.entries(FAMILY_CATEGORY)) familiesOf.set(id, [...(familiesOf.get(id) ?? []), family]);
 
@@ -38,7 +42,9 @@ for (const [family, id] of Object.entries(FAMILY_CATEGORY)) familiesOf.set(id, [
 const words = (s: string) => ` ${normalizeText(s).replace(/[^a-z0-9]+/g, ' ').trim()} `;
 
 export const mercadolibreCatalog: ChannelCatalog = {
-  categories: ML_CATEGORIES.map((c) => ({ id: c.id, name: c.name })),
+  get categories() {
+    return [...ML_CATEGORIES, ...[...extra.values()].filter((c) => !byId.has(c.id))].map((c) => ({ id: c.id, name: c.name }));
+  },
   categoryForFamily(family) {
     if (!family?.trim()) return null;
     return byFamily.get(normalizeText(family)) ?? byBase.get(normalizeText(familyBase(family) ?? '')) ?? null;
@@ -49,5 +55,21 @@ export const mercadolibreCatalog: ChannelCatalog = {
     const t = words(title ?? '');
     return families.find((f) => t.includes(words(familyBase(f) ?? f))) ?? families[0];
   },
-  category: (id) => byId.get(id) ?? null,
+  category: (id) => byId.get(id) ?? extra.get(id.toUpperCase()) ?? null,
+  register(category) {
+    if (!byId.has(category.id)) extra.set(category.id.toUpperCase(), category);
+  },
+  async fetchCategory(id, accessToken) {
+    if (!isMlaCategoryId(id)) return null;
+    const code = id.trim().toUpperCase();
+    let info: unknown;
+    try {
+      info = await mlGet(`/categories/${encodeURIComponent(code)}`, accessToken);
+    } catch (e) {
+      if (e instanceof MercadoLibreRequestError && (e.status === 404 || e.status === 400)) return null;
+      throw e;
+    }
+    const attributes = await mlGet(`/categories/${encodeURIComponent(code)}/attributes`, accessToken);
+    return categoryFromApi(code, info, attributes);
+  },
 };

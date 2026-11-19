@@ -1,3 +1,4 @@
+import { loadSavedCategories } from '@/lib/catalog-categories';
 import { prisma } from '@/lib/db';
 import { getChannelAdapter } from '@/channels';
 import { getChannelPublisher, PUBLISH_FIELDS } from '@/channels/publish';
@@ -64,6 +65,8 @@ export async function loadPublicationFaces(accountId: string, publicationId: str
     },
   });
   if (!p) return null;
+  // Las categorías que se trajeron del canal, para nombrarlas.
+  await loadSavedCategories(prisma, p.store.channel.kind);
 
   const adapter = getChannelAdapter(p.store.channel.kind, p.store.channel.name);
   const metrics = latestMetrics(p.measurements);

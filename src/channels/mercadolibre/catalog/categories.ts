@@ -13,7 +13,7 @@ import type { CatalogCategory, CatalogField } from '@/domain/catalog-data';
 
 // El paquete con que se despacha: Mercado Libre lo pide para calcular el envío.
 // Con sus nombres en Mercado Libre, que son los que trae cada publicación.
-const PACKAGE: CatalogField[] = [
+export const PACKAGE: CatalogField[] = [
   { id: 'SELLER_PACKAGE_HEIGHT', label: 'Altura del paquete del seller', type: 'number_unit', units: ['cm'], defaultUnit: 'cm', required: true },
   { id: 'SELLER_PACKAGE_WIDTH', label: 'Ancho del paquete del seller', type: 'number_unit', units: ['cm'], defaultUnit: 'cm', required: true },
   { id: 'SELLER_PACKAGE_LENGTH', label: 'Largo del paquete del seller', type: 'number_unit', units: ['cm'], defaultUnit: 'cm', required: true },
@@ -22,7 +22,7 @@ const PACKAGE: CatalogField[] = [
 
 // Mercado Libre los pide en estas categorías y casi siempre son los mismos en
 // toda la tienda.
-const TAXES: CatalogField[] = [
+export const TAXES: CatalogField[] = [
   { id: 'VALUE_ADDED_TAX', label: 'IVA', type: 'list', options: ['Exento', '0 %', '10.5 %', '21 %', '27 %'], required: true, sameInStore: true },
   {
     id: 'IMPORT_DUTY',

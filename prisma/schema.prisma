@@ -1203,6 +1203,23 @@ model SearchPosition {
   @@map("search_positions")
 }
 
+// El formulario de una categoría del canal que no está en la lista fija de la
+// app: se trae de la API de categorías del canal la primera vez que se pide y
+// queda guardado, así se puede usar cualquier categoría (src/lib/catalog-categories.ts).
+model ChannelCategory {
+  kind       ChannelKind
+  categoryId String
+  name       String
+  // Cómo se llega a ella, por ejemplo "Accesorios para Vehículos > Repuestos Autos y Camionetas > Motor".
+  path       String?
+  // Los campos del formulario, como CatalogField de src/domain/catalog-data.ts.
+  fields     Json
+  fetchedAt  DateTime    @default(now())
+
+  @@id([kind, categoryId])
+  @@map("channel_categories")
+}
+
 // Prueba de conexión con un canal: si la app puede leer cada cosa.
 model ChannelProbe {
   id        String   @id @default(cuid())

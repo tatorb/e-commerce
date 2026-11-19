@@ -1,3 +1,4 @@
+import { loadSavedCategories } from '@/lib/catalog-categories';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { getChannelAdapter, type ChannelAdapter } from '@/channels';
 
@@ -72,6 +73,7 @@ export async function adoptChannelCategory(
 ): Promise<string[]> {
   const { before, after, adapter } = args;
   if (!before || !after || before === after) return [];
+  await loadSavedCategories(tx, adapter.kind);
   const name = categoryLabel(adapter, after, args.details);
   const was = categoryLabel(adapter, before);
   const known = Boolean(adapter.catalog?.category(after));

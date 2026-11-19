@@ -113,6 +113,17 @@ export function CatalogCard({
           </p>
         ) : null}
         {data.categoryWarning ? <p className="text-xs text-amber-700 dark:text-amber-400">{data.categoryWarning}</p> : null}
+        {data.categoryWarning && data.inChannel && data.productInChannel.length <= 1 && data.inChannel.id !== category?.id ? (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={action.pending}
+            pending={action.pending}
+            onClick={() => changeCategory(data.inChannel!.id)}
+          >
+            Usar la de {data.channelName}
+          </Button>
+        ) : null}
       </div>
 
       {category ? (
