@@ -16,7 +16,7 @@ No muevas ni borres la carpeta después: Chrome la lee de ahí. Para actualizarl
 
 1. Tené la sesión de Mercado Libre iniciada en ese Chrome.
 2. En el Pipeline, pestaña **Por subir**, o en el paso **Publicación**, tocá **Subir a Mercado Libre** en el clip.
-3. Se abre una pestaña de Mercado Libre. Si el producto tiene varias medidas, las despliega y entra por la de la publicación. Un cartel abajo a la derecha cuenta qué va haciendo.
+3. Se abre una pestaña de Mercado Libre. Si el producto tiene varias medidas, las despliega y entra por la de la publicación. Si tiene varias opciones de venta, entra por la de la publicación, o por otra del mismo producto si la suya no está a la vista: el video es del producto y se ve en todas. Un cartel abajo a la derecha cuenta qué va haciendo.
 4. Cuando Mercado Libre suma el video a **Tus videos**, la subida terminó: queda en revisión y la app lo marca sola como subido.
 
 ## La cola de subida

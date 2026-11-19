@@ -46,6 +46,11 @@ const MRB = {
 
   pausa: (ms) => new Promise((r) => setTimeout(r, ms)),
 
+  // Si el link lleva a la subida de videos de una publicación de Mercado Libre.
+  esSubida(url) {
+    return /(^|\.)mercadolibre\.com\.ar$/.test(url.hostname) && url.pathname.includes('/video/creator/upload') && Boolean(url.searchParams.get('item_id'));
+  },
+
   // Espera a que la pantalla deje de cambiar, por ejemplo mientras carga el video.
   async quieta(maximo = 180000, quieto = 4000) {
     let anterior = null;

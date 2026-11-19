@@ -22,6 +22,29 @@
   };
   const frenar = (error, conInforme = true) => decir(null, { error, informe: conInforme ? MRB.mirar() : null });
 
+  // Abre el menú de una fila, lee el link de «Crear video» y lo cierra. Null si no lo tiene.
+  const linkDeCrear = async (boton) => {
+    boton.click();
+    await MRB.esperar(MRB.OPCION, 10000);
+    await MRB.pausa(300);
+    const opciones = [...document.querySelectorAll(MRB.OPCION)].filter((a) => MRB.visible(a) && a.textContent.trim() === MRB.TEXTO_OPCION);
+    const href = opciones.length === 1 ? opciones[0].getAttribute('href') : null;
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    document.body.click();
+    await MRB.pausa(400);
+    if (!href) return null;
+    const url = new URL(href, location.href);
+    return MRB.esSubida(url) ? url : null;
+  };
+  // Entre los links de las opciones de venta, el de esta publicación. Si no está a la vista,
+  // cualquiera del mismo producto: el clip es del producto y se ve en todas sus opciones de venta.
+  const elegirLink = (links, codigo) => {
+    const propio = links.filter((u) => u.searchParams.get('item_id')?.toUpperCase() === codigo);
+    if (propio.length > 0) return propio[0];
+    const productos = new Set(links.map((u) => u.searchParams.get('user_product_id')).filter(Boolean));
+    return links.length > 0 && productos.size === 1 && links.every((u) => u.searchParams.get('user_product_id')) ? links[0] : null;
+  };
+
   try {
     const persona = MRB.pidePersona();
     if (persona) return await frenar(persona, false);
@@ -35,8 +58,18 @@
       const numero = trabajo.codigo.replace(/^[A-Z]+/, '');
       // Lo que se ve antes de desplegar nada: tiene que ser una sola fila, la del producto.
       const arriba = [...document.querySelectorAll(MRB.MENU)].filter((b) => MRB.visible(b) && !b.closest(MRB.MEDIDA));
-      // Con más de una fila no se sabe cuál es: mejor no tocar.
-      if (arriba.length !== 1) return await frenar(`El listado mostró ${arriba.length} publicaciones al buscar ${trabajo.codigo}: no se sabe a cuál subirle el clip.`);
+      if (arriba.length === 0) return await frenar(`La publicación ${trabajo.codigo} no aparece en tu listado de Mercado Libre.`);
+      // Varias filas: un producto con varias opciones de venta, cada una con su menú. Se lee a
+      // qué publicación lleva el «Crear video» de cada una, sin tocar nada más.
+      if (arriba.length > 1) {
+        const links = [];
+        for (const b of arriba) links.push(await linkDeCrear(b));
+        const destino = elegirLink(links.filter(Boolean), trabajo.codigo);
+        if (!destino) return await frenar(`El listado mostró ${arriba.length} publicaciones al buscar ${trabajo.codigo} y ninguna lleva a esa publicación ni a su mismo producto: no se sabe a cuál subirle el clip.`);
+        await pedir({ tipo: 'etapa', etapa: 'crear' });
+        location.assign(destino.href);
+        return;
+      }
       let boton = arriba[0];
       let codigos = null;
       // Un producto con varias medidas: se despliega y se entra por la medida que tiene esta publicación.
@@ -58,7 +91,7 @@
       if (opciones.length !== 1) return await frenar(`El menú de la publicación no ofrece «${MRB.TEXTO_OPCION}». Puede que Mercado Libre haya cambiado la pantalla: no se tocó nada.`);
       const destino = new URL(opciones[0].getAttribute('href') ?? '', location.href);
       const item = destino.searchParams.get('item_id') ?? '';
-      if (!/(^|\.)mercadolibre\.com\.ar$/.test(destino.hostname) || !destino.pathname.includes('/video/creator/upload') || !item) {
+      if (!MRB.esSubida(destino)) {
         return await frenar('El link de Crear video no lleva a la subida de videos. Puede que Mercado Libre haya cambiado la pantalla: no se tocó nada.');
       }
       // En un producto con medidas, el link tiene que ser de una publicación de esa medida.

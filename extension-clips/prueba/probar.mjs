@@ -33,6 +33,9 @@ const medida = (id, nombre, codigos, item = id) => `<div id="${id}" class="sll-l
 const familia = (medidas) => `<div id="TR1" class="sll-list-grid-row sll-list-grid-row--family">
   <button class="sll-list-chevron-button__icon" aria-expanded="false" onclick="this.setAttribute('aria-expanded','true'); document.querySelector('#medidas').hidden=false"></button>${menu('MLA900')}</div>
   <div id="medidas" class="sll-list-expanded-row" hidden>${medidas}</div>`;
+// Una publicación con varias opciones de venta, como la muestra Mercado Libre: una fila por opción,
+// sin flechita, cada una con su menú. El link de Crear video lleva su publicación y su producto.
+const opcionDeVenta = (item, producto = 'MLAU1') => `<div class="sll-list-grid-row"><button class="sll-list-row-secondary-actions-trigger" onclick="document.querySelectorAll('ul.menu').forEach((u) => u.remove()); document.body.insertAdjacentHTML('beforeend', '<ul class=menu><li><a class=sll-list-row-secondary-action__label--link href=${SUBIDA.replace('MLA4188931774', item).replace('MLAU1', producto)}>Crear video</a></li></ul>')"></button></div>`;
 const DOS_MEDIDAS = familia(medida('MLA2265591717', '0,60 mm', ['2265591717', '2273471309']) + medida('MLA2265637921', 'STD', ['2265637921', '2273516303']));
 
 const CREAR = `<title>Crear clip con IA</title><h1>Crear video</h1><input type="checkbox" id="CHECKBOX_SHOW_VIDEO_IN_ALL_VARIANTS" checked>
@@ -123,7 +126,7 @@ const pagina = await contexto.newPage();
 await pagina.goto(`${APP}/a/insur/clips-por-subir`);
 await pagina.evaluate(() => postMessage({ origen: 'mrb-app', tipo: 'hola' }, location.origin));
 await pagina.waitForFunction(() => window.avances.some((a) => a.tipo === 'hola'), null, { timeout: 10000 });
-comprobar('la app ve que la extensión está', (await pagina.evaluate(() => window.avances.find((a) => a.tipo === 'hola').version)) === '0.4.0');
+comprobar('la app ve que la extensión está', (await pagina.evaluate(() => window.avances.find((a) => a.tipo === 'hola').version)) === '0.4.1');
 
 async function correr(codigo) {
   await pagina.evaluate(() => (window.avances = []));
@@ -187,14 +190,27 @@ async function correr(codigo) {
   comprobar('si ninguna medida tiene la publicación, se frena', /hay 0 con la publicación/.test(no.avances.at(-1).error ?? ''));
   await no.ml.close();
 }
-// 2. Dos publicaciones en el listado: no elige.
+// 2. Dos publicaciones de productos distintos en el listado: no elige.
 {
-  listado = fila() + fila();
+  listado = opcionDeVenta('MLA1000001', 'MLAU1') + opcionDeVenta('MLA1000009', 'MLAU2');
   const antes = pedidosML.length;
-  const { ml, avances } = await correr('MLA1000001');
+  const { ml, avances } = await correr('MLA5550000');
   comprobar('con dos publicaciones se frena', /2 publicaciones/.test(avances.at(-1).error ?? ''), JSON.stringify(avances.at(-1)).slice(0, 200));
   comprobar('y no entra a la subida', !pedidosML.slice(antes).some((p) => p.includes('/video/creator')));
   await ml.close();
+}
+// 2b. Una publicación con varias opciones de venta: entra por la de su código.
+{
+  listado = opcionDeVenta('MLA2273471717') + opcionDeVenta('MLA2259001059');
+  const antes = pedidosML.length;
+  const r = await correr('MLA2259001059');
+  const nuevos = pedidosML.slice(antes);
+  comprobar('con opciones de venta, sube por la de la publicación', r.avances.at(-1).subido === true && nuevos.some((p) => p.includes('item_id=MLA2259001059')) && !nuevos.some((p) => p.includes('item_id=MLA2273471717')), JSON.stringify(r.avances.at(-1)).slice(0, 200) + nuevos.join(' , '));
+  await r.ml.close();
+  // La de su código no está a la vista: todas son del mismo producto, sube por cualquiera.
+  const otra = await correr('MLA2259009999');
+  comprobar('si no se ve la suya, sube por otra del mismo producto', otra.avances.at(-1).subido === true, JSON.stringify(otra.avances.at(-1)).slice(0, 200));
+  await otra.ml.close();
 }
 // 3. La pantalla cambió.
 {
@@ -262,9 +278,9 @@ async function correr(codigo) {
   comprobar('toma el clip de la cola, lo sube y le cuenta a la app', cola.resultados.length === 1 && cola.resultados[0].ok === true && cola.resultados[0].publicacion === 'pub123456', JSON.stringify(cola.resultados));
   await pagina.waitForTimeout(1500);
   comprobar('y cierra la pestaña que abrió', contexto.pages().length === antes, String(contexto.pages().length - antes));
-  comprobar('pregunta con su versión', cola.preguntas.some((u) => u.includes('version=0.4.0')));
+  comprobar('pregunta con su versión', cola.preguntas.some((u) => u.includes('version=0.4.1')));
   // Uno que no se puede subir: se lo cuenta a la app con el motivo.
-  listado = fila() + fila();
+  listado = opcionDeVenta('MLA1000001', 'MLAU1') + opcionDeVenta('MLA1000009', 'MLAU2');
   cola.pendientes.push({ publicacion: 'pub123456', video: 'vid123456', codigo: 'MLA5550002', nombre: 'clip.mp4', tipoDeArchivo: 'video/mp4', todasLasVariantes: true });
   await pagina.evaluate(() => postMessage({ origen: 'mrb-app', tipo: 'cola', sola: true }, location.origin));
   for (let i = 0; i < 150 && cola.resultados.length === 1; i++) await pagina.waitForTimeout(200);
