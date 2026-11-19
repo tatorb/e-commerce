@@ -465,13 +465,14 @@ describe.skipIf(!url)('la cola del editor de videos en la base', () => {
     const step = await db.shootStep.create({ data: { protocolId: protocol.id, title: 'Unboxing cenital', kind: 'VIDEO', moments } });
     expect(await videoSteps(db, accountId)).toEqual([{ id: step.id, label: 'Unboxing: Unboxing cenital', moments: 2, productType: 'Camisa de cilindro', forDrive: true }]);
     expect(await loadAccountVideo(db, accountId)).toEqual(DEFAULT_ACCOUNT_VIDEO);
-    const settings = { ...DEFAULT_ACCOUNT_VIDEO, targetSeconds: 40, voiceOn: true, voiceId: 'voz1', musicOn: true, subtitlesOn: true, subtitleColor: '#6fa82c' };
+    const settings = { ...DEFAULT_ACCOUNT_VIDEO, targetSeconds: 40, voiceOn: true, voiceId: 'voz1', subtitlesOn: true, subtitleColor: '#6fa82c' };
     await saveAccountVideo(db, { accountId, values: settings, userId });
     expect(await loadAccountVideo(db, accountId)).toEqual(settings);
 
     // Un video copiado al Drive no dice su paso: vale el paso de video del protocolo del tipo de su producto.
     const v = await db.productVideo.update({ where: { id: (await video()).id }, data: { variantLabel: '0.50' } });
-    const { editId } = await requestEdit(db, { accountId, videoId: v.id, userId });
+    // La música se pide en cada edición.
+    const { editId } = await requestEdit(db, { accountId, videoId: v.id, music: true, userId });
     await claimNextEdit(db, workerId);
     const job = await buildVideoJob(db, editId, deps);
     expect(job.objetivo_segundos).toBe(40);
@@ -486,7 +487,6 @@ describe.skipIf(!url)('la cola del editor de videos en la base', () => {
     const base = { ...DEFAULT_ACCOUNT_VIDEO };
     await expect(saveAccountVideo(db, { accountId, values: { ...base, voiceOn: true }, userId })).rejects.toThrow('ID de la voz');
     await expect(saveAccountVideo(db, { accountId, values: { ...base, subtitlesOn: true }, userId })).rejects.toThrow('prendé la voz primero');
-    await expect(saveAccountVideo(db, { accountId, values: { ...base, musicOn: true, musicStyle: '' }, userId })).rejects.toThrow('estilo');
     // El paso por defecto de la cuenta ya no existe: unos ajustes viejos que lo traen se guardan sin él.
     expect(await saveAccountVideo(db, { accountId, values: { ...base, defaultStepId: 'un-paso' }, userId })).not.toHaveProperty('defaultStepId');
     await db.videoAccountSettings.deleteMany();
@@ -566,11 +566,42 @@ describe.skipIf(!url)('la cola del editor de videos en la base', () => {
     expect((await db.videoEdit.findUniqueOrThrow({ where: { id: second.id } })).status).toBe('REVIEW');
   });
 
-  it('una edición pre-aprobada se aprueba sola aunque traiga avisos, salvo que le falte el sonido de la cuenta', async () => {
-    // La cuenta no aprueba sola, y tiene la música prendida.
-    await saveAccountVideo(db, { accountId, values: { ...DEFAULT_ACCOUNT_VIDEO, musicOn: true }, userId });
+  it('la música se elige en cada pedido: sin pedirla, el clip sale sin música', async () => {
+    // Aunque unos ajustes viejos de la cuenta la tengan prendida.
+    await db.videoAccountSettings.create({ data: { accountId, values: { ...DEFAULT_ACCOUNT_VIDEO, musicOn: true, musicStyle: '' } } });
     const a = await video('a.mp4');
     const first = await requestEdit(db, { accountId, videoId: a.id, preApprove: true, userId });
+    expect((await editsOfProduct(db, productId))[0]).toMatchObject({ music: false });
+    await claimNextEdit(db, workerId);
+    expect((await buildVideoJob(db, first.editId, deps)).sonido).toBeNull();
+    // La Mac ya empezó: la música no se cambia. Lo demás sí.
+    await expect(setEditAuto(db, { accountId, editId: first.editId, music: true })).rejects.toThrow('antes de que la Mac empiece');
+    await setEditAuto(db, { accountId, editId: first.editId, music: false, autoUpload: false });
+    uploaded.set(first.editId, clipFile(first.editId));
+    // Sale sin música y no se pidió: no le falta nada, se aprueba sola.
+    await submitEditResult(db, workerId, done(first.editId, 1), { collect });
+    expect(await db.videoEdit.findUniqueOrThrow({ where: { id: first.editId } })).toMatchObject({ status: 'APPROVED', musicOn: false });
+
+    // Pedido con música, en la cola se puede sacar y volver a poner. Sin estilo en la cuenta, va el de siempre.
+    const b = await video('b.mp4');
+    const second = await requestEdit(db, { accountId, videoId: b.id, music: true, userId });
+    await setEditAuto(db, { accountId, editId: second.editId, music: false });
+    expect(await db.videoEdit.findUniqueOrThrow({ where: { id: second.editId } })).toMatchObject({ musicOn: false });
+    await setEditAuto(db, { accountId, editId: second.editId, music: true });
+    await claimNextEdit(db, workerId);
+    expect((await buildVideoJob(db, second.editId, deps)).sonido).toMatchObject({ voz: null, musica: { estilo: DEFAULT_ACCOUNT_VIDEO.musicStyle } });
+    uploaded.set(second.editId, { ...clipFile(second.editId), name: 'b · editado.mp4' });
+    await submitEditResult(db, workerId, done(second.editId, 1, { sonido: { voz: false, musica: true, subtitulos: false, costo_usd: null } }), { collect });
+    // Al pedirlo de nuevo, sigue con música, salvo que se diga otra cosa.
+    const again = await redoEdit(db, { accountId, editId: second.editId, userId });
+    expect(await db.videoEdit.findUniqueOrThrow({ where: { id: again.editId } })).toMatchObject({ musicOn: true });
+    await discardEdit(db, { accountId, editId: again.editId, userId });
+  });
+
+  it('una edición pre-aprobada se aprueba sola aunque traiga avisos, salvo que le falte el sonido de la cuenta', async () => {
+    // La cuenta no aprueba sola. Los dos clips se piden con música.
+    const a = await video('a.mp4');
+    const first = await requestEdit(db, { accountId, videoId: a.id, preApprove: true, music: true, userId });
     await claimNextEdit(db, workerId);
     uploaded.set(first.editId, clipFile(first.editId));
     // Sale con un aviso leve y con su música: se aprueba igual.
@@ -580,8 +611,8 @@ describe.skipIf(!url)('la cola del editor de videos en la base', () => {
     // A otra le falta la música: queda para revisar, y dice por qué.
     const b = await video('b.mp4');
     const second = await requestEdit(db, { accountId, videoId: b.id, userId });
-    // Se la deja pre-aprobada mientras espera en la cola.
-    await setEditAuto(db, { accountId, editId: second.editId, preApprove: true });
+    // Se la deja pre-aprobada y con música mientras espera en la cola.
+    await setEditAuto(db, { accountId, editId: second.editId, preApprove: true, music: true });
     await claimNextEdit(db, workerId);
     uploaded.set(second.editId, { ...clipFile(second.editId), name: 'b · editado.mp4' });
     await submitEditResult(db, workerId, done(second.editId, 1, { avisos: [] }), { collect });

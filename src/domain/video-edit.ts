@@ -181,7 +181,8 @@ export const accountVideoSchema = z.object({
   // La voz en off: Claude escribe el guión y ElevenLabs lo dice con esta voz.
   voiceOn: z.boolean(),
   voiceId: z.string().trim().max(80),
-  // La música de fondo, que genera ElevenLabs con este estilo.
+  // El estilo de la música de fondo, que genera ElevenLabs. Si un clip la lleva se elige en
+  // cada pedido de edición: musicOn quedó de antes y ya no se usa.
   musicOn: z.boolean(),
   musicStyle: z.string().trim().max(500),
   // El guión escrito sobre el video, palabra por palabra.

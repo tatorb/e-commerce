@@ -112,7 +112,7 @@ describe.skipIf(!url)('el editor de videos desde Claude', () => {
     expect(r.data.guion_del_clip).toBeNull();
     expect(r.data.para_escribir_el_guion).toMatchObject({ segundos_del_clip: 45, lo_mas_que_acepta_el_canal_en_segundos: 60 });
     expect(r.data.para_escribir_el_guion.palabras_que_entran).toBeGreaterThan(80);
-    expect(r.data.como_se_editan_los_videos_de_la_cuenta).toMatchObject({ voz_en_off: false, musica: false, subtitulos: false, color_de_los_subtitulos: '#FFE633', claude_escribe_el_guion_solo: false });
+    expect(r.data.como_se_editan_los_videos_de_la_cuenta).toMatchObject({ voz_en_off: false, subtitulos: false, color_de_los_subtitulos: '#FFE633', claude_escribe_el_guion_solo: false });
     expect(r.data.mac_del_estudio).toEqual({ cuando_edita: 'Apagado: la Mac no edita videos.', conectada: true, tiene_llave: true });
     expect(r.data.pasos_de_video_de_los_protocolos).toEqual([
       { paso: stepId, nombre: 'Unboxing: Unboxing cenital', tipo_de_producto_del_protocolo: null, se_usa_para_los_videos_copiados_al_drive: true, indicaciones_para_el_editor: null, momentos: [] },
@@ -150,7 +150,7 @@ describe.skipIf(!url)('el editor de videos desde Claude', () => {
       segundos_del_clip: 40,
       voz_en_off: true,
       voz_de_elevenlabs: 'voz1',
-      musica: true,
+      estilo_de_la_musica: 'Piano tranquilo.',
       subtitulos: true,
       color_de_los_subtitulos: '#6fa82c',
       modo_de_la_mac: { modo: 'SCHEDULE', desde: '22:00', hasta: '7:00', solo_enchufada: true },
@@ -159,8 +159,9 @@ describe.skipIf(!url)('el editor de videos desde Claude', () => {
     expect(s.data.como_se_editan_los_videos_de_la_cuenta).not.toHaveProperty('paso_para_los_videos_copiados_al_drive');
     expect(s.data.mac_del_estudio.cuando_edita).toBe('Con horario: edita de 22:00 a 07:00, solo enchufada.');
     // Lo que no se manda queda como está.
-    const again = await call('update_video_settings', { musica: false });
-    expect(again.data.como_se_editan_los_videos_de_la_cuenta).toMatchObject({ segundos_del_clip: 40, voz_en_off: true, musica: false });
+    const again = await call('update_video_settings', { subtitulos: false });
+    expect(again.data.como_se_editan_los_videos_de_la_cuenta).toMatchObject({ segundos_del_clip: 40, voz_en_off: true, subtitulos: false, estilo_de_la_musica: 'Piano tranquilo.' });
+    expect(again.data.como_se_editan_los_videos_de_la_cuenta).not.toHaveProperty('musica');
     const step = await call('get_videos_step', { publicacion: 'MLA1110001' });
     expect(step.data.pasos_de_video_de_los_protocolos[0].momentos).toEqual(moments);
   });
@@ -324,12 +325,15 @@ describe.skipIf(!url)('el editor de videos desde Claude', () => {
 
   it('la edición se puede dejar pre-aprobada y con la orden de subir, también cuando ya está en la cola', async () => {
     const asked = await call('request_video_edit', { publicacion: 'MLA1110001', video: videoId, aprobar_al_terminar: true });
-    expect(asked.data.edicion).toMatchObject({ estado: 'en cola', pre_aprobada: expect.stringContaining('Se aprueba sola') });
+    expect(asked.data.edicion).toMatchObject({ estado: 'en cola', con_musica: false, pre_aprobada: expect.stringContaining('Se aprueba sola') });
     expect(asked.data.edicion).not.toHaveProperty('se_sube_sola');
     // Ya está en la cola: no se pide de nuevo, pero queda anotada la orden de subir.
     const again = await call('request_video_edit', { publicacion: 'MLA1110001', video: videoId, subir_al_aprobar: true });
     expect(again.data.aviso).toContain('Quedó anotado');
     expect(again.data.edicion).toMatchObject({ pre_aprobada: expect.any(String), se_sube_sola: expect.any(String) });
+    // La música también se puede pedir mientras espera en la cola.
+    const music = await call('request_video_edit', { publicacion: 'MLA1110001', video: videoId, musica: true });
+    expect(music.data.edicion).toMatchObject({ con_musica: true, pre_aprobada: expect.any(String) });
     expect(await db.videoEdit.count()).toBe(1);
   });
 

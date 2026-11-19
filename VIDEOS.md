@@ -6,7 +6,7 @@ El editor arma el clip vertical de un video de unboxing. Corre en la Mac del est
 3. Corrige la luz y el balance de blancos.
 4. Marca los momentos del video y le da a cada uno su velocidad.
 5. Le saca el sonido de la grabación.
-6. Le pone la voz en off, la música y los subtítulos, si la cuenta los tiene prendidos.
+6. Le pone la voz en off y los subtítulos, si la cuenta los tiene prendidos, y la música, si se pidió para ese clip.
 7. Lo exporta en el tamaño que pide Mercado Libre, 1080 × 1920.
 
 Claude mira el video y propone la imagen, los cortes y el guión, y el programa los aplica. El clip queda en la carpeta de videos del producto en el Drive, al lado del original, esperando que lo apruebes.
@@ -27,10 +27,10 @@ Sin momentos en el protocolo, Claude los marca por lo que ve.
 
 ## La voz, la música y los subtítulos
 
-Se prenden por cuenta, en Ajustes, Protocolos de fotos, Edición de videos.
+La voz y los subtítulos se prenden por cuenta, en Ajustes, Protocolos de fotos, Edición de videos. La música se elige en cada pedido de edición.
 
 - **Voz en off.** ElevenLabs dice el guión del clip con la voz que elijas. Hace falta el ID de la voz: en ElevenLabs, en Voices, abrí el menú de la voz y elegí Copy voice ID. El guión se escribe aparte, antes de editar: está más abajo.
-- **Música.** ElevenLabs la genera para cada clip, del largo justo, con el estilo que describas. Baja sola cuando habla la voz.
+- **Música.** Viene apagada. Se prende en cada pedido, con la casilla «Música de fondo», al lado de las de aprobar solo y subir. ElevenLabs la genera para ese clip, del largo justo, con el estilo que describas en los ajustes de la cuenta. Baja sola cuando habla la voz. Un video que se edita solo, sin que nadie lo pida, sale sin música.
 - **Subtítulos.** El guión escrito sobre el video, de a pocas palabras, con la que se está diciendo resaltada en el color de la marca, que se elige ahí mismo. Los dibuja el programa, con la letra Poppins Bold que viene con él, así que se ven igual en cualquier Mac y no dependen de cómo esté instalado ffmpeg.
 
 La mezcla lleva la voz a -14 LUFS, el volumen de las redes, y la música a un 16 %.
@@ -126,9 +126,10 @@ En Edición de videos, por cuenta:
 
 ### Dejar un video pre-aprobado y con la orden de subir
 
-Al pedir la edición, o mientras el video espera en la cola, hay dos casillas:
+Al pedir la edición, o mientras el video espera en la cola, hay tres casillas:
 
-- **Aprobar solo al terminar.** El clip se aprueba sin que nadie lo mire, aunque traiga avisos leves. Si sale sin la voz, la música o los subtítulos que la cuenta tiene prendidos, no se aprueba: queda para revisar y dice por qué.
+- **Música de fondo.** El clip lleva música. Sin marcar, sale sin música. Se puede cambiar mientras la Mac no empezó a editar.
+- **Aprobar solo al terminar.** El clip se aprueba sin que nadie lo mire, aunque traiga avisos leves. Si sale sin la voz o los subtítulos que la cuenta tiene prendidos, o sin la música que se pidió, no se aprueba: queda para revisar y dice por qué.
 - **Subir apenas quede aprobado.** El clip va a la cola de subida a Mercado Libre.
 
 Con las dos, el video se edita, se aprueba y se sube solo. Nadie ve ni escucha el clip antes: conviene usarlo cuando ya viste que los clips de ese tipo de producto salen bien.
@@ -153,7 +154,7 @@ Todo lo del editor se puede hacer también hablando con Claude, conectado a la a
 - **Escribir el guión** del clip: `save_video_script`. Claude lee antes el paso Información y Preguntas y respuestas.
 - **Pedir o rehacer** una edición, con o sin cortes propios: `request_video_edit`. **Aprobar o descartar** el clip: `review_video_edit`.
 - **Revisar las carpetas del Drive** para ver si se copiaron videos, de unas publicaciones o de toda la cuenta: `sync_videos`.
-- **Cambiar** la voz, la música, los subtítulos y lo automático de la cuenta, y cuándo edita la Mac: `update_video_settings`. **Cargar los momentos** de un paso del protocolo: `set_video_moments`.
+- **Cambiar** la voz, el estilo de la música, los subtítulos y lo automático de la cuenta, y cuándo edita la Mac: `update_video_settings`. **Cargar los momentos** de un paso del protocolo: `set_video_moments`.
 - **Decir para qué tipo de producto es** cada protocolo: `set_protocol_product_type`. **Elegir la medida** de un video: `set_video_measure`.
 - **Ver los clips por subir** y cómo va la cola: `list_clips_to_upload`. **Pedir que se suban**, de a uno o todos: `queue_clip_uploads`. La app no puede subirlos por su cuenta: los sube la extensión de Chrome de quien tenga **Subir sola la cola** prendido, con Chrome abierto. **Anotar** uno subido a mano: `mark_clip_uploaded`.
 

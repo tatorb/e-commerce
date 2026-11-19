@@ -93,7 +93,8 @@ function editOut(e: EditRow, account: AccountRef) {
     estado: STATUS[e.status],
     pedida: when(e.createdAt, account),
     pedida_por: e.askedBy,
-    ...(e.preApproved ? { pre_aprobada: 'Se aprueba sola al terminar, salvo que salga sin la voz, la música o los subtítulos que la cuenta tiene prendidos.' } : {}),
+    con_musica: e.music,
+    ...(e.preApproved ? { pre_aprobada: 'Se aprueba sola al terminar, salvo que salga sin la voz o los subtítulos que la cuenta tiene prendidos, o sin la música que se pidió.' } : {}),
     ...(e.autoUpload ? { se_sube_sola: 'Apenas quede aprobado, el clip va a la cola de subida.' } : {}),
     segundos_pedidos: e.targetSeconds,
     indicacion: e.note,
@@ -169,7 +170,6 @@ const getStep = defineTool({
         segundos_del_clip: s.accountVideo.targetSeconds,
         voz_en_off: s.accountVideo.voiceOn,
         voz_de_elevenlabs: s.accountVideo.voiceId || null,
-        musica: s.accountVideo.musicOn,
         estilo_de_la_musica: s.accountVideo.musicStyle,
         subtitulos: s.accountVideo.subtitlesOn,
         color_de_los_subtitulos: s.accountVideo.subtitleColor,
@@ -255,10 +255,14 @@ const requestTool = defineTool({
     video: z.string().min(1).describe('La clave «video» del video original, de get_videos_step.'),
     segundos: z.number().int().min(10).max(60).optional().describe('Cuánto tiene que durar el clip. Sin decir, lo de la cuenta. Si el guión dura más, el clip se alarga.'),
     indicacion: z.string().max(1000).optional().describe('Una indicación puntual para el editor, que manda sobre las del protocolo.'),
+    musica: z
+      .boolean()
+      .optional()
+      .describe('true = el clip lleva música de fondo, que genera ElevenLabs con el estilo de la cuenta. Sin mandarlo, el clip sale sin música; al rehacer una edición, queda como estaba. Para un video que ya está en la cola se puede cambiar mientras la Mac no empezó a editarlo.'),
     aprobar_al_terminar: z
       .boolean()
       .optional()
-      .describe('true = dejarlo pre-aprobado: cuando la Mac termine, el clip se aprueba solo, aunque traiga avisos, salvo que salga sin la voz, la música o los subtítulos que la cuenta tiene prendidos; en ese caso queda para revisar. Nadie ve ni escucha el clip antes: usalo cuando la persona ya vio que los clips de ese tipo de producto salen bien, y confirmalo con ella. También se puede mandar para un video que ya está en la cola.'),
+      .describe('true = dejarlo pre-aprobado: cuando la Mac termine, el clip se aprueba solo, aunque traiga avisos, salvo que salga sin la voz o los subtítulos que la cuenta tiene prendidos, o sin la música que se pidió; en ese caso queda para revisar. Nadie ve ni escucha el clip antes: usalo cuando la persona ya vio que los clips de ese tipo de producto salen bien, y confirmalo con ella. También se puede mandar para un video que ya está en la cola.'),
     subir_al_aprobar: z
       .boolean()
       .optional()
@@ -271,14 +275,14 @@ const requestTool = defineTool({
   async run(ctx, args) {
     const { account, id } = await target(ctx, args);
     const { video, edit } = await videoIn(ctx, account, id, args.video);
-    const auto = { ...(args.aprobar_al_terminar !== undefined ? { preApprove: args.aprobar_al_terminar } : {}), ...(args.subir_al_aprobar !== undefined ? { autoUpload: args.subir_al_aprobar } : {}) };
+    const auto = { ...(args.aprobar_al_terminar !== undefined ? { preApprove: args.aprobar_al_terminar } : {}), ...(args.subir_al_aprobar !== undefined ? { autoUpload: args.subir_al_aprobar } : {}), ...(args.musica !== undefined ? { music: args.musica } : {}) };
     if (edit && (edit.status === 'QUEUED' || edit.status === 'PROCESSING')) {
       // Ya está pedida: no se pide de nuevo, pero se le puede dejar dicho que se apruebe y se suba sola.
       if (Object.keys(auto).length > 0) await asToolError(() => setEditAuto(ctx.db, { accountId: account.id, editId: edit.id, ...auto }));
       const after = await videoIn(ctx, account, id, video.id);
       return {
         edicion: after.edit ? editOut(after.edit, account) : null,
-        aviso: `Ese video ya está en la cola o editándose: no se pidió de nuevo.${Object.keys(auto).length > 0 ? ' Quedó anotado lo que se hace solo cuando termine.' : ''}`,
+        aviso: `Ese video ya está en la cola o editándose: no se pidió de nuevo.${Object.keys(auto).length > 0 ? ' Quedó anotado lo que se pidió.' : ''}`,
       };
     }
     const ask = { accountId: account.id, targetSeconds: args.segundos, note: args.indicacion, plan: args.plan, userId: ctx.userId, ...auto };
@@ -366,14 +370,13 @@ const settingsTool = defineTool({
   section: 'protocolos',
   title: 'Cambiar cómo se editan los videos de la cuenta',
   description:
-    'Cambia cómo arma la Mac el clip de cada video de la cuenta. Lo que no mandes queda como está. La voz en off necesita el ID de una voz de ElevenLabs; los subtítulos necesitan la voz. color_de_los_subtitulos es el color de la palabra que se está diciendo, el de la marca, como #6FA82C. Lo automático conviene prenderlo cuando los clips ya salen bien: editar solo cada video nuevo, que Claude escriba el guión del producto que no tiene, y aprobar solo el clip que salió sin avisos. Con modo_de_la_mac, además, cambia cuándo puede editar la Mac del estudio, para todas las cuentas: solo lo puede hacer un administrador.',
+    'Cambia cómo arma la Mac el clip de cada video de la cuenta. Lo que no mandes queda como está. La voz en off necesita el ID de una voz de ElevenLabs; los subtítulos necesitan la voz. La música no se prende acá: se elige en cada pedido de edición, y acá va solo su estilo. color_de_los_subtitulos es el color de la palabra que se está diciendo, el de la marca, como #6FA82C. Lo automático conviene prenderlo cuando los clips ya salen bien: editar solo cada video nuevo, que Claude escriba el guión del producto que no tiene, y aprobar solo el clip que salió sin avisos. Con modo_de_la_mac, además, cambia cuándo puede editar la Mac del estudio, para todas las cuentas: solo lo puede hacer un administrador.',
   input: z.object({
     cuenta: accountArg,
     segundos_del_clip: z.number().int().min(10).max(60).optional(),
     voz_en_off: z.boolean().optional(),
     voz_de_elevenlabs: z.string().max(80).optional().describe('El ID de la voz, de ElevenLabs.'),
-    musica: z.boolean().optional(),
-    estilo_de_la_musica: z.string().max(500).optional(),
+    estilo_de_la_musica: z.string().max(500).optional().describe('Cómo suena la música de fondo. Si un clip la lleva se elige en cada pedido, con musica en request_video_edit.'),
     subtitulos: z.boolean().optional(),
     color_de_los_subtitulos: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
     editar_solo_cada_video_nuevo: z.boolean().optional(),
@@ -398,7 +401,6 @@ const settingsTool = defineTool({
       ...(args.segundos_del_clip !== undefined ? { targetSeconds: args.segundos_del_clip } : {}),
       ...(args.voz_en_off !== undefined ? { voiceOn: args.voz_en_off } : {}),
       ...(args.voz_de_elevenlabs !== undefined ? { voiceId: args.voz_de_elevenlabs } : {}),
-      ...(args.musica !== undefined ? { musicOn: args.musica } : {}),
       ...(args.estilo_de_la_musica !== undefined ? { musicStyle: args.estilo_de_la_musica } : {}),
       ...(args.subtitulos !== undefined ? { subtitlesOn: args.subtitulos } : {}),
       ...(args.color_de_los_subtitulos !== undefined ? { subtitleColor: args.color_de_los_subtitulos.toUpperCase() } : {}),
@@ -427,7 +429,6 @@ const settingsTool = defineTool({
         segundos_del_clip: saved.targetSeconds,
         voz_en_off: saved.voiceOn,
         voz_de_elevenlabs: saved.voiceId || null,
-        musica: saved.musicOn,
         estilo_de_la_musica: saved.musicStyle,
         subtitulos: saved.subtitlesOn,
         color_de_los_subtitulos: saved.subtitleColor,

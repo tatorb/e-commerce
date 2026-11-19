@@ -1970,6 +1970,8 @@ model VideoEdit {
   // y mandarlo a la cola de subida apenas quede aprobado.
   approveWhenDone    Boolean   @default(false)
   uploadWhenApproved Boolean   @default(false)
+  // Si este clip lleva música de fondo. Se elige en cada pedido: sin pedirla, no lleva.
+  musicOn            Boolean   @default(false)
   // Cuándo se ofreció el clip aprobado a las publicaciones del producto, para
   // Clips por subir. Se ofrece una sola vez: si la persona lo saca, no vuelve.
   clipOfferedAt DateTime?

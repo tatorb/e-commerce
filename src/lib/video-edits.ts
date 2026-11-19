@@ -6,6 +6,7 @@ import type { ClipRules } from '@/domain/videos';
 import { chooseApprovedClip, queueApprovedClip } from '@/lib/clip-uploads';
 import { proposeVideoScript, scriptLinesOf, scriptShownOf } from '@/lib/video-script';
 import {
+  DEFAULT_MUSIC_STYLE,
   accountVideoSchema,
   cleanNote,
   cleanTarget,
@@ -175,7 +176,6 @@ export async function saveAccountVideo(db: PrismaClient, args: { accountId: stri
   const v = parsed.data;
   if (v.voiceOn && !v.voiceId) throw new VideoEditError('Para prender la voz en off hace falta el ID de la voz de ElevenLabs.');
   if (v.subtitlesOn && !v.voiceOn) throw new VideoEditError('Los subtítulos escriben lo que dice la voz en off: prendé la voz primero.');
-  if (v.musicOn && !v.musicStyle) throw new VideoEditError('Para prender la música hace falta describir el estilo.');
   const data = { values: v as unknown as Prisma.InputJsonValue, updatedById: args.userId };
   await db.videoAccountSettings.upsert({ where: { accountId: args.accountId }, create: { accountId: args.accountId, ...data }, update: data });
   return v;
@@ -210,7 +210,7 @@ async function lockVideo(tx: Tx, videoId: string) {
  */
 export async function requestEdit(
   db: PrismaClient,
-  args: { accountId: string; videoId: string; targetSeconds?: unknown; note?: unknown; plan?: unknown; script?: unknown; stepId?: string | null | 'auto'; preApprove?: boolean; autoUpload?: boolean; userId: string | null },
+  args: { accountId: string; videoId: string; targetSeconds?: unknown; note?: unknown; plan?: unknown; script?: unknown; stepId?: string | null | 'auto'; preApprove?: boolean; autoUpload?: boolean; music?: boolean; userId: string | null },
 ): Promise<{ editId: string }> {
   const video = await videoOf(db, args.accountId, args.videoId);
   const settings = await loadAccountVideo(db, args.accountId);
@@ -244,6 +244,7 @@ export async function requestEdit(
         requestedScript: json(script),
         approveWhenDone: args.preApprove === true,
         uploadWhenApproved: args.autoUpload === true,
+        musicOn: args.music === true,
         askedById: args.userId,
       },
     });
@@ -369,7 +370,8 @@ export async function buildVideoJob(db: PrismaClient, editId: string, deps: Vide
   const momentos: VideoMoment[] = parseMoments(step?.moments);
   const script = parseRequestedScript(edit.requestedScript);
   const voice = settings.voiceOn && settings.voiceId ? { id: settings.voiceId } : null;
-  const music = settings.musicOn && settings.musicStyle ? { estilo: settings.musicStyle } : null;
+  // La música se pide en cada edición. El estilo es el de la cuenta.
+  const music = edit.musicOn ? { estilo: settings.musicStyle || DEFAULT_MUSIC_STYLE } : null;
   const rules = await clipRulesFor(db, video.productId);
   const carpeta = await deps.folderPath(video.productId);
   const source = (which: 'original' | 'liviana', nombre: string, bytes: bigint | null): VideoSource => ({
@@ -481,10 +483,10 @@ export async function submitEditResult(
     const clip = await tx.productVideo.upsert({ where: { driveFileId: file.fileId }, create: { driveFileId: file.fileId, ...fields }, update: fields });
     const cost = (typeof done.propuesta?.uso?.costo_usd === 'number' ? done.propuesta.uso.costo_usd : 0) + (typeof done.sonido?.costo_usd === 'number' ? done.sonido.costo_usd : 0);
     const warnings = [...(done.propuesta?.avisos ?? []), ...done.avisos];
-    // Lo que la cuenta tiene prendido y el clip no trae: con eso el canal lo rechaza o no dice nada.
+    // Lo que se pidió y el clip no trae: con eso el canal lo rechaza o no dice nada.
     const missing = [
       settings.voiceOn && !done.sonido?.voz ? 'la voz' : null,
-      settings.musicOn && !done.sonido?.musica ? 'la música' : null,
+      edit.musicOn && !done.sonido?.musica ? 'la música' : null,
       settings.voiceOn && settings.subtitlesOn && !done.sonido?.subtitulos ? 'los subtítulos' : null,
     ].filter((m): m is string => m !== null);
     // Con la cuenta en automático, un clip que salió sin avisos no espera a nadie. Uno
@@ -565,15 +567,24 @@ export async function approveEdit(db: PrismaClient, args: { accountId: string; e
 
 /**
  * Deja dicho, en una edición que todavía no se aprobó, que se apruebe sola al
- * terminar y que el clip vaya a la cola de subida. Si ya está para revisar y
+ * terminar y que el clip vaya a la cola de subida, y si lleva música. Si ya está para revisar y
  * queda pre-aprobada, no se aprueba sola: eso pasa cuando la Mac entrega.
  */
-export async function setEditAuto(db: PrismaClient, args: { accountId: string; editId: string; preApprove?: boolean; autoUpload?: boolean }): Promise<void> {
+export async function setEditAuto(db: PrismaClient, args: { accountId: string; editId: string; preApprove?: boolean; autoUpload?: boolean; music?: boolean }): Promise<void> {
   await db.$transaction(async (tx) => {
     const edit = await openEdit(tx, args.accountId, args.editId, ['QUEUED', 'PROCESSING', 'REVIEW'], 'cambiar');
+    // La música va dentro del clip: se puede cambiar mientras el video espera en la cola.
+    const music = args.music !== undefined && args.music !== edit.musicOn ? args.music : undefined;
+    if (music !== undefined && edit.status !== 'QUEUED') {
+      throw new VideoEditError('La música se elige antes de que la Mac empiece a editar. Para cambiarla, pedí el clip de nuevo.');
+    }
     await tx.videoEdit.update({
       where: { id: edit.id },
-      data: { ...(args.preApprove !== undefined ? { approveWhenDone: args.preApprove } : {}), ...(args.autoUpload !== undefined ? { uploadWhenApproved: args.autoUpload } : {}) },
+      data: {
+        ...(args.preApprove !== undefined ? { approveWhenDone: args.preApprove } : {}),
+        ...(args.autoUpload !== undefined ? { uploadWhenApproved: args.autoUpload } : {}),
+        ...(music !== undefined ? { musicOn: music } : {}),
+      },
     });
   });
 }
@@ -606,7 +617,7 @@ async function discardIn(tx: Tx, args: { accountId: string; editId: string; user
  */
 export async function redoEdit(
   db: PrismaClient,
-  args: { accountId: string; editId: string; targetSeconds?: unknown; note?: unknown; plan?: unknown; script?: unknown; preApprove?: boolean; autoUpload?: boolean; userId: string | null; now?: Date },
+  args: { accountId: string; editId: string; targetSeconds?: unknown; note?: unknown; plan?: unknown; script?: unknown; preApprove?: boolean; autoUpload?: boolean; music?: boolean; userId: string | null; now?: Date },
 ): Promise<{ editId: string; clipFileId: string | null }> {
   const before = await db.videoEdit.findFirst({ where: { id: args.editId, video: { product: { accountId: args.accountId } } }, include: { video: { select: { productId: true } } } });
   if (!before) throw new VideoEditError('Esa edición ya no existe.');
@@ -632,6 +643,7 @@ export async function redoEdit(
         // Lo que se había dejado dicho sigue valiendo, salvo que se diga otra cosa.
         approveWhenDone: args.preApprove ?? before.approveWhenDone,
         uploadWhenApproved: args.autoUpload ?? before.uploadWhenApproved,
+        musicOn: args.music ?? before.musicOn,
         askedById: args.userId,
       },
     });
@@ -666,6 +678,8 @@ export type EditRow = {
   // Lo que se dejó dicho: aprobarlo solo al terminar, y subirlo apenas quede aprobado.
   preApproved: boolean;
   autoUpload: boolean;
+  // Si se pidió con música de fondo.
+  music: boolean;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -721,6 +735,7 @@ export async function editsOfProduct(db: PrismaClient, productId: string): Promi
       askedBy: r.askedBy?.name ?? null,
       preApproved: r.approveWhenDone,
       autoUpload: r.uploadWhenApproved,
+      music: r.musicOn,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
     });

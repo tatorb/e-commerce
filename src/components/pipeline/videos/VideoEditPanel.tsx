@@ -26,7 +26,7 @@ export type EditorInfo = {
 };
 
 // stepId: un paso, null para no usar protocolo, o 'auto' para el que sale solo del tipo de producto.
-type Ask = { targetSeconds: number; note: string; stepId?: string | null | 'auto'; preApprove?: boolean; autoUpload?: boolean };
+type Ask = { targetSeconds: number; note: string; stepId?: string | null | 'auto'; preApprove?: boolean; autoUpload?: boolean; music?: boolean };
 const AUTO = 'auto';
 const NONE = 'none';
 type ActionResult = { ok: true } | { ok: false; error: string };
@@ -59,6 +59,7 @@ function AskForm({
   const [stepId, setStepId] = useState(initial.stepId === null ? NONE : (initial.stepId ?? AUTO));
   const [preApprove, setPreApprove] = useState(initial.preApprove === true);
   const [autoUpload, setAutoUpload] = useState(initial.autoUpload === true);
+  const [music, setMusic] = useState(initial.music === true);
   const n = Number(seconds);
   const valid = Number.isFinite(n) && n >= range.min && n <= range.max;
   return (
@@ -104,9 +105,9 @@ function AskForm({
           className="w-full rounded-md border bg-background px-2 py-1 text-sm"
         />
       </label>
-      <AutoChecks preApprove={preApprove} autoUpload={autoUpload} disabled={pending} onChange={(a) => (setPreApprove(a.preApprove), setAutoUpload(a.autoUpload))} />
+      <AutoChecks preApprove={preApprove} autoUpload={autoUpload} music={music} disabled={pending} onChange={(a) => (setPreApprove(a.preApprove), setAutoUpload(a.autoUpload), setMusic(a.music))} />
       <div className="flex justify-end">
-        <Button size="sm" pending={pending} disabled={pending || !valid} onClick={() => onSubmit({ targetSeconds: Math.round(n), note, preApprove, autoUpload, ...(steps ? { stepId: stepId === NONE ? null : stepId } : {}) })}>
+        <Button size="sm" pending={pending} disabled={pending || !valid} onClick={() => onSubmit({ targetSeconds: Math.round(n), note, preApprove, autoUpload, music, ...(steps ? { stepId: stepId === NONE ? null : stepId } : {}) })}>
           {submitLabel}
         </Button>
       </div>
@@ -114,19 +115,43 @@ function AskForm({
   );
 }
 
-/** Lo que se deja dicho antes de que la Mac termine: aprobarlo solo y subirlo. */
-function AutoChecks({ preApprove, autoUpload, disabled, onChange }: { preApprove: boolean; autoUpload: boolean; disabled: boolean; onChange: (a: { preApprove: boolean; autoUpload: boolean }) => void }) {
+/** Lo que se deja dicho antes de que la Mac termine: si lleva música, aprobarlo solo y subirlo. */
+function AutoChecks({
+  preApprove,
+  autoUpload,
+  music,
+  musicLocked = false,
+  disabled,
+  onChange,
+}: {
+  preApprove: boolean;
+  autoUpload: boolean;
+  music: boolean;
+  // La Mac ya empezó: la música no se puede cambiar.
+  musicLocked?: boolean;
+  disabled: boolean;
+  onChange: (a: { preApprove: boolean; autoUpload: boolean; music: boolean }) => void;
+}) {
   return (
     <div className="space-y-1.5 text-sm">
       <label className="flex items-start gap-2">
-        <input type="checkbox" className="mt-1" checked={preApprove} disabled={disabled} onChange={(e) => onChange({ preApprove: e.target.checked, autoUpload })} />
+        <input type="checkbox" className="mt-1" checked={music} disabled={disabled || musicLocked} onChange={(e) => onChange({ preApprove, autoUpload, music: e.target.checked })} />
         <span>
-          Aprobar solo al terminar
-          <span className="block text-xs text-muted-foreground">Salvo que salga sin la voz, la música o los subtítulos que la cuenta tiene prendidos: ahí queda para revisar.</span>
+          Música de fondo
+          <span className="block text-xs text-muted-foreground">
+            {musicLocked ? 'Se elige antes de que la Mac empiece a editar. Para cambiarla, pedí el clip de nuevo.' : 'ElevenLabs la genera para este clip, con el estilo de la cuenta. Sin marcar, el clip sale sin música.'}
+          </span>
         </span>
       </label>
       <label className="flex items-start gap-2">
-        <input type="checkbox" className="mt-1" checked={autoUpload} disabled={disabled} onChange={(e) => onChange({ preApprove, autoUpload: e.target.checked })} />
+        <input type="checkbox" className="mt-1" checked={preApprove} disabled={disabled} onChange={(e) => onChange({ preApprove: e.target.checked, autoUpload, music })} />
+        <span>
+          Aprobar solo al terminar
+          <span className="block text-xs text-muted-foreground">Salvo que salga sin la voz o los subtítulos que la cuenta tiene prendidos, o sin la música que se pidió: ahí queda para revisar.</span>
+        </span>
+      </label>
+      <label className="flex items-start gap-2">
+        <input type="checkbox" className="mt-1" checked={autoUpload} disabled={disabled} onChange={(e) => onChange({ preApprove, autoUpload: e.target.checked, music })} />
         <span>
           Subir apenas quede aprobado
           <span className="block text-xs text-muted-foreground">Va a la cola de subida, que atiende la extensión de Chrome con «Subir sola la cola» prendido.</span>
@@ -202,6 +227,7 @@ export function VideoEditPanel({
     stepId: video.stepChosen ? video.stepId : AUTO,
     preApprove: edit?.preApproved ?? false,
     autoUpload: edit?.autoUpload ?? false,
+    music: edit?.music ?? false,
   };
   const autoText = video.autoStep ? video.autoStep.label : 'sin protocolo';
   // Lo que falta para que la Mac lo tome, dicho antes de pedirlo.
@@ -414,6 +440,8 @@ export function VideoEditPanel({
         <AutoChecks
           preApprove={edit.preApproved}
           autoUpload={edit.autoUpload}
+          music={edit.music}
+          musicLocked={edit.status !== 'QUEUED'}
           disabled={pending}
           onChange={(a) => run(() => setVideoEditAutoAction(accountSlug, edit.id, a))}
         />
@@ -437,7 +465,7 @@ export function VideoEditPanel({
           </Button>
         ) : null}
         {edit.status === 'REVIEW' || edit.status === 'FAILED'
-          ? askButton('Pedir de nuevo', 'redo', (ask) => redoVideoEditAction(accountSlug, edit.id, { targetSeconds: ask.targetSeconds, note: ask.note, preApprove: ask.preApprove, autoUpload: ask.autoUpload }))
+          ? askButton('Pedir de nuevo', 'redo', (ask) => redoVideoEditAction(accountSlug, edit.id, { targetSeconds: ask.targetSeconds, note: ask.note, preApprove: ask.preApprove, autoUpload: ask.autoUpload, music: ask.music }))
           : null}
         {edit.status === 'REVIEW'
           ? discardButton('Descartar el clip', 'El clip va a la papelera del Drive. El video original queda como está.')

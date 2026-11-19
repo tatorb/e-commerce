@@ -104,13 +104,11 @@ export function AccountVideoCard({ accountSlug, settings }: { accountSlug: strin
               <p className="text-xs text-muted-foreground">El color de la marca. Las demás palabras van en blanco, con borde negro.</p>
             </div>
           ) : null}
-          <Check checked={v.musicOn} onChange={(musicOn) => set({ musicOn })} label="Música de fondo" help="ElevenLabs la genera para cada clip, del largo justo. Baja sola cuando habla la voz." />
-          {v.musicOn ? (
-            <div className="space-y-1.5 pl-6">
-              <Label htmlFor="video-music">Estilo de la música</Label>
-              <Textarea id="video-music" rows={2} value={v.musicStyle} maxLength={500} onChange={(e) => set({ musicStyle: e.target.value })} />
-            </div>
-          ) : null}
+          <div className="space-y-1.5">
+            <Label htmlFor="video-music">Estilo de la música de fondo</Label>
+            <Textarea id="video-music" rows={2} value={v.musicStyle} maxLength={500} onChange={(e) => set({ musicStyle: e.target.value })} />
+            <p className="text-xs text-muted-foreground">La música se elige en cada pedido de edición, con la casilla «Música de fondo». ElevenLabs la genera para ese clip, del largo justo, y baja sola cuando habla la voz.</p>
+          </div>
         </div>
 
         <div className="space-y-3 border-t pt-4">
