@@ -1,5 +1,6 @@
 import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { variantKey } from '@/domain/media';
 import { PrismaClient } from '@/generated/prisma/client';
 import { addToPipeline, advanceStep } from '@/domain/pipeline';
 import type { McpContext } from '@/lib/mcp/tool';
@@ -206,6 +207,53 @@ describe.skipIf(!url)('herramientas para Claude', () => {
     const types = (await call('search_catalog', { incluir_tipos: true })).data.tipos_de_producto;
     expect(types).toHaveLength(2);
     expect((await call('search_catalog', { pipeline: ['NADA'] })).isError).toBe(true);
+  });
+
+  it('search_catalog: familia, marca y medida, filtro por marca, agrupar por familia y marcas', async () => {
+    const store = await db.store.findFirstOrThrow({ where: { accountId } });
+    const camisa = await db.product.create({
+      data: { accountId, name: 'Camisa CM-1', productType: 'Camisa de cilindro', brand: 'Sabó', variants: { create: [{ sku: 'CM-1', measure: 'STD' }, { sku: 'CM-1', measure: '0,50' }] } },
+    });
+    const key = (measure: string) => variantKey({ sku: 'CM-1', measure });
+    const family = await db.listingFamily.create({ data: { storeId: store.id, productId: camisa.id } });
+    const std = await db.publication.create({
+      data: { productId: camisa.id, storeId: store.id, externalId: 'MLA3330001', title: 'Camisa STD', familyId: family.id, variantKey: key('STD'), channelStatus: 'PAUSED' },
+    });
+    await db.publication.create({
+      data: { productId: camisa.id, storeId: store.id, externalId: 'MLA3330002', title: 'Camisa 0,50', familyId: family.id, variantKey: key('0,50') },
+    });
+    await db.listingFamily.update({ where: { id: family.id }, data: { leadId: std.id } });
+
+    const all = (await call('search_catalog', { orden: 'titulo', incluir_marcas: true, incluir_tipos: true })).data;
+    expect(all.total).toBe(4);
+    const byCode = Object.fromEntries(all.publicaciones.map((p: { codigo: string }) => [p.codigo, p]));
+    expect(byCode.MLA3330001).toMatchObject({ familia_id: family.id, es_principal: true, marca: 'Sabó', medida: 'STD' });
+    expect(byCode.MLA3330002).toMatchObject({ familia_id: family.id, es_principal: false, marca: 'Sabó', medida: '0,50' });
+    // Sin familia: la medida es la única del producto.
+    expect(byCode.MLA1110001).toMatchObject({ familia_id: null, es_principal: false, marca: 'Marca Uno', medida: 'STD' });
+    expect(byCode.MLA2220002).toMatchObject({ marca: null, medida: null });
+    expect(all.marcas).toEqual([
+      { marca: 'Marca Uno', familias: 1 },
+      { marca: 'Sabó', familias: 1 },
+      { marca: 'Sin marca', familias: 1 },
+    ]);
+    expect(all.tipos_de_producto).toContainEqual({ tipo: 'Camisa de cilindro', publicaciones: 2 });
+
+    // La marca, sin mayúsculas ni acentos, y en lista.
+    expect((await call('search_catalog', { marca: ['SABO'] })).data.total).toBe(2);
+    expect((await call('search_catalog', { marca: ['sabo', 'marca uno'] })).data.total).toBe(3);
+
+    // Agrupando: una fila por familia, la principal.
+    const grouped = (await call('search_catalog', { agrupar_por_familia: true, incluir_tipos: true })).data;
+    expect(grouped.total).toBe(3);
+    expect(grouped.publicaciones.map((p: { codigo: string }) => p.codigo)).toContain('MLA3330001');
+    expect(grouped.tipos_de_producto).toContainEqual({ tipo: 'Camisa de cilindro', familias: 1 });
+
+    // Los tipos y las marcas respetan los filtros: la principal está pausada, va la medida activa.
+    const active = (await call('search_catalog', { estado_en_canal: ['ACTIVE'], agrupar_por_familia: true, incluir_tipos: true, incluir_marcas: true })).data;
+    expect(active.publicaciones.find((p: { familia_id: string | null }) => p.familia_id === family.id)).toMatchObject({ codigo: 'MLA3330002', es_principal: false });
+    const paused = (await call('search_catalog', { estado_en_canal: ['PAUSED'], incluir_tipos: true, incluir_marcas: true })).data;
+    expect(paused).toMatchObject({ total: 1, tipos_de_producto: [{ tipo: 'Camisa de cilindro', publicaciones: 1 }], marcas: [{ marca: 'Sabó', familias: 1 }] });
   });
 
   it('get_pipeline_board: cada paso con sus publicaciones y los días', async () => {

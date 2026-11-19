@@ -61,6 +61,7 @@ export async function listScoredPublications(
         pipelineStatus: true,
         pipelineStep: true,
         variantKey: true,
+        familyId: true,
         mainOptionId: true,
         mainOption: { select: { externalId: true } },
         pipelineRemoval: true,
@@ -98,6 +99,7 @@ export async function listScoredPublications(
             name: true,
             kind: true,
             productType: true,
+            brand: true,
             warranty: true,
             kitContents: true,
             partNumber: true,
@@ -149,6 +151,7 @@ export async function listScoredPublications(
       titleLock: resolveTitleLock(titleLockFromData(channel, p), p.titleLockedManual, Boolean(p.externalId)),
       // La familia de medidas: la principal, que la representa en el tablero, y cuántas medidas tiene.
       familyLeadId: p.family?.leadId ?? null,
+      familyId: p.familyId,
       // Si es otra opción de venta de una medida: el código de la principal. Null: es la principal o la única.
       mainOptionId: p.mainOptionId,
       mainOptionCode: p.mainOption ? (p.mainOption.externalId ?? 'sin publicar') : null,
@@ -157,6 +160,10 @@ export async function listScoredPublications(
       // Los códigos de las otras medidas de su familia: la tarjeta del tablero se encuentra por cualquiera.
       familyCodes: p.family?.members.map((m) => m.externalId).filter((c): c is string => Boolean(c)) ?? [],
       measures,
+      // La medida de esta publicación. Sin saber cuál vende, la del producto si tiene una sola.
+      measure: p.variantKey ? (productMeasures.find((m) => m.key === p.variantKey)?.label ?? null) : productMeasures.length === 1 ? productMeasures[0].measure : null,
+      // La marca del repuesto, de la ficha.
+      brand: p.product.brand?.trim() || null,
       productType: p.product.productType?.trim() || null,
       kind: p.product.kind,
       visits: typeof metrics.visits_90d === 'number' ? metrics.visits_90d : null,

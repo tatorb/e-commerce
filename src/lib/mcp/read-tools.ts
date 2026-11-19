@@ -33,6 +33,7 @@ import {
 } from '@/lib/queries/catalog-filters';
 import { listBoard, listPipelineMovements } from '@/lib/queries/pipeline';
 import { listScoredPublications, type ScoredPublication } from '@/lib/queries/scoring';
+import { optionKey } from '@/domain/product-options';
 import { KIND_OPTIONS, parseKinds } from '@/lib/queries/catalog-filters';
 import { fileHref } from '@/lib/file-rules';
 import { loadKnowledge, loadResearch } from '@/lib/queries/research';
@@ -219,7 +220,7 @@ const searchCatalog = defineTool({
   section: ['publicaciones', 'pipeline'],
   title: 'Buscar en Publicaciones',
   description:
-    'Busca en la lista de Publicaciones de una cuenta, con los mismos filtros de la pantalla. Devuelve título, código, si es individual o combo, familia, puntaje, visitas y ventas de 90 días, si el título está bloqueado y el estado en el pipeline. Los filtros con varios valores aceptan cualquiera de ellos.',
+    'Busca en la lista de Publicaciones de una cuenta, con los mismos filtros de la pantalla. Devuelve título, código, si es individual o combo, familia (familia_id y es_principal), marca, medida, puntaje, visitas y ventas de 90 días, si el título está bloqueado y el estado en el pipeline. Los filtros con varios valores aceptan cualquiera de ellos.',
   input: z.object({
     cuenta: accountArg,
     texto: z.string().optional().describe('Busca en el título, el código del canal y los SKU.'),
@@ -263,15 +264,25 @@ const searchCatalog = defineTool({
       .describe(`Orden: ${labels(SORTS.map((s) => [s.value, s.label]))}. Sin orden, menor puntaje primero.`),
     limite: z.number().int().min(1).max(200).optional().describe('Cuántas devolver, hasta 200. Sin límite, 50.'),
     desde: z.number().int().min(0).optional().describe('Cuántas saltear, para ver las siguientes.'),
-    incluir_tipos: z.boolean().optional().describe('Suma la lista de tipos de producto de la cuenta con cuántas publicaciones tiene cada uno.'),
+    marca: z
+      .array(z.string())
+      .optional()
+      .describe('Marca del repuesto, de la ficha. Sin importar mayúsculas ni acentos.'),
+    agrupar_por_familia: z
+      .boolean()
+      .optional()
+      .describe('true = una sola fila por familia, la principal, y el total cuenta familias. Una publicación sin familia cuenta como una familia.'),
+    incluir_tipos: z
+      .boolean()
+      .optional()
+      .describe('Suma la lista de tipos de producto con cuántas publicaciones tiene cada uno, con los filtros de la búsqueda. Agrupando por familia, cuenta familias.'),
+    incluir_marcas: z.boolean().optional().describe('Suma la lista de marcas con cuántas familias tiene cada una, con los filtros de la búsqueda.'),
   }),
   readOnly: true,
   async run(ctx, args) {
     const account = await resolveAccount(ctx, args.cuenta);
     const all = await listScoredPublications(account.id, {}, ctx.db);
-    const counts = new Map<string, number>();
-    for (const p of all) if (p.productType) counts.set(p.productType, (counts.get(p.productType) ?? 0) + 1);
-    const types = [...counts.keys()];
+    const types = [...new Set(all.flatMap((p) => (p.productType ? [p.productType] : [])))];
 
     // Cada tipo pedido: el exacto o, si no hay, los que lo contienen.
     const wantedTypes = (args.tipo_de_producto ?? []).flatMap((raw) => {
@@ -297,26 +308,60 @@ const searchCatalog = defineTool({
       orden: args.orden,
     });
     const steps = new Set<PipelineStep>(args.paso ?? []);
-    const found = filterPublications(all, filters).filter(
-      (p) => steps.size === 0 || (p.pipelineStatus === 'IN_PIPELINE' && p.pipelineStep !== null && steps.has(p.pipelineStep)),
+    const brands = new Set((args.marca ?? []).map(optionKey).filter(Boolean));
+    const matching = filterPublications(all, filters).filter(
+      (p) =>
+        (steps.size === 0 || (p.pipelineStatus === 'IN_PIPELINE' && p.pipelineStep !== null && steps.has(p.pipelineStep))) &&
+        (brands.size === 0 || (p.brand !== null && brands.has(optionKey(p.brand)))),
     );
+    // Una publicación sin familia es una familia sola.
+    const familyOf = (p: ScoredPublication) => p.familyId ?? p.id;
+    // Agrupando, una fila por familia: la principal o, si no pasa los filtros, la primera que sí.
+    const leads = new Map<string, ScoredPublication>();
+    for (const p of matching) {
+      const seen = leads.get(familyOf(p));
+      if (!seen || (p.familyLeadId === p.id && seen.familyLeadId !== seen.id)) leads.set(familyOf(p), p);
+    }
+    const found = args.agrupar_por_familia ? matching.filter((p) => leads.get(familyOf(p)) === p) : matching;
     const from = args.desde ?? 0;
     const page = found.slice(from, from + (args.limite ?? 50));
     return {
       cuenta: account.slug,
       total: found.length,
       mostrando: page.length > 0 ? `${from + 1} a ${from + page.length}` : 'ninguna',
-      publicaciones: page.map((p) => summary(ctx, account, p)),
+      publicaciones: page.map((p) => ({
+        ...summary(ctx, account, p),
+        familia_id: p.familyId,
+        es_principal: p.familyId !== null && p.familyLeadId === p.id,
+        marca: p.brand,
+        medida: p.measure,
+      })),
       ...(args.incluir_tipos
         ? {
-            tipos_de_producto: [...counts.entries()]
-              .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'es'))
-              .map(([tipo, publicaciones]) => ({ tipo, publicaciones })),
+            tipos_de_producto: countBy(found, (p) => p.productType).map(([tipo, n]) => (args.agrupar_por_familia ? { tipo, familias: n } : { tipo, publicaciones: n })),
+          }
+        : {}),
+      ...(args.incluir_marcas
+        ? {
+            marcas: countBy([...new Map(matching.map((p) => [familyOf(p), p])).values()], (p) => p.brand ?? 'Sin marca').map(([marca, familias]) => ({
+              marca,
+              familias,
+            })),
           }
         : {}),
     };
   },
 });
+
+/** Cuántas hay de cada valor, de más a menos. Las que no tienen valor no cuentan. */
+function countBy<T>(rows: T[], key: (row: T) => string | null): [string, number][] {
+  const counts = new Map<string, number>();
+  for (const r of rows) {
+    const k = key(r);
+    if (k) counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'es'));
+}
 
 // ───────────────────────────── Tablero ─────────────────────────────
 
