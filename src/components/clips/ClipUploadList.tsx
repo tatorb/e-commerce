@@ -9,6 +9,7 @@ import { StatusText } from '@/components/pipeline/StatusText';
 import { useStepAction } from '@/components/pipeline/useStepAction';
 import { VideoFacts, VideoThumb } from '@/components/pipeline/videos/VideoCard';
 import { markClipUploadedAction, queueClipUploadsAction } from '@/app/a/[cuenta]/pipeline/video-actions';
+import { usePageHeaderHeight } from '@/components/dashboard/use-page-header-height';
 import { askClipUpload, setClipQueue, uploadKey, useClipUploader } from './clip-uploader';
 import { ClipUploadStatus } from './ClipUploadStatus';
 
@@ -41,6 +42,7 @@ export function ClipUploadList({ accountSlug, clips }: { accountSlug: string; cl
   const router = useRouter();
   const { extension, queue, progress } = useClipUploader();
   const all = useStepAction();
+  const headerTop = usePageHeaderHeight();
   const queuedCount = clips.filter((c) => c.queued).length;
   // Mientras la cola trabaja, la lista se pone al día sola.
   useEffect(() => {
@@ -54,7 +56,8 @@ export function ClipUploadList({ accountSlug, clips }: { accountSlug: string; cl
   }
   return (
     <div className="space-y-3">
-      <div className="space-y-3 rounded-lg border p-3 text-sm">
+      {/* La primera fila, la de la extensión y la cola, queda fija debajo del encabezado de la página. */}
+      <div className="sticky z-10 space-y-3 rounded-lg border bg-background p-3 text-sm" style={{ top: headerTop }}>
         <p className="flex items-start gap-2">
           <Puzzle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
           {extension

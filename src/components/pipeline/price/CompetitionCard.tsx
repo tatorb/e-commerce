@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,7 @@ import { formatPercent, formatPrice } from '@/domain/money';
 import { brandKey, brandOptions, competitorAverage, copyablePlan, type ComparedRow, type Comparison, type Estimate } from '@/domain/price-comparison';
 import { planLabel, type InstallmentPlan, type PricingParams } from '@/domain/pricing';
 import { cn } from '@/lib/utils/cn';
+import { usePageHeaderHeight } from '@/components/dashboard/use-page-header-height';
 
 // Mi precio frente al de la competencia que se cargó en el paso Información:
 // una fila mía arriba y una por competidor, lo que más importa en números y
@@ -81,28 +82,6 @@ function HelpLabel({ label, help }: { label: string; help: string }) {
       <Info className="h-3 w-3 shrink-0" aria-label={help} />
     </span>
   );
-}
-
-/**
- * Cuánto ocupa arriba el encabezado de la página cuando queda fijo, para que
- * los títulos de la tabla queden justo debajo. Cero si no queda fijo.
- */
-function usePageHeaderHeight() {
-  const [height, setHeight] = useState(0);
-  useEffect(() => {
-    const header = document.querySelector<HTMLElement>('[data-page-header]');
-    if (!header) return;
-    const update = () => setHeight(getComputedStyle(header).position === 'sticky' ? header.offsetHeight : 0);
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(header);
-    window.addEventListener('resize', update);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener('resize', update);
-    };
-  }, []);
-  return height;
 }
 
 function surveyed(day: string | null, today: string): string {

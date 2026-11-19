@@ -42,9 +42,9 @@ export default async function PipelinePage({
   searchParams,
 }: {
   params: Promise<{ cuenta: string }>;
-  searchParams: Promise<{ tipo?: string; vista?: string }>;
+  searchParams: Promise<{ tipo?: string; vista?: string; tabla?: string }>;
 }) {
-  const [{ cuenta }, { tipo, vista }] = await Promise.all([params, searchParams]);
+  const [{ cuenta }, { tipo, vista, tabla }] = await Promise.all([params, searchParams]);
   const { user, account } = await requireAccount(cuenta, 'pipeline');
 
   const kinds = parseKinds(tipo);
@@ -73,6 +73,14 @@ export default async function PipelinePage({
     Object.entries(noteCounts).map(([id, n]) => [id, { count: n.count, last: `${n.last.author}: ${n.last.text.length > 200 ? `${n.last.text.slice(0, 197)}…` : n.last.text}` }]),
   );
   const catalogHref = `/a/${account.slug}/publicaciones?pipeline=UNTOUCHED,DISCARDED`;
+  // En Por subir, una pestaña por lista. Sin elegir, la primera que tiene algo.
+  const tables = [
+    { key: 'cambios', label: 'Cambios', count: toPush.length },
+    { key: 'clips', label: 'Clips', count: clips.length },
+    { key: 'compatibilidades', label: 'Compatibilidades', count: compatibilities.length },
+  ] as const;
+  const table = tables.find((t) => t.key === tabla)?.key ?? tables.find((t) => t.count > 0)?.key ?? 'cambios';
+  const nothing = (what: string) => <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">{what}</div>;
 
   return (
     <>
@@ -100,62 +108,66 @@ export default async function PipelinePage({
             />
           </div>
         </div>
+        {/* Las pestañas van en el encabezado, que queda fijo al bajar. */}
+        <div className="-mb-4 space-y-3 md:-mb-5">
+          <TabLinks
+            label="Vista del pipeline"
+            items={(
+              [
+                ['', 'Tablero'],
+                ['por-subir', 'Por subir'],
+              ] as const
+            ).map(([key, label]) => ({
+              key: key || 'tablero',
+              href: key ? `?vista=${key}` : '?',
+              label,
+              active: (key === 'por-subir') === toPushView,
+              count: key === 'por-subir' && toPushView ? toPush.length + compatibilities.length + clips.length : null,
+            }))}
+           // La raya de abajo la pone el encabezado, salvo que sigan las pestañas de Por subir.
+            className={toPushView ? undefined : 'border-b-0'}
+          />
+          {toPushView ? (
+            <TabLinks
+              label="Listas por subir"
+              items={tables.map((t) => ({ key: t.key, href: `?vista=por-subir&tabla=${t.key}`, label: t.label, active: t.key === table, count: t.count }))}
+              className="border-b-0"
+            />
+          ) : null}
+        </div>
       </PageHeader>
       <PageBody>
         <QuestionsNotice accountSlug={account.slug} count={questions.count} oldestAt={questions.oldestAt} />
-        <TabLinks
-          label="Vista del pipeline"
-          items={(
-            [
-              ['', 'Tablero'],
-              ['por-subir', 'Por subir'],
-            ] as const
-          ).map(([key, label]) => ({
-            key: key || 'tablero',
-            href: key ? `?vista=${key}` : '?',
-            label,
-            active: (key === 'por-subir') === toPushView,
-            count: key === 'por-subir' && toPushView ? toPush.length + compatibilities.length + clips.length : null,
-          }))}
-        />
         {toPushView ? (
-          <>
-            <p className="text-sm text-muted-foreground">
-              Las publicaciones con cambios de la app que todavía no están en el canal, vengan del pipeline o de un cambio suelto. Las que
-              tienen datos para elegir se resuelven en su página.
-            </p>
-            {toPush.length > 0 ? (
-              <ToPushList accountSlug={account.slug} rows={toPush} />
-            ) : compatibilities.length === 0 && clips.length === 0 ? (
-              <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">
-                No hay cambios para subir: todo lo de la app ya está en el canal.
-              </div>
-            ) : null}
-            {clips.length > 0 ? (
-              <>
-                <div className="space-y-1 pt-2">
-                  <h2 className="text-base font-semibold">Clips</h2>
-                  <p className="text-sm text-muted-foreground">
-                    Los clips aprobados y elegidos que todavía no están en el canal. Mercado Libre no deja subirlos desde la app a las cuentas locales: se
-                    suben desde tu Chrome, con la extensión de Studio MRB o a mano. Va uno por producto, o uno por medida si cada medida tiene el suyo.
-                  </p>
-                </div>
-                <ClipUploadList accountSlug={account.slug} clips={clipRows(clips)} />
-              </>
-            ) : null}
-            {compatibilities.length > 0 ? (
-              <>
-                <div className="space-y-1 pt-2">
-                  <h2 className="text-base font-semibold">Compatibilidades con vehículos</h2>
-                  <p className="text-sm text-muted-foreground">
-                    Lo que mostró la última auditoría: los vehículos que salen de la ficha y faltan en el canal, y los que cargó la tienda y no
-                    salen de la ficha. Las fichas sin compatibilidades no aparecen: sin datos no se puede corregir.
-                  </p>
-                </div>
+          table === 'cambios' ? (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Las publicaciones con cambios de la app que todavía no están en el canal, vengan del pipeline o de un cambio suelto. Las que
+                tienen datos para elegir se resuelven en su página.
+              </p>
+              {toPush.length > 0 ? <ToPushList accountSlug={account.slug} rows={toPush} /> : nothing('No hay cambios para subir: todo lo de la app ya está en el canal.')}
+            </>
+          ) : table === 'clips' ? (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Los clips aprobados y elegidos que todavía no están en el canal. Mercado Libre no deja subirlos desde la app a las cuentas locales: se
+                suben desde tu Chrome, con la extensión de Studio MRB o a mano. Va uno por producto, o uno por medida si cada medida tiene el suyo.
+              </p>
+              {clips.length > 0 ? <ClipUploadList accountSlug={account.slug} clips={clipRows(clips)} /> : nothing('No hay clips para subir.')}
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Lo que mostró la última auditoría: los vehículos que salen de la ficha y faltan en el canal, y los que cargó la tienda y no
+                salen de la ficha. Las fichas sin compatibilidades no aparecen: sin datos no se puede corregir.
+              </p>
+              {compatibilities.length > 0 ? (
                 <CompatibilityPushList accountSlug={account.slug} rows={compatibilities} />
-              </>
-            ) : null}
-          </>
+              ) : (
+                nothing('No hay compatibilidades para subir.')
+              )}
+            </>
+          )
         ) : all.length === 0 ? (
           <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">
             Todavía no hay publicaciones en el pipeline. Elegilas en{' '}

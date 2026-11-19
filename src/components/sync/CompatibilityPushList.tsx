@@ -1,6 +1,7 @@
 'use client';
 
 import { BAND } from '@/components/ui/band';
+import { usePageHeaderHeight } from '@/components/dashboard/use-page-header-height';
 import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -54,6 +55,7 @@ export function CompatibilityPushList({ accountSlug, rows }: { accountSlug: stri
   const router = useRouter();
   const key = (r: CompatibilityPushRow) => r.publicationIds[0];
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const headerTop = usePageHeaderHeight();
   const [asking, setAsking] = useState<CompatibilityPushRow[] | null>(null);
   // Solo agregar: lo que sobra queda para otra subida.
   const [addOnly, setAddOnly] = useState(false);
@@ -94,45 +96,49 @@ export function CompatibilityPushList({ accountSlug, rows }: { accountSlug: stri
   const canAdd = (r: CompatibilityPushRow) => r.add.count + r.complete.count > 0;
 
   return (
-    <div className="overflow-hidden rounded-2xl border bg-card shadow-card">
-      <div className={cn('flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-3 text-sm', BAND)}>
-        <input
-          type="checkbox"
-          aria-label="Elegir todas las que se pueden subir"
-          className="h-4 w-4 accent-[hsl(var(--primary))]"
-          checked={pushable.length > 0 && chosen.length === pushable.length}
-          disabled={pushable.length === 0 || progress !== null}
-          onChange={(e) => setSelected(new Set(e.target.checked ? pushable.map(key) : []))}
-        />
-        <span className="text-muted-foreground">
-          {chosen.length > 0
-            ? plural(chosen.length, 'elegida', 'elegidas')
-            : `${plural(rows.length, 'publicación', 'publicaciones')} con compatibilidades por subir`}
-        </span>
-        <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
-          {progress ? (
-            <>
-              <span className="tabular-nums text-muted-foreground" aria-live="polite">
-                Subiendo {progress.done} de {progress.total}
-              </span>
-              <Button access="subir" size="sm" variant="ghost" onClick={() => (stop.current = true)}>
-                Parar
-              </Button>
-            </>
-          ) : null}
-          <Button
-            access="subir"
-            size="sm"
-            variant="outline"
-            disabled={!chosen.some(canAdd) || progress !== null}
-            onClick={() => ask(chosen.filter(canAdd), true)}
-          >
-            Solo agregar
-          </Button>
-          <Button access="subir" size="sm" disabled={chosen.length === 0 || progress !== null} pending={progress !== null} onClick={() => ask(chosen, false)}>
-            <Upload />
-            Subir las elegidas{chosen.length > 0 ? ` (${chosen.length})` : ''}
-          </Button>
+    // overflow-clip y no hidden: con hidden, la primera fila no queda fija al bajar.
+    <div className="overflow-clip rounded-2xl border bg-card shadow-card">
+      {/* La primera fila queda fija debajo del encabezado de la página. */}
+      <div className="sticky z-10 bg-card" style={{ top: headerTop }}>
+        <div className={cn('flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-3 text-sm', BAND)}>
+          <input
+            type="checkbox"
+            aria-label="Elegir todas las que se pueden subir"
+            className="h-4 w-4 accent-[hsl(var(--primary))]"
+            checked={pushable.length > 0 && chosen.length === pushable.length}
+            disabled={pushable.length === 0 || progress !== null}
+            onChange={(e) => setSelected(new Set(e.target.checked ? pushable.map(key) : []))}
+          />
+          <span className="text-muted-foreground">
+            {chosen.length > 0
+              ? plural(chosen.length, 'elegida', 'elegidas')
+              : `${plural(rows.length, 'publicación', 'publicaciones')} con compatibilidades por subir`}
+          </span>
+          <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+            {progress ? (
+              <>
+                <span className="tabular-nums text-muted-foreground" aria-live="polite">
+                  Subiendo {progress.done} de {progress.total}
+                </span>
+                <Button access="subir" size="sm" variant="ghost" onClick={() => (stop.current = true)}>
+                  Parar
+                </Button>
+              </>
+            ) : null}
+            <Button
+              access="subir"
+              size="sm"
+              variant="outline"
+              disabled={!chosen.some(canAdd) || progress !== null}
+              onClick={() => ask(chosen.filter(canAdd), true)}
+            >
+              Solo agregar
+            </Button>
+            <Button access="subir" size="sm" disabled={chosen.length === 0 || progress !== null} pending={progress !== null} onClick={() => ask(chosen, false)}>
+              <Upload />
+              Subir las elegidas{chosen.length > 0 ? ` (${chosen.length})` : ''}
+            </Button>
+          </div>
         </div>
       </div>
 
