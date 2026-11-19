@@ -231,7 +231,7 @@ describe.skipIf(!url)('herramientas para Claude', () => {
     expect(byCode.MLA3330001).toMatchObject({ familia_id: family.id, es_principal: true, marca: 'Sabó', medida: 'STD' });
     expect(byCode.MLA3330002).toMatchObject({ familia_id: family.id, es_principal: false, marca: 'Sabó', medida: '0,50' });
     // Sin familia: la medida es la única del producto.
-    expect(byCode.MLA1110001).toMatchObject({ familia_id: null, es_principal: false, marca: 'Marca Uno', medida: 'STD' });
+    expect(byCode.MLA1110001).toMatchObject({ familia_id: null, es_principal: false, marca: 'Marca Uno', medida: 'STD', producto_nombre: 'Kit de embrague Modelo X', producto_numero_de_pieza: 'P-100' });
     expect(byCode.MLA2220002).toMatchObject({ marca: null, medida: null });
     expect(all.marcas).toEqual([
       { marca: 'Marca Uno', familias: 1 },

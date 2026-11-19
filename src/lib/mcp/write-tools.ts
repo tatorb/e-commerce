@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { logActivity } from '@/lib/activity';
 import { todayIn } from '@/domain/applications';
 import { COMPETITOR_SELECT, competitorsSchema, INSTALLMENT_OPTIONS, MAX_COMPETITORS, storedCompetitor } from '@/domain/competitors';
 import { competitorOwner, loadCompetitors, saveCompetitorsFrom, sharedText } from '@/lib/competitors';
@@ -408,10 +409,17 @@ const updateProductInfoTool = defineTool({
   section: ['productos', 'pipeline'],
   title: 'Corregir la ficha',
   description:
-    'Corrige la ficha del producto de una publicación: tipo, marca, número de pieza, línea, origen, garantía, medidas y compatibilidades. También si es individual o combo, y los productos del combo: un combo se arma solo con productos individuales, y un producto que está dentro de un combo no puede ser combo. La ficha es la fuente de verdad y la comparten todas las publicaciones del producto. Lo que no se manda queda como está; las listas reemplazan la lista entera. El tipo y la marca son de listas fijas de la cuenta (Ajustes, Tipos y marcas): tienen que ser uno de la lista; si no está, devuelve las que hay y no se guarda nada. Usá solo datos que te dio la persona o que están en la ficha, nunca supuestos.',
+    'Corrige la ficha del producto de una publicación: nombre del producto (no el título de la publicación), tipo, marca, número de pieza, línea, origen, garantía, medidas y compatibilidades. También si es individual o combo, y los productos del combo: un combo se arma solo con productos individuales, y un producto que está dentro de un combo no puede ser combo. La ficha es la fuente de verdad y la comparten todas las publicaciones del producto. Lo que no se manda queda como está; las listas reemplazan la lista entera. El tipo y la marca son de listas fijas de la cuenta (Ajustes, Tipos y marcas): tienen que ser uno de la lista; si no está, devuelve las que hay y no se guarda nada. Usá solo datos que te dio la persona o que están en la ficha, nunca supuestos.',
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg,
+    nombre: z
+      .string()
+      .trim()
+      .min(1)
+      .max(300)
+      .optional()
+      .describe('El nombre del producto en la ficha, por ejemplo "Subconjunto SP-413". No es el título de la publicación. Sin mandar, queda como está. Para muchos a la vez, rename_products.'),
     tipo: optionalText('Tipo de producto, uno de la lista de la cuenta, por ejemplo "Kit de embrague"'),
     marca: optionalText('Marca del repuesto, una de la lista de la cuenta'),
     numero_de_pieza: optionalText('Número de pieza u OEM'),
@@ -472,6 +480,7 @@ const updateProductInfoTool = defineTool({
         productId: true,
         product: {
           select: {
+            name: true,
             productType: true,
             brand: true,
             partNumber: true,
@@ -556,6 +565,7 @@ const updateProductInfoTool = defineTool({
     await ctx.db.$transaction(async (tx) => {
       await updateProductInfo(tx, { accountId: account.id, productId: pub.productId, data: parsed.data });
       if (args.garantia !== undefined) await tx.product.update({ where: { id: pub.productId }, data: { warranty: args.garantia.trim() || null } });
+      if (args.nombre !== undefined && args.nombre !== p.name) await tx.product.update({ where: { id: pub.productId }, data: { name: args.nombre } });
       if (args.individual_o_combo) {
         await setProductKind(tx, { accountId: account.id, productId: pub.productId, kind: args.individual_o_combo === 'combo' ? 'COMBO' : 'INDIVIDUAL' });
       }
@@ -568,6 +578,18 @@ const updateProductInfoTool = defineTool({
         await setComboItems(tx, { accountId: account.id, comboId: pub.productId, items });
       }
     });
+    // El cambio de nombre queda en el registro del producto con el nombre anterior.
+    if (args.nombre !== undefined && args.nombre !== p.name) {
+      await logActivity(ctx.db, {
+        userId: ctx.userId,
+        accountId: account.id,
+        section: 'productos',
+        summary: 'Cambió el nombre del producto',
+        productId: pub.productId,
+        detail: `Antes: ${p.name} · Ahora: ${args.nombre}`,
+        via: 'CLAUDE',
+      });
+    }
     const combo = await loadCombo(ctx.db, pub.productId);
     return {
       listo: true,

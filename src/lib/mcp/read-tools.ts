@@ -221,7 +221,7 @@ const searchCatalog = defineTool({
   section: ['publicaciones', 'pipeline'],
   title: 'Buscar en Publicaciones',
   description:
-    'Busca en la lista de Publicaciones de una cuenta, con los mismos filtros de la pantalla. Devuelve título, código, si es individual o combo, familia (familia_id y es_principal), producto (producto_id y si está optimizado), marca, medida, stock del producto, cantidad en el canal, puntaje, visitas y ventas de 90 días, si el título está bloqueado y el estado en el pipeline. Los filtros con varios valores aceptan cualquiera de ellos.',
+    'Busca en la lista de Publicaciones de una cuenta, con los mismos filtros de la pantalla. Devuelve título, código, si es individual o combo, familia (familia_id y es_principal), producto (producto_id, nombre, número de pieza y si está optimizado), marca, medida, stock del producto, cantidad en el canal, puntaje, visitas y ventas de 90 días, si el título está bloqueado y el estado en el pipeline. Los filtros con varios valores aceptan cualquiera de ellos.',
   input: z.object({
     cuenta: accountArg,
     texto: z.string().optional().describe('Busca en el título, el código del canal y los SKU.'),
@@ -378,6 +378,8 @@ const searchCatalog = defineTool({
         marca: p.brand,
         medida: p.measure,
         producto_id: p.productId,
+        producto_nombre: p.productName,
+        producto_numero_de_pieza: p.partNumber,
         producto_optimizado: optimized.has(p.productId),
         stock_del_producto: stockOf.get(p.id) ?? null,
         cantidad_en_el_canal: p.quantity.channel,

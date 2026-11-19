@@ -135,6 +135,7 @@ export async function listScoredPublications(
       title: p.title,
       productId: p.product.id,
       productName: p.product.name,
+      partNumber: p.product.partNumber?.trim() || null,
       externalId: p.externalId,
       url: p.url,
       skus: p.product.variants.map((v) => v.sku).filter((s): s is string => Boolean(s)),

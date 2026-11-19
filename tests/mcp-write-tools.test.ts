@@ -54,7 +54,8 @@ describe('herramientas de escritura en la lista', () => {
     expect(tools.get('set_publication_flex')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('create_volume_campaign')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('delete_volume_campaign')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
-    expect(tools.size).toBe(112);
+    expect(tools.get('rename_products')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+    expect(tools.size).toBe(113);
   });
 });
 
@@ -226,6 +227,65 @@ describe.skipIf(!url)('herramientas de escritura', () => {
     const bad = await call('update_product_info', { publicacion: 'MLA1110001', compatibilidades: [{ marca: 'VW', desde: 2015, hasta: 2010 }] });
     expect(bad).toMatchObject({ isError: true });
     expect(bad.text).toContain('año desde');
+  });
+
+  it('update_product_info: corrige el nombre del producto y lo deja en su registro', async () => {
+    expect((await call('update_product_info', { publicacion: 'MLA1110001', nombre: '  Kit de embrague P-100 ' })).data).toMatchObject({ listo: true });
+    expect((await db.product.findUniqueOrThrow({ where: { id: productId } })).name).toBe('Kit de embrague P-100');
+    const log = await db.activityLog.findFirstOrThrow({ where: { productId, summary: 'Cambió el nombre del producto' } });
+    expect(log).toMatchObject({ detail: 'Antes: Kit de embrague Gol · Ahora: Kit de embrague P-100', via: 'CLAUDE', userId: 'u1' });
+    // Sin mandar el nombre, queda como está.
+    await call('update_product_info', { publicacion: 'MLA1110001', marca: 'Marca Uno' });
+    expect((await db.product.findUniqueOrThrow({ where: { id: productId } })).name).toBe('Kit de embrague P-100');
+  });
+
+  it('rename_products: cuenta sin cambiar, avisa lo que no se puede y los conflictos, y renombra con registro', async () => {
+    await db.productOption.createMany({
+      data: [
+        { accountId, kind: 'TYPE', name: 'Subconjunto (pistones + aros)', shortName: 'Subconjunto' },
+        { accountId, kind: 'TYPE', name: 'Kit de embrague' },
+        { accountId, kind: 'BRAND', name: 'Persan' },
+      ],
+    });
+    const make = (name: string, partNumber: string | null, extra = {}) =>
+      db.product.create({ data: { accountId, name, productType: 'Subconjunto (pistones + aros)', brand: 'Persan', partNumber, ...extra } });
+    const a = await make('Subconjunto Gol viejo', 'SP-1');
+    await make('Subconjunto SP-2', 'SP-2');
+    const noPart = await make('Sin número', null);
+    const twin1 = await make('Gemelo uno', 'SP-9');
+    const twin2 = await make('Gemelo dos', 'sp-9');
+    const clash = await make('Choca', 'SP-3');
+    // Otro producto, de otra marca, ya se llama así.
+    await db.product.create({ data: { accountId, name: 'Subconjunto SP-3', brand: 'Otra' } });
+
+    const preview = (await call('rename_products', { formato: '[tipo_corto] [numero_de_pieza]', marca: ['PERSAN'] })).data;
+    expect(preview).toMatchObject({ solo_contar: true, a_renombrar: 1, ya_cumplen: 1, no_se_pueden: 1, en_conflicto: 3 });
+    expect(preview.cambios).toEqual([{ producto_id: a.id, nombre_actual: 'Subconjunto Gol viejo', nombre_nuevo: 'Subconjunto SP-1' }]);
+    expect(preview.sin_renombrar).toEqual([{ producto_id: noPart.id, nombre_actual: 'Sin número', motivo: 'Sin número de pieza en la ficha.' }]);
+    expect(preview.conflictos.map((c: { producto_id: string }) => c.producto_id).sort()).toEqual([twin1.id, twin2.id, clash.id].sort());
+    expect(preview.conflictos.find((c: { producto_id: string }) => c.producto_id === clash.id).choca_con).toEqual(['Subconjunto SP-3']);
+    // No cambió nada.
+    expect((await db.product.findUniqueOrThrow({ where: { id: a.id } })).name).toBe('Subconjunto Gol viejo');
+
+    // Un tipo sin nombre corto no se puede; se puede probar uno sin guardarlo.
+    const kit = (await call('rename_products', { formato: '[tipo_corto] [numero_de_pieza]', producto_ids: [productId] })).data;
+    expect(kit.sin_renombrar[0].motivo).toContain('no tiene nombre corto');
+    const tried = (await call('rename_products', { formato: '[tipo_corto] [numero_de_pieza]', producto_ids: [productId], nombres_cortos: [{ tipo: 'kit de embrague', nombre_corto: 'Kit' }] })).data;
+    expect(tried.cambios[0].nombre_nuevo).toBe('Kit P-100');
+    expect((await db.productOption.findFirstOrThrow({ where: { accountId, name: 'Kit de embrague' } })).shortName).toBeNull();
+    expect((await call('rename_products', { formato: '[tipo] [modelo]' })).text).toContain('[modelo]');
+
+    // De verdad: renombra y deja el nombre anterior en el registro del producto.
+    const done = (await call('rename_products', { formato: '[tipo_corto] [numero_de_pieza]', marca: ['persan'], solo_contar: false })).data;
+    expect(done).toMatchObject({ solo_contar: false, a_renombrar: 1 });
+    expect((await db.product.findUniqueOrThrow({ where: { id: a.id } })).name).toBe('Subconjunto SP-1');
+    expect((await db.product.findUniqueOrThrow({ where: { id: twin1.id } })).name).toBe('Gemelo uno');
+    const log = await db.activityLog.findFirstOrThrow({ where: { productId: a.id } });
+    expect(log).toMatchObject({ summary: 'Cambió el nombre del producto', detail: 'Antes: Subconjunto Gol viejo · Ahora: Subconjunto SP-1', via: 'CLAUDE' });
+    // Guarda el nombre corto que se manda.
+    await call('rename_products', { formato: '[tipo_corto] [numero_de_pieza]', producto_ids: [productId], nombres_cortos: [{ tipo: 'Kit de embrague', nombre_corto: 'Kit' }], solo_contar: false });
+    expect((await db.product.findUniqueOrThrow({ where: { id: productId } })).name).toBe('Kit P-100');
+    expect((await db.productOption.findFirstOrThrow({ where: { accountId, name: 'Kit de embrague' } })).shortName).toBe('Kit');
   });
 
   it('update_product_info: carga y borra la garantía de la ficha', async () => {

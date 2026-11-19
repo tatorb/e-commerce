@@ -8,6 +8,7 @@ import { addOption, OptionError, removeOption, renameOption } from '@/lib/produc
 import type { OptionKind } from '@/domain/product-options';
 import type { CompetitorScope } from '@/generated/prisma/enums';
 import { changeScope, previewScopeChange, type ScopeChangePreview } from '@/lib/competitors';
+import { ProductNameError, setTypeShortName } from '@/lib/product-names';
 
 // Agregar, renombrar y borrar tipos de producto y marcas de la cuenta.
 
@@ -23,7 +24,7 @@ async function attempt(accountSlug: string, work: () => Promise<string>): Promis
     revalidatePath(`/a/${accountSlug}`, 'layout');
     return { ok: true, message };
   } catch (e) {
-    if (e instanceof OptionError) return { ok: false, error: e.message };
+    if (e instanceof OptionError || e instanceof ProductNameError) return { ok: false, error: e.message };
     throw e;
   }
 }
@@ -93,4 +94,14 @@ export async function changeCompetitorScopeAction(accountSlug: string, type: unk
       throw e;
     }
   });
+}
+
+/** El nombre corto de un tipo de producto, para el nombre de los productos. Vacío lo borra. */
+export async function setTypeShortNameAction(accountSlug: string, type: unknown, shortName: unknown): Promise<Result> {
+  return act(accountSlug, { section: 'productos', does: 'Cambió el nombre corto de un tipo de producto' }, ({ account }) =>
+    attempt(accountSlug, async () => {
+      await setTypeShortName(prisma, account.id, text(type), text(shortName));
+      return 'Guardado.';
+    }),
+  );
 }

@@ -2628,6 +2628,9 @@ model ProductOption {
   name      String
   // Solo en los tipos: si la competencia es de cada publicación o del producto.
   competitorScope CompetitorScope @default(PUBLICATION)
+  // Solo en los tipos: el nombre corto, para el nombre de los productos, por
+  // ejemplo "Subconjunto" para "Subconjunto (pistones + aros)". Null: no tiene.
+  shortName String?
   createdAt DateTime          @default(now())
 
   @@unique([accountId, kind, name])

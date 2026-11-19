@@ -1,9 +1,10 @@
-import { Tag, Shapes, Users } from 'lucide-react';
+import { Tag, Shapes, Users, Type } from 'lucide-react';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { SectionBody, SectionCard } from '@/components/ui/section-card';
 import { OptionListEditor } from '@/components/settings/OptionListEditor';
 import { CompetitorScopeEditor } from '@/components/settings/CompetitorScopeEditor';
+import { TypeShortNameEditor } from '@/components/settings/TypeShortNameEditor';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { prisma } from '@/lib/db';
 import { loadProductOptions, optionUsage } from '@/lib/product-options';
@@ -24,9 +25,10 @@ export default async function OptionsPage({ params }: { params: Promise<{ cuenta
   const [options, usage, scopes] = await Promise.all([
     loadProductOptions(prisma, account.id),
     optionUsage(prisma, account.id),
-    prisma.productOption.findMany({ where: { accountId: account.id, kind: 'TYPE' }, select: { name: true, competitorScope: true } }),
+    prisma.productOption.findMany({ where: { accountId: account.id, kind: 'TYPE' }, select: { name: true, competitorScope: true, shortName: true } }),
   ]);
   const scopeOf = new Map(scopes.map((o) => [o.name, o.competitorScope]));
+  const shortOf = new Map(scopes.map((o) => [o.name, o.shortName ?? '']));
   const rows = (names: string[], used: Map<string, number>) => names.map((name) => ({ name, products: used.get(name) ?? 0 }));
 
   return (
@@ -53,6 +55,15 @@ export default async function OptionsPage({ params }: { params: Promise<{ cuenta
             </SectionBody>
           </SectionCard>
         </div>
+        <SectionCard
+          title="Nombre corto de cada tipo"
+          icon={<Type />}
+          description="Para armar el nombre de los productos, por ejemplo «Subconjunto» para «Subconjunto (pistones + aros)». Claude lo usa al renombrar productos en tanda con el campo [tipo_corto]."
+        >
+          <SectionBody>
+            <TypeShortNameEditor accountSlug={account.slug} types={options.types.map((name) => ({ name, shortName: shortOf.get(name) ?? '' }))} canWrite={canWrite} />
+          </SectionBody>
+        </SectionCard>
         <SectionCard
           title="Competencia por tipo de producto"
           icon={<Users />}
