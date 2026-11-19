@@ -89,18 +89,15 @@ export function displacementOf(text: string | null | undefined): string | null {
   return parseEngine((text ?? '').replace(/(\d),(\d)/g, '$1.$2')).displacement;
 }
 
-/** Las versiones que no van: del campo de la ficha, o de la nota ("no THP", "excepto VTi"). */
-export function excludedOf(c: Pick<FichaCompatibility, 'excludedVersions' | 'note'>): string[] {
+/**
+ * Las versiones que no van: solo las del campo de la ficha. La nota explica y
+ * nunca deja versiones afuera: "no confirmado por Sabó" no es una versión.
+ */
+export function excludedOf(c: Pick<FichaCompatibility, 'excludedVersions'>): string[] {
   const out: string[] = [];
-  const add = (v: string) => {
+  for (const v of (c.excludedVersions ?? '').split(/[,;/]|\by\b/)) {
     const w = v.trim();
     if (w && !out.some((x) => norm(x) === norm(w))) out.push(w);
-  };
-  for (const v of (c.excludedVersions ?? '').split(/[,;/]|\by\b/)) add(v);
-  for (const m of (c.note ?? '').matchAll(/\b(?:no|excepto|salvo|menos)\s+([A-Za-z0-9][\w.-]*)/gi)) {
-    // "no sirve", "no es": palabras comunes, no versiones.
-    const word = m[1].replace(/\.+$/, '');
-    if (!/^(sirve|es|va|incluye|trae|tiene|para|el|la|los|las|con|de)$/i.test(word)) add(word);
   }
   return out;
 }

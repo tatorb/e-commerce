@@ -59,10 +59,17 @@ describe('cómo se lee una línea de la ficha', () => {
     // La nota no da la potencia: suele hablar de otro motor.
     expect(lineRule(ficha({ vehicleBrand: 'Volkswagen', model: 'Gol', engine: '1.0 8v EA111', fuel: 'Nafta', note: 'El 1.0 16v Turbo de 112 cv lleva otro pistón.' }), 0).power).toBeNull();
     expect(lineRule(ficha({ vehicleBrand: 'Renault', model: 'Logan', engine: '1.6 8v K7M', fuel: 'Nafta', note: 'K7M de 85 a 90 CV.', power: '90' }), 0).power).toBe(90);
-    expect(excludedOf({ excludedVersions: 'THP, VTi', note: null })).toEqual(['THP', 'VTi']);
-    expect(excludedOf({ excludedVersions: null, note: 'Sirve para el 1.6, no THP. Excepto GTi.' })).toEqual(['THP', 'GTi']);
-    // "No sirve" no es una versión.
-    expect(excludedOf({ excludedVersions: null, note: 'No sirve para el aspirado.' })).toEqual([]);
+    expect(excludedOf({ excludedVersions: 'THP, VTi' })).toEqual(['THP', 'VTi']);
+    // Las versiones salen solo del campo versiones que no van, nunca de la nota.
+    expect(excludedOf({ excludedVersions: null, note: 'Sirve para el 1.6, no THP. Excepto GTi.' } as never)).toEqual([]);
+    expect(excludedOf({ excludedVersions: null, note: 'No sirve para el aspirado.' } as never)).toEqual([]);
+    const fire = lineRule(
+      ficha({ vehicleBrand: 'Fiat', model: 'Palio', engine: '1.4 8v Fire', fuel: 'Nafta', excludedVersions: 'Evo', yearFrom: 2011, yearTo: 2016, note: 'Según la competencia, no confirmado por Sabó' }),
+      0,
+    );
+    expect(fire.exclude).toEqual(['Evo']);
+    expect(fire.label).toContain('sin Evo');
+    expect(fire.label).not.toContain('confirmado');
   });
 
   it('varios modelos en una línea, separados por barra o coma', () => {
@@ -605,7 +612,7 @@ describe.skipIf(!url)('auditar contra Mercado Libre simulado', () => {
   it('filtra por combustible y potencia, y deja afuera las versiones que no van', async () => {
     const kit = await product('Kit de prueba 308', [
       { vehicleBrand: 'Peugeot', model: '308', engine: '1.6 HDi', power: '115 cv' },
-      { vehicleBrand: 'Peugeot', model: '308', engine: '1.6', fuel: 'Nafta', note: 'No THP.' },
+      { vehicleBrand: 'Peugeot', model: '308', engine: '1.6', fuel: 'Nafta', excludedVersions: 'THP' },
     ]);
     const p = await pub(kit.id, 'MLA9000010');
     loaded.MLA9000010 = [
