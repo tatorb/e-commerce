@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Clock, GripVertical, Layers, ListTodo, Lock, MessageSquareText } from 'lucide-react';
+import { Clock, GripVertical, Layers, ListTodo, Lock, MessageSquareText, TriangleAlert } from 'lucide-react';
 import { ScoreBadge } from '@/components/stages/ScoreBadge';
 import { KindBadge } from '@/components/products/KindBadge';
 import { codeOrUnpublished } from '@/domain/channel-status';
@@ -45,6 +45,8 @@ export type BoardCardData = {
   familyCodes?: string[];
   // Las notas del equipo: cuántas y la última, para leerla sin entrar.
   notes?: { count: number; last: string } | null;
+  // El canal le cambió la categoría por su cuenta, o el producto quedó en dos categorías.
+  categoryAlert?: string | null;
 };
 
 // Las medidas que entran en la tarjeta; las demás se cuentan.
@@ -234,6 +236,12 @@ function BoardCard({
             </span>
           ) : null}
         </div>
+        {card.categoryAlert ? (
+          <p title={card.categoryAlert} className="flex items-start gap-1 text-xs font-medium text-amber-700 dark:text-amber-400">
+            <TriangleAlert className="mt-px h-3 w-3 shrink-0" />
+            <span className="line-clamp-2">Categoría: {card.categoryAlert}</span>
+          </p>
+        ) : null}
         <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
           {card.code ? (
             <span title="Código del producto" className="rounded border bg-background px-1.5 py-px font-semibold tracking-wide text-foreground">

@@ -21,6 +21,7 @@ export function PipelineBoard({
   showStore = false,
   openTasks = {},
   notes = {},
+  categoryAlerts = {},
 }: {
   accountSlug: string;
   items: BoardItem[];
@@ -30,6 +31,8 @@ export function PipelineBoard({
   openTasks?: Record<string, number>;
   // Las notas de cada tarjeta, por su id: cuántas y la última.
   notes?: Record<string, { count: number; last: string }>;
+  // La alerta de categoría de cada tarjeta, por su id.
+  categoryAlerts?: Record<string, string>;
 }) {
   const cards: BoardCardData[] = items.flatMap((i) =>
     i.pipelineStep
@@ -52,6 +55,7 @@ export function PipelineBoard({
             skus: i.skus,
             familyCodes: i.familyCodes,
             notes: notes[i.id] ?? null,
+            categoryAlert: categoryAlerts[i.id] ?? null,
           },
         ]
       : [],

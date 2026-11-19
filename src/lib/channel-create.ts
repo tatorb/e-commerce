@@ -180,7 +180,9 @@ function measuresCheck(measures: Measure[], targets: Target[], published: { labe
 }
 
 /** Qué está listo y qué falta para crear la publicación en el canal. Con varias medidas, una por medida. */
-export async function createChecks(db: Db, args: { accountId: string; publicationId: string }) {
+// recreate: la crea el flujo de recrear el producto en otra categoría (src/lib/recreate.ts), que finaliza
+// las viejas al final: que estén en otra categoría solo se avisa.
+export async function createChecks(db: Db, args: { accountId: string; publicationId: string; recreate?: boolean }) {
   const minPhotos = MIN_CREATE_PHOTOS;
   const p = await load(db, args.accountId, args.publicationId);
   const channelName = getChannelAdapter(p.store.channel.kind, p.store.channel.name).name;
@@ -230,8 +232,10 @@ export async function createChecks(db: Db, args: { accountId: string; publicatio
           ? clashText(inChannel, channelName)
           : same
             ? `La misma que las otras del producto en ${channelName} (${theirs.externalIds.join(', ')}).`
-            : `${channelName} tiene las otras del producto (${theirs.externalIds.join(', ')}) en ${categoryText(theirs)}. Elegí esa en Datos de catálogo antes de crear.`,
-      blocking: true,
+            : args.recreate
+              ? `${channelName} tiene las otras del producto (${theirs.externalIds.join(', ')}) en ${categoryText(theirs)}: se crea como un producto nuevo y esas se finalizan al terminar.`
+              : `${channelName} tiene las otras del producto (${theirs.externalIds.join(', ')}) en ${categoryText(theirs)}. Elegí esa en Datos de catálogo antes de crear, o recreá el producto en esta categoría con recreate_product_in_category.`,
+      blocking: !args.recreate,
     });
   }
   const missing = [
@@ -304,6 +308,8 @@ export async function createChecks(db: Db, args: { accountId: string; publicatio
     checks,
     ready: !blocked && checks.every((c) => c.ok || !c.blocking),
     listingTypes: publisher?.listingTypes ?? [],
+    // La categoría de la app, para recrear el producto en ella si el canal tiene las otras en otra.
+    categoryId: category?.id ?? null,
     price: p.price === null ? null : Number(p.price),
     // Con varias medidas, la cantidad se carga en cada una; el precio es el de la familia, salvo la que tiene el suyo.
     measures: byMeasure ? targets.map((t) => ({ key: t.key, label: t.label, price: t.ownPrice })) : [],
@@ -325,6 +331,8 @@ type CreateArgs = {
   listingType: string;
   userId: string | null;
   now?: Date;
+  // Desde el flujo de recrear el producto en otra categoría.
+  recreate?: boolean;
 };
 type Created = {
   // La primera que se creó.

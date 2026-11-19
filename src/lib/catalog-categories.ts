@@ -46,6 +46,7 @@ export async function ensureChannelCategory(db: PrismaClient, args: { storeId: s
   const known = catalog.category(code);
   if (known) return known;
   if (!catalog.fetchCategory || !catalog.register) throw new CatalogError(`No hay una categoría «${args.categoryId}».`);
+  if (!/^[A-Z]{3}\d{3,}$/.test(code)) throw new CatalogError(`«${args.categoryId}» no es un código de categoría de ${adapter.name}, como MLA458790.`);
   const read = await withAccessToken(db, args.storeId, (token) => catalog.fetchCategory!(code, token));
   if (!read) throw new CatalogError(`${code} no es una categoría de ${adapter.name}: revisá el código.`);
   if (!read.leaf) throw new CatalogError(`${read.name} (${code}) tiene subcategorías: en ${adapter.name} se publica en una de ellas. Elegí la de abajo que corresponda.`);

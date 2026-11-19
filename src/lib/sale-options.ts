@@ -224,3 +224,19 @@ export async function setMainOption(
     return { changed: true, from: old.externalId, to: target.externalId };
   });
 }
+
+/**
+ * Pasa el trabajo del pipeline de una publicación a otra que no es opción de
+ * venta suya, como la principal nueva de un producto recreado en otra
+ * categoría: el paso, el historial, el título y la descripción en trabajo, la
+ * competencia, las posiciones y las notas del equipo. El contenido de la nueva
+ * (título, descripción, fotos, datos de catálogo) queda como está.
+ */
+export async function movePipelineWork(tx: Tx, fromId: string, toId: string): Promise<void> {
+  const select = Object.fromEntries(PIPELINE_FIELDS.map((f) => [f, true])) as Record<(typeof PIPELINE_FIELDS)[number], true>;
+  const [from, to] = await Promise.all([tx.publication.findUniqueOrThrow({ where: { id: fromId }, select }), tx.publication.findUniqueOrThrow({ where: { id: toId }, select })]);
+  await tx.publication.update({ where: { id: toId }, data: from as Prisma.PublicationUncheckedUpdateInput });
+  await tx.publication.update({ where: { id: fromId }, data: to as Prisma.PublicationUncheckedUpdateInput });
+  await swapWork(tx, fromId, toId);
+  await tx.publicationNote.updateMany({ where: { publicationId: fromId }, data: { publicationId: toId } });
+}

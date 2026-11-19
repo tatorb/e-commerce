@@ -207,7 +207,9 @@ export type CreatedOption = { id: string; externalId: string; url: string | null
  */
 export async function createSaleOption(
   db: Db,
-  args: { accountId: string; publicationId: string; sourceId?: string; plan: number; price?: number; userId: string | null; now?: Date },
+  // recreate: desde el flujo de recrear el producto en otra categoría, la opción va en la categoría de la principal
+  // nueva aunque las viejas sigan en otra: se finalizan al terminar.
+  args: { accountId: string; publicationId: string; sourceId?: string; plan: number; price?: number; userId: string | null; now?: Date; recreate?: boolean },
 ): Promise<CreatedOption> {
   if (!isInstallmentPlan(args.plan)) throw new SaleOptionCopyError('La forma de cobro es sin cuotas, cuota promocionada, 3, 6, 9 o 12 cuotas.');
   const plan = args.plan;
@@ -241,9 +243,11 @@ export async function createSaleOption(
   // La categoría es la que el canal ya eligió para el producto: la de sus otras opciones activas, en
   // todas sus medidas. El canal finaliza las que quedan en otra. Si ya hay en dos, no se crea otra.
   const product = await db.publication.findUniqueOrThrow({ where: { id: main.id }, select: { productId: true } });
-  const inChannel = await productChannelCategories(db, { productId: product.productId, storeId: store.id });
+  const inChannel = args.recreate ? [] : await productChannelCategories(db, { productId: product.productId, storeId: store.id });
   if (inChannel.length > 1) throw new SaleOptionCopyError(clashText(inChannel, channelName));
-  const categoryId = inChannel[0]?.categoryId ?? source.channelCopy?.categoryId ?? main.channelCopy?.categoryId ?? null;
+  const categoryId = args.recreate
+    ? (main.channelCopy?.categoryId ?? source.channelCopy?.categoryId ?? null)
+    : (inChannel[0]?.categoryId ?? source.channelCopy?.categoryId ?? main.channelCopy?.categoryId ?? null);
   if (!categoryId) throw new SaleOptionCopyError('Todavía no se leyó la categoría de la buena en el canal: leela de nuevo antes de crear.');
 
   // La medida en el canal: la nueva se suma a ella. Sin leerla, el canal armaría un producto aparte.

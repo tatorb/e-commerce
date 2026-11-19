@@ -1,3 +1,4 @@
+import { closePendingPass } from '@/lib/recreate';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
@@ -65,6 +66,8 @@ const SOLD_BUDGET_MS = 5_000;
 const TEXT_CODES_BUDGET_MS = 10_000;
 // Las notificaciones: las de las tareas, las que no salieron al instante y el resumen del día.
 const NOTICES_BUDGET_MS = 4_000;
+// Las que quedaron por finalizar al recrear un producto en otra categoría: se reintentan.
+const CLOSE_BUDGET_MS = 4_000;
 
 const digest = (s: string) => createHash('sha256').update(s).digest();
 
@@ -103,6 +106,10 @@ export async function GET(request: Request) {
   const ledger = await readAllSales(prisma, { budgetMs: budget(LEDGER_BUDGET_MS) });
   const saleTasks = await saleAlarmPass(prisma);
   const sold = await importSoldListings(prisma, { budgetMs: budget(SOLD_BUDGET_MS) });
+  const closings = await closePendingPass(prisma, { budgetMs: budget(CLOSE_BUDGET_MS) }).catch((e) => {
+    console.error('No se pudieron reintentar las publicaciones por finalizar.', e);
+    return { closed: 0, still: 0 };
+  });
   // Las notificaciones que no salieron al instante, las de las tareas y el resumen del día.
   const notices = await notificationPass(budget(NOTICES_BUDGET_MS));
   return NextResponse.json({
@@ -137,6 +144,7 @@ export async function GET(request: Request) {
     visitsRead: visits.read,
     soldListingsImported: sold.imported.length,
     notifications: notices,
+    closedPending: closings.closed,
   });
 }
 

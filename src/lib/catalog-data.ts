@@ -1,4 +1,5 @@
 import { ensureChannelCategory, loadSavedCategories } from '@/lib/catalog-categories';
+import { categoryAlerts, type CategoryAlert } from '@/lib/channel-category';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
 import {
@@ -72,6 +73,8 @@ export type CatalogData = {
   productInChannel: ChannelCategoryGroup[];
   /** El aviso si la categoría de la app no es la del canal, o el producto está en varias. Null si coinciden. */
   categoryWarning: string | null;
+  // El canal le cambió la categoría por su cuenta hace poco, o el producto quedó en dos categorías.
+  categoryAlert: CategoryAlert | null;
 };
 
 /**
@@ -125,6 +128,7 @@ export async function loadCatalogData(db: Db, publicationId: string): Promise<Ca
     inChannel,
     productInChannel,
     categoryWarning: warningOf(channelName, ref(category), inChannel, productInChannel),
+    categoryAlert: (await categoryAlerts(db, [pub.id])).get(pub.id) ?? null,
   };
 }
 

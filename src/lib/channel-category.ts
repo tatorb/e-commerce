@@ -147,3 +147,44 @@ export async function listCategoryClashes(db: Db, accountId: string): Promise<Ca
   }
   return out.sort((a, b) => a.product.localeCompare(b.product));
 }
+
+// Una categoría que cambió el canal se avisa estos días.
+const ALERT_DAYS = 30;
+
+export type CategoryAlert = { text: string; changedAt: Date | null; split: boolean };
+
+/**
+ * Las alertas de categoría de esas publicaciones, por su id: el canal le
+ * cambió la categoría por su cuenta a alguna publicación del producto en los
+ * últimos días, o el producto quedó con opciones activas en dos categorías.
+ */
+export async function categoryAlerts(db: Db, publicationIds: string[], now = new Date()): Promise<Map<string, CategoryAlert>> {
+  const out = new Map<string, CategoryAlert>();
+  if (publicationIds.length === 0) return out;
+  const pubs = await db.publication.findMany({ where: { id: { in: publicationIds } }, select: { id: true, productId: true, storeId: true } });
+  const productIds = [...new Set(pubs.map((p) => p.productId))];
+  const since = new Date(now.getTime() - ALERT_DAYS * 86_400_000);
+  const [changes, live] = await Promise.all([
+    db.channelSyncChange.findMany({
+      where: { field: 'category', kind: 'TAKEN', createdAt: { gte: since }, publication: { productId: { in: productIds } } },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true, message: true, publication: { select: { productId: true, storeId: true, externalId: true } } },
+    }),
+    db.publication.findMany({
+      where: { productId: { in: productIds }, externalId: { not: null }, channelStatus: { in: ['ACTIVE', 'PAUSED'] }, channelCopy: { is: { missingSince: null, categoryId: { not: null } } } },
+      select: { productId: true, storeId: true, channelCopy: { select: { categoryId: true } } },
+    }),
+  ]);
+  for (const p of pubs) {
+    const change = changes.find((c) => c.publication.productId === p.productId && c.publication.storeId === p.storeId);
+    const categories = new Set(live.filter((l) => l.productId === p.productId && l.storeId === p.storeId).map((l) => l.channelCopy!.categoryId));
+    const split = categories.size > 1;
+    if (!change && !split) continue;
+    const parts = [
+      change ? `El canal cambió por su cuenta la categoría de ${change.publication.externalId ?? 'una publicación del producto'}: ${change.message ?? ''}`.trim() : null,
+      split ? `El producto quedó con opciones activas en ${categories.size} categorías: el canal finaliza las que quedan en otra.` : null,
+    ].filter(Boolean);
+    out.set(p.id, { text: parts.join(' '), changedAt: change?.createdAt ?? null, split });
+  }
+  return out;
+}

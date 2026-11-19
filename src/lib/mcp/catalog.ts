@@ -26,6 +26,16 @@ export function catalogForClaude(data: CatalogData | null) {
       ? { categorias_del_producto_en_el_canal: data.productInChannel.map((g) => ({ categoria: `${g.name} (${g.categoryId})`, publicaciones_activas: g.externalIds })) }
       : {}),
     ...(data.categoryWarning ? { aviso_de_categoria: data.categoryWarning } : {}),
+    ...(data.categoryAlert
+      ? {
+          alerta_de_categoria: {
+            que_paso: data.categoryAlert.text,
+            ...(data.categoryAlert.changedAt ? { cuando: data.categoryAlert.changedAt.toISOString().slice(0, 10) } : {}),
+            producto_en_dos_categorias: data.categoryAlert.split,
+            ...(data.categoryAlert.split ? { como_se_resuelve: 'Si el producto ya no acepta opciones nuevas, recreate_product_in_category lo crea de nuevo en la categoría que va y finaliza las viejas al final.' } : {}),
+          },
+        }
+      : {}),
     // La acción directa para resolver el aviso: tomar en la app la categoría del canal.
     ...(data.categoryWarning && data.inChannel && data.productInChannel.length <= 1 && data.inChannel.id !== data.category?.id
       ? {

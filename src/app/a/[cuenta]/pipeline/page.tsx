@@ -24,6 +24,9 @@ import { listCompatibilitiesToPush } from '@/lib/compatibility-push';
 import { unansweredSummary } from '@/lib/queries/questions';
 import { plural } from '@/lib/format';
 import { prisma } from '@/lib/db';
+import { listPendingClose } from '@/lib/recreate';
+import { categoryAlerts } from '@/lib/channel-category';
+import { CHANNEL_STATUS_LABEL } from '@/domain/channel-status';
 import { openTasksByPublication } from '@/lib/tasks';
 import { notesByCard } from '@/lib/publication-notes';
 
@@ -52,20 +55,22 @@ export default async function PipelinePage({
   // Por subir mira todas las publicaciones de la cuenta: se carga solo en su pestaña.
   // Los clips aprobados antes de que entraran a Por subir se ofrecen acá, una sola vez.
   if (toPushView) await offerApprovedClips(prisma, account.id);
-  const [all, stores, toPush, compatibilities, clips, questions, options] = await Promise.all([
+  const [all, stores, toPush, compatibilities, clips, toClose, questions, options] = await Promise.all([
     toPushView ? Promise.resolve([]) : listBoard(account.id),
     listStores(account.id),
     toPushView ? listToPush(account.id) : Promise.resolve([]),
     toPushView ? listCompatibilitiesToPush(prisma, account.id) : Promise.resolve([]),
     toPushView ? pendingClipUploads(prisma, account.id) : Promise.resolve([]),
+    toPushView ? listPendingClose(prisma, account.id) : Promise.resolve([]),
     unansweredSummary(account.id),
     loadProductOptions(prisma, account.id),
   ]);
   const items = kinds.length > 0 ? all.filter((i) => kinds.includes(i.kind)) : all;
   // Cuántas tareas abiertas tiene cada tarjeta.
-  const [taskCounts, noteCounts] = await Promise.all([
+  const [taskCounts, noteCounts, alerts] = await Promise.all([
     openTasksByPublication(prisma, { publicationIds: items.map((i) => i.id), viewer: user }),
     notesByCard(prisma, account.id, items.map((i) => i.id)),
+    categoryAlerts(prisma, items.map((i) => i.id)),
   ]);
   const tasks = Object.fromEntries(taskCounts);
   // Cuántas notas tiene cada tarjeta y la última, para leerla sin entrar.
@@ -78,6 +83,7 @@ export default async function PipelinePage({
     { key: 'cambios', label: 'Cambios', count: toPush.length },
     { key: 'clips', label: 'Clips', count: clips.length },
     { key: 'compatibilidades', label: 'Compatibilidades', count: compatibilities.length },
+    { key: 'por-finalizar', label: 'Por finalizar', count: toClose.length },
   ] as const;
   const table = tables.find((t) => t.key === tabla)?.key ?? tables.find((t) => t.count > 0)?.key ?? 'cambios';
   const nothing = (what: string) => <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">{what}</div>;
@@ -122,7 +128,7 @@ export default async function PipelinePage({
               href: key ? `?vista=${key}` : '?',
               label,
               active: (key === 'por-subir') === toPushView,
-              count: key === 'por-subir' && toPushView ? toPush.length + compatibilities.length + clips.length : null,
+              count: key === 'por-subir' && toPushView ? toPush.length + compatibilities.length + clips.length + toClose.length : null,
             }))}
            // La raya de abajo la pone el encabezado, salvo que sigan las pestañas de Por subir.
             className={toPushView ? undefined : 'border-b-0'}
@@ -154,6 +160,29 @@ export default async function PipelinePage({
                 suben desde tu Chrome, con la extensión de Studio MRB o a mano. Va uno por producto, o uno por medida si cada medida tiene el suyo.
               </p>
               {clips.length > 0 ? <ClipUploadList accountSlug={account.slug} clips={clipRows(clips)} /> : nothing('No hay clips para subir.')}
+            </>
+          ) : table === 'por-finalizar' ? (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Las publicaciones que hay que finalizar en el canal y todavía no se pudo, por ejemplo porque están en revisión. La app lo reintenta cada hora
+                y las saca de acá cuando lo logra.
+              </p>
+              {toClose.length > 0 ? (
+                <ul className="divide-y rounded-2xl border bg-card shadow-card">
+                  {toClose.map((p) => (
+                    <li key={p.id} className="space-y-0.5 px-4 py-3 text-sm">
+                      <Link href={`/a/${account.slug}/publicaciones/${p.id}`} className="font-medium underline-offset-4 hover:underline">
+                        {p.externalId ?? 'Sin código'} · {p.title ?? 'Sin título'}
+                      </Link>
+                      <p className="text-xs text-muted-foreground">
+                        {CHANNEL_STATUS_LABEL[p.channelStatus]}. {p.closeWantedWhy}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                nothing('No hay publicaciones por finalizar.')
+              )}
             </>
           ) : (
             <>
@@ -192,7 +221,14 @@ export default async function PipelinePage({
                 En cada paso, las que esperan hace más tiempo van primero.
               </p>
             </div>
-            <PipelineBoard accountSlug={account.slug} items={items} showStore={stores.length > 1} openTasks={tasks} notes={notes} />
+            <PipelineBoard
+              accountSlug={account.slug}
+              items={items}
+              showStore={stores.length > 1}
+              openTasks={tasks}
+              notes={notes}
+              categoryAlerts={Object.fromEntries([...alerts].map(([id, a]) => [id, a.text]))}
+            />
           </>
         )}
       </PageBody>

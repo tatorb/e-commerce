@@ -112,6 +112,7 @@ export function CatalogCard({
             En {data.channelName}: {data.inChannel.name} ({data.inChannel.id}).
           </p>
         ) : null}
+        {data.categoryAlert ? <p className="text-xs font-medium text-amber-700 dark:text-amber-400">{data.categoryAlert.text}</p> : null}
         {data.categoryWarning ? <p className="text-xs text-amber-700 dark:text-amber-400">{data.categoryWarning}</p> : null}
         {data.categoryWarning && data.inChannel && data.productInChannel.length <= 1 && data.inChannel.id !== category?.id ? (
           <Button

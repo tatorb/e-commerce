@@ -566,6 +566,12 @@ model Publication {
   // Si la cantidad en el canal se actualiza sola con el stock del producto.
   // Apagado, se cambia a mano en la publicación; sus ventas igual descuentan.
   followsStock      Boolean               @default(true)
+  // Hay que finalizarla en el canal y todavía no se pudo, por ejemplo porque
+  // está en revisión: la tarea de cada hora lo reintenta hasta lograrlo
+  // (src/lib/recreate.ts). Por qué, y la tarea que lo avisa.
+  closeWantedAt     DateTime?
+  closeWantedWhy    String?
+  closeTaskId       String?
   // La familia, cuando el canal guarda cada medida como una publicación aparte
   // y las agrupa (src/lib/families.ts). Sin familia: una publicación suelta.
   familyId          String?

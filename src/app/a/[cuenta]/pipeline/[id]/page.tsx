@@ -49,6 +49,7 @@ import { loadTextImageStep, MAX_TEXT_IMAGES } from '@/lib/text-images/step';
 import { loadMediaSources } from '@/lib/media';
 import { loadFamilyMedia } from '@/lib/family-media';
 import { CreateInChannelCard } from '@/components/publication/CreateInChannelCard';
+import { RecreateCard } from '@/components/publication/RecreateCard';
 import { WarrantyCard } from '@/components/publication/WarrantyCard';
 import { warrantyOverview } from '@/lib/warranty';
 import { SalesHistoryCard } from '@/components/sales/SalesHistoryCard';
@@ -621,6 +622,9 @@ export default async function PipelineStepPage({
               <FlexCard accountSlug={account.slug} publicationId={pub.id} channelName={pub.channelName} flex={faces?.copy?.flex ?? null} familySize={family?.members.length ?? 0} />
             ) : null}
             {create ? <CreateInChannelCard accountSlug={account.slug} publicationId={pub.id} info={create} /> : null}
+            {create && create.checks.some((c) => c.label.startsWith('Categoría en') && !c.ok) ? (
+              <RecreateCard accountSlug={account.slug} publicationId={pub.id} channelName={create.channelName} defaultCategory={create.categoryId} />
+            ) : null}
             <PublicationCodeCard
               accountSlug={account.slug}
               publicationId={pub.id}
