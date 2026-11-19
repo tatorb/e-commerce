@@ -243,7 +243,24 @@ export type TranslatedLine = {
   groups: TargetGroup[];
   // Lo que conviene saber aunque se haya traducido, por ejemplo una versión excluida que el catálogo no tiene.
   notes: string[];
+  // Un modelo de la ficha que el catálogo no tiene y se tomó como modelo y versión ("207 GTi" es el 207,
+  // solo las versiones GTi): por el nombre del modelo del catálogo, las palabras que tiene que tener la versión.
+  onlyVersions?: Record<string, string>;
 };
+
+/**
+ * Un modelo de la ficha que el catálogo no tiene, leído como modelo más el
+ * nombre de la versión: "207 GTi" es el 207 con versión GTi, "Chevy SS" el
+ * Chevy con versión SS. El modelo más largo que esté en la lista. Null si no hay.
+ */
+export function splitModelVersion<T extends Named>(models: T[], wanted: string): { model: T; version: string } | null {
+  const words = wanted.trim().split(/\s+/);
+  for (let k = words.length - 1; k >= 1; k--) {
+    const model = pickByName(models, words.slice(0, k).join(' '));
+    if (model) return { model, version: words.slice(k).join(' ') };
+  }
+  return null;
+}
 
 export function groupLabel(g: Pick<TargetGroup, 'brand' | 'model' | 'year' | 'fuel' | 'displacement' | 'power' | 'versions'>): string {
   return [g.brand, g.model, String(g.year), g.displacement, FUEL_LABEL[g.fuel], g.power ? `${g.power} cv` : null, g.versions ? `(${g.versions.join(', ')})` : null]
@@ -315,11 +332,18 @@ export function judgeVehicle(v: LoadedVehicle, lines: TranslatedLine[]): Vehicle
     const model = brand && hasWords(v.name, brand) ? models.find((m) => hasWords(v.name, m)) : undefined;
     if (!model) continue;
     if (l.status === 'review') {
-      reviewReason ??= `Coincide con una línea de la ficha que está a revisar: ${l.rule.label}.`;
+      // Una línea a revisar con años no explica un vehículo de otro año, si hay otra línea del mismo
+      // modelo que sí se tradujo: ese vehículo se juzga con las demás y, si no va, sobra.
+      const y = yearOf(v.name, model);
+      const outside = y !== null && (l.rule.from !== null || l.rule.to !== null) && ((l.rule.from !== null && y < l.rule.from) || (l.rule.to !== null && y > l.rule.to));
+      const confirmed = lines.some((o) => o.status === 'ok' && brandOf(o) && norm(brandOf(o)!) === norm(brand!) && [...o.modelNames, ...o.rule.models].some((m) => hasWords(v.name, m)));
+      if (!(outside && confirmed)) reviewReason ??= `Coincide con una línea de la ficha que está a revisar: ${l.rule.label}.`;
       continue;
     }
     const r = l.rule;
     const year = yearOf(v.name, model);
+    // El modelo de la ficha con el nombre de la versión pegado: solo las versiones que lo dicen.
+    const only = l.onlyVersions?.[model];
     const excluded = excludedWordIn(v.name, r.exclude);
     const why =
       year !== null && ((r.from !== null && year < r.from) || (r.to !== null && year > r.to))
@@ -332,7 +356,9 @@ export function judgeVehicle(v: LoadedVehicle, lines: TranslatedLine[]): Vehicle
               ? `tiene ${power} cv y la ficha dice ${r.power} cv`
               : excluded
                 ? `es una versión que la ficha deja afuera (${excluded})`
-                : null;
+                : only && !hasWords(v.name, only)
+                  ? `no es la versión ${only}`
+                  : null;
     if (!why) return { kind: 'covered', line: r.index, year, displacement };
     firstReason ??= why;
   }

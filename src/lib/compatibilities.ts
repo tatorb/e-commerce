@@ -28,6 +28,8 @@ import {
   pickYears,
   powerOf,
   similar,
+  splitModelVersion,
+  hasWords,
   type CompatibilityAudit,
   type FichaCompatibility,
   type IncompleteGroup,
@@ -305,15 +307,26 @@ export async function translateLine(cat: Catalog, rule: LineRule): Promise<Trans
   const models = await cat.values('model', [brandFilter(brand.id)]);
   if (!models) return review(`No se pudo leer la lista de modelos de ${brand.name}.`);
   const picked: CatalogValue[] = [];
+  // Los modelos que se tomaron como modelo y versión: solo las versiones con esas palabras.
+  const only: Record<string, string> = {};
   for (const m of rule.models) {
     const model = pickByName(models, m);
     if (!model) {
+      // "207 GTi" no está como modelo: es el 207, versión GTi. Queda propuesto, para confirmarlo.
+      const split = splitModelVersion(models, m);
+      if (split) {
+        picked.push(split.model);
+        only[split.model.name] = split.version;
+        out.notes.push(`El modelo ${m} no está en el catálogo de ${brand.name}: se tomó como ${split.model.name}, solo las versiones ${split.version}. Si no es así, corregí el modelo en la ficha.`);
+        continue;
+      }
       const like = similar(models, m);
       return review(`El modelo ${m} no está en el catálogo de ${brand.name} del canal.${like.length > 0 ? ` Parecidos: ${names(like)}.` : ''}`);
     }
     picked.push(model);
   }
   out.modelNames = picked.map((m) => m.name);
+  if (Object.keys(only).length > 0) out.onlyVersions = only;
 
   // Por qué no salió nada, si al final no sale ningún vehículo.
   let lastWhy: string | null = null;
@@ -368,10 +381,11 @@ export async function translateLine(cat: Catalog, rule: LineRule): Promise<Trans
           const known = power ? [...bmfe, { field: 'power' as const, id: power.id }] : bmfe;
           // Las versiones: hacen falta para dejar afuera las que no van, o para filtrar lo que el canal no tiene en lista.
           let versions: CatalogValue[] | null = null;
-          if (rule.exclude.length > 0 || displacementByVersion || powerByVersion) {
+          const onlyVersion = only[model.name];
+          if (rule.exclude.length > 0 || displacementByVersion || powerByVersion || onlyVersion) {
             const all = await cat.values('version', known);
             if (!all || all.length === 0) return review(`No se pudieron leer las versiones de ${what} para filtrarlas.`);
-            versions = all.filter((v) => !isExcluded(v.name, rule.exclude));
+            versions = all.filter((v) => !isExcluded(v.name, rule.exclude) && (!onlyVersion || hasWords(v.name, onlyVersion)));
             if (rule.exclude.length > 0 && versions.length === all.length) {
               const note = `Ninguna versión de ${what} se llama ${rule.exclude.join(' ni ')}: no se dejó afuera ninguna.`;
               if (!out.notes.includes(note)) out.notes.push(note);

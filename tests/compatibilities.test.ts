@@ -5,7 +5,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@/generated/prisma/client';
 import { familyBody, parseVehicles, parseValues, writeRejection } from '@/channels/mercadolibre/compatibilities';
 import { MercadoLibreRequestError } from '@/channels/mercadolibre/http';
+import { translateLine } from '@/lib/compatibilities';
 import {
+  splitModelVersion,
   auditCompatibilities,
   excludedOf,
   fuelOf,
@@ -131,6 +133,43 @@ describe('lo cargado contra lo que sale de la ficha', () => {
     expect(judgeVehicle(v('Mercedes-Benz Sprinter 2015 415 CDI'), [amarok, truck])).toMatchObject({ kind: 'extra' });
   });
 
+  it('una línea a revisar con años no frena lo de otros años si hay otra línea del mismo modelo confirmada: eso sobra', () => {
+    // Como el THP: "308 156 cv 2009 a 2011" no se pudo traducir; "308 163 cv 2012 a 2014" sí.
+    const ok: TranslatedLine = {
+      ...amarok,
+      rule: lineRule(ficha({ vehicleBrand: 'Peugeot', model: '308', engine: '1.6 16v THP', fuel: 'Nafta', power: '163 cv', yearFrom: 2012, yearTo: 2014 }), 0),
+      brandName: 'Peugeot',
+      modelNames: ['308'],
+    };
+    const old: TranslatedLine = {
+      ...ok,
+      rule: lineRule(ficha({ vehicleBrand: 'Peugeot', model: '308', engine: '1.6 16v THP', fuel: 'Nafta', power: '156 cv', yearFrom: 2009, yearTo: 2011 }), 1),
+      status: 'review',
+      reason: 'Sin años en el catálogo.',
+      groups: [],
+    };
+    expect(judgeVehicle(v('Peugeot 308 2013 1.6 THP 163cv Feline'), [ok, old])).toMatchObject({ kind: 'covered' });
+    expect(judgeVehicle(v('Peugeot 308 2018 1.6 THP 165cv GT'), [ok, old])).toMatchObject({ kind: 'extra', reason: expect.stringContaining('el año 2018 está fuera') });
+    expect(judgeVehicle(v('Peugeot 308 2010 1.6 THP 156cv'), [ok, old])).toMatchObject({ kind: 'review' });
+    // Sin otra línea confirmada del modelo, sigue a revisar.
+    expect(judgeVehicle(v('Peugeot 308 2018 1.6 THP 165cv GT'), [old])).toMatchObject({ kind: 'review' });
+  });
+
+  it('un modelo con el nombre de la versión pegado solo cubre esas versiones', () => {
+    const chevy: TranslatedLine = {
+      ...amarok,
+      rule: lineRule(ficha({ vehicleBrand: 'Chevrolet', model: 'Chevy SS', engine: '250 (4.1)', fuel: 'Nafta' }), 4),
+      brandName: 'Chevrolet',
+      modelNames: ['Chevy'],
+      onlyVersions: { Chevy: 'SS' },
+    };
+    expect(judgeVehicle(v('Chevrolet Chevy 1974 4.1 SS Coupe'), [chevy])).toMatchObject({ kind: 'covered' });
+    expect(judgeVehicle(v('Chevrolet Chevy 1974 4.1 Luxe'), [chevy])).toMatchObject({ kind: 'extra', reason: expect.stringContaining('no es la versión SS') });
+    expect(splitModelVersion([{ id: '1', name: '207' }, { id: '2', name: '207 Compact' }], '207 GTi')).toEqual({ model: { id: '1', name: '207' }, version: 'GTi' });
+    expect(splitModelVersion([{ id: '1', name: '208' }], '208 GT Line')).toEqual({ model: { id: '1', name: '208' }, version: 'GT Line' });
+    expect(splitModelVersion([{ id: '1', name: '208' }], 'Partner')).toBeNull();
+  });
+
   it('"S/aa" es sin aire: no es la versión S que la ficha deja afuera', () => {
     const ecosport: TranslatedLine = {
       ...amarok,
@@ -246,6 +285,32 @@ describe('lo cargado contra lo que sale de la ficha', () => {
     expect(a.missing.map((g) => g.label)).toEqual(['Volkswagen Amarok 2014 2.0 diésel']);
     expect(a.extra.map((x) => x.vehicle.name)).toEqual(['Ford Mustang 2024 5.0 V8 GT']);
     expect(a.extraByChannel.map((x) => x.vehicle.name)).toEqual(['Toyota']);
+  });
+});
+
+describe('la ficha llevada al catálogo', () => {
+  it('"207 GTi", que el catálogo no tiene, se toma como el 207 con las versiones GTi y lo avisa', async () => {
+    const lists: Record<string, { id: string; name: string }[]> = {
+      brand: [{ id: 'p', name: 'Peugeot' }],
+      model: [{ id: 'm207', name: '207' }, { id: 'm208', name: '208' }],
+      fuel: [{ id: 'n', name: 'Nafta' }],
+      engine: [{ id: 'e', name: '1.6' }],
+      version: [{ id: 'v1', name: '1.6 THP 156cv GTi' }, { id: 'v2', name: '1.6 VTi XS' }],
+      year: [{ id: 'y10', name: '2010' }, { id: 'y11', name: '2011' }],
+    };
+    const cat = {
+      values: async (field: string) => lists[field] ?? null,
+      count: async () => null,
+      known: async () => ({ intruders: [], unfilled: 0, sent: false }),
+    };
+    const line = await translateLine(cat as never, lineRule(ficha({ vehicleBrand: 'Peugeot', model: '207 GTi', engine: '1.6 16v THP', fuel: 'Nafta', yearFrom: 2010, yearTo: 2011 }), 0));
+    expect(line.status).toBe('ok');
+    expect(line.onlyVersions).toEqual({ '207': 'GTi' });
+    expect(line.groups.map((g) => [g.model, g.year, g.versions])).toEqual([
+      ['207', 2010, ['1.6 THP 156cv GTi']],
+      ['207', 2011, ['1.6 THP 156cv GTi']],
+    ]);
+    expect(line.notes[0]).toContain('se tomó como 207, solo las versiones GTi');
   });
 });
 
