@@ -47,6 +47,7 @@ export type BoardCardData = {
   notes?: { count: number; last: string } | null;
   // El canal le cambió la categoría por su cuenta, o el producto quedó en dos categorías.
   categoryAlert?: string | null;
+  titleAlert?: string | null;
 };
 
 // Las medidas que entran en la tarjeta; las demás se cuentan.
@@ -236,6 +237,12 @@ function BoardCard({
             </span>
           ) : null}
         </div>
+        {card.titleAlert ? (
+          <p title={card.titleAlert} className="flex items-start gap-1 text-xs font-medium text-destructive">
+            <TriangleAlert className="mt-px h-3 w-3 shrink-0" />
+            <span className="line-clamp-2">{card.titleAlert}</span>
+          </p>
+        ) : null}
         {card.categoryAlert ? (
           <p title={card.categoryAlert} className="flex items-start gap-1 text-xs font-medium text-amber-700 dark:text-amber-400">
             <TriangleAlert className="mt-px h-3 w-3 shrink-0" />

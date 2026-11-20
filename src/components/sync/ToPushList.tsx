@@ -138,6 +138,7 @@ export function ToPushList({ accountSlug, rows }: { accountSlug: string; rows: T
                   <PipelineBadge state={row.pipeline} />
                 </div>
                 <div className="flex flex-wrap gap-1.5 text-xs">
+                  {row.titleAlert ? <Badge variant="destructive">{row.titleAlert}</Badge> : null}
                   {row.draft.length > 0 ? <Badge variant="secondary">Sin subir: {labels(row.draft)}</Badge> : null}
                   {row.choose.length > 0 ? <Badge variant="destructive">Para elegir: {labels(row.choose)}</Badge> : null}
                   {row.sku ? <Badge variant="secondary">SKU de la medida: {row.sku}</Badge> : null}
@@ -147,6 +148,11 @@ export function ToPushList({ accountSlug, rows }: { accountSlug: string; rows: T
                     </Badge>
                   ))}
                 </div>
+                {row.ficha.length > 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    De la ficha: {row.ficha.map((f) => `${f.label} ${f.from ? `«${f.from}»` : 'vacío'} → «${f.to}»`).join(', ')}
+                  </p>
+                ) : null}
                 {row.campaigns
                   .filter((c) => c.rejection)
                   .map((c) => (

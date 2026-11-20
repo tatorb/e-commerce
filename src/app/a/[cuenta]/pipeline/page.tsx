@@ -26,6 +26,7 @@ import { plural } from '@/lib/format';
 import { prisma } from '@/lib/db';
 import { listPendingClose } from '@/lib/recreate';
 import { categoryAlerts } from '@/lib/channel-category';
+import { titleNotPushedText, titlesNotPushed } from '@/lib/title-push-state';
 import { CHANNEL_STATUS_LABEL } from '@/domain/channel-status';
 import { openTasksByPublication } from '@/lib/tasks';
 import { notesByCard } from '@/lib/publication-notes';
@@ -67,10 +68,11 @@ export default async function PipelinePage({
   ]);
   const items = kinds.length > 0 ? all.filter((i) => kinds.includes(i.kind)) : all;
   // Cuántas tareas abiertas tiene cada tarjeta.
-  const [taskCounts, noteCounts, alerts] = await Promise.all([
+  const [taskCounts, noteCounts, alerts, notPushed] = await Promise.all([
     openTasksByPublication(prisma, { publicationIds: items.map((i) => i.id), viewer: user }),
     notesByCard(prisma, account.id, items.map((i) => i.id)),
     categoryAlerts(prisma, items.map((i) => i.id)),
+    titlesNotPushed(prisma, { accountId: account.id, publicationIds: items.map((i) => i.id) }),
   ]);
   const tasks = Object.fromEntries(taskCounts);
   // Cuántas notas tiene cada tarjeta y la última, para leerla sin entrar.
@@ -228,6 +230,7 @@ export default async function PipelinePage({
               openTasks={tasks}
               notes={notes}
               categoryAlerts={Object.fromEntries([...alerts].map(([id, a]) => [id, a.text]))}
+              titleAlerts={Object.fromEntries([...notPushed].map(([id, t]) => [id, titleNotPushedText(t)]))}
             />
           </>
         )}

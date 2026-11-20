@@ -22,6 +22,7 @@ export function PipelineBoard({
   openTasks = {},
   notes = {},
   categoryAlerts = {},
+  titleAlerts = {},
 }: {
   accountSlug: string;
   items: BoardItem[];
@@ -33,6 +34,8 @@ export function PipelineBoard({
   notes?: Record<string, { count: number; last: string }>;
   // La alerta de categoría de cada tarjeta, por su id.
   categoryAlerts?: Record<string, string>;
+  // El título aprobado que no está en el canal, o que el canal rechazó, por su id.
+  titleAlerts?: Record<string, string>;
 }) {
   const cards: BoardCardData[] = items.flatMap((i) =>
     i.pipelineStep
@@ -56,6 +59,7 @@ export function PipelineBoard({
             familyCodes: i.familyCodes,
             notes: notes[i.id] ?? null,
             categoryAlert: categoryAlerts[i.id] ?? null,
+            titleAlert: titleAlerts[i.id] ?? null,
           },
         ]
       : [],

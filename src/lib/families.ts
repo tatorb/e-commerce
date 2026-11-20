@@ -821,3 +821,84 @@ export async function setPublicationMeasure(db: PrismaClient, args: { accountId:
   if (!measuresOf(p.product.variants).some((m) => m.key === args.variantKey)) throw new FamilyError('Esa medida no está en la ficha del producto.');
   await db.publication.update({ where: { id: p.id }, data: { variantKey: args.variantKey } });
 }
+
+export type JoinMeasuresPlan = {
+  productName: string;
+  channelFamilyId: string | null;
+  members: { id: string; externalId: string | null; title: string | null; measure: string | null; family: string | null }[];
+  problems: string[];
+  // Las medidas que se pueden elegir, por si a alguna le falta.
+  measures: { key: string; label: string }[];
+};
+
+/**
+ * Junta a mano en una familia de la app publicaciones del mismo producto que
+ * en el canal ya son medidas de la misma familia, como la pantalla Familias.
+ * medidas elige la medida de las que no se sabe por el SKU. Sin aplicar, solo
+ * dice qué haría y qué lo frena.
+ */
+export async function joinMeasures(
+  db: PrismaClient,
+  args: { accountId: string; publicationIds: string[]; measures?: Record<string, string>; apply: boolean; userId: string | null },
+): Promise<JoinMeasuresPlan & { familyId?: string; joined?: number }> {
+  const ids = [...new Set(args.publicationIds)];
+  const rows = await db.publication.findMany({
+    where: { id: { in: ids }, product: { accountId: args.accountId } },
+    select: {
+      id: true,
+      externalId: true,
+      title: true,
+      storeId: true,
+      productId: true,
+      variantKey: true,
+      variantListings: true,
+      familyId: true,
+      family: { select: { channelFamilyId: true } },
+      channelCopy: { select: { details: true, variations: true } },
+      product: { select: { name: true, variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } } } },
+    },
+  });
+  if (rows.length !== ids.length) throw new FamilyError('Alguna publicación no está en la cuenta.');
+  const measures = measuresOf(rows[0].product.variants);
+  const problems: string[] = [];
+  if (ids.length < 2) problems.push('Hacen falta al menos dos publicaciones.');
+  if (new Set(rows.map((r) => r.productId)).size > 1) problems.push('No son del mismo producto: una familia junta las medidas de un solo producto.');
+  if (new Set(rows.map((r) => r.storeId)).size > 1) problems.push('No son de la misma tienda.');
+  if (rows.some((r) => parseVariantListings(r.variantListings).length >= 2)) problems.push('Alguna publicación junta varios códigos del canal: primero se separa.');
+  const familyIds = new Set(rows.map((r) => r.familyId).filter(Boolean));
+  if (familyIds.size > 1) problems.push('Están en familias distintas de la app.');
+  // La familia del canal: la que leyó la app de cada una, o la de la familia de la app.
+  const channelIds = new Set(rows.map((r) => familyRead(r.channelCopy?.details)?.channelFamilyId ?? r.family?.channelFamilyId ?? null).filter((x): x is string => !!x));
+  if (channelIds.size > 1) problems.push('En el canal están en familias distintas: no se pueden juntar en la app.');
+  const unread = rows.filter((r) => !familyRead(r.channelCopy?.details));
+  const channelFamilyId = channelIds.size === 1 ? [...channelIds][0] : null;
+  const label = (key: string | null) => measures.find((m) => m.key === key)?.label ?? null;
+  const measureOf = (r: (typeof rows)[number]) => {
+    const chosen = args.measures?.[r.id];
+    if (chosen) return measures.some((m) => m.key === chosen) ? chosen : null;
+    return r.variantKey && measures.some((m) => m.key === r.variantKey) ? r.variantKey : (soleMeasureOf(measures, r.channelCopy)?.key ?? null);
+  };
+  for (const [id, key] of Object.entries(args.measures ?? {})) {
+    if (!measures.some((m) => m.key === key)) problems.push(`La medida «${key}» de ${rows.find((r) => r.id === id)?.externalId ?? id} no está en la ficha del producto.`);
+  }
+  const missing = rows.filter((r) => measureOf(r) === null);
+  if (missing.length > 0) problems.push(`Falta elegir qué medida vende ${missing.map((r) => r.externalId ?? r.id).join(', ')}: pasala en medidas.`);
+  const keys = rows.map(measureOf).filter(Boolean);
+  if (new Set(keys).size < keys.length) problems.push('Dos publicaciones venden la misma medida: en una familia cada medida va una vez.');
+  const plan: JoinMeasuresPlan = {
+    productName: rows[0].product.name,
+    channelFamilyId,
+    members: rows.map((r) => ({ id: r.id, externalId: r.externalId, title: r.title, measure: label(measureOf(r)), family: r.familyId })),
+    problems: [...problems, ...(channelFamilyId === null && unread.length > 0 ? ['Todavía no se leyó del canal a qué familia pertenecen: se juntan igual, y la próxima lectura le pone el código de la familia.'] : [])],
+    measures: measures.map((m) => ({ key: m.key, label: m.label })),
+  };
+  if (!args.apply || problems.length > 0) return plan;
+  const r = await db.$transaction(async (tx) => {
+    for (const row of rows) {
+      const key = measureOf(row)!;
+      if (row.variantKey !== key) await tx.publication.update({ where: { id: row.id }, data: { variantKey: key } });
+    }
+    return joinFamily(tx, { storeId: rows[0].storeId, productId: rows[0].productId, channelFamilyId, publicationIds: ids, userId: args.userId });
+  });
+  return { ...plan, familyId: r.familyId, joined: r.joined };
+}

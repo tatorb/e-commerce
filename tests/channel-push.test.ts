@@ -1,13 +1,18 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.hoisted(() => {
+  process.env.DATABASE_URL ??= process.env.TEST_DATABASE_URL ?? 'postgresql://localhost/sin-base';
+});
 import { PrismaClient } from '@/generated/prisma/client';
 import { descriptionRejected, rejectionMessage } from '@/channels/mercadolibre/publish';
 import { MercadoLibreRequestError } from '@/channels/mercadolibre/http';
 import { faceSummary, faceValues, fingerprint, fingerprintsOf } from '@/domain/channel-sync';
 import { DraftError, pushDrafts, PushError, renewDiscounts, saveDraft } from '@/lib/channel-push';
 import { discardDrafts, readOne, runSyncStep, startSync } from '@/lib/channel-sync';
+import { listToPush } from '@/lib/queries/sync';
 import { encrypt } from '@/lib/crypto';
 import { savePriceDecision } from '@/lib/pricing';
 import { readPromotions } from '@/lib/channel-promotions';
@@ -208,6 +213,8 @@ describe.skipIf(!url)('subir al canal en la base', () => {
           const bad = body.attributes.find((a: Attribute) => a.value_name === 'Usado');
           if (bad) return json(400, { message: 'Validation error', cause: [{ code: 'item.attributes.invalid', message: 'Condición del ítem: el valor Usado no es válido' }] });
           for (const a of body.attributes as Attribute[]) {
+            // Inventado: un origen que el canal acepta y deja como estaba.
+            if (a.id === 'ORIGIN' && a.value_name === 'Corea') continue;
             const list = (it.attributes ??= []);
             const at = list.findIndex((x) => x.id === a.id);
             const next = { id: a.id, name: at >= 0 ? list[at].name : a.id, value_name: a.value_name ?? null, ...(a.values ? { values: a.values } : {}) };
@@ -699,6 +706,83 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     expect(writes.map((w) => w.body)).toEqual([{ attributes: [{ id: 'ITEM_CONDITION', value_name: 'Usado' }] }]);
     expect((await state('MLA1')).rejected).toHaveLength(1);
   });
+  it('marca, número de pieza y origen de la ficha van con los datos de catálogo si el canal tiene otro', async () => {
+    items.MLA1.attributes!.push({ id: 'ORIGIN', name: 'Origen', value_name: 'Taiwán' });
+    const p = await pub('MLA1');
+    await readOne(db, { accountId, publicationId: p.id });
+    // La marca ya es la misma, sin importar mayúsculas: no se manda.
+    await db.product.update({ where: { id: productId }, data: { brand: 'SACHS', origin: 'India', partNumber: 'PD-1' } });
+    const row = (await listToPush(accountId, db)).find((r) => r.id === p.id)!;
+    expect(row.draft).toEqual(['attributes']);
+    expect(row.ficha.map((f) => [f.label, f.from, f.to])).toEqual([
+      ['Número de pieza', null, 'PD-1'],
+      ['Origen', 'Taiwán', 'India'],
+    ]);
+    writes.length = 0;
+    const result = await pushDrafts(db, { accountId, publicationId: p.id, fields: ['attributes'], userId: null });
+    expect(result).toMatchObject({ sent: ['attributes'], rejected: [], confirmed: true });
+    expect(writes.map((w) => w.body)).toEqual([{ attributes: [{ id: 'PART_NUMBER', value_name: 'PD-1' }, { id: 'ORIGIN', value_name: 'India' }] }]);
+    expect(result.ficha?.notTaken).toEqual([]);
+    expect((await listToPush(accountId, db)).some((r) => r.id === p.id)).toBe(false);
+
+    // Si el canal lo acepta y lo deja como estaba, lo dice.
+    await db.product.update({ where: { id: productId }, data: { origin: 'Corea' } });
+    const again = await pushDrafts(db, { accountId, publicationId: p.id, fields: ['attributes'], userId: null });
+    expect(again.rejected).toEqual([{ field: 'attributes', message: 'Mercado Libre no tomó origen «Corea»: sigue «India».' }]);
+    expect((await listToPush(accountId, db)).find((r) => r.id === p.id)?.ficha.map((f) => f.to)).toEqual(['Corea']);
+  });
+
+  it('un título aprobado que no llegó al canal se avisa en las herramientas, en Por subir y en search_catalog, y deja de avisarse al subirlo', async () => {
+    // El canal tiene el título viejo. Datos inventados.
+    items.MLA3381569380 = { title: 'Bomba Agua Vieja', description: 'Texto.', sold: 0, last_updated: '2026-11-10T10:00:00.000Z' };
+    const p = await db.publication.create({ data: { productId, storeId, externalId: 'MLA3381569380', title: 'Bomba Agua Vieja', attributes: [] } });
+    await readOne(db, { accountId, publicationId: p.id });
+    await db.user.create({ data: { id: 'u-titulo', email: 'titulo@ejemplo.com', name: 'Persona de prueba', isAdmin: true } });
+    const ctx: McpContext = { db, userId: 'u-titulo', access: { isAdmin: true, permissions: {}, accountIds: [] }, baseUrl: 'https://app.ejemplo.com' };
+    const { WRITE_TOOLS } = await import('@/lib/mcp/write-tools');
+    const { READ_TOOLS } = await import('@/lib/mcp/read-tools');
+    const { PUSH_TOOLS } = await import('@/lib/mcp/push-tools');
+    const tools = [...WRITE_TOOLS, ...READ_TOOLS, ...PUSH_TOOLS];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const run = async (name: string, args: Record<string, unknown>): Promise<any> => {
+      const t = tools.find((x) => x.name === name)!;
+      return t.run(ctx, t.input.parse({ cuenta: 'prueba', ...args }));
+    };
+
+    const approved = await run('approve_title', { publicacion: 'MLA3381569380', titulo: 'Bomba De Agua Fiat Uno Palio 1.4' });
+    expect(approved.aviso).toBe('Falta subir el título con push_titles: en el canal sigue «Bomba Agua Vieja». Quedó una nota en la publicación.');
+    expect((await db.publicationNote.findFirstOrThrow({ where: { publicationId: p.id } })).text).toContain('salió del paso Título sin subirse al canal');
+
+    const expected = { titulo_aprobado: 'Bomba De Agua Fiat Uno Palio 1.4', titulo_en_el_canal: 'Bomba Agua Vieja' };
+    expect((await run('get_publication', { publicacion: 'MLA3381569380' })).titulo_sin_subir).toMatchObject({ aviso: expect.stringContaining('push_titles'), ...expected });
+    const workspace = await run('get_title_workspace', { publicacion: 'MLA3381569380' });
+    expect(Object.keys(workspace)[0]).toBe('titulo_sin_subir');
+    expect(workspace.titulo_sin_subir).toMatchObject(expected);
+    const search = await run('search_catalog', { titulo_sin_subir: true });
+    expect(search.publicaciones.map((x: { codigo: string }) => x.codigo)).toEqual(['MLA3381569380']);
+    expect(search.publicaciones[0].titulo_sin_subir).toMatchObject({ estado: 'sin subir', ...expected });
+    const row = (await listToPush(accountId, db)).find((r) => r.id === p.id)!;
+    expect(row).toMatchObject({ titleAlert: 'Título aprobado sin subir', draft: expect.arrayContaining(['title']) });
+
+    // Al subirlo, el aviso desaparece de todos lados.
+    const pushed = await run('push_titles', { publicaciones: ['MLA3381569380'] });
+    expect(pushed.subidas[0]).toMatchObject({ resultado: 'subido', confirmado_en_el_canal: true });
+    expect(items.MLA3381569380.title).toBe('Bomba De Agua Fiat Uno Palio 1.4');
+    expect((await run('get_publication', { publicacion: 'MLA3381569380' })).titulo_sin_subir).toBeUndefined();
+    expect((await run('get_title_workspace', { publicacion: 'MLA3381569380' })).titulo_sin_subir).toBeUndefined();
+    expect((await run('search_catalog', { titulo_sin_subir: true })).publicaciones).toEqual([]);
+    expect((await listToPush(accountId, db)).find((r) => r.id === p.id)).toBeUndefined();
+
+    // Si el canal lo rechaza, no es "sin subir" sino rechazado, con el motivo.
+    const sold = await pub('MLA3');
+    await db.titleApproval.create({ data: { publicationId: sold.id, outcome: 'WRITTEN', before: 'Pistones Tico', title: 'Pistones Daewoo Tico 0.8' } });
+    await db.publication.update({ where: { id: sold.id }, data: { title: 'Pistones Daewoo Tico 0.8' } });
+    await pushDrafts(db, { accountId, publicationId: sold.id, fields: ['title'], userId: null });
+    const rejected = (await run('get_publication', { publicacion: sold.id })).titulo_sin_subir;
+    expect(rejected).toMatchObject({ aviso: 'Título aprobado rechazado por el canal', motivo_del_rechazo: expect.stringContaining('bloqueado porque la publicación tiene ventas') });
+    expect((await listToPush(accountId, db)).find((r) => r.id === sold.id)?.titleAlert).toMatch(/^Título rechazado por el canal: /);
+  });
+
   // ───────────────────────────── Precio ─────────────────────────────
 
   /** Decide el precio, con el costo cargado en el producto. */

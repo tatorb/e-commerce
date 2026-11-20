@@ -6,7 +6,7 @@ import { writeContentField } from '@/domain/content';
 import { familyDetails } from '@/domain/families';
 import { addToPipeline, advanceStep, removeFromPipeline } from '@/domain/pipeline';
 import { applyFamilies } from '@/lib/family-apply';
-import { addFamilyMeasures, familyByMeasure, FamilyMeasureError, fillFamilyCode, joinKnownFamilies, planFamilies } from '@/lib/families';
+import { addFamilyMeasures, familyByMeasure, FamilyMeasureError, fillFamilyCode, joinKnownFamilies, joinMeasures, planFamilies } from '@/lib/families';
 import { setProductCosts } from '@/lib/costs';
 import { loadPriceStep, priceGroups, savePriceDecision } from '@/lib/pricing';
 import { saveQaTexts } from '@/lib/publication-qa';
@@ -56,6 +56,42 @@ describe.skipIf(!url)('la vista previa de las familias', () => {
     });
     return p;
   }
+
+  it('join_family_measures: junta dos medidas de la misma familia del canal, y frena lo que no va', async () => {
+    const lt = await product('Camisa LT-9', [
+      { sku: 'LT-9-00', measure: 'STD' },
+      { sku: 'LT-9-30', measure: '-0,30' },
+      { sku: 'LT-9-60', measure: '-0,60' },
+    ]);
+    const a = await listing(lt.id, 'MLA30', { sku: 'LT-9-30', family: { id: 'F9', listings: ['MLA30', 'MLA31'] } });
+    // Sin SKU: no se sabe qué medida vende.
+    const b = await listing(lt.id, 'MLA31', { family: { id: 'F9', listings: ['MLA30', 'MLA31'] } });
+    const show = await joinMeasures(db, { accountId, publicationIds: [a.id, b.id], apply: false, userId: null });
+    expect(show.channelFamilyId).toBe('F9');
+    expect(show.problems).toEqual(['Falta elegir qué medida vende MLA31: pasala en medidas.']);
+    expect(show.members.map((m) => m.measure)).toEqual(expect.arrayContaining(['-0,30', null]));
+    // Sin aplicar no cambia nada.
+    expect((await db.publication.findUniqueOrThrow({ where: { id: a.id } })).familyId).toBeNull();
+
+    const sixty = show.measures.find((m) => m.label === '-0,60')!.key;
+    const done = await joinMeasures(db, { accountId, publicationIds: [a.id, b.id], measures: { [b.id]: sixty }, apply: true, userId: null });
+    expect(done.joined).toBe(2);
+    const [x, y] = await Promise.all([a, b].map((p) => db.publication.findUniqueOrThrow({ where: { id: p.id }, select: { familyId: true, variantKey: true } })));
+    expect(x.familyId).toBe(y.familyId);
+    expect(y.variantKey).toBe(sixty);
+    expect((await db.listingFamily.findUniqueOrThrow({ where: { id: x.familyId! } })).channelFamilyId).toBe('F9');
+
+    // Otra familia del canal, u otro producto: no se juntan.
+    const other = await listing(lt.id, 'MLA32', { sku: 'LT-9-00', family: { id: 'F10', listings: ['MLA32'] } });
+    expect((await joinMeasures(db, { accountId, publicationIds: [a.id, other.id], apply: false, userId: null })).problems).toContain(
+      'En el canal están en familias distintas: no se pueden juntar en la app.',
+    );
+    const pd = await product('Pistón PD-2', [{ sku: 'PD-2-00', measure: 'STD' }]);
+    const foreign = await listing(pd.id, 'MLA40', { sku: 'PD-2-00', family: { id: 'F9', listings: ['MLA40'] } });
+    expect((await joinMeasures(db, { accountId, publicationIds: [a.id, foreign.id], apply: false, userId: null })).problems).toContain(
+      'No son del mismo producto: una familia junta las medidas de un solo producto.',
+    );
+  });
 
   it('junta las medidas del canal, dice cuáles faltan traer y qué pasa al juntarlas', async () => {
     const sp741 = await product('Subconjunto SP-741', [

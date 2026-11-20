@@ -10,6 +10,9 @@ import { choiceExclusionSelect } from '@/lib/sync-choices';
 import type { NameValue } from '@/domain/name-value';
 import { getChannelListings } from '@/channels/listings';
 import { getChannelPublisher } from '@/channels/publish';
+import { getChannelAdapter } from '@/channels';
+import { titleNotPushedText, titlesNotPushed } from '@/lib/title-push-state';
+import { channelFichaOf, fichaChanges, type FichaChange } from '@/domain/catalog-data';
 import type { PipelineRemoval, PipelineStatus, PipelineStep } from '@/generated/prisma/enums';
 
 // Lo que muestra la pantalla Sincronización: cómo va la lectura de cada
@@ -184,6 +187,10 @@ export type ToPushRow = {
   sku: string | null;
   // Por qué no se puede subir desde la app, si no se puede.
   blocked: string | null;
+  // Lo de la ficha (marca, número de pieza, origen) que el canal tiene distinto: va con los datos de catálogo.
+  ficha: FichaChange[];
+  // El título aprobado en el paso Título que no está en el canal, o que el canal rechazó.
+  titleAlert: string | null;
   pipeline: { pipelineStatus: PipelineStatus; pipelineStep: PipelineStep | null; pipelineRemoval: PipelineRemoval | null };
 };
 
@@ -207,17 +214,25 @@ export async function listToPush(accountId: string, db: PrismaClient = prisma): 
       pipelineStatus: true,
       pipelineStep: true,
       pipelineRemoval: true,
+      product: { select: { brand: true, partNumber: true, origin: true } },
       store: { select: { name: true, channel: { select: { kind: true, name: true } }, connection: { select: { status: true } } } },
-      channelCopy: { select: { fingerprints: true, agreed: true, rejections: true, price: true, installments: true, discount: true } },
+      channelCopy: { select: { fingerprints: true, agreed: true, rejections: true, price: true, installments: true, discount: true, details: true } },
       campaignRequests: { orderBy: { createdAt: 'asc' }, select: { action: true, name: true, kind: true, price: true, rejection: true } },
     },
     orderBy: { updatedAt: 'desc' },
   });
+  const notPushed = await titlesNotPushed(db, { accountId });
   const rows: ToPushRow[] = [];
   for (const p of publications) {
     const summary = faceSummary(fingerprintsOf(faceValues(p)), p.channelCopy);
-    if (summary.draft.length === 0 && summary.choose.length === 0 && p.campaignRequests.length === 0 && !p.skuToPush) continue;
     const channelName = p.store.channel.name;
+    const ficha = fichaChanges(p.product, channelFichaOf(p.channelCopy?.details), getChannelAdapter(p.store.channel.kind, channelName).catalog?.productFieldIds);
+    // La ficha distinta del canal deja los datos de catálogo por subir.
+    if (ficha.length > 0 && !summary.draft.includes('attributes') && !summary.choose.includes('attributes')) summary.draft.push('attributes');
+    // Un título aprobado que no está en el canal queda para subir, aunque lo acordado diga otra cosa.
+    const titleAlert = notPushed.get(p.id);
+    if (titleAlert?.kind === 'sin_subir' && !summary.draft.includes('title') && !summary.choose.includes('title')) summary.draft.unshift('title');
+    if (summary.draft.length === 0 && summary.choose.length === 0 && p.campaignRequests.length === 0 && !p.skuToPush && !titleAlert) continue;
     rows.push({
       id: p.id,
       externalId: p.externalId,
@@ -238,6 +253,8 @@ export async function listToPush(accountId: string, db: PrismaClient = prisma): 
           ? `La tienda no está conectada con ${channelName}.`
           : null,
       pipeline: { pipelineStatus: p.pipelineStatus, pipelineStep: p.pipelineStep, pipelineRemoval: p.pipelineRemoval },
+      ficha,
+      titleAlert: titleAlert ? titleNotPushedText(titleAlert) : null,
     });
   }
   return rows;

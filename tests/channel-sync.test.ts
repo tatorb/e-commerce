@@ -541,3 +541,19 @@ describe.skipIf(!url)('la lectura automática en la base', () => {
     expect(await db.channelCopy.count()).toBe(0);
   });
 });
+
+describe('el orden de una pasada', () => {
+  it('primero las que nunca se leyeron, después las del pipeline, después la que hace más que no se lee', async () => {
+    const { readOrder } = await import('@/lib/channel-sync');
+    const at = (d: string) => ({ readAt: new Date(d) });
+    expect(
+      readOrder([
+        { externalId: 'MLA1', pipelineStatus: 'UNTOUCHED', channelCopy: at('2026-11-20') },
+        { externalId: 'MLA2', pipelineStatus: 'UNTOUCHED', channelCopy: at('2026-11-10') },
+        { externalId: 'MLA3', pipelineStatus: 'IN_PIPELINE', channelCopy: at('2026-11-20') },
+        { externalId: 'MLA9', pipelineStatus: 'UNTOUCHED', channelCopy: null },
+        { externalId: null, pipelineStatus: 'UNTOUCHED', channelCopy: null },
+      ]),
+    ).toEqual(['MLA9', 'MLA3', 'MLA2', 'MLA1']);
+  });
+});

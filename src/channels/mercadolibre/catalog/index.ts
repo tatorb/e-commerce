@@ -56,6 +56,7 @@ export const mercadolibreCatalog: ChannelCatalog = {
     return families.find((f) => t.includes(words(familyBase(f) ?? f))) ?? families[0];
   },
   category: (id) => byId.get(id) ?? extra.get(id.toUpperCase()) ?? null,
+  productFieldIds: { brand: 'BRAND', partNumber: 'PART_NUMBER', origin: 'ORIGIN' },
   register(category) {
     if (!byId.has(category.id)) extra.set(category.id.toUpperCase(), category);
   },

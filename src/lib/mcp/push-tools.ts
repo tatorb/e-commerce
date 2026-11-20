@@ -58,6 +58,8 @@ const TEXTS: Record<Field, { name: string; title: string; the: string; it: strin
     none: 'No hay datos de catálogo por subir en la cuenta.',
     from: 'save_catalog_data, normalize_sale_options o el paso Información',
     show: 'qué datos de catálogo se van a mandar y a cuáles',
+    more:
+      'También manda marca, número de pieza y origen de la ficha del producto cuando el canal tiene otro valor: eso solo ya deja los datos de catálogo por subir. de_la_ficha dice qué se mandó; después vuelve a leer la publicación y, si el canal no lo tomó, lo dice en motivo.',
   },
   warranty: {
     name: 'push_warranties',
@@ -169,6 +171,11 @@ function pushFieldTool(field: Field) {
             resultado: sent ? t.it : 'rechazado',
             ...(rejected ? { motivo: rejected.message } : {}),
             confirmado_en_el_canal: r.confirmed,
+            ...(r.ficha
+              ? {
+                  de_la_ficha: r.ficha.sent.map((f) => ({ dato: f.label, en_el_canal_antes: f.from, se_mando: f.to, lo_tomo: r.confirmed ? !r.ficha!.notTaken.some((n) => n.field === f.field) : 'sin confirmar' })),
+                }
+              : {}),
             ...(field === 'photos' && sent ? { _id: id } : {}),
           });
           // Como el botón de Por subir: queda en la actividad de la persona, hecho por Claude.

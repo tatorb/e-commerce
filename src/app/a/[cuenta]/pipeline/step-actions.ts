@@ -1,5 +1,6 @@
 'use server';
 
+import { noteTitleNotPushed } from '@/lib/title-push-state';
 import { act } from '@/lib/auth/guard';
 import { OptionError } from '@/lib/product-options';
 import { revalidatePath } from 'next/cache';
@@ -283,7 +284,11 @@ export async function approveTitleAction(
           userId: user.id,
         }),
       );
-      return done(accountSlug, r.outcome === 'COPY' ? 'Título guardado para la copia con cuotas.' : 'Título aprobado.');
+      const notPushed =
+        r.outcome === 'WRITTEN'
+          ? await noteTitleNotPushed(prisma, { accountId: t.account.id, publicationId, userId: user.id, viaClaude: false, timeZone: t.account.timezone }).catch(() => null)
+          : null;
+      return done(accountSlug, r.outcome === 'COPY' ? 'Título guardado para la copia con cuotas.' : notPushed ? 'Título aprobado. Falta subirlo al canal desde Por subir.' : 'Título aprobado.');
     });
   });
 }

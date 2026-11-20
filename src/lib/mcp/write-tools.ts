@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { noteTitleNotPushed } from '@/lib/title-push-state';
 import { logActivity } from '@/lib/activity';
 import { todayIn } from '@/domain/applications';
 import { COMPETITOR_SELECT, competitorsSchema, INSTALLMENT_OPTIONS, MAX_COMPETITORS, storedCompetitor } from '@/domain/competitors';
@@ -1217,7 +1218,7 @@ const approveTitleTool = defineTool({
   section: 'pipeline',
   title: 'Aprobar el título',
   description:
-    'Aprueba el título en el paso Título: lo escribe en la publicación (o lo deja para la copia con cuotas si se decidió así) y pasa a Imágenes. No deja aprobar un título con errores, ni uno bloqueado sin decidir antes. Confirmalo con la persona antes.',
+    'Aprueba el título en el paso Título: lo escribe en la publicación (o lo deja para la copia con cuotas si se decidió así) y pasa a Imágenes. No lo sube al canal: eso va con push_titles. Si el canal tiene otro, la respuesta trae aviso y queda una nota automática en la publicación. No deja aprobar un título con errores, ni uno bloqueado sin decidir antes. Confirmalo con la persona antes.',
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg,
@@ -1238,9 +1239,12 @@ const approveTitleTool = defineTool({
         userId: ctx.userId,
       }),
     );
+    // El título queda en la app: al canal va con push_titles. Si no está allá, queda una nota.
+    const notPushed = r.outcome === 'WRITTEN' ? await noteTitleNotPushed(ctx.db, { accountId: account.id, publicationId: id, userId: ctx.userId, viaClaude: true, timeZone: account.timezone }) : null;
     return {
       listo: true,
       mensaje: r.outcome === 'COPY' ? 'Título guardado para la copia con cuotas.' : 'Título aprobado y escrito en la publicación.',
+      ...(notPushed ? { aviso: `Falta subir el título con push_titles: en el canal sigue «${notPushed.inChannel ?? 'sin título'}». Quedó una nota en la publicación.` } : {}),
       ...(await stateOf(ctx, account, id)),
     };
   },

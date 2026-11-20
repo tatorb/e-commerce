@@ -12,7 +12,8 @@ import {
 } from '@/channels/publish';
 import { ConnectError } from '@/channels/connect';
 import type { ChannelAdapter } from '@/channels/types';
-import { CatalogError, cleanCatalogValue, findField, normalizeText } from '@/domain/catalog-data';
+import { titlesNotPushed } from '@/lib/title-push-state';
+import { CatalogError, channelFichaOf, cleanCatalogValue, fichaChanges, findField, normalizeText, type FichaChange } from '@/domain/catalog-data';
 import {
   attributeDiff,
   channelFaceValues,
@@ -94,6 +95,7 @@ async function loadForPush(db: Db, accountId: string, publicationId: string) {
     select: {
       id: true,
       productId: true,
+      product: { select: { brand: true, partNumber: true, origin: true } },
       externalId: true,
       variantListings: true,
       variantKey: true,
@@ -287,6 +289,8 @@ export type PushResult = {
   campaigns: CampaignOutcome[];
   // El SKU de la medida, si estaba en Por subir: si se mandó o por qué no.
   sku?: SkuOutcome;
+  // Lo de la ficha que fue con los datos de catálogo, y lo que el canal no tomó al releerla.
+  ficha?: { sent: FichaChange[]; notTaken: FichaChange[] };
 };
 
 /**
@@ -322,6 +326,16 @@ export async function pushDrafts(
   const appPrints = fingerprintsOf(app);
   const summary = faceSummary(appPrints, copy);
   const adapter = getChannelAdapter(p.store.channel.kind, p.store.channel.name);
+  // Marca, número de pieza y origen salen de la ficha: si el canal tiene otro, van con los datos de catálogo.
+  const ficha = fichaChanges(p.product, channelFichaOf(copy.details), adapter.catalog?.productFieldIds);
+  // Si los datos de catálogo propios cambiaron en la app, o solo va lo de la ficha.
+  const ownAttributes = summary.draft.includes('attributes') || summary.choose.includes('attributes');
+  if (ficha.length > 0 && !summary.draft.includes('attributes') && !summary.choose.includes('attributes')) summary.draft.push('attributes');
+  // Un título aprobado que no está en el canal se sube, aunque lo acordado diga otra cosa.
+  if (!summary.draft.includes('title') && !summary.choose.includes('title')) {
+    const notPushed = (await titlesNotPushed(db, { accountId: args.accountId, publicationIds: [p.id] })).get(p.id);
+    if (notPushed?.kind === 'sin_subir') summary.draft.push('title');
+  }
   const wanted = args.fields ?? [...summary.draft, ...summary.choose];
   const result: PushResult = { sent: [], rejected: [], confirmed: false, campaigns: [] };
   // Si van las campañas pedidas y alguna frena el descuento propio, el descuento no se manda: chocarían.
@@ -418,14 +432,23 @@ export async function pushDrafts(
       let problems: string[] = [];
       let extra: Prisma.ChannelCopyUpdateInput = {};
       if (field === 'attributes') {
-        const plan = planAttributes(app, channel, copy, adapter);
+        const plan = !ownAttributes ? { updates: [], sent: [], problems: [] } : planAttributes(app, channel, copy, adapter);
         problems = plan.problems;
-        if (plan.updates.length === 0) {
+        const updates = [...plan.updates, ...ficha.map((f) => ({ id: f.id, value: f.to, multiple: false }))];
+        if (updates.length === 0) {
           await reject(field, problems.join(' ') || 'No hay datos de catálogo para subir.');
           continue;
         }
         value = mergeAttributes(channel.attributes, plan.sent);
-        send = () => withAccessToken(db, p.store.id, (token) => eachTarget(p, (id) => publisher.updateAttributes(token, id, plan.updates)));
+        if (ficha.length > 0) result.ficha = { sent: ficha, notTaken: [] };
+        send = async () => {
+          await withAccessToken(db, p.store.id, (token) => eachTarget(p, (id) => publisher.updateAttributes(token, id, updates)));
+          // Lo de la ficha ya está en el canal: la relectura confirma si lo tomó.
+          if (ficha.length > 0) {
+            const details = { ...((copy.details ?? {}) as Record<string, unknown>), ...Object.fromEntries(ficha.map((f) => [f.field, f.to])) };
+            await db.channelCopy.update({ where: { publicationId: p.id }, data: { details: details as Prisma.InputJsonValue } });
+          }
+        };
       } else if (field === 'price') {
         const price = Number(app.price);
         if (!app.price || !(price > 0)) {
@@ -493,7 +516,8 @@ export async function pushDrafts(
         send = () => withAccessToken(db, p.store.id, (token) => eachTarget(p, (id) => publisher.setWarranty(token, id, warranty)));
       } else {
         if (field === 'title' && titleLocked(p)) {
-          result.rejected.push({ field, message: LOCKED_TITLE });
+          // Queda anotado: el título aprobado figura rechazado, con el motivo, y no sin subir.
+          await reject(field, LOCKED_TITLE);
           continue;
         }
         if (field === 'title') {
@@ -554,6 +578,18 @@ export async function pushDrafts(
     });
     try {
       result.confirmed = (await readOne(db, { accountId: args.accountId, publicationId: p.id })) !== null;
+      // Lo de la ficha que, releído, el canal no tomó: a veces lo acepta y lo deja como estaba.
+      if (result.ficha && result.confirmed) {
+        const after = await db.channelCopy.findUnique({ where: { publicationId: p.id }, select: { details: true } });
+        result.ficha.notTaken = fichaChanges(p.product, channelFichaOf(after?.details), adapter.catalog?.productFieldIds);
+        if (result.ficha.notTaken.length > 0) {
+          const message = `${channelName} no tomó ${names(result.ficha.notTaken.map((f) => `${f.label.toLowerCase()} «${f.to}»`))}: sigue ${names(result.ficha.notTaken.map((f) => `«${f.from ?? 'vacío'}»`))}.`;
+          result.rejected.push({ field: 'attributes', message });
+          await db.channelSyncChange.create({
+            data: { publicationId: p.id, field: 'attributes', kind: 'REJECTED', before: asJson(result.ficha.notTaken.map((f) => f.from)), after: asJson(result.ficha.notTaken.map((f) => f.to)), message, userId: args.userId },
+          });
+        }
+      }
     } catch (e) {
       console.error('No se pudo volver a leer después de subir', e instanceof Error ? e.message : e);
     }

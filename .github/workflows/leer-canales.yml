@@ -22,7 +22,7 @@ concurrency:
 jobs:
   leer:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 16
     steps:
       - name: Pedirle a la app que lea
         env:
@@ -38,7 +38,7 @@ jobs:
           # Si la app tardó de más o no respondió, se espera un poco y se pide otra vez:
           # lo que no se leyó lo sigue el pedido siguiente o la próxima hora.
           answered=0
-          for i in 1 2 3 4 5 6 7 8; do
+          for i in $(seq 1 13); do
             out=$(curl -sS --max-time 90 -w '\n%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "$url" || echo 000)
             code=$(printf '%s\n' "$out" | tail -n 1)
             res=$(printf '%s\n' "$out" | sed '$d')

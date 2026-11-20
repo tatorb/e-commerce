@@ -2,7 +2,8 @@ import { z } from 'zod';
 import { FACE_FIELD_LABEL, FACE_FIELDS, SYNC_CHANGE_LABEL, type FaceField } from '@/domain/channel-sync';
 import { fieldLabel } from '@/domain/sync-log';
 import { titleOrUntitled } from '@/domain/publication-title';
-import { chooseFaces, runSyncStep, startSync, syncableStores } from '@/lib/channel-sync';
+import { chooseFaces, readOne, runSyncStep, startSync, syncableStores, SyncError } from '@/lib/channel-sync';
+import { ConnectError } from '@/channels/connect';
 import { loadSyncOverview } from '@/lib/queries/sync';
 import { McpToolError, accountArg, defineTool, findPublication, resolveAccount, when, type AccountRef, type McpContext } from './tool';
 
@@ -147,11 +148,42 @@ const syncNowTool = defineTool({
   section: 'sincronizacion',
   title: 'Leer ahora las publicaciones del canal',
   description:
-    'Como el botón Leer ahora de Sincronización: empieza una lectura de las publicaciones de la tienda en el canal, o sigue la que está en curso, y lee lo que alcanza en unos 40 segundos. Si no terminó, dice cuánto falta: volvé a llamarla para seguir, o dejala, que sigue sola con la lectura de cada hora. Solo lee: no sube nada al canal. Con varias tiendas, pasá la tienda.',
-  input: z.object({ cuenta: accountArg, tienda: z.string().optional().describe('El nombre de la tienda, si la cuenta tiene más de una.') }),
+    'Como el botón Leer ahora de Sincronización: empieza una lectura de las publicaciones de la tienda en el canal, o sigue la que está en curso, y lee lo que alcanza en unos 40 segundos. Si no terminó, dice cuánto falta: volvé a llamarla para seguir, o dejala, que sigue sola con la lectura de cada hora. Con publicaciones, lee solo esas, enseguida y con su descripción, sin esperar la lectura completa: sirve para una que figura "Todavía no se leyó" o para ver ya algo que cambió allá. Solo lee: no sube nada al canal. Con varias tiendas, pasá la tienda.',
+  input: z.object({
+    cuenta: accountArg,
+    tienda: z.string().optional().describe('El nombre de la tienda, si la cuenta tiene más de una.'),
+    publicaciones: z.array(z.string().min(1)).min(1).max(30).optional().describe('Solo estas publicaciones: su código del canal, link o id, hasta 30.'),
+  }),
   readOnly: false,
   async run(ctx, args) {
     const account = await resolveAccount(ctx, args.cuenta);
+    if (args.publicaciones) {
+      const started = Date.now();
+      const leidas: Record<string, unknown>[] = [];
+      const quedan: string[] = [];
+      for (const ref of args.publicaciones) {
+        if (Date.now() - started > READ_BUDGET_MS) {
+          quedan.push(ref);
+          continue;
+        }
+        try {
+          const id = await findPublication(ctx.db, account.id, ref);
+          const taken = await readOne(ctx.db, { accountId: account.id, publicationId: id });
+          leidas.push(
+            taken === null
+              ? { publicacion: ref, resultado: 'el canal no la devolvió', motivo: 'Puede estar borrada o ser de otra cuenta.' }
+              : { publicacion: ref, resultado: 'leída', datos_traidos: taken.map((f) => FACE_FIELD_LABEL[f].toLowerCase()) },
+          );
+        } catch (e) {
+          if (!(e instanceof McpToolError || e instanceof SyncError || e instanceof ConnectError)) throw e;
+          leidas.push({ publicacion: ref, resultado: 'no se leyó', motivo: e.message });
+        }
+      }
+      if (args.publicaciones.length === 1 && leidas[0]?.resultado === 'leída') {
+        ctx.touched = { ...ctx.touched, publicationId: await findPublication(ctx.db, account.id, args.publicaciones[0]) };
+      }
+      return { leidas, ...(quedan.length > 0 ? { quedan, aviso: 'No entraron todas en esta vuelta: volvé a llamar con la lista de quedan.' } : {}) };
+    }
     const stores = await syncableStores(ctx.db, account.id);
     if (stores.length === 0) throw new McpToolError('La cuenta no tiene una tienda conectada que se pueda leer. Se conecta en Conexión.');
     const wanted = args.tienda?.trim().toLowerCase();

@@ -308,7 +308,14 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
                 sold_quantity: it.sold,
                 category_id: it.category_id,
                 pictures: it.pictures,
-                attributes: it.attributes,
+                // La marca y el número de pieza de la ficha ya están en el canal: estas pruebas son de fotos.
+                attributes: [
+                  ...it.attributes,
+                  ...[
+                    { id: 'BRAND', value_name: 'Sachs' },
+                    { id: 'PART_NUMBER', value_name: 'PD-1' },
+                  ].filter((a) => !(it.attributes as { id?: string }[]).some((x) => x.id === a.id)),
+                ],
                 variations: it.variations ?? [],
                 ...(it.sku ? { seller_custom_field: it.sku } : {}),
                 ...(it.userProduct ? { user_product_id: it.userProduct } : {}),

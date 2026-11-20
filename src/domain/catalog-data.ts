@@ -52,6 +52,8 @@ export interface ChannelCatalog {
    * leaf: si se puede publicar en ella (no tiene subcategorías).
    */
   fetchCategory?(id: string, accessToken: string): Promise<(CatalogCategory & { path: string | null; leaf: boolean }) | null>;
+  /** El código de campo del canal de lo que sale de la ficha (marca, número de pieza, origen), sea cual sea la categoría. */
+  productFieldIds?: Record<ProductSourceField, string>;
 }
 
 export class CatalogError extends Error {}
@@ -244,5 +246,38 @@ export function mergeCatalogAttributes(
     }
   }
   out.push(...attributes.filter((a) => !ownNames.has(normalizeText(a.name))));
+  return out;
+}
+
+// ───────────────────────────── Lo que sale de la ficha ─────────────────────────────
+
+export type FichaValues = Record<ProductSourceField, string | null>;
+
+const FICHA_FIELDS: ProductSourceField[] = ['brand', 'partNumber', 'origin'];
+
+/** Marca, número de pieza y origen que leyó la app del canal, guardados en los detalles de la copia. */
+export function channelFichaOf(details: unknown): FichaValues | null {
+  if (!details || typeof details !== 'object' || Array.isArray(details)) return null;
+  const d = details as Record<string, unknown>;
+  const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+  return { brand: text(d.brand), partNumber: text(d.partNumber), origin: text(d.origin) };
+}
+
+export type FichaChange = { field: ProductSourceField; id: string; label: string; from: string | null; to: string };
+
+/**
+ * Lo de la ficha que el canal tiene distinto: marca, número de pieza y origen.
+ * Solo lo que la ficha tiene cargado; sin la lectura del canal, nada.
+ */
+export function fichaChanges(product: Partial<Record<ProductSourceField, string | null>>, channel: FichaValues | null, ids: Record<ProductSourceField, string> | undefined): FichaChange[] {
+  if (!channel || !ids) return [];
+  const out: FichaChange[] = [];
+  for (const field of FICHA_FIELDS) {
+    const to = product[field]?.trim();
+    if (!to) continue;
+    const from = channel[field];
+    if (from && normalizeText(from) === normalizeText(to)) continue;
+    out.push({ field, id: ids[field], label: PRODUCT_FIELD_LABEL[field], from, to });
+  }
   return out;
 }

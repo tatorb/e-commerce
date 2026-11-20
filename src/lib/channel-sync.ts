@@ -49,7 +49,10 @@ type Tx = Prisma.TransactionClient;
 // Una pasada programada no arranca si hubo otra hace menos de esto.
 const SCHEDULE_GAP_MS = 50 * 60 * 1000;
 // Una pasada que no terminó en este tiempo se da por fallida y se empieza otra.
-const STALE_MS = 6 * 60 * 60 * 1000;
+// Con más de mil publicaciones y la tarea programada de GitHub, que a veces
+// corre cada varias horas, una pasada puede llevar más de un día: con 6 horas
+// se tiraba antes de terminar y volvía a empezar de cero.
+const STALE_MS = 3 * 24 * 60 * 60 * 1000;
 // La descripción se vuelve a pedir aunque el canal no diga que cambió.
 const DESCRIPTION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const MAX_ERRORS = 50;
@@ -95,7 +98,7 @@ export async function startSync(
   if (running) {
     await db.channelSync.update({
       where: { id: running.id },
-      data: { status: 'FAILED', finishedAt: now, leaseUntil: null, errors: [{ at: now.toISOString(), message: 'No terminó en 6 horas: se empezó otra.' }] },
+      data: { status: 'FAILED', finishedAt: now, leaseUntil: null, errors: [{ at: now.toISOString(), message: 'No terminó en 3 días: se empezó otra.' }] },
     });
   }
   if (args.trigger === 'SCHEDULE') {
@@ -105,10 +108,10 @@ export async function startSync(
   // Las eliminadas quedan archivadas en la app: ya no se leen.
   const publications = await db.publication.findMany({
     where: { storeId: args.storeId, externalId: { not: null }, channelStatus: { not: 'DELETED' } },
-    select: { externalId: true },
+    select: { externalId: true, pipelineStatus: true, channelCopy: { select: { readAt: true } } },
     orderBy: { externalId: 'asc' },
   });
-  const ids = publications.map((p) => p.externalId!);
+  const ids = readOrder(publications);
   try {
     return await db.channelSync.create({
       data: { storeId: args.storeId, trigger: args.trigger, userId: args.userId ?? null, startedAt: now, ids, total: ids.length },
@@ -119,6 +122,19 @@ export async function startSync(
     if (!isUniqueViolation(e)) throw e;
     return db.channelSync.findFirst({ where: { storeId: args.storeId, status: 'RUNNING' }, select: { id: true } });
   }
+}
+
+/**
+ * En qué orden se leen: primero las que nunca se leyeron, después las del
+ * pipeline, después las demás de la que hace más que no se lee. Así una
+ * publicación nueva no espera a que la pasada recorra todas las otras.
+ */
+export function readOrder(publications: { externalId: string | null; pipelineStatus: string; channelCopy: { readAt: Date } | null }[]): string[] {
+  const rank = (p: (typeof publications)[number]) => (!p.channelCopy ? 0 : p.pipelineStatus === 'IN_PIPELINE' ? 1 : 2);
+  return publications
+    .filter((p) => p.externalId)
+    .sort((a, b) => rank(a) - rank(b) || (a.channelCopy?.readAt.getTime() ?? 0) - (b.channelCopy?.readAt.getTime() ?? 0) || a.externalId!.localeCompare(b.externalId!))
+    .map((p) => p.externalId!);
 }
 
 // ───────────────────────────── Una publicación ─────────────────────────────
@@ -477,11 +493,12 @@ export async function runSyncStep(
             return need;
           },
         });
-        return {
-          ...read,
-          members: await readVariantListings(listings, token, userId, others),
-          families: await readFamiliesFor(listings, token, userId, read.listings, (id) => byId.get(id)?.channelCopy?.details, now),
-        };
+        // Las medidas aparte y las familias no dependen una de otra: van a la vez.
+        const [members, families] = await Promise.all([
+          readVariantListings(listings, token, userId, others),
+          readFamiliesFor(listings, token, userId, read.listings, (id) => byId.get(id)?.channelCopy?.details, now),
+        ]);
+        return { ...read, members, families };
       });
 
       const ctx = { syncId: run.id, adapter, day: dayIn(run.store.account.timezone, now), now };

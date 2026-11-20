@@ -57,6 +57,7 @@ import { unitsLast90 } from '@/lib/sales/units';
 import { visitsForClaude } from '@/domain/visits';
 import { loadSaleOptions, type SaleOptions } from '@/lib/sale-options';
 import { listNotes, notesByCard, type NoteView } from '@/lib/publication-notes';
+import { titlesNotPushed, type TitleNotPushed } from '@/lib/title-push-state';
 
 // Las notas del equipo que se muestran en una publicación, las más nuevas.
 const NOTES_SHOWN = 30;
@@ -289,6 +290,10 @@ const searchCatalog = defineTool({
       .boolean()
       .optional()
       .describe('true = solo las de productos con alguna publicación Corregida o en el paso Publicación; false = solo las de productos sin ninguna.'),
+    titulo_sin_subir: z
+      .boolean()
+      .optional()
+      .describe('true = solo las que tienen el último título aprobado en el paso Título distinto del que está en el canal: sin subir o rechazado por el canal. titulo_sin_subir dice cuál y por qué.'),
     incluir_tipos: z
       .boolean()
       .optional()
@@ -324,11 +329,13 @@ const searchCatalog = defineTool({
     const brands = new Set((args.marca ?? []).map(optionKey).filter(Boolean));
     // Un producto optimizado: alguna de sus publicaciones está Corregida o en el paso Publicación.
     const optimized = new Set(all.filter((p) => p.pipelineStatus === 'CORRECTED' || (p.pipelineStatus === 'IN_PIPELINE' && p.pipelineStep === 'PUBLISH')).map((p) => p.productId));
+    const notPushed = args.titulo_sin_subir === undefined ? null : await titlesNotPushed(ctx.db, { accountId: account.id });
     const filtered = filterPublications(all, filters).filter(
       (p) =>
         (steps.size === 0 || (p.pipelineStatus === 'IN_PIPELINE' && p.pipelineStep !== null && steps.has(p.pipelineStep))) &&
         (brands.size === 0 || (p.brand !== null && brands.has(optionKey(p.brand)))) &&
-        (args.producto_optimizado === undefined || optimized.has(p.productId) === args.producto_optimizado),
+        (args.producto_optimizado === undefined || optimized.has(p.productId) === args.producto_optimizado) &&
+        (notPushed === null || notPushed.has(p.id) === args.titulo_sin_subir),
     );
     // El stock del producto para la medida de cada una, como lo calcula la app.
     const stockOf = new Map(
@@ -380,6 +387,12 @@ const searchCatalog = defineTool({
         producto_optimizado: optimized.has(p.productId),
         stock_del_producto: stockOf.get(p.id) ?? null,
         cantidad_en_el_canal: p.quantity.channel,
+        ...(notPushed?.has(p.id)
+          ? (() => {
+              const t = notPushed.get(p.id)!;
+              return { titulo_sin_subir: { estado: t.kind === 'rechazado' ? 'rechazado por el canal' : 'sin subir', titulo_aprobado: t.approved, titulo_en_el_canal: t.inChannel, aprobado: when(t.approvedAt, account), ...(t.reason ? { motivo: t.reason } : {}) } };
+            })()
+          : {}),
       })),
       ...(args.incluir_tipos
         ? {
@@ -601,8 +614,10 @@ const getPublication = defineTool({
       ? await Promise.all(familyMeasures(family.members).map(async (m) => [m.id, m.options.length > 0 ? await loadSaleOptions(ctx.db, m.id) : null] as const))
       : [];
     const optionsOf = new Map(familyOptions);
+    const notPushed = (await titlesNotPushed(ctx.db, { accountId: account.id, publicationIds: [id] })).get(id);
     return {
       ...summary(ctx, account, scored),
+      ...(notPushed ? { titulo_sin_subir: titleNotPushedOut(notPushed, account) } : {}),
       // El estado tal como lo leyó del canal, con el motivo que informa.
       ...(copyState
         ? {
@@ -846,7 +861,9 @@ const getTitleWorkspace = defineTool({
     const combo = await loadCombo(ctx.db, tc.publication.productId);
     const current = tc.publication.title ?? '';
     const usable = tc.words.filter((w) => w.status === 'use').map((w) => w.word);
+    const notPushed = (await titlesNotPushed(ctx.db, { accountId: account.id, publicationIds: [tc.publication.id] })).get(tc.publication.id);
     return {
+      ...(notPushed ? { titulo_sin_subir: titleNotPushedOut(notPushed, account) } : {}),
       publicacion: {
         id: tc.publication.id,
         codigo: tc.publication.externalId,
@@ -930,6 +947,18 @@ const getTitleWorkspace = defineTool({
     };
   },
 });
+
+/** El título aprobado que no llegó al canal, para get_publication y get_title_workspace. */
+function titleNotPushedOut(t: TitleNotPushed, account: AccountRef) {
+  return {
+    aviso: t.kind === 'rechazado' ? 'Título aprobado rechazado por el canal' : 'Título aprobado sin subir: falta subirlo con push_titles',
+    titulo_aprobado: t.approved,
+    titulo_en_el_canal: t.inChannel,
+    aprobado: when(t.approvedAt, account),
+    ...(t.approvedBy ? { aprobado_por: t.approvedBy } : {}),
+    ...(t.kind === 'rechazado' ? { motivo_del_rechazo: t.reason } : {}),
+  };
+}
 
 const checkTitleTool = defineTool({
   name: 'check_title',

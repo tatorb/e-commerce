@@ -13,7 +13,7 @@ const PAGE = 100;
 const OFFSET_MAX = 1000;
 const SCAN_PAGES_MAX = 500;
 // Pocos pedidos a la vez: Mercado Libre corta con "demasiados pedidos".
-const PARALLEL = 2;
+const PARALLEL = 3;
 const VISIT_DAYS = 90;
 
 const ITEM_FIELDS = [
