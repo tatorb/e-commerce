@@ -5,6 +5,7 @@ import { familyOf } from '@/lib/families';
 import { pushDrafts, PushError } from '@/lib/channel-push';
 import { listToPush } from '@/lib/queries/sync';
 import { PUSH_BUDGET_MS } from './price-tools';
+import { runInGroups } from '@/lib/pool';
 import { parseWarranty, warrantyLabel } from '@/domain/warranty';
 import { McpToolError, accountArg, defineTool, findPublication, resolveAccount } from './tool';
 
@@ -13,6 +14,10 @@ import { McpToolError, accountArg, defineTool, findPublication, resolveAccount }
 // familia: con una medida van todas. Por cada publicación dice si quedó bien o
 // el motivo exacto del rechazo del canal; lo que no entra en una vuelta vuelve
 // en quedan.
+
+// Cuántas publicaciones se suben a la vez: cada una hace varios pedidos al
+// canal (subir y volver a leer), y Mercado Libre pide esperar si llegan demasiados juntos.
+export const PUSH_CONCURRENCY = 4;
 
 type Field = 'title' | 'description' | 'warranty' | 'photos' | 'attributes';
 
@@ -126,13 +131,13 @@ function pushFieldTool(field: Field) {
         (
           await ctx.db.publication.findMany({
             where: { id: { in: ids } },
-            select: { id: true, externalId: true, title: true, description: true, warranty: true, store: { select: { channel: { select: { name: true } } } } },
+            select: { id: true, familyId: true, externalId: true, title: true, description: true, warranty: true, store: { select: { channel: { select: { name: true } } } } },
           })
         ).map((p) => [p.id, p]),
       );
 
-      const subidas: Record<string, unknown>[] = [];
-      const quedan: string[] = [];
+      // Primero lo que se saltea; lo que hay que subir va a la cola, en el orden pedido.
+      const queue: string[] = [];
       for (const id of ids) {
         const p = pubs.get(id)!;
         const code = p.externalId ?? id;
@@ -150,10 +155,12 @@ function pushFieldTool(field: Field) {
           if (asked.has(id)) salteadas.push({ publicacion: code, motivo: `No tiene ${t.the} por subir.` });
           continue;
         }
-        if (Date.now() - started > PUSH_BUDGET_MS) {
-          quedan.push(code);
-          continue;
-        }
+        queue.push(id);
+      }
+
+      const pushOne = async (id: string): Promise<Record<string, unknown>> => {
+        const p = pubs.get(id)!;
+        const code = p.externalId!;
         const value = (field === 'title' ? p.title : field === 'description' ? p.description : null)?.trim() ?? '';
         const warranty = field === 'warranty' ? parseWarranty(p.warranty) : null;
         const base = {
@@ -166,18 +173,6 @@ function pushFieldTool(field: Field) {
           const r = await pushDrafts(ctx.db, { accountId: account.id, publicationId: id, fields: [field], campaigns: false, userId: ctx.userId });
           const rejected = r.rejected.find((x) => x.field === field);
           const sent = r.sent.includes(field);
-          subidas.push({
-            ...base,
-            resultado: sent ? t.it : 'rechazado',
-            ...(rejected ? { motivo: rejected.message } : {}),
-            confirmado_en_el_canal: r.confirmed,
-            ...(r.ficha
-              ? {
-                  de_la_ficha: r.ficha.sent.map((f) => ({ dato: f.label, en_el_canal_antes: f.from, se_mando: f.to, lo_tomo: r.confirmed ? !r.ficha!.notTaken.some((n) => n.field === f.field) : 'sin confirmar' })),
-                }
-              : {}),
-            ...(field === 'photos' && sent ? { _id: id } : {}),
-          });
           // Como el botón de Por subir: queda en la actividad de la persona, hecho por Claude.
           await logActivity(ctx.db, {
             userId: ctx.userId,
@@ -188,17 +183,38 @@ function pushFieldTool(field: Field) {
             detail: sent ? t.done : (rejected?.message ?? null),
             via: 'CLAUDE',
           });
+          return {
+            ...base,
+            resultado: sent ? t.it : 'rechazado',
+            ...(rejected ? { motivo: rejected.message } : {}),
+            confirmado_en_el_canal: r.confirmed,
+            ...(r.ficha
+              ? {
+                  de_la_ficha: r.ficha.sent.map((f) => ({ dato: f.label, en_el_canal_antes: f.from, se_mando: f.to, lo_tomo: r.confirmed ? !r.ficha!.notTaken.some((n) => n.field === f.field) : 'sin confirmar' })),
+                }
+              : {}),
+            ...(field === 'photos' && sent ? { _id: id } : {}),
+          };
         } catch (e) {
           if (!(e instanceof PushError || e instanceof ConnectError)) {
             console.error(`${t.name}: no se pudo subir`, e instanceof Error ? e.message : e);
           }
-          subidas.push({
+          return {
             ...base,
             resultado: 'error',
             motivo: e instanceof PushError || e instanceof ConnectError ? e.message : 'No se pudo subir: hubo un error en la app. Probá de nuevo.',
-          });
+          };
         }
-      }
+      };
+
+      // Cada una se sube y se vuelve a leer del canal: varias a la vez, las de
+      // una misma familia de a una (comparten lo que se lee del canal).
+      const { done, left } = await runInGroups(queue, (id) => pubs.get(id)!.familyId ?? id, pushOne, {
+        concurrency: PUSH_CONCURRENCY,
+        budgetMs: PUSH_BUDGET_MS - (Date.now() - started),
+      });
+      const subidas = queue.flatMap((id) => (done.has(id) ? [done.get(id)!] : []));
+      const quedan = left.map((id) => pubs.get(id)!.externalId!);
       // Las fotos: confirmadas solo si, releídas del canal, son las mismas y en el mismo orden que las elegidas.
       if (field === 'photos' && subidas.some((x) => x._id)) {
         const after = new Map((await listToPush(account.id, ctx.db)).map((r) => [r.id, r]));
