@@ -25,7 +25,7 @@ import {
 import { campaignOutcomeState, campaignPrice, campaignRevenue, combinedBounds, discountOptions, type CampaignOutcomeState } from '@/domain/promotions';
 import { logActivity } from '@/lib/activity';
 import { readPromotions, type PromotionsResult } from '@/lib/channel-promotions';
-import { CampaignError, campaignText, familyCampaignAction, type CampaignOutcome } from '@/lib/channel-campaigns';
+import { CampaignError, campaignText, familyCampaignAction, optionsCampaignAction, type CampaignOutcome } from '@/lib/channel-campaigns';
 import { familyCampaigns, membersText, splitText } from '@/domain/family-campaigns';
 import { measuresOf } from '@/lib/media';
 import { pushDrafts, PushError } from '@/lib/channel-push';
@@ -585,19 +585,79 @@ const chooseCampaign = defineTool({
   section: 'pipeline',
   title: 'Sumarse a una campaña o salir',
   description:
-    'Deja en Por subir sumarse a una campaña del canal o salir de una, como los botones de la tarjeta Promociones del paso Precio y de la página de la publicación. La campaña es su campana en lo_que_acepta_el_canal.campanas de get_price_step. En una familia se pide para todas las medidas a la vez, cada una con su propia campaña del canal: en las que se suman eligiendo el precio, para las medidas que comparten el precio de la pestaña de la publicación (las de otro precio se suman pasando una publicación de su pestaña, con su precio), y el precio se revisa contra el rango de cada medida. Las de salir y las que se suman aceptando el precio del canal van para todas. Para sumarse: si como_sumarse es eligiendo_el_precio, mandá precio, el precio para el comprador dentro de precio_que_acepta; si es aceptando, el precio lo pone el canal; si es desde_el_canal, no se puede desde la app. Para salir, se_puede_salir tiene que ser true. Devuelve qué pasó con cada medida (pedido, ya_estaba, no_entra con el motivo, otro_precio) y el margen estimado con lo que recibe la tienda, que suma lo que pone el canal. Se manda al canal con push_prices o desde Por subir. Antes, mostrale a la persona la campaña, el precio, las medidas y el margen, y esperá que confirme.',
+    'Deja en Por subir sumarse a una campaña del canal o salir de una, como los botones de la tarjeta Promociones del paso Precio y de la página de la publicación. La campaña es su campana en lo_que_acepta_el_canal.campanas de get_price_step. En una familia se pide para todas las medidas a la vez, cada una con su propia campaña del canal: en las que se suman eligiendo el precio, para las medidas que comparten el precio de la pestaña de la publicación (las de otro precio se suman pasando una publicación de su pestaña, con su precio), y el precio se revisa contra el rango de cada medida. Las de salir y las que se suman aceptando el precio del canal van para todas. Para sumarse: si como_sumarse es eligiendo_el_precio, mandá precio, el precio para el comprador dentro de precio_que_acepta; si es aceptando, el precio lo pone el canal; si es desde_el_canal, no se puede desde la app. Para salir, se_puede_salir tiene que ser true. Si la publicación es una opción de venta que no es la principal (otra forma de cobro), o hay que pedirla en varias opciones con precios distintos, usá opciones: la lista de publicaciones, cada una con su precio, todas en una sola llamada, con el resultado y el margen de cada una. Devuelve qué pasó con cada medida (pedido, ya_estaba, no_entra con el motivo, otro_precio) y el margen estimado con lo que recibe la tienda, que suma lo que pone el canal. Se manda al canal con push_prices o desde Por subir. Antes, mostrale a la persona la campaña, el precio, las medidas y el margen, y esperá que confirme.',
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg,
     campana: z.string().min(1).max(500).describe('La campaña: su campana en lo_que_acepta_el_canal.campanas de get_price_step.'),
     accion: z.enum(['sumarse', 'salir']),
     precio: z.number().positive().max(999_999_999).optional().describe('El precio para el comprador, en pesos, en las campañas que se suman eligiendo el precio. Con centavos se redondea para abajo.'),
+    opciones: z
+      .array(
+        z.object({
+          publicacion: z.string().min(1).describe('La opción de venta: su código en el canal o su id.'),
+          precio: z.number().positive().max(999_999_999).optional().describe('Su precio para el comprador, si la campaña se suma eligiendo el precio.'),
+        }),
+      )
+      .min(1)
+      .max(40)
+      .optional()
+      .describe('Para pedir la misma campaña en varias publicaciones en una sola llamada, cada una con su precio: las opciones de venta de una familia (cada forma de cobro de cada medida). Con esto, la campaña se pide solo en las de la lista y precio no se usa.'),
   }),
   readOnly: false,
   destructive: false,
   run: async (ctx, args) => {
     const account = await resolveAccount(ctx, args.cuenta);
     const id = await resolvePublication(ctx, account.id, args.publicacion);
+    // Una opción de venta que no es la principal tiene su forma de cobro y su precio: se pide sola, no con la familia.
+    const isOption = !args.opciones?.length && (await ctx.db.publication.findUnique({ where: { id }, select: { mainOptionId: true } }))?.mainOptionId;
+    const asked = args.opciones?.length ? args.opciones : isOption ? [{ publicacion: id, precio: args.precio }] : null;
+    if (asked) {
+      const action = args.accion === 'sumarse' ? 'join' : 'leave';
+      const options: { publicationId: string; price: number | null }[] = [];
+      for (const o of asked) {
+        const publicationId = await resolvePublication(ctx, account.id, o.publicacion);
+        if (!options.some((x) => x.publicationId === publicationId)) options.push({ publicationId, price: o.precio ?? null });
+      }
+      try {
+        const r = await optionsCampaignAction(ctx.db, { accountId: account.id, options, also: id, campaign: args.campana, action, mode: 'queue', userId: ctx.userId });
+        // El margen de cada una, con su costo y su forma de cobro.
+        const margins = new Map<string, number>();
+        if (action === 'join') {
+          for (const x of r.results) {
+            if (x.result !== 'pedido' || !x.campaign) continue;
+            const row = await ctx.db.publication.findUnique({ where: { id: x.publicationId }, select: { mainOptionId: true, installments: true, channelCopy: { select: { installments: true } } } });
+            // El costo es el de su medida: el de la pestaña de su principal.
+            const headId = row?.mainOptionId ?? x.publicationId;
+            const step = await loadPriceStep(ctx.db, account.id, headId);
+            const group = step?.groups.find((g) => g.publicationIds.includes(headId));
+            const revenue = campaignRevenue({ price: x.price ?? x.campaign.price, channelPct: x.campaign.channelPct, listPrice: x.campaign.listPrice });
+            const own = row?.channelCopy?.installments ?? row?.installments ?? null;
+            if (!step || !group?.cost || revenue === null) continue;
+            const margin = marginOf(revenue, group.cost, resolvePricing(step.account, step.overrides), own !== null && isInstallmentPlan(own) ? own : 0);
+            if (margin !== null) margins.set(x.publicationId, margin);
+          }
+        }
+        const queued = r.results.filter((x) => x.result === 'pedido');
+        if (queued.length === 0) throw new McpToolError(`No quedó nada en Por subir. ${r.results.map((x) => x.message).filter(Boolean).join(' ')}`.trim());
+        return {
+          campana: r.name,
+          en_por_subir: queued.length,
+          opciones: r.results.map((x) => ({
+            publicacion: x.externalId ?? x.publicationId,
+            resultado: x.result,
+            ...(x.price !== null ? { precio: x.price } : {}),
+            ...(margins.has(x.publicationId) ? { margen_estimado_pct: round(margins.get(x.publicationId)!) } : {}),
+            ...(x.message ? { motivo: x.message } : {}),
+          })),
+          ...(queued.length < r.results.length ? { aviso: 'No todas quedaron pedidas: mirá el motivo de cada una.' } : {}),
+          como_sigue: 'Se mandan al canal con push_prices.',
+        };
+      } catch (e) {
+        if (e instanceof CampaignError) throw new McpToolError(e.message);
+        throw e;
+      }
+    }
     const step = await loadPriceStep(ctx.db, account.id, id);
     // Las medidas que comparten el precio de la publicación: su pestaña del paso Precio.
     const group = step?.groups.find((g) => g.publicationIds.includes(id));

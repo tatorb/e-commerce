@@ -71,7 +71,7 @@ const createTool = defineTool({
   section: 'subir',
   title: 'Crear otra forma de cobro para una medida',
   description:
-    'Crea en el canal otra opción de venta de una medida, sumada al mismo producto del canal que la buena, con una forma de cobro que la medida no tiene, copiada de la buena (la que está en el pipeline): el mismo nombre, descripción, datos de catálogo, garantía y fotos. El precio, sin mandarlo, es el de esa forma de cobro desde el precio sin cuotas guardado (la misma ganancia); la cantidad es la del producto en el canal, la misma de las otras opciones. Queda en la app como otra opción de la medida. Devuelve el código, el link, el precio y si el canal la juntó con las otras opciones de la medida (junto_a_la_medida): si da false, frená y avisale a la persona antes de crear más. Antes, corré reconcile_publications con aplicar para esa medida, así la app conoce todas las opciones que ya tiene el canal y no se crea una repetida. Crea la publicación de verdad en el canal: antes, mostrale a la persona la medida, la forma de cobro, y el precio, y esperá que confirme. Una por llamada.',
+    'Crea en el canal otra opción de venta de una medida, sumada al mismo producto del canal que la buena, con una forma de cobro que la medida no tiene, copiada de la buena (la que está en el pipeline): el mismo nombre, descripción, datos de catálogo, garantía y fotos. El precio, sin mandarlo, es el de esa forma de cobro desde el precio sin cuotas guardado (la misma ganancia); la cantidad es la del producto en el canal, la misma de las otras opciones. Queda en la app como otra opción de la medida. Devuelve el código, el link, el precio, la forma de cobro con que quedó ese código en el canal (leída después de crearlo; si no es la pedida lo dice en avisos y forma_de_cobro_confirmada_en_el_canal da false) y si el canal la juntó con las otras opciones de la medida (junto_a_la_medida): si da false, frená y avisale a la persona antes de crear más. Antes, corré reconcile_publications con aplicar para esa medida, así la app conoce todas las opciones que ya tiene el canal y no se crea una repetida. Crea la publicación de verdad en el canal: antes, mostrale a la persona la medida, la forma de cobro, y el precio, y esperá que confirme. Una por llamada, y de a una: no mandes dos a la vez para la misma medida, esperá la respuesta de cada una.',
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg.describe('Cualquier publicación de la medida: su código, link o id.'),
@@ -99,7 +99,10 @@ const createTool = defineTool({
       creada: true,
       codigo: r.externalId,
       link: r.url,
+      // La forma de cobro de ese código, leída del canal después de crearlo.
       forma_de_cobro: r.plan,
+      forma_de_cobro_pedida: r.asked,
+      forma_de_cobro_confirmada_en_el_canal: r.planConfirmed,
       precio_publicado: r.price,
       junto_a_la_medida: r.joined,
       ...(r.warnings.length > 0 ? { avisos: r.warnings } : {}),

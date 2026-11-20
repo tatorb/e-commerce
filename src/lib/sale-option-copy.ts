@@ -198,7 +198,19 @@ export async function normalizeSaleOptions(
   return report;
 }
 
-export type CreatedOption = { id: string; externalId: string; url: string | null; plan: string; price: number; joined: boolean; warnings: string[] };
+export type CreatedOption = {
+  id: string;
+  externalId: string;
+  url: string | null;
+  // La forma de cobro con que quedó en el canal, leída después de crearla; si no se pudo leer, la pedida.
+  plan: string;
+  asked: string;
+  // Si se leyó del canal y es la pedida.
+  planConfirmed: boolean;
+  price: number;
+  joined: boolean;
+  warnings: string[];
+};
 
 /**
  * Crea en el canal otra forma de cobro para la medida, copiada de la buena:
@@ -319,14 +331,35 @@ export async function createSaleOption(
 
   // La lectura del canal trae su medida en el canal: así se sabe si quedó junto a las otras.
   let joined = false;
+  let inChannelPlan: number | null = null;
   try {
     await readOne(db, { accountId: args.accountId, publicationId: row.id, now: args.now });
-    const copy = await db.channelCopy.findUnique({ where: { publicationId: row.id }, select: { channelProductId: true } });
+    const copy = await db.channelCopy.findUnique({ where: { publicationId: row.id }, select: { channelProductId: true, installments: true } });
     joined = copy?.channelProductId === channelProductId;
+    // La forma de cobro es la que tiene ese código en el canal, no la que se pidió: si no coinciden, se dice.
+    if (copy && copy.installments !== null) {
+      inChannelPlan = copy.installments;
+      if (copy.installments !== plan) {
+        warnings.push(
+          `Se pidió ${planLabel(plan).toLowerCase()} y ${made.externalId} quedó en ${channelName} con ${planLabel(copy.installments).toLowerCase()}: este código es de ${planLabel(copy.installments).toLowerCase()}. Revisá las opciones de la medida con get_price_step antes de crear otra.`,
+        );
+        await db.publication.update({ where: { id: row.id }, data: { installments: copy.installments } });
+      }
+    }
     if (!joined) warnings.push(`${channelName} no la juntó con las otras opciones de la medida: quedó como un producto aparte. Revisala antes de crear las demás.`);
   } catch (e) {
     warnings.push('Se creó, pero todavía no se pudo leer del canal para confirmar que quedó junto a las otras opciones.');
     console.error('No se pudo leer la opción recién creada', e instanceof Error ? e.message : e);
   }
-  return { id: row.id, externalId: made.externalId, url: made.url, plan: planLabel(plan), price: price!, joined, warnings };
+  return {
+    id: row.id,
+    externalId: made.externalId,
+    url: made.url,
+    plan: planLabel(inChannelPlan ?? plan),
+    asked: planLabel(plan),
+    planConfirmed: inChannelPlan === plan,
+    price: price!,
+    joined,
+    warnings,
+  };
 }

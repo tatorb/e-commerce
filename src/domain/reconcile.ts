@@ -28,6 +28,7 @@ export type FindingKind =
   | 'new_option' // el canal la tiene y la app no: se suma como opción de venta
   | 'switch_main' // la principal no se puede usar, o hay una sin cuotas viva: la principal pasa a esa
   | 'no_replacement' // la principal está finalizada y no hay otra viva: tarea
+  | 'replaced' // finalizada a propósito: el producto vende esa medida en otra publicación activa, no hace falta nada
   | 'duplicate_off' // el canal la apagó por repetida: se propone finalizarla
   | 'needs_fix' // la principal está inactiva para corregir: tarea y vuelve a Información
   | 'under_review' // la principal está en revisión: no se sube nada

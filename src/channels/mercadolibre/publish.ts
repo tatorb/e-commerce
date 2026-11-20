@@ -1,5 +1,5 @@
 import { MercadoLibreRequestError, mlGet, mlSend } from './http';
-import { CAMPAIGN_TAG, CLASSIC, inFull, INSTALLMENT_TAGS, listingsOfProducts, LOW_INTEREST_TAG, PREMIUM, tagsOf, variationsOf } from './listings';
+import { CAMPAIGN_TAG, CLASSIC, inFull, installmentsOf, INSTALLMENT_TAGS, listingsOfProducts, LOW_INTEREST_TAG, PREMIUM, tagsOf, variationsOf } from './listings';
 import { measureText, variantKey, type VariantLike } from '@/domain/media';
 import { formatPrice } from '@/domain/money';
 import { isInstallmentPlan, LOW_INTEREST_PLAN } from '@/domain/pricing';
@@ -615,8 +615,23 @@ export const mercadolibrePublisher: ChannelPublisher = {
     });
     const itemId = (v: unknown) => (typeof v === 'string' && /^MLA\d+$/.test(v) ? v : null);
     let id = isObj(body) ? (itemId(body.id) ?? itemId(body.item_id)) : null;
-    // Si la respuesta no trae el código, es la publicación del producto que antes no estaba.
-    if (!id) id = (await listingsOfProducts(accessToken, sellerId, [o.channelProductId]).catch(() => [] as string[])).find((x) => !before.includes(x)) ?? null;
+    // Si la respuesta no trae el código, es la publicación del producto que antes no estaba. Si aparecieron
+    // varias (se crearon dos formas de cobro a la vez), la que tiene esta forma de cobro: nunca la de otra.
+    if (!id) {
+      const fresh = (await listingsOfProducts(accessToken, sellerId, [o.channelProductId]).catch(() => [] as string[])).filter((x) => !before.includes(x));
+      if (fresh.length === 1) id = fresh[0];
+      else {
+        const same: string[] = [];
+        for (const x of fresh) {
+          const item = await get(`/items/${encodeURIComponent(x)}?attributes=listing_type_id,tags`, accessToken).catch(() => null);
+          if (isObj(item) && installmentsOf(item) === o.plan) same.push(x);
+        }
+        if (same.length === 1) id = same[0];
+        else if (fresh.length > 1) {
+          throw new PublishError(`Mercado Libre creó la publicación pero no dijo su código, y aparecieron ${fresh.length} nuevas en el producto (${fresh.join(', ')}): corré reconcile_publications para traerlas antes de crear otra.`);
+        }
+      }
+    }
     if (!id) throw new PublishError('Mercado Libre no devolvió el código de la publicación nueva: revisá el producto en Mercado Libre antes de volver a probar.');
     const warnings: string[] = [];
     if (o.description) {

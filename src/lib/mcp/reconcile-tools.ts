@@ -10,6 +10,7 @@ const FINDING_LABEL = {
   new_option: 'opción que faltaba en la app',
   switch_main: 'pasar la principal a otro código',
   no_replacement: 'finalizada sin reemplazo',
+  replaced: 'finalizada, la medida se vende en otra publicación',
   duplicate_off: 'apagada por repetida',
   needs_fix: 'inactiva para corregir',
   under_review: 'en revisión',
@@ -21,7 +22,7 @@ const reconcileTool = defineTool({
   section: ['pipeline', 'publicaciones'],
   title: 'Reconciliar las opciones de venta con el canal',
   description:
-    'Compara las opciones de venta de cada medida con lo que tiene el canal: le pide al canal todas las publicaciones vivas de cada medida conocida y dice qué encuentra. Los casos: una opción que el canal tiene y la app no (se suma); la principal finalizada, en revisión o apagada por repetida con otra opción viva (la principal pasa a esa); la principal finalizada sin otra viva (tarea: ¿volver a publicar?); la principal inactiva para corregir (tarea y vuelve al paso Información); una opción apagada por repetida (se propone finalizarla); dos opciones vivas con la misma forma de cobro (aviso). Sin aplicar, solo muestra y no cambia nada: usalo así primero y mostrale a la persona el resultado. Con aplicar, hace esos cambios en la app; no sube nada al canal: lo que queda distinto aparece en Por subir. Revisa unas 40 medidas por vuelta: si quedan, volvé a llamar con desde.',
+    'Compara las opciones de venta de cada medida con lo que tiene el canal: le pide al canal todas las publicaciones vivas de cada medida conocida y dice qué encuentra. Los casos: una opción que el canal tiene y la app no (se suma); la principal finalizada, en revisión o apagada por repetida con otra opción viva (la principal pasa a esa); la principal finalizada sin otra viva (tarea: ¿volver a publicar?, salvo que el producto venda esa misma medida en otra publicación activa, por ejemplo porque la familia se recreó: ahí no propone nada); la principal inactiva para corregir (tarea y vuelve al paso Información); una opción apagada por repetida (se propone finalizarla); dos opciones vivas con la misma forma de cobro (aviso). Sin aplicar, solo muestra y no cambia nada: usalo así primero y mostrale a la persona el resultado. Con aplicar, hace esos cambios en la app; no sube nada al canal: lo que queda distinto aparece en Por subir. Revisa unas 40 medidas por vuelta: si quedan, volvé a llamar con desde.',
   input: z.object({
     cuenta: accountArg,
     publicaciones: z.array(z.string().min(1)).max(100).optional().describe('Solo las medidas de estas publicaciones: código del canal, link o id. Sin la lista, todas las de la cuenta.'),

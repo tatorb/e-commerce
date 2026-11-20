@@ -244,6 +244,57 @@ export async function familyCampaignAction(
   return { name: g.name, kind: g.kind, channelName: read.channelName, results, lead };
 }
 
+/**
+ * Lo mismo para varias publicaciones a la vez, cada una con su precio: las
+ * opciones de venta de una familia, que tienen cada una su forma de cobro y
+ * su precio. Lee las promociones de todas una sola vez. also: otra publicación
+ * de la que salió la campaña, por si la campaña viene por su ref.
+ */
+export async function optionsCampaignAction(
+  db: PrismaClient,
+  args: {
+    accountId: string;
+    options: { publicationId: string; price: number | null }[];
+    also?: string;
+    campaign: string;
+    action: CampaignAction;
+    mode: 'queue' | 'now';
+    userId: string | null;
+  },
+): Promise<{ name: string; kind: string; channelName: string; results: (FamilyCampaignResult & { price: number | null; campaign: ChannelCampaign | null })[] }> {
+  const ids = [...new Set([...args.options.map((o) => o.publicationId), ...(args.also ? [args.also] : [])])];
+  const read = await readPromotions(db, { accountId: args.accountId, publicationIds: ids, family: false });
+  if (!read.ok) throw new CampaignError(read.error);
+  const groups = familyCampaigns(read.read.map((m) => ({ publicationId: m.publicationId, label: m.externalId, campaigns: m.promotions.campaigns })));
+  const g = groups.find((x) => x.key === args.campaign || x.members.some((m) => m.campaign?.ref === args.campaign));
+  if (!g) throw new CampaignError(`Esa campaña ya no aparece en ${read.channelName}: volvé a consultar las promociones.`);
+  const code = new Map(read.read.map((m) => [m.publicationId, m.externalId]));
+  const results: (FamilyCampaignResult & { price: number | null; campaign: ChannelCampaign | null })[] = [];
+  for (const o of args.options) {
+    const member = g.members.find((m) => m.publicationId === o.publicationId);
+    const base = { publicationId: o.publicationId, label: code.get(o.publicationId) ?? o.publicationId, externalId: code.get(o.publicationId) ?? null, price: null, campaign: member?.campaign ?? null };
+    if (!member) {
+      results.push({ ...base, result: 'no_entra', message: code.has(o.publicationId) ? `A ${base.label} no la invitan a ${g.name}.` : `${base.label} todavía no está publicada en ${read.channelName}.` });
+      continue;
+    }
+    // Cada una con su precio: se planea sola, como si fuera la única.
+    const plan = planFamilyAction({ ...g, members: [member] }, { action: args.action, price: o.price, samePrice: [o.publicationId], channelName: read.channelName })[0];
+    if (plan.outcome !== 'do') {
+      results.push({ ...base, result: plan.outcome === 'already' ? 'ya_estaba' : 'no_entra', message: `${base.label}: ${plan.message}` });
+      continue;
+    }
+    const choice: CampaignChoice = { action: args.action, ref: plan.ref!, name: g.name, kind: g.kind, price: plan.price, pausesOwnDiscount: member.campaign!.pausesOwnDiscount };
+    if (args.mode === 'queue') {
+      await queueCampaign(db, { accountId: args.accountId, publicationId: o.publicationId, choice, userId: args.userId });
+      results.push({ ...base, price: plan.price, result: 'pedido', message: null });
+      continue;
+    }
+    const r = await sendCampaignNow(db, { accountId: args.accountId, publicationId: o.publicationId, choice, userId: args.userId });
+    results.push(r.ok ? { ...base, price: plan.price, result: 'hecho', message: null } : { ...base, result: 'rechazado', message: `${base.label}: ${r.error}` });
+  }
+  return { name: g.name, kind: g.kind, channelName: read.channelName, results };
+}
+
 /** Lo que pasó, en una frase por medida, para la pantalla y para Claude. */
 export function familyResultText(r: FamilyCampaignResult, action: CampaignAction, mode: 'queue' | 'now'): string {
   if (r.result === 'pedido') return `${r.label}: quedó en Por subir ${action === 'join' ? 'sumarse' : 'salir'}.`;

@@ -192,6 +192,23 @@ describe.skipIf(!url)('reconciliar contra la base', async () => {
     expect(await db.task.count()).toBe(2);
   });
 
+  it('finalizada a propósito porque la familia se recreó: si el producto vende esa medida en otra publicación activa, no propone volver a publicar', async () => {
+    await app('MLA1', 'CLOSED');
+    channel.options.set('UP-050', []);
+    // La familia nueva del mismo producto, con la misma medida, activa.
+    const fresh = await db.publication.create({ data: { productId, storeId, externalId: 'MLA7', title: 'Subconjunto' } });
+    await db.channelCopy.create({ data: { publicationId: fresh.id, readAt: new Date(), status: 'ACTIVE', installments: 0, price: 1000, channelProductId: 'UP-NUEVA' } });
+    channel.options.set('UP-NUEVA', ['MLA7']);
+    const r = await reconcile(db, { accountId, apply: true, userId });
+    expect(r.measures.flatMap((m) => m.findings.map((f) => [f.kind, f.codes, f.done ?? null]))).toEqual([['replaced', ['MLA1'], null]]);
+    expect(r.measures[0].findings[0].text).toContain('sigue vendiendo esta medida en MLA7');
+    expect(await db.task.count()).toBe(0);
+    // Si la otra es de otra medida, o también está finalizada, sí la propone.
+    await db.channelCopy.update({ where: { publicationId: fresh.id }, data: { status: 'CLOSED' } });
+    const again = await reconcile(db, { accountId, apply: false, userId });
+    expect(again.measures.flatMap((m) => m.findings.map((f) => f.kind))).toContain('no_replacement');
+  });
+
   it('solo las medidas pedidas, y las que el canal no devolvió quedan aparte', async () => {
     const a = await app('MLA1', 'ACTIVE');
     const other = await db.product.create({ data: { accountId, name: 'Subconjunto SP-2' } });

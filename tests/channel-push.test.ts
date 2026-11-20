@@ -1225,6 +1225,37 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     expect(new Map(requests.map((r) => [r.publicationId, Number(r.price)]))).toEqual(new Map([[p1.id, 75], [p2.id, 75]]));
     expect(writes).toEqual([]);
 
+    // Varias opciones en una sola llamada, cada una con su precio y su resultado.
+    await db.campaignRequest.deleteMany();
+    const many = await run('choose_campaign', {
+      cuenta: 'prueba',
+      publicacion: p1.id,
+      campana: deal.campana,
+      accion: 'sumarse',
+      opciones: [
+        { publicacion: p1.id, precio: 85 },
+        { publicacion: p2.id, precio: 70 },
+      ],
+    });
+    expect(many.opciones.map((o: { publicacion: string; resultado: string; precio?: number }) => [o.publicacion, o.resultado, o.precio])).toEqual([
+      ['MLA1', 'pedido', 85],
+      ['MLA2', 'pedido', 70],
+    ]);
+    expect(many.en_por_subir).toBe(2);
+    expect(new Map((await db.campaignRequest.findMany()).map((r) => [r.publicationId, Number(r.price)]))).toEqual(new Map([[p1.id, 85], [p2.id, 70]]));
+    // Una que no entra lo dice sin frenar a las demás.
+    const some = await run('choose_campaign', { cuenta: 'prueba', publicacion: p1.id, campana: deal.campana, accion: 'sumarse', opciones: [{ publicacion: p1.id, precio: 80 }, { publicacion: p2.id, precio: 85 }] });
+    expect(some.opciones.map((o: { resultado: string }) => o.resultado)).toEqual(['pedido', 'no_entra']);
+    expect(some.opciones[1].motivo).toContain('Es más alto de lo que acepta el canal');
+    // Una opción de venta que no es la principal se pide sola, con su precio: las demás no vuelven como otro_precio.
+    await db.publication.update({ where: { id: p2.id }, data: { mainOptionId: p1.id } });
+    const option = await run('choose_campaign', { cuenta: 'prueba', publicacion: p2.id, campana: deal.campana, accion: 'sumarse', precio: 75 });
+    expect(option.opciones).toEqual([expect.objectContaining({ publicacion: 'MLA2', resultado: 'pedido', precio: 75 })]);
+    await db.publication.update({ where: { id: p2.id }, data: { mainOptionId: null } });
+    await db.campaignRequest.deleteMany();
+    await run('choose_campaign', { cuenta: 'prueba', publicacion: p2.id, campana: deal.campana, accion: 'sumarse', precio: 75 });
+    expect(writes).toEqual([]);
+
     // push_prices con una sola medida sube las dos, cada una con su medida. El canal rechaza la 0,50: la familia queda partida.
     items.MLA2.campaignRejected = 'Item is not eligible';
     const pushed = await run('push_prices', { cuenta: 'prueba', publicaciones: [p1.id] });

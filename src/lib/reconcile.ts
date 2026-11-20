@@ -126,7 +126,18 @@ export async function reconcile(
           blocked: l.statusBlocked ?? false,
         })),
       ];
-      const findings = reconcileMeasure(options);
+      const findings = reconcileMeasure(options).map((f) => {
+        if (f.kind !== 'no_replacement') return f;
+        // Finalizada a propósito, por ejemplo porque la familia se recreó: si el producto vende esa
+        // misma medida en otra publicación activa, no hay nada que volver a publicar.
+        const main = inApp.find((r) => r.externalId === f.codes[0]);
+        const elsewhere = main
+          ? rows.filter((r) => r.productId === main.productId && r.variantKey === main.variantKey && r.channelProductId !== productId && ['ACTIVE', 'PAUSED'].includes(r.status) && !r.blocked)
+          : [];
+        if (elsewhere.length === 0) return f;
+        const codes = elsewhere.slice(0, 3).map((r) => r.externalId).join(', ');
+        return { ...f, kind: 'replaced' as const, text: `La principal ${f.codes[0]} está finalizada, y el producto sigue vendiendo esta medida en ${codes}: no hace falta volver a publicarla ni crear una tarea.` };
+      });
       if (findings.length === 0) continue;
       const first = inApp[0];
       const entry: MeasureReport = {

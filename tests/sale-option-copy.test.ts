@@ -12,6 +12,8 @@ const installments: [string, number][] = [];
 const locked = new Set<string>();
 let nextCode = 900;
 let joinAs = 'UP-1';
+// La forma de cobro con que el canal dejó la publicación nueva, si se leyó.
+let readPlan: number | null = null;
 
 vi.mock('@/lib/connections', () => ({ withAccessToken: async (_db: unknown, _store: string, run: (t: string, u: string) => unknown) => run('llave', '7') }));
 vi.mock('@/channels/publish', async (orig) => {
@@ -34,8 +36,8 @@ vi.mock('@/lib/channel-sync', () => ({
   readOne: async (db: PrismaClient, args: { publicationId: string }) => {
     await db.channelCopy.upsert({
       where: { publicationId: args.publicationId },
-      create: { publicationId: args.publicationId, readAt: new Date(), status: 'ACTIVE', channelProductId: joinAs },
-      update: { channelProductId: joinAs },
+      create: { publicationId: args.publicationId, readAt: new Date(), status: 'ACTIVE', channelProductId: joinAs, installments: readPlan },
+      update: { channelProductId: joinAs, installments: readPlan },
     });
     return [];
   },
@@ -58,6 +60,7 @@ describe.skipIf(!url)('igualar y crear opciones de venta', () => {
     installments.length = 0;
     locked.clear();
     joinAs = 'UP-1';
+    readPlan = null;
     await db.$executeRawUnsafe('TRUNCATE listing_families, channel_copies, channel_sync_changes, price_decisions, pipeline_movements, publications, products, stores, channels, accounts, users CASCADE');
     const channel = await db.channel.create({ data: { kind: 'MERCADOLIBRE', name: 'Mercado Libre' } });
     accountId = (await db.account.create({ data: { slug: 'prueba', name: 'Cuenta de prueba' } })).id;
@@ -140,6 +143,20 @@ describe.skipIf(!url)('igualar y crear opciones de venta', () => {
     const apart = await createSaleOption(db, { accountId, publicationId: main.id, plan: 6, price: 600_000, userId: null });
     expect(apart.joined).toBe(false);
     expect(apart.warnings[0]).toContain('no la juntó');
+  });
+
+  it('la forma de cobro que devuelve es la que tiene ese código en el canal, no la que se pidió', async () => {
+    const main = await good();
+    // Leída del canal y es la pedida: confirmada.
+    readPlan = 9;
+    const nine = await createSaleOption(db, { accountId, publicationId: main.id, plan: 9, price: 700_000, userId: null });
+    expect(nine).toMatchObject({ plan: '9 cuotas', asked: '9 cuotas', planConfirmed: true, warnings: [] });
+    // Se pidió 12 y ese código quedó en el canal con 3: lo dice y la app guarda la del canal.
+    readPlan = 3;
+    const crossed = await createSaleOption(db, { accountId, publicationId: main.id, plan: 12, price: 800_000, userId: null });
+    expect(crossed).toMatchObject({ plan: '3 cuotas', asked: '12 cuotas', planConfirmed: false });
+    expect(crossed.warnings[0]).toContain(`Se pidió 12 cuotas y ${crossed.externalId} quedó en Mercado Libre con 3 cuotas`);
+    expect((await db.publication.findUniqueOrThrow({ where: { id: crossed.id } })).installments).toBe(3);
   });
 
   it('sin una buena en el pipeline, pide cuál es', async () => {
