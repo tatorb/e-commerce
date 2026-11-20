@@ -76,6 +76,7 @@ import { listNotes } from '@/lib/publication-notes';
 import { assignablePeople, tasksOfPublication } from '@/lib/tasks';
 import { followsStockOf, managedNote, plannedText, plansFor } from '@/lib/stock-plan';
 import { FollowStockSwitch } from '@/components/publication/FollowStockSwitch';
+import { UnitsPerSaleBlock } from '@/components/publication/UnitsPerSaleBlock';
 import { SharedPhotosNote } from '@/components/publication/SharedPhotosNote';
 import { PublicationFactsRow } from '@/components/publication/PublicationFactsRow';
 import { MeasurePickerCard } from '@/components/publication/MeasurePickerCard';
@@ -447,6 +448,7 @@ export default async function PublicationPage({
                     {field === 'quantity' && p.externalId ? (
                       <FollowStockSwitch accountSlug={account.slug} publicationId={p.id} on={followsStockOf(stockPlan)} />
                     ) : null}
+                    {field === 'quantity' ? <UnitsPerSaleBlock accountSlug={account.slug} publicationId={p.id} /> : null}
                     {field === 'photos' && media ? <SharedPhotosNote sources={media} /> : null}
                     {field === 'price' && canSimulate ? (
                       <Button size="sm" variant="outline" asChild>

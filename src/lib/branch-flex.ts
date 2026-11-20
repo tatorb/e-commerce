@@ -25,6 +25,7 @@ const SELECT = {
   variantListings: true,
   variantKey: true,
   flexFollowsStock: true,
+  unitsPerSale: true,
   store: { select: { id: true, accountId: true, channel: { select: { kind: true, name: true } }, connection: { select: { status: true } } } },
   channelCopy: { select: { flex: true, status: true, missingSince: true, stockInChannel: true, variations: true, details: true } },
   product: { select: SOURCE_SELECT },
@@ -100,7 +101,7 @@ export async function flexPlans(db: Db, publicationIds: string[]): Promise<Map<s
       no('No está activa ni pausada en el canal.');
       continue;
     }
-    const source = sourceOf(p.product);
+    const source = sourceOf(p.product, p.unitsPerSale);
     if (!isManaged(source)) {
       no('El producto todavía no tiene stock en la app.');
       continue;

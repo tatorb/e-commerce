@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { AlertTriangle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { SectionBody, SectionCard } from '@/components/ui/section-card';
-import { available, STOCK_MOVE_LABEL, stockText } from '@/domain/stock';
+import { available, setsOf, STOCK_MOVE_LABEL, stockText } from '@/domain/stock';
 import { formatDateTime } from '@/lib/format';
 import type { ProductStockView } from '@/lib/stock';
 import { plannedText } from '@/lib/stock-plan';
@@ -152,8 +152,12 @@ export function ProductStockPanel({
                   {view.lines.map((l) => (
                     <li key={l.key} className="flex flex-wrap items-baseline gap-x-2">
                       <span className="font-medium">{view.lines.length > 1 ? `${l.label || 'Sin medida'}:` : ''}</span>
-                      <span className="tabular-nums">{l.quantity === null || l.shown === null ? 'Sin stock cargado' : cushionText(l.quantity, l.shown)}</span>
-                      <MeasureAlarm quantity={l.quantity} alarm={l.alarm} timeZone={timeZone} />
+                      <span className="tabular-nums">
+                        {l.quantity === null || l.shown === null
+                          ? 'Sin stock cargado'
+                          : `${cushionText(setsOf(l.quantity, l.pack), l.shown)}${l.pack > 1 ? ` · se vende de a ${l.pack} (${l.quantity} ${l.quantity === 1 ? 'unidad' : 'unidades'})` : ''}`}
+                      </span>
+                      <MeasureAlarm quantity={l.quantity === null ? null : setsOf(l.quantity, l.pack)} alarm={l.alarm} timeZone={timeZone} />
                     </li>
                   ))}
                 </ul>

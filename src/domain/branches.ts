@@ -32,7 +32,9 @@ export type BranchStockMap = Map<string, Record<string, number>>;
 /** Lo que vende la publicación con el stock de una sucursal en lugar del total. */
 function inBranch(source: StockSource, stock: BranchStockMap): StockSource {
   const swap = <P extends { id: string; stock: Record<string, number> | null }>(p: P): P => ({ ...p, stock: p.stock === null ? null : (stock.get(p.id) ?? {}) });
-  return source.kind === 'INDIVIDUAL' ? { kind: 'INDIVIDUAL', product: swap(source.product) } : { kind: 'COMBO', parts: source.parts.map((p) => ({ ...p, product: swap(p.product) })) };
+  return source.kind === 'INDIVIDUAL'
+    ? { kind: 'INDIVIDUAL', product: swap(source.product), units: source.units }
+    : { kind: 'COMBO', parts: source.parts.map((p) => ({ ...p, product: swap(p.product) })), units: source.units };
 }
 
 export type FlexWanted = { on: boolean; branch: string | null; reason: string };

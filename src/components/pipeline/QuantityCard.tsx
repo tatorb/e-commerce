@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { quantityText } from '@/domain/quantities';
 import { followsStockOf, type StockPlan } from '@/lib/stock-plan';
 import { FollowStockSwitch } from '@/components/publication/FollowStockSwitch';
+import { UnitsPerSaleBlock } from '@/components/publication/UnitsPerSaleBlock';
 
 // En el paso Publicación: la cantidad disponible. Si sale del stock del
 // producto, se cambia allá y se sube sola; si no, se cambia acá y queda en Por
@@ -29,7 +30,12 @@ export function QuantityCard({
   // Lo que le toca según el stock del producto, y dónde se cambia.
   stock?: { plan: StockPlan; productHref: string } | null;
 }) {
-  const toggle = <FollowStockSwitch accountSlug={accountSlug} publicationId={publicationId} on={followsStockOf(stock?.plan)} />;
+  const toggle = (
+    <>
+      <FollowStockSwitch accountSlug={accountSlug} publicationId={publicationId} on={followsStockOf(stock?.plan)} />
+      <UnitsPerSaleBlock accountSlug={accountSlug} publicationId={publicationId} />
+    </>
+  );
   if (stock?.plan.managed) {
     const channel = stock.plan.channel;
     return (

@@ -19,6 +19,7 @@ import { readPublicationFlex, setPublicationsFlex, type FlexResult } from '@/lib
 import { MAX_QUANTITY } from '@/domain/quantities';
 import { saveQuantities, type QuantitiesResult } from '@/lib/quantities';
 import { setFollowsStock, syncStock } from '@/lib/stock';
+import { setUnitsPerSale } from '@/lib/units-per-sale';
 import { StockError } from '@/domain/stock';
 import { plannedText } from '@/lib/stock-plan';
 import { settleReactivations } from '@/lib/restock';
@@ -432,6 +433,27 @@ export async function setFollowsStockAction(accountSlug: string, publicationId: 
       if (r.sync.failed.length > 0) return { ok: false, error: `Quedó prendida, pero no se pudo subir: ${r.sync.failed[0].error}` };
       if (!r.plan.managed) return { ok: true, message: `Prendida. Todavía no sigue al stock: ${r.plan.reason}` };
       return { ok: true, message: r.sync.sent > 0 ? `Prendida. Se subió ${plannedText(r.plan)}.` : `Prendida. Ya tenía ${plannedText(r.plan)}.` };
+    } catch (e) {
+      if (e instanceof StockError) return { ok: false, error: e.message };
+      return failure(e);
+    }
+  });
+}
+
+/** Las unidades por venta: de a cuántas unidades del stock vende. Va a su familia y sus opciones de venta, y sube la cantidad. */
+export async function setUnitsPerSaleAction(accountSlug: string, publicationId: string, units: number): Promise<Result<{ message: string }>> {
+  return act(accountSlug, { section: ['publicaciones', 'pipeline'], does: 'Cambió las unidades por venta', publicationId }, async () => {
+    const user = await requireUser();
+    const account = await getAccountBySlug(accountSlug);
+    if (!account) return { ok: false, error: 'La cuenta no existe.' };
+    const id = idSchema.safeParse(publicationId);
+    if (!id.success) return { ok: false, error: 'La publicación no existe.' };
+    try {
+      const r = await setUnitsPerSale(prisma, { accountId: account.id, publicationId: id.data, units, userId: user.id });
+      refresh(accountSlug, id.data);
+      if (r.sync.failed.length > 0) return { ok: false, error: `Quedó guardado, pero no se pudo subir la cantidad: ${r.sync.failed[0].error}` };
+      const where = r.rows.length > 1 ? ` en ${r.rows.length} publicaciones` : '';
+      return { ok: true, message: `Guardado${where}: vende de a ${r.units}.${r.sync.sent > 0 ? ` Se subió la cantidad nueva a ${r.sync.sent}.` : ''} Revisá el precio: el costo de la publicación cambió.` };
     } catch (e) {
       if (e instanceof StockError) return { ok: false, error: e.message };
       return failure(e);

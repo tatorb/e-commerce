@@ -7,7 +7,7 @@ import { fingerprint, parseFingerprints, parseRejections } from '@/domain/channe
 import { parseVariantListings, parseVariations, type VariantLike } from '@/domain/media';
 import { channelQuantities } from '@/domain/quantities';
 import { cushionShown } from '@/domain/stock-cushion';
-import { copySkus, initialStock, isManaged, listingMeasure, observedStock, parseStockChange, StockError, stockSlots, unitParts } from '@/domain/stock';
+import { copySkus, initialStock, isManaged, listingMeasure, observedStock, parseStockChange, setsOf, StockError, stockSlots, unitParts, unitsOf } from '@/domain/stock';
 import { titleOrUntitled } from '@/domain/publication-title';
 import { needsReactivation } from '@/domain/channel-status';
 import { quantityCopy, sendQuantities } from '@/lib/channel-push';
@@ -19,7 +19,7 @@ import { readOne } from '@/lib/channel-sync';
 import { addBranchStock, branchChange, pendingUnits, productBranches, saleBranch, startingBranch } from '@/lib/branches';
 import { openSaleBranchTask, settleSaleBranchTask } from '@/lib/sale-branch';
 import { syncFlex } from '@/lib/branch-flex';
-import { announceStockAlarms, markStockAlarms, settleStockAlarms, type AlarmEvent, type StockChange } from '@/lib/stock-alarms';
+import { announceStockAlarms, markStockAlarms, packSize, settleStockAlarms, type AlarmEvent, type StockChange } from '@/lib/stock-alarms';
 
 // El stock de cada producto: cargarlo a mano, tomarlo del canal al empezar,
 // descontar las ventas, devolver las canceladas y subir la cantidad que le
@@ -421,7 +421,8 @@ async function resolveLine(
   if (!pub) return { ...base, publicationId: null, counted: false, reason: 'La publicación no está en la app.' };
   const skip = (reason: string, extra: Partial<SaleLine> = {}): SaleLine => ({ ...base, publicationId: pub!.id, counted: false, reason, ...extra });
   if (pub.channelCopy?.stockInChannel) return skip('El stock lo maneja el canal, por ejemplo en Full.');
-  const source = sourceOf(pub.product);
+  // Con unidades por venta, cada unidad vendida descuenta esas del stock.
+  const source = sourceOf(pub.product, pub.unitsPerSale);
   const measure = soldMeasure(pub, line);
   const unit = unitParts(source, measure);
   if (!unit) return skip('No se sabe de qué medida del producto es.');
@@ -819,7 +820,7 @@ export async function startStock(db: Db, opts: { budgetMs?: number } = {}): Prom
         variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } },
         publications: {
           where,
-          select: { id: true, variantKey: true, store: { select: { salesSince: true } }, channelCopy: { select: { quantity: true, variations: true, readAt: true, details: true } } },
+          select: { id: true, variantKey: true, unitsPerSale: true, store: { select: { salesSince: true } }, channelCopy: { select: { quantity: true, variations: true, readAt: true, details: true } } },
         },
       },
     });
@@ -839,6 +840,7 @@ type StartRow = {
   variants: VariantLike[];
   publications: {
     variantKey: string | null;
+    unitsPerSale?: number;
     store: { salesSince: Date | null };
     channelCopy: { quantity: number | null; variations: unknown; readAt: Date; details: unknown } | null;
   }[];
@@ -853,7 +855,9 @@ async function startOne(db: Db, product: StartRow): Promise<boolean> {
       const variations = parseVariations(p.channelCopy!.variations);
       const channel = channelQuantities(p.channelCopy!.quantity, variations) ?? [];
       const sole = singleMeasure(product, null, p.variantKey) ?? listingMeasure(slots, copySkus(p.channelCopy!.details));
-      return observedStock(slots, channel, variations, sole);
+      // Una que vende de a varias: cada una del canal son esas unidades del stock.
+      const seen = observedStock(slots, channel, variations, sole);
+      return Object.fromEntries(Object.entries(seen).map(([k, n]) => [k, n * unitsOf(p.unitsPerSale)]));
     })
     .filter((o) => Object.keys(o).length > 0);
   if (observed.length === 0) return false;
@@ -925,6 +929,8 @@ export async function loadProductStock(db: Db, args: { accountId: string; produc
   const stock = new Map(product.stock.map((s) => [s.key, s]));
   const branchList = await productBranches(db, product.id);
   const branchRows = branchList.length ? await db.branchStock.findMany({ where: { productId: product.id }, select: { key: true, branchId: true, quantity: true } }) : [];
+  const packs = new Map<string, number>();
+  for (const s of slots) packs.set(s.key, await packSize(db, product.id, s.key));
   const unassigned = branchList.length ? await pendingUnits(db, product.id) : {};
   const publications = await db.publication.findMany({
     where: { productId: product.id },
@@ -957,7 +963,9 @@ export async function loadProductStock(db: Db, args: { accountId: string; produc
         label: s.label,
         quantity,
         // Lo que se ve en los canales con "Mostrar más de 5", y cómo está su alarma.
-        shown: quantity === null ? null : cushionShown(quantity, product.showMore),
+        shown: quantity === null ? null : cushionShown(setsOf(quantity, packs.get(s.key)), product.showMore),
+        // De a cuántas se vende esta medida, si alguna publicación vende de a varias.
+        pack: packs.get(s.key) ?? 1,
         alarm: row ? { lowAt: row.lowAt, outSince: row.outSince, remindedAt: row.remindedAt, cutAt: row.cutAt } : null,
       };
     }),

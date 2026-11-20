@@ -244,6 +244,7 @@ async function copyAsNew(db: Db, fromId: string): Promise<string> {
       media: json(p.media),
       warranty: json(p.warranty),
       variantKey: p.variantKey,
+      unitsPerSale: p.unitsPerSale,
       price: p.price,
       currency: p.currency,
       channelStatus: 'UNPUBLISHED',

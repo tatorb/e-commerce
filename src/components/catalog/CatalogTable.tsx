@@ -43,7 +43,7 @@ export type CatalogRow = PipelineState & {
   missing: string[];
   sync: SyncState;
   // La cantidad: la del canal, la que falta subir, en cuántas medidas y si la maneja el canal.
-  quantity: { channel: number | null; draft: number | null; measures: number; inChannel: boolean };
+  quantity: { channel: number | null; draft: number | null; measures: number; inChannel: boolean; unitsPerSale?: number; stockUnits?: number | null };
   // Cuántas medidas tiene su familia; 0 si no es de una familia.
   familySize: number;
   // Si es otra opción de venta de una medida: el código de la principal.
@@ -129,11 +129,14 @@ function LockIcon({ lock }: { lock: TitleLock }) {
 
 /** La cantidad disponible: la del canal y, si se cambió en la app, la que falta subir. */
 function QuantityCell({ q }: { q: CatalogRow['quantity'] }) {
-  if (q.channel === null) return <span className="text-muted-foreground">—</span>;
+  const packed = (q.unitsPerSale ?? 1) > 1;
+  // Si vende de a varias: "Vende de a 4", y con el stock del producto, "22 juegos (88 unidades)".
+  const pack = packed ? <span className="whitespace-nowrap text-[11px] text-muted-foreground">Vende de a {q.unitsPerSale}</span> : null;
+  if (q.channel === null) return pack ?? <span className="text-muted-foreground">—</span>;
   return (
     <span className="inline-flex flex-col items-end">
-      <span className={cn(q.channel === 0 && 'text-destructive')}>
-        {q.channel}
+      <span className={cn(q.channel === 0 && 'text-destructive', packed && 'whitespace-nowrap')}>
+        {packed ? `${q.channel} ${q.channel === 1 ? 'juego' : 'juegos'}${q.stockUnits !== null && q.stockUnits !== undefined ? ` (${q.stockUnits} ${q.stockUnits === 1 ? 'unidad' : 'unidades'})` : ''}` : q.channel}
         {q.draft !== null && q.draft !== q.channel ? (
           <span className="text-amber-700" title="Cambiada en la app: falta subirla">
             {' '}
@@ -141,6 +144,7 @@ function QuantityCell({ q }: { q: CatalogRow['quantity'] }) {
           </span>
         ) : null}
       </span>
+      {pack}
       {q.inChannel ? (
         <span className="text-[11px] text-muted-foreground">Full</span>
       ) : q.measures > 1 ? (

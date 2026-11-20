@@ -3,7 +3,7 @@ import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
 import { parseVariations, variantKey, type VariantLike } from '@/domain/media';
 import { channelQuantities, quantityText, sameQuantities, type QuantityLine } from '@/domain/quantities';
-import { copySkus, isManaged, listingMeasure, plannedQuantities, stockSlots, type StockProduct, type StockSource } from '@/domain/stock';
+import { copySkus, isManaged, listingMeasure, plannedQuantities, stockSlots, unitsOf, type StockProduct, type StockSource } from '@/domain/stock';
 
 // Qué cantidad le toca a cada publicación según el stock de su producto, o
 // por qué todavía sigue a la de su canal. Recibe la base por parámetro para
@@ -49,13 +49,17 @@ export function stockProduct(p: ProductRow): StockProduct {
 /** Lo mismo sin "Mostrar más de 5": lo que hay de verdad. */
 function realSource(source: StockSource): StockSource {
   const plain = (product: StockProduct): StockProduct => ({ ...product, showMore: false });
-  return source.kind === 'COMBO' ? { kind: 'COMBO', parts: source.parts.map((p) => ({ ...p, product: plain(p.product) })) } : { kind: 'INDIVIDUAL', product: plain(source.product) };
+  return source.kind === 'COMBO'
+    ? { kind: 'COMBO', parts: source.parts.map((p) => ({ ...p, product: plain(p.product) })), units: source.units }
+    : { kind: 'INDIVIDUAL', product: plain(source.product), units: source.units };
 }
 
-export function sourceOf(p: SourceRow): StockSource {
+/** units: las unidades por venta de la publicación. Sin dato, de a una. */
+export function sourceOf(p: SourceRow, units?: number | null): StockSource {
+  const u = unitsOf(units);
   return p.kind === 'COMBO'
-    ? { kind: 'COMBO', parts: p.comboItems.map((i) => ({ product: stockProduct(i.product), quantity: i.quantity })) }
-    : { kind: 'INDIVIDUAL', product: stockProduct(p) };
+    ? { kind: 'COMBO', parts: p.comboItems.map((i) => ({ product: stockProduct(i.product), quantity: i.quantity })), units: u }
+    : { kind: 'INDIVIDUAL', product: stockProduct(p), units: u };
 }
 
 export const PLAN_SELECT = {
@@ -65,6 +69,7 @@ export const PLAN_SELECT = {
   variantListings: true,
   variantKey: true,
   followsStock: true,
+  unitsPerSale: true,
   channelStatus: true,
   store: { select: { id: true, name: true, accountId: true, salesSince: true, salesError: true, channel: { select: { kind: true, name: true } } } },
   channelCopy: { select: { quantity: true, variations: true, stockInChannel: true, missingSince: true, readAt: true, details: true } },
@@ -133,7 +138,7 @@ export function planFor(p: PlanRow): StockPlan {
   const channelName = getChannelAdapter(p.store.channel.kind, p.store.channel.name).name;
   const copy = p.channelCopy;
   if (!p.followsStock) return { managed: false, reason: STOCK_OFF, off: true };
-  const source = sourceOf(p.product);
+  const source = sourceOf(p.product, p.unitsPerSale);
   if (!isManaged(source)) {
     return {
       managed: false,
@@ -166,12 +171,22 @@ export function planFor(p: PlanRow): StockPlan {
 }
 
 /**
- * Lo que hay de verdad en el stock del producto para lo que vende la publicación,
- * sin "Mostrar más de 5", aunque su cantidad no lo siga. Null si el producto no
+ * Lo que hay de verdad para vender en la publicación según el stock del
+ * producto: con unidades por venta, los juegos que alcanza. Sin "Mostrar más
+ * de 5", aunque su cantidad no lo siga. Null si el producto no
  * tiene stock en la app o no se sabe qué medida vende.
  */
 export function productStockOf(p: PlanRow): number | null {
-  const source = sourceOf(p.product);
+  return stockFor(p, p.unitsPerSale);
+}
+
+/** Lo mismo en la unidad del stock, sin dividir por las unidades por venta: las 88 bocas, no los 22 juegos. */
+export function productStockUnits(p: PlanRow): number | null {
+  return stockFor(p, 1);
+}
+
+function stockFor(p: PlanRow, units: number): number | null {
+  const source = sourceOf(p.product, units);
   if (!isManaged(source)) return null;
   const copy = p.channelCopy && !p.channelCopy.missingSince ? p.channelCopy : null;
   const variations = copy ? parseVariations(copy.variations) : [];

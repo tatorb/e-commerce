@@ -79,7 +79,10 @@ export async function lineFacts(db: Db, accountId: string, lines: SaleLineRow[])
     const slot = key === null ? undefined : p?.slots.find((s) => s.key === key);
     const measure = key === null ? null : key === NO_MEASURE ? line.measure : (slot?.label ?? line.measure);
     const sku = sold ?? (slot?.sku?.trim() || null);
-    const own = unit(line.productId, key);
+    // Si la publicación vendía de a varias, cada unidad vendida cuesta esas.
+    const times = (c: number) => Math.round(c * (line.units && line.units > 1 ? line.units : 1) * 100) / 100;
+    const base = unit(line.productId, key);
+    const own = base === null ? null : times(base);
     if (own !== null) return { key, measure, unitCost: own, sku };
     // Un combo sin costo propio: lo que cuestan sus piezas.
     if (!line.parts?.length) return { key, measure, unitCost: null, sku };
@@ -89,7 +92,7 @@ export async function lineFacts(db: Db, accountId: string, lines: SaleLineRow[])
       if (c === null) return { key, measure, unitCost: null, sku };
       sum += c * part.quantity;
     }
-    return { key, measure, unitCost: sum, sku };
+    return { key, measure, unitCost: times(sum), sku };
   };
 }
 

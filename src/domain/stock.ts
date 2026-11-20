@@ -115,8 +115,29 @@ export type StockProduct = {
   alarms?: Record<string, CushionState>;
 };
 
-/** Lo que vende una publicación: un producto, o las piezas de un combo con cuántas lleva de cada una. */
-export type StockSource = { kind: 'INDIVIDUAL'; product: StockProduct } | { kind: 'COMBO'; parts: { product: StockProduct; quantity: number }[] };
+/**
+ * Lo que vende una publicación: un producto, o las piezas de un combo con
+ * cuántas lleva de cada una. units: de a cuántas unidades del stock vende la
+ * publicación ("unidades por venta"); sin dato, de a una.
+ */
+export type StockSource = ({ kind: 'INDIVIDUAL'; product: StockProduct } | { kind: 'COMBO'; parts: { product: StockProduct; quantity: number }[] }) & { units?: number };
+
+/** De a cuántas unidades del stock vende: un entero de 1 en adelante. */
+export const unitsOf = (units: number | null | undefined): number => (typeof units === 'number' && Number.isInteger(units) && units >= 1 ? units : 1);
+
+/** Lo más que se puede cargar en unidades por venta. */
+export const MAX_UNITS_PER_SALE = 1000;
+
+/** Cuántas ventas alcanza un stock: la parte entera de stock / unidades por venta. Negativo si se vendió sin tener. */
+export const setsOf = (stock: number, units: number | null | undefined): number => Math.floor(stock / unitsOf(units));
+
+/** "22 juegos (88 unidades)": lo que se puede vender y lo que hay en el stock. De a una, solo el número. */
+export function setsText(stock: number, units: number | null | undefined): string {
+  const u = unitsOf(units);
+  if (u === 1) return String(stock);
+  const sets = Math.max(setsOf(stock, u), 0);
+  return `${sets} ${sets === 1 ? 'juego' : 'juegos'} (${stock} ${stock === 1 ? 'unidad' : 'unidades'})`;
+}
 
 /** Si la app maneja el stock de lo que vende la publicación. */
 export function isManaged(source: StockSource): boolean {
@@ -135,15 +156,16 @@ function partKey(product: StockProduct, v: VariantLike | null, byMeasureOnly: bo
 
 /** Lo que sale del stock al vender una unidad de esa medida: cada producto, su medida y cuántas. Null si no se sabe. */
 export function unitParts(source: StockSource, v: VariantLike | null): { productId: string; key: string; quantity: number }[] | null {
+  const units = unitsOf(source.units);
   if (source.kind === 'INDIVIDUAL') {
     const key = partKey(source.product, v, false);
-    return key === null ? null : [{ productId: source.product.id, key, quantity: 1 }];
+    return key === null ? null : [{ productId: source.product.id, key, quantity: units }];
   }
   const out: { productId: string; key: string; quantity: number }[] = [];
   for (const part of source.parts) {
     const key = partKey(part.product, v, true);
     if (key === null) return null;
-    out.push({ productId: part.product.id, key, quantity: part.quantity });
+    out.push({ productId: part.product.id, key, quantity: part.quantity * units });
   }
   return out.length > 0 ? out : null;
 }
@@ -179,7 +201,8 @@ export function shownAvailable(source: StockSource, v: VariantLike | null): numb
   const product = source.product;
   if (!product.showMore || !product.stock) return n;
   const key = unitParts(source, v)![0].key;
-  return Math.min(cushionShown(product.stock[key] ?? 0, true), MAX_QUANTITY);
+  // Sobre lo que queda para vender: con 3 bocas de un juego de 4 no hay ninguno.
+  return Math.min(cushionShown(setsOf(product.stock[key] ?? 0, source.units), true), MAX_QUANTITY);
 }
 
 /**

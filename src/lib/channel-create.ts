@@ -299,12 +299,16 @@ export async function createChecks(db: Db, args: { accountId: string; publicatio
 
   // Si el producto lleva stock en la app, la cantidad para empezar sale de ahí.
   const product = await db.product.findUnique({ where: { id: p.product.id }, select: SOURCE_SELECT });
-  const source = product ? sourceOf(product) : null;
+  // Con unidades por venta, la cantidad es lo que alcanza el stock: cada medida con las suyas.
+  const unitRows = await db.publication.findMany({ where: { id: { in: [p.id, ...targets.flatMap((t) => (t.id ? [t.id] : []))] } }, select: { id: true, unitsPerSale: true } });
+  const unitsById = new Map(unitRows.map((r) => [r.id, r.unitsPerSale]));
+  const own = unitsById.get(p.id) ?? 1;
+  const source = product ? sourceOf(product, own) : null;
   const stock =
-    source && isManaged(source)
+    source && product && isManaged(source)
       ? {
           quantity: available(source, null),
-          quantities: Object.fromEntries(targets.map((t) => [t.key, available(source, { sku: t.sku, measure: t.measure })])),
+          quantities: Object.fromEntries(targets.map((t) => [t.key, available(sourceOf(product, (t.id ? unitsById.get(t.id) : null) ?? own), { sku: t.sku, measure: t.measure })])),
         }
       : null;
 

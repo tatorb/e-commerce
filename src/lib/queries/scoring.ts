@@ -1,3 +1,4 @@
+import { PLAN_SELECT, productStockUnits } from '@/lib/stock-plan';
 import { prisma } from '@/lib/db';
 import { unitsLast90 } from '@/lib/sales/units';
 import { productCode } from '@/lib/publication-facts';
@@ -61,6 +62,7 @@ export async function listScoredPublications(
         pipelineStatus: true,
         pipelineStep: true,
         variantKey: true,
+        unitsPerSale: true,
         familyId: true,
         mainOptionId: true,
         // La principal de la medida y sus otras opciones de venta: el código, y sus ventas para el candado del título.
@@ -117,6 +119,11 @@ export async function listScoredPublications(
 
   // Las ventas de 90 días salen de las ventas leídas del canal; si la tienda todavía no las tiene, del dato importado.
   const units = await unitsLast90(db, publications.map((p) => p.id));
+  // Las que venden de a varias unidades: el stock del producto en su unidad, para mostrar "22 juegos (88 unidades)".
+  const packed = publications.filter((p) => p.unitsPerSale > 1).map((p) => p.id);
+  const stockUnits = new Map(
+    packed.length > 0 ? (await db.publication.findMany({ where: { id: { in: packed } }, select: PLAN_SELECT })).map((r) => [r.id, productStockUnits(r)] as const) : [],
+  );
   return publications.map((p) => {
     const result: ScoreResult = scorePublication(rules.get(p.store.channelId) ?? [], toScoreInput(p.product, p));
     const metrics = latestMetrics(p.measurements);
@@ -184,6 +191,9 @@ export async function listScoredPublications(
         draft: app.quantity ? totalQuantity(app.quantity) : null,
         measures: lines?.length ?? 0,
         inChannel: copy?.stockInChannel ?? false,
+        // De a cuántas unidades del stock vende y, si son varias, el stock del producto en su unidad.
+        unitsPerSale: p.unitsPerSale,
+        stockUnits: stockUnits.get(p.id) ?? null,
       },
     };
   });

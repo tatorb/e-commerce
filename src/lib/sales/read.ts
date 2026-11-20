@@ -57,6 +57,8 @@ export type SaleLineRow = {
   measure: string | null;
   // En un combo: lo que lleva de cada pieza por unidad, para el costo si el combo no tiene el suyo.
   parts?: { productId: string; key: string; quantity: number }[];
+  // De a cuántas unidades del stock vendía la publicación, si eran más de una: el costo es por esas.
+  units?: number;
 };
 
 export type SalePaymentRow = ChannelSaleRecord['payments'][number] & { net?: number | null; releaseAt?: string | null; released?: boolean | null };
@@ -102,6 +104,7 @@ async function linkLine(db: Db, storeId: string, row: SaleLineRow, owners: () =>
   row.productId = pub.product.id;
   row.key = key;
   row.measure = key ? (slots.find((s) => s.key === key)?.label ?? null) : null;
+  if (pub.unitsPerSale > 1) row.units = pub.unitsPerSale;
   if (pub.product.kind === 'COMBO') row.parts = unitParts(sourceOf(pub.product), measure) ?? undefined;
   return [pub.product.name, pub.title, pub.externalId, ...pub.product.variants.map((v) => v.sku)];
 }

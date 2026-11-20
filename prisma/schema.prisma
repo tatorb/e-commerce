@@ -568,6 +568,12 @@ model Publication {
   // Si la cantidad en el canal se actualiza sola con el stock del producto.
   // Apagado, se cambia a mano en la publicación; sus ventas igual descuentan.
   followsStock      Boolean               @default(true)
+  // De a cuántas unidades del stock del producto vende: un juego de aros para
+  // 4 cilindros con el stock cargado por boca vende de a 4. La cantidad en el
+  // canal es el stock dividido por esto, y cada venta descuenta esto por unidad
+  // vendida (src/domain/stock.ts). Es de la familia y de sus opciones de venta;
+  // una medida puede tener otro.
+  unitsPerSale      Int                   @default(1)
   // Si Envíos Flex se prende y se apaga solo según el stock de las sucursales
   // con Flex (src/lib/branch-flex.ts). Se apaga cuando una persona lo cambia a mano.
   flexFollowsStock  Boolean               @default(true)

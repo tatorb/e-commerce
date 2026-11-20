@@ -159,7 +159,10 @@ function groupForClaude(g: PriceGroupData, params: PricingParams, ref: (id: stri
     publicacion_para_guardar: ref(g.anchorId),
     publicaciones: g.publicationIds.map(ref),
     ...(g.measures.length > 0 ? { medidas: g.measures } : {}),
+    // El costo de la publicación: el de una unidad por las unidades por venta. Con él se calculan márgenes, precios y campañas.
     costo_de_reposicion_sin_iva: g.cost,
+    costo_unitario_sin_iva: g.unitCost,
+    unidades_por_venta: g.unitsPerSale,
     de_donde_sale_el_costo: g.cost !== null ? g.costNote : null,
     ...(g.missing.length > 0 && g.measures.length > 0 ? { falta_el_costo_de: g.missing } : {}),
     hoy: {

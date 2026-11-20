@@ -1,6 +1,6 @@
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import type { ChannelKind, ChannelStatus } from '@/generated/prisma/enums';
-import { stockSlots, unitParts } from '@/domain/stock';
+import { setsOf, stockSlots, unitParts } from '@/domain/stock';
 import { parseVariations, type VariantLike } from '@/domain/media';
 import { quantityKey } from '@/domain/quantities';
 import { titleOrUntitled } from '@/domain/publication-title';
@@ -23,6 +23,20 @@ import { stockTaskRecipients } from '@/lib/stock-task-recipients';
 
 type Db = PrismaClient;
 type Tx = Prisma.TransactionClient;
+
+/**
+ * De a cuántas unidades se vende una medida del producto: las unidades por
+ * venta más altas de sus publicaciones vivas que la venden. Las alarmas cuentan
+ * lo que queda para vender (juegos), no las unidades sueltas. Sin
+ * publicaciones, de a una.
+ */
+export async function packSize(db: Db | Tx, productId: string, key: string): Promise<number> {
+  const pubs = await db.publication.findMany({
+    where: { productId, unitsPerSale: { gt: 1 }, channelStatus: { notIn: ['CLOSED', 'DELETED'] } },
+    select: PLAN_SELECT,
+  });
+  return pubs.filter((p) => soldKeys(p).includes(key)).reduce((max, p) => Math.max(max, p.unitsPerSale), 1);
+}
 
 /** La clave de la tarea automática de una medida. */
 export const stockAlarmKey = (productId: string, key: string) => `stock:${productId}:${key}`;
@@ -47,12 +61,15 @@ export type AlarmEvent = { productId: string; key: string; kind: SaleAlarm | 're
 export async function markStockAlarms(tx: Tx, changes: StockChange[], now: Date): Promise<AlarmEvent[]> {
   const events: AlarmEvent[] = [];
   const showsMore = new Map<string, boolean>();
-  for (const c of changes) {
-    if (!showsMore.has(c.productId)) {
-      const p = await tx.product.findUnique({ where: { id: c.productId }, select: { showMore: true } });
-      showsMore.set(c.productId, p?.showMore ?? false);
+  for (const raw of changes) {
+    if (!showsMore.has(raw.productId)) {
+      const p = await tx.product.findUnique({ where: { id: raw.productId }, select: { showMore: true } });
+      showsMore.set(raw.productId, p?.showMore ?? false);
     }
-    if (!showsMore.get(c.productId)) continue;
+    if (!showsMore.get(raw.productId)) continue;
+    // Sobre lo que queda para vender: con publicaciones que venden de a 4, 3 unidades son 0 juegos.
+    const pack = await packSize(tx, raw.productId, raw.key);
+    const c = { ...raw, before: setsOf(raw.before, pack), after: setsOf(raw.after, pack) };
     const where = { productId_key: { productId: c.productId, key: c.key } };
     const row = await tx.productStock.findUnique({ where, select: { outSince: true, lowAt: true } });
     const state = { outSince: row?.outSince ?? null, lowAt: row?.lowAt ?? null };
@@ -133,6 +150,8 @@ export function alarmTaskText(
   kind: AlarmEvent['kind'],
   listings: AlarmListing[] = [],
   appUrl: string = publicAppUrl(),
+  // De a cuántas unidades se vende la medida: la alarma cuenta juegos.
+  pack = 1,
 ): { title: string; description: string } {
   const tz = row.product.account.timezone;
   const item = alarmItem(row);
@@ -155,16 +174,16 @@ export function alarmTaskText(
         .join(' · '),
     ),
   ].join('\n');
-  const real = row.quantity;
+  const real = setsOf(row.quantity, pack);
   const missing = owed(real);
-  const stock = `Stock real: ${real}. En los canales se sigue viendo ${SHOWN_WHEN_SHORT}, así que la publicación no se pausa.`;
+  const stock = `Stock real: ${pack > 1 ? `${row.quantity} ${row.quantity === 1 ? 'unidad' : 'unidades'}, se vende de a ${pack}: ${real <= 0 ? 'no alcanza para ninguna venta' : real === 1 ? 'alcanza para 1 venta' : `alcanza para ${real} ventas`}` : real}. En los canales se sigue viendo ${SHOWN_WHEN_SHORT}, así que la publicación no se pausa.`;
   const closing = 'Esta tarea se cierra sola al cargar el stock en el producto. Si hay que pausar la publicación, se pausa a mano.';
   const when = (d: Date) => formatDateTime(d, tz);
 
   if (!row.outSince && real === 1) {
     return {
       title: `Queda 1: ${what}`.slice(0, TASK_TITLE_MAX),
-      description: `${head}\n\n${stock} Queda 1 unidad: si se vende, la app avisa de nuevo. ${closing}`,
+      description: `${head}\n\n${stock} ${pack > 1 ? 'Queda 1 para vender' : 'Queda 1 unidad'}: si se vende, la app avisa de nuevo. ${closing}`,
     };
   }
   const state = missing > 0 ? owedText(missing).toLowerCase() : 'sin stock';
@@ -179,7 +198,7 @@ export function alarmTaskText(
 
 /** Las claves de stock de las medidas que vende la publicación. */
 function soldKeys(pub: Parameters<typeof planFor>[0]): string[] {
-  const source = sourceOf(pub.product);
+  const source = sourceOf(pub.product, pub.unitsPerSale);
   const variations = parseVariations(pub.channelCopy?.variations);
   const measures = variations.length === 0 ? [singleMeasure(pub.product, pub.channelCopy, pub.variantKey)] : variations;
   return measures.flatMap((v) => unitParts(source, v)?.[0]?.key ?? []);
@@ -233,7 +252,9 @@ async function announceOne(db: Db, e: AlarmEvent, now: Date): Promise<void> {
   const autoKey = stockAlarmKey(e.productId, e.key);
   // Se cierra al cargar stock (aunque sea 1) o al apagar la opción sin nada que entregar.
   const pubs = await taskPublications(db, e.productId, e.key);
-  const settled = e.kind === 'off' ? row.quantity >= 0 : e.kind === 'restock' && !row.outSince && row.quantity >= 1;
+  const pack = await packSize(db, e.productId, e.key);
+  const sets = setsOf(row.quantity, pack);
+  const settled = e.kind === 'off' ? sets >= 0 : e.kind === 'restock' && !row.outSince && sets >= 1;
   const notify = e.kind !== 'restock' && e.kind !== 'keep' && e.kind !== 'off';
 
   const taskId = await db.$transaction(async (tx) => {
@@ -243,7 +264,7 @@ async function announceOne(db: Db, e: AlarmEvent, now: Date): Promise<void> {
       if (open) await tx.task.update({ where: { id: open.id }, data: { status: 'DONE', doneAt: now } });
       return null;
     }
-    const text = alarmTaskText(row, e.kind, pubs.listings);
+    const text = alarmTaskText(row, e.kind, pubs.listings, publicAppUrl(), pack);
     const data = {
       title: text.title,
       description: text.description,
@@ -393,7 +414,7 @@ export async function loadStockAlarms(db: Db, accountId: string): Promise<AlarmR
   for (const pub of pubs) {
     const plan = planFor(pub);
     if (!plan.managed) continue;
-    const source = sourceOf(pub.product);
+    const source = sourceOf(pub.product, pub.unitsPerSale);
     const slots = stockSlots(pub.product.variants);
     const copy = pub.channelCopy;
     const variations = parseVariations(copy?.variations);
@@ -404,7 +425,8 @@ export async function loadStockAlarms(db: Db, accountId: string): Promise<AlarmR
       const key = unitParts(source, m.v)?.[0]?.key;
       if (key === undefined) continue;
       const state = stateOf.get(`${pub.product.id}:${key}`);
-      const real = state?.quantity ?? 0;
+      // Lo que queda para vender en esta publicación: juegos, si vende de a varias.
+      const real = setsOf(state?.quantity ?? 0, pub.unitsPerSale);
       const shown = plan.lines.find((l) => l.key === m.lineKey)?.quantity ?? 0;
       const out = state?.outSince ?? null;
       if (shown <= Math.max(real, 0) && !out) continue;

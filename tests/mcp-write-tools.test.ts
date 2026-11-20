@@ -60,7 +60,8 @@ describe('herramientas de escritura en la lista', () => {
     expect(tools.get('save_branch')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('get_branches')).toMatchObject({ readOnlyHint: true });
     expect(tools.get('assign_sale_branch')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
-    expect(tools.size).toBe(119);
+    expect(tools.get('set_units_per_sale')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+    expect(tools.size).toBe(120);
   });
 });
 

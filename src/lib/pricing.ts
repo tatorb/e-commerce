@@ -5,7 +5,7 @@ import { lockFamily } from '@/domain/family-members';
 import { getChannelPublisher } from '@/channels/publish';
 import { dayOf, offerOf } from '@/domain/competitors';
 import { costGroups, highestCost, measuresText } from '@/domain/costs';
-import { matchSlot, stockSlots } from '@/domain/stock';
+import { matchSlot, stockSlots, unitsOf } from '@/domain/stock';
 import { discountText, fingerprint, installmentsText, priceText, storedPrints } from '@/domain/channel-sync';
 import type { CompetitorPrice } from '@/domain/price-comparison';
 import {
@@ -64,7 +64,11 @@ export type PriceGroup = {
   publicationIds: string[];
   // Las medidas, como se llaman en la ficha. Vacío si el producto no tiene medidas.
   measures: string[];
+  // El costo de la publicación: el de una unidad por las unidades por venta.
   cost: number | null;
+  // El costo de una unidad, como está cargado en el producto, y de a cuántas vende.
+  unitCost: number | null;
+  unitsPerSale: number;
   // De dónde sale el costo, para decirlo en pantalla.
   costNote: string;
   // Las medidas que no tienen el costo cargado.
@@ -74,6 +78,9 @@ export type PriceGroup = {
 };
 
 const UNKNOWN_MEASURE = 'Medida sin elegir';
+
+/** El costo de una unidad por las unidades por venta, al centavo. */
+const timesUnits = (cost: number | null, units: number | null | undefined) => (cost === null ? null : Math.round(cost * unitsOf(units) * 100) / 100);
 
 /**
  * Las pestañas del paso Precio de una publicación. En una familia, una por
@@ -88,9 +95,10 @@ export async function priceGroups(db: Db, publicationId: string): Promise<PriceG
       id: true,
       variantKey: true,
       price: true,
+      unitsPerSale: true,
       channelCopy: { select: { details: true } },
       // Las otras opciones de venta de una medida no son otra pestaña: llevan su precio aparte.
-      family: { select: { leadId: true, members: { where: { mainOptionId: null }, select: { id: true, variantKey: true, price: true } } } },
+      family: { select: { leadId: true, members: { where: { mainOptionId: null }, select: { id: true, variantKey: true, price: true, unitsPerSale: true } } } },
       product: { select: COST_SELECT },
     },
   });
@@ -105,7 +113,7 @@ export async function priceGroups(db: Db, publicationId: string): Promise<PriceG
     const key = m ? matchSlot(slots, m) : null;
     return key !== null ? [key] : [];
   };
-  const members = pub.family?.members ?? [{ id: pub.id, variantKey: pub.variantKey, price: pub.price }];
+  const members = pub.family?.members ?? [{ id: pub.id, variantKey: pub.variantKey, price: pub.price, unitsPerSale: pub.unitsPerSale }];
   const units = members.map((m) => {
     let keys = sold(m.variantKey);
     // Sin familia, si no se sabe qué medida vende, son todas: va el costo más alto.
@@ -117,7 +125,10 @@ export async function priceGroups(db: Db, publicationId: string): Promise<PriceG
       keys,
       labels: known ? keys.map((k) => line.get(k)!.label) : [UNKNOWN_MEASURE],
       order: known ? Math.min(...keys.map((k) => slots.findIndex((x) => x.key === k))) : slots.length,
-      cost: known ? highestCost(keys.map((k) => line.get(k)!.cost)) : null,
+      // El costo de la publicación es el de una unidad por las unidades por venta.
+      unitCost: known ? highestCost(keys.map((k) => line.get(k)!.cost)) : null,
+      perSale: unitsOf(m.unitsPerSale),
+      cost: known ? timesUnits(highestCost(keys.map((k) => line.get(k)!.cost)), m.unitsPerSale) : null,
       missing: known ? keys.filter((k) => line.get(k)!.cost === null).map((k) => line.get(k)!.label) : [UNKNOWN_MEASURE],
     };
   });
@@ -131,13 +142,16 @@ export async function priceGroups(db: Db, publicationId: string): Promise<PriceG
       publicationIds: ids,
       measures,
       cost: g.cost,
-      costNote: single
-        ? 'el del producto'
-        : several
-          ? `el más alto de ${measuresText(measures)}`
-          : measures.length === 1
-            ? `el de la medida ${measures[0]}`
-            : `el de las medidas ${measuresText(measures)}`,
+      unitCost: g.items[0].unitCost,
+      unitsPerSale: g.items[0].perSale,
+      costNote:
+        (single
+          ? 'el del producto'
+          : several
+            ? `el más alto de ${measuresText(measures)}`
+            : measures.length === 1
+              ? `el de la medida ${measures[0]}`
+              : `el de las medidas ${measuresText(measures)}`) + (g.items[0].perSale > 1 ? `, por las ${g.items[0].perSale} unidades que lleva cada venta` : ''),
       missing: [...new Set(g.items.flatMap((u) => u.missing))],
       pricesDiffer: new Set(g.items.map((u) => u.price)).size > 1,
     };

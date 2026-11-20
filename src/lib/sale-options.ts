@@ -40,6 +40,12 @@ export async function assignSaleOptions(db: Db, storeId: string): Promise<number
   // Primero las que pasan a ser principales, así ninguna apunta a otra que todavía apunta a una tercera.
   const ordered = [...changes.entries()].sort((a, b) => Number(a[1] !== null) - Number(b[1] !== null));
   await db.$transaction(ordered.map(([id, mainOptionId]) => db.publication.update({ where: { id }, data: { mainOptionId } })));
+  // Una opción que se suma a una medida vende de a las mismas unidades que su principal.
+  for (const [id, mainOptionId] of ordered) {
+    if (!mainOptionId) continue;
+    const main = await db.publication.findUnique({ where: { id: mainOptionId }, select: { unitsPerSale: true } });
+    if (main) await db.publication.updateMany({ where: { id, unitsPerSale: { not: main.unitsPerSale } }, data: { unitsPerSale: main.unitsPerSale } });
+  }
   return changes.size;
 }
 

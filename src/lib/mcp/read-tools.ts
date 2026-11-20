@@ -36,7 +36,7 @@ import {
 import { listBoard, listPipelineMovements } from '@/lib/queries/pipeline';
 import { listScoredPublications, type ScoredPublication } from '@/lib/queries/scoring';
 import { matchTypes, optionKey } from '@/domain/product-options';
-import { PLAN_SELECT, productStockOf } from '@/lib/stock-plan';
+import { PLAN_SELECT, productStockOf, productStockUnits } from '@/lib/stock-plan';
 import { KIND_OPTIONS, parseKinds } from '@/lib/queries/catalog-filters';
 import { fileHref } from '@/lib/file-rules';
 import { loadKnowledge, loadResearch } from '@/lib/queries/research';
@@ -226,7 +226,7 @@ const searchCatalog = defineTool({
   section: ['publicaciones', 'pipeline'],
   title: 'Buscar en Publicaciones',
   description:
-    'Busca en la lista de Publicaciones de una cuenta, con los mismos filtros de la pantalla. Devuelve título, código, si es individual o combo, familia (familia_id y es_principal), producto (producto_id, nombre, número de pieza y si está optimizado), marca, medida, stock del producto, cantidad en el canal, puntaje, visitas y ventas de 90 días, si el título está bloqueado y el estado en el pipeline. Los filtros con varios valores aceptan cualquiera de ellos.',
+    'Busca en la lista de Publicaciones de una cuenta, con los mismos filtros de la pantalla. Devuelve título, código, si es individual o combo, familia (familia_id y es_principal), producto (producto_id, nombre, número de pieza y si está optimizado), marca, medida, stock del producto (lo que alcanza para vender: con unidades por venta, stock / unidades), cantidad en el canal, puntaje, visitas y ventas de 90 días, si el título está bloqueado y el estado en el pipeline. Los filtros con varios valores aceptan cualquiera de ellos.',
   input: z.object({
     cuenta: accountArg,
     texto: z.string().optional().describe('Busca en el título, el código del canal y los SKU.'),
@@ -289,7 +289,7 @@ const searchCatalog = defineTool({
     cantidad_distinta_al_stock: z
       .boolean()
       .optional()
-      .describe('true = solo las publicaciones cuya cantidad en el canal no coincide con el stock del producto. Las que no tienen uno de los dos datos no entran.'),
+      .describe('true = solo las publicaciones cuya cantidad en el canal no coincide con el stock del producto; si vende de a varias unidades, con stock / unidades por venta. Las que no tienen uno de los dos datos no entran.'),
     producto_optimizado: z
       .boolean()
       .optional()
@@ -343,15 +343,19 @@ const searchCatalog = defineTool({
     );
     // El stock del producto para la medida de cada una, como lo calcula la app.
     const stockOf = new Map(
-      (await ctx.db.publication.findMany({ where: { id: { in: filtered.map((p) => p.id) } }, select: PLAN_SELECT })).map((r) => [r.id, productStockOf(r)]),
+      (await ctx.db.publication.findMany({ where: { id: { in: filtered.map((p) => p.id) } }, select: PLAN_SELECT })).map((r) => [
+        r.id,
+        { sets: productStockOf(r), units: productStockUnits(r), perSale: r.unitsPerSale },
+      ]),
     );
     const stockWanted = new Set(args.stock ?? []);
     const differs = (p: ScoredPublication) => {
-      const stock = stockOf.get(p.id) ?? null;
+      // Contra lo que alcanza el stock: con unidades por venta, stock / unidades.
+      const stock = stockOf.get(p.id)?.sets ?? null;
       return stock !== null && p.quantity.channel !== null && stock !== p.quantity.channel;
     };
     const matching = filtered.filter((p) => {
-      const stock = stockOf.get(p.id) ?? null;
+      const stock = stockOf.get(p.id)?.sets ?? null;
       const band = stock === null ? 'sin-dato' : stock > 0 ? 'con' : 'sin';
       return (stockWanted.size === 0 || stockWanted.has(band)) && (!args.cantidad_distinta_al_stock || differs(p));
     });
@@ -389,7 +393,8 @@ const searchCatalog = defineTool({
         producto_nombre: p.productName,
         producto_numero_de_pieza: p.partNumber,
         producto_optimizado: optimized.has(p.productId),
-        stock_del_producto: stockOf.get(p.id) ?? null,
+        stock_del_producto: stockOf.get(p.id)?.sets ?? null,
+        ...((stockOf.get(p.id)?.perSale ?? 1) > 1 ? { unidades_por_venta: stockOf.get(p.id)!.perSale, stock_del_producto_en_unidades: stockOf.get(p.id)!.units } : {}),
         cantidad_en_el_canal: p.quantity.channel,
         ...(notPushed?.has(p.id)
           ? (() => {
@@ -525,6 +530,7 @@ const getPublication = defineTool({
           attributes: true,
           ownQuestions: true,
           followsStock: true,
+          unitsPerSale: true,
           // Lo último del Registro: lo que se subió, se tomó o no se pudo, con el motivo.
           syncChanges: {
             orderBy: { createdAt: 'desc' },
@@ -604,6 +610,7 @@ const getPublication = defineTool({
       flexPlans(ctx.db, [id]).then((m) => m.get(id) ?? null),
     ]);
     const plan = plans.get(id) ?? null;
+    const planRow = pub.unitsPerSale > 1 ? await ctx.db.publication.findUnique({ where: { id }, select: PLAN_SELECT }) : null;
     const r = research.research;
     const manufacturerText = withoutPrices(r?.manufacturerText ?? null);
     const measurement = pub.measurements[0] ?? null;
@@ -693,8 +700,11 @@ const getPublication = defineTool({
         en_la_app: pub.warranty ? warrantyLabel(parseWarranty(pub.warranty)) : 'Sigue a la del canal',
         en_el_canal: pub.channelCopy?.warranty ? warrantyLabel(parseWarranty(pub.channelCopy.warranty)) : 'Sin leer del canal',
       },
+      // De a cuántas unidades del stock vende. Se cambia con set_units_per_sale.
+      unidades_por_venta: pub.unitsPerSale,
       cantidad_disponible: {
         actualizacion_automatica: pub.followsStock ? 'prendida' : 'apagada',
+        ...(pub.unitsPerSale > 1 ? { vende_de_a: pub.unitsPerSale, stock_del_producto_en_unidades: planRow ? productStockUnits(planRow) : null, cantidad_para_el_canal: planRow ? productStockOf(planRow) : null } : {}),
         ...(plan?.managed
           ? { sale_del_stock_del_producto: true, cantidad: plannedText(plan), ...(plan.measure ? { vende_solo_la_medida: plan.measure.label } : {}) }
           : { sale_del_stock_del_producto: false, motivo: plan?.reason ?? null }),

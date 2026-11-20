@@ -586,6 +586,7 @@ async function copyMember(
       media: json(args.media),
       videoVariants: head.videoVariants as Prisma.InputJsonValue,
       followsStock: head.followsStock,
+      unitsPerSale: head.unitsPerSale,
       source: head.source,
       familyId: args.familyId,
       variantKey: args.variantKey,

@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { matchSlot, StockError, stockSlots, stockText } from '@/domain/stock';
+import { matchSlot, MAX_UNITS_PER_SALE, StockError, stockSlots, stockText } from '@/domain/stock';
+import { previewUnitsPerSale, setUnitsPerSale, type UnitsRow } from '@/lib/units-per-sale';
 import { setProductStock, setShowMore } from '@/lib/stock';
 import { accountBranches, branchStockText, findBranch } from '@/lib/branches';
 import { CostError, costsForClaude, loadProductCosts, setProductCosts } from '@/lib/costs';
@@ -142,4 +143,56 @@ const setProductCostTool = defineTool({
   },
 });
 
-export const STOCK_TOOLS = [setProductStockTool, setProductCostTool];
+const setUnitsPerSaleTool = defineTool({
+  name: 'set_units_per_sale',
+  section: 'productos',
+  title: 'Cambiar de a cuántas unidades vende la publicación',
+  description:
+    'Las unidades por venta: de a cuántas unidades del stock del producto vende la publicación. El stock y el costo del producto quedan siempre en la unidad en que se cargan (por ejemplo aros por boca, pistones sueltos) y no se dividen; lo que cambia es que la publicación vende un juego de 4 o una caja de 6. Con unidades por venta 4 y 90 en el stock, el canal muestra 22; cada unidad vendida descuenta 4 y una cancelada devuelve 4; las alarmas y "Mostrar más de 5" cuentan lo que queda para vender; y en el paso Precio el costo de la publicación es el costo unitario por 4. Es de la familia y de todas sus opciones de venta (formas de cobro): se guarda en todas a la vez. Con solo_esta_medida, solo en la medida de esa publicación y sus opciones. Con vista_previa muestra, por medida y opción de venta, la cantidad que tiene hoy en el canal y la que le quedaría, sin guardar nada. Sin vista_previa lo guarda y sube la cantidad nueva al canal: primero llamala con vista_previa, mostrale a la persona qué cambia y esperá que confirme. Después de cambiarlo conviene revisar el precio con get_price_step, porque el costo de la publicación cambia.',
+  input: z.object({
+    cuenta: accountArg,
+    publicacion: publicationArg,
+    unidades: z.number().int().min(1).max(MAX_UNITS_PER_SALE).describe('De a cuántas unidades del stock vende, por ejemplo 4 para un juego de aros de 4 cilindros. 1 es de a una.'),
+    vista_previa: z.boolean().optional().describe('true: solo muestra cómo quedaría, sin guardar ni subir nada.'),
+    solo_esta_medida: z.boolean().optional().describe('true: solo la medida de esa publicación y sus opciones de venta, no toda la familia.'),
+  }),
+  readOnly: false,
+  destructive: true,
+  run: async (ctx, args) => {
+    const account = await resolveAccount(ctx, args.cuenta);
+    const publicationId = await resolvePublication(ctx, account.id, args.publicacion);
+    const base = { accountId: account.id, publicationId, units: args.unidades, onlyThisMeasure: args.solo_esta_medida === true };
+    const row = (r: UnitsRow) => ({
+      publicacion: r.externalId ?? r.id,
+      titulo: r.title,
+      ...(r.measure ? { medida: r.measure } : {}),
+      ...(r.plan ? { forma_de_cobro: r.plan } : {}),
+      unidades_por_venta_antes: r.before,
+      unidades_por_venta: r.after,
+      stock_del_producto_en_unidades: r.stock,
+      cantidad_en_el_canal_hoy: r.inChannel,
+      ...(r.note ? { la_cantidad_no_sale_del_stock: r.note } : { cantidad_que_le_toca: r.planned }),
+    });
+    try {
+      if (args.vista_previa) {
+        const p = await previewUnitsPerSale(ctx.db, base);
+        return { vista_previa: true, unidades_por_venta: p.units, publicaciones: p.rows.map(row), aviso: 'No se guardó nada. Para guardarlo y subir la cantidad, volvé a llamar sin vista_previa cuando la persona confirme.' };
+      }
+      const r = await setUnitsPerSale(ctx.db, { ...base, userId: ctx.userId });
+      return {
+        guardado: true,
+        unidades_por_venta: r.units,
+        publicaciones_que_cambiaron: r.changed,
+        publicaciones: r.rows.map(row),
+        cantidades_subidas_al_canal: r.sync.sent,
+        ...(r.sync.failed.length > 0 ? { no_se_pudo_subir: r.sync.failed.map((f) => ({ publicacion: f.title, motivo: f.error })) } : {}),
+        aviso: 'El costo de la publicación en el paso Precio ahora es el costo unitario por las unidades por venta: revisá el precio con get_price_step.',
+      };
+    } catch (e) {
+      if (e instanceof StockError) throw new McpToolError(e.message);
+      throw e;
+    }
+  },
+});
+
+export const STOCK_TOOLS = [setProductStockTool, setProductCostTool, setUnitsPerSaleTool];
