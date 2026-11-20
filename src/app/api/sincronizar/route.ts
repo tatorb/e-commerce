@@ -9,6 +9,7 @@ import { answerAlone } from '@/lib/answers';
 import { isAiConfigured } from '@/ai/claude';
 import { sendTaskMail } from '@/lib/task-mail';
 import { readSales, reconcileStock, startStock } from '@/lib/stock';
+import { reconcileFlex } from '@/lib/branch-flex';
 import { stockAlarmPass } from '@/lib/stock-alarms';
 import { settleReactivations } from '@/lib/restock';
 import { placeAllShotPhotos } from '@/lib/shoot';
@@ -95,6 +96,11 @@ export async function GET(request: Request) {
   // Con lo recién leído: el stock de partida de los productos nuevos y lo que quedó distinto del stock.
   const started = await startStock(prisma, { budgetMs: budget(STOCK_BUDGET_MS) });
   const stock = await reconcileStock(prisma, { budgetMs: budget(STOCK_BUDGET_MS) });
+  // Envíos Flex según el stock de las sucursales con Flex.
+  const flex = await reconcileFlex(prisma, { budgetMs: budget(STOCK_BUDGET_MS) }).catch((e) => {
+    console.error('No se pudo revisar Flex por el stock de las sucursales.', e);
+    return { pending: false };
+  });
   // Con lo recién leído: las tareas de reactivar de las que ya están activas se cierran.
   const reactivated = await settleReactivations(prisma);
   const shots = await placeAllShotPhotos(prisma, { budgetMs: budget(SHOTS_BUDGET_MS) });
@@ -115,6 +121,7 @@ export async function GET(request: Request) {
   return NextResponse.json({
     pending:
       result.pending ||
+      flex.pending ||
       questions.pending ||
       alone.pending ||
       renewals.pending ||

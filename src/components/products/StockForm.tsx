@@ -10,19 +10,22 @@ import { cn } from '@/lib/utils/cn';
 import { StatusText } from '@/components/pipeline/StatusText';
 import { dropOrphanStockAction, markStockReviewedAction, setProductStockAction, setShowMoreAction } from '@/app/a/[cuenta]/productos/stock-actions';
 
-// Cambiar a mano el stock del producto, uno por medida. Al guardar se sube
-// solo a todas sus publicaciones.
+// Cambiar a mano el stock del producto, uno por medida, o el de una sucursal
+// si la cuenta tiene sucursales. Al guardar se sube solo a todas sus publicaciones.
 
 export function StockForm({
   accountSlug,
   productId,
   lines,
   managed,
+  branchId,
 }: {
   accountSlug: string;
   productId: string;
   lines: { key: string; label: string; quantity: number | null }[];
   managed: boolean;
+  // Con sucursales: la sucursal cuyo stock se carga.
+  branchId?: string;
 }) {
   const router = useRouter();
   const start = Object.fromEntries(lines.map((l) => [l.key, l.quantity === null ? '' : String(l.quantity)]));
@@ -36,7 +39,7 @@ export function StockForm({
   function save() {
     setStatus(null);
     startTransition(async () => {
-      const r = await setProductStockAction(accountSlug, productId, values);
+      const r = await setProductStockAction(accountSlug, productId, values, branchId ?? null);
       if (!r.ok) return setStatus({ kind: 'error', text: r.error });
       setStatus({ kind: 'ok', text: r.message });
       router.refresh();
@@ -54,9 +57,9 @@ export function StockForm({
       <div className={single ? 'max-w-40' : 'grid grid-cols-2 gap-3 sm:grid-cols-4'}>
         {lines.map((l, i) => (
           <div key={l.key} className="space-y-1.5">
-            <Label htmlFor={`stock-${i}`}>{single ? 'Unidades' : l.label || 'Sin medida'}</Label>
+            <Label htmlFor={`stock-${branchId ?? ''}${i}`}>{single ? 'Unidades' : l.label || 'Sin medida'}</Label>
             <Input
-              id={`stock-${i}`}
+              id={`stock-${branchId ?? ''}${i}`}
               inputMode="numeric"
               value={values[l.key] ?? ''}
               disabled={pending}

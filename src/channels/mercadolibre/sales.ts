@@ -57,6 +57,7 @@ export function parseOrder(o: unknown): ChannelOrder | null {
     cancelled,
     delivered: tags.includes('delivered'),
     lines,
+    shipmentId: isObj(o.shipping) ? id(o.shipping.id) : null,
   };
 }
 

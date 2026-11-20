@@ -246,6 +246,7 @@ model Account {
   shootProtocols      ShootProtocol[]
   productOptions      ProductOption[]
   textImages          TextImage[]
+  branches            Branch[]
 
   @@map("accounts")
 }
@@ -396,6 +397,7 @@ model Product {
   // alarmas para reponer (src/domain/stock-cushion.ts).
   showMore    Boolean         @default(false)
   stock       ProductStock[]
+  branchStock BranchStock[]
   stockMoves  StockMovement[]
   costs       ProductCost[]
 
@@ -566,6 +568,9 @@ model Publication {
   // Si la cantidad en el canal se actualiza sola con el stock del producto.
   // Apagado, se cambia a mano en la publicación; sus ventas igual descuentan.
   followsStock      Boolean               @default(true)
+  // Si Envíos Flex se prende y se apaga solo según el stock de las sucursales
+  // con Flex (src/lib/branch-flex.ts). Se apaga cuando una persona lo cambia a mano.
+  flexFollowsStock  Boolean               @default(true)
   // Hay que finalizarla en el canal y todavía no se pudo, por ejemplo porque
   // está en revisión: la tarea de cada hora lo reintenta hasta lograrlo
   // (src/lib/recreate.ts). Por qué, y la tarea que lo avisa.
@@ -2458,10 +2463,49 @@ model StockMovement {
   userId        String?
   user          User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
   note          String?
+  // En una cuenta con sucursales, cuánto cambió en cada una: { "<id de la sucursal>": delta }.
+  branches      Json?
   createdAt     DateTime      @default(now())
 
   @@index([productId, createdAt])
   @@map("stock_movements")
+}
+
+// Las sucursales de la cuenta, cada una con su depósito. Con sucursales, el
+// stock del producto es la suma del de cada una, y Envíos Flex se ofrece solo
+// si hay stock en una sucursal con Flex (src/domain/branches.ts).
+model Branch {
+  id        String        @id @default(cuid())
+  accountId String
+  account   Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  name      String
+  position  Int           @default(0)
+  // Si despacha Envíos Flex: las ventas Flex salen de acá.
+  flex      Boolean       @default(false)
+  // De dónde salen primero las ventas que no son Flex.
+  main      Boolean       @default(false)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  stock     BranchStock[]
+
+  @@unique([accountId, name])
+  @@map("branches")
+}
+
+// El stock de una medida del producto en una sucursal.
+model BranchStock {
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  key       String
+  branchId  String
+  branch    Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  // Puede quedar negativo si se vendió más de lo que había.
+  quantity  Int
+  updatedAt DateTime @updatedAt
+
+  @@id([productId, key, branchId])
+  @@index([branchId])
+  @@map("branch_stock")
 }
 
 enum SaleStatus {

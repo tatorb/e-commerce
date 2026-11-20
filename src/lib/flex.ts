@@ -10,8 +10,9 @@ import { listingTargets } from '@/lib/variant-listings';
 
 // Envíos Flex desde la app: prender y apagar Flex en las publicaciones, las
 // ventas Flex del día y la configuración de Flex de la cuenta. Prender o apagar
-// lo decide una persona: la app no lo hace sola. En una familia, el cambio va a
-// todas sus medidas. Cada intento queda en el registro. Recibe la base por
+// lo decide una persona, salvo en una cuenta con sucursales con Flex, donde
+// sigue al stock de esas sucursales (src/lib/branch-flex.ts). En una familia,
+// el cambio a mano va a todas sus medidas. Cada intento queda en el registro. Recibe la base por
 // parámetro para poder probarlo.
 
 type Db = PrismaClient;
@@ -47,15 +48,42 @@ async function expand(db: Db, accountId: string, publicationIds: string[]) {
   return { rows, missing: [...new Set(missing)] };
 }
 
-type Row = Awaited<ReturnType<typeof expand>>['rows'][number];
+export const FLEX_SELECT = SELECT;
+export type FlexRow = Prisma.PublicationGetPayload<{ select: typeof SELECT }>;
+type Row = FlexRow;
 
 /** Por qué no se puede, o null si se puede. */
-function blockedReason(p: Row): string | null {
+export function blockedReason(p: Row): string | null {
   const channelName = getChannelAdapter(p.store.channel.kind, p.store.channel.name).name;
   if (!p.externalId) return `Todavía no está publicada en ${channelName}.`;
   if (!getChannelFlex(p.store.channel.kind)) return `${channelName} no tiene Envíos Flex.`;
   if (p.store.connection?.status !== 'ACTIVE') return `La tienda no está conectada con ${channelName}, conectala en Conexión.`;
   return null;
+}
+
+/** Prende o apaga Flex en una publicación, en todos sus códigos del canal, y lo anota. */
+export async function applyFlex(db: Db, p: Row, on: boolean, opts: { userId: string | null; note: string | null }): Promise<{ ok: true } | { ok: false; message: string }> {
+  const blocked = blockedReason(p);
+  if (blocked) return { ok: false, message: blocked };
+  const flex = getChannelFlex(p.store.channel.kind)!;
+  // En el registro, sin dato va como nulo de JSON.
+  const before = p.channelCopy?.flex ?? Prisma.JsonNull;
+  try {
+    await withAccessToken(db, p.store.id, async (token) => {
+      for (const target of listingTargets(p)) await flex.setFlex(token, target, on);
+    });
+  } catch (e) {
+    if (!(e instanceof FlexError) && !(e instanceof ConnectError)) throw e;
+    await db.channelSyncChange.create({
+      data: { publicationId: p.id, field: 'flex', kind: 'STATUS_FAILED', before, after: on, message: opts.note ? `${opts.note} ${e.message}` : e.message, userId: opts.userId },
+    });
+    return { ok: false, message: e.message };
+  }
+  await db.$transaction([
+    db.channelCopy.updateMany({ where: { publicationId: p.id }, data: { flex: on } }),
+    db.channelSyncChange.create({ data: { publicationId: p.id, field: 'flex', kind: 'STATUS_CHANGED', before, after: on, message: opts.note, userId: opts.userId } }),
+  ]);
+  return { ok: true };
 }
 
 /**
@@ -70,31 +98,13 @@ export async function setPublicationsFlex(
   const { rows, missing } = await expand(db, args.accountId, args.publicationIds);
   for (const id of missing) result.failed.push({ id, title: null, externalId: null, message: 'La publicación no está en la cuenta.' });
   for (const p of rows) {
-    const blocked = blockedReason(p);
-    if (blocked) {
-      result.failed.push({ id: p.id, title: p.title, externalId: p.externalId, message: blocked });
-      continue;
-    }
-    const flex = getChannelFlex(p.store.channel.kind)!;
-    // En el registro, sin dato va como nulo de JSON.
-    const before = p.channelCopy?.flex ?? Prisma.JsonNull;
-    try {
-      await withAccessToken(db, p.store.id, async (token) => {
-        for (const target of listingTargets(p)) await flex.setFlex(token, target, args.on);
-      });
-    } catch (e) {
-      if (!(e instanceof FlexError) && !(e instanceof ConnectError)) throw e;
-      result.failed.push({ id: p.id, title: p.title, externalId: p.externalId, message: e.message });
-      await db.channelSyncChange.create({
-        data: { publicationId: p.id, field: 'flex', kind: 'STATUS_FAILED', before, after: args.on, message: e.message, userId: args.userId },
-      });
-      continue;
-    }
-    await db.$transaction([
-      db.channelCopy.updateMany({ where: { publicationId: p.id }, data: { flex: args.on } }),
-      db.channelSyncChange.create({ data: { publicationId: p.id, field: 'flex', kind: 'STATUS_CHANGED', before, after: args.on, userId: args.userId } }),
-    ]);
-    result.done.push({ id: p.id, title: p.title, externalId: p.externalId });
+    const r = await applyFlex(db, p, args.on, { userId: args.userId, note: null });
+    if (r.ok) result.done.push({ id: p.id, title: p.title, externalId: p.externalId });
+    else result.failed.push({ id: p.id, title: p.title, externalId: p.externalId, message: r.message });
+  }
+  // En una cuenta con sucursales, lo que una persona cambia a mano deja de seguir al stock.
+  if (result.done.length > 0 && (await db.branch.count({ where: { accountId: args.accountId } })) > 0) {
+    await db.publication.updateMany({ where: { id: { in: result.done.map((d) => d.id) } }, data: { flexFollowsStock: false } });
   }
   return result;
 }

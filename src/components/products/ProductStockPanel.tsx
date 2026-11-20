@@ -107,6 +107,26 @@ export function ProductStockPanel({
               )}
               {comboUnits !== null ? <p>Alcanza para armar {comboUnits === 1 ? '1 combo' : `${comboUnits} combos`}.</p> : null}
             </div>
+          ) : view.branches.length > 0 ? (
+            <div className="space-y-4">
+              {view.branches.map((b) => (
+                <div key={b.id} className="space-y-2 rounded-lg border px-3 py-2.5">
+                  <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
+                    {b.name}
+                    {b.flex ? <Badge variant="secondary">Con Flex</Badge> : null}
+                    {b.main ? <Badge variant="outline">Principal</Badge> : null}
+                  </p>
+                  {canEdit ? (
+                    <StockForm accountSlug={accountSlug} productId={view.id} lines={b.lines} managed={view.managed} branchId={b.id} />
+                  ) : (
+                    <p className="text-sm tabular-nums">{view.managed ? stockText(b.lines.map((l) => ({ label: l.label, quantity: l.quantity ?? 0 }))) : 'Sin stock cargado.'}</p>
+                  )}
+                </div>
+              ))}
+              <p className="text-sm">
+                Total: <span className="tabular-nums">{view.managed ? stockText(view.lines.map((l) => ({ label: l.label, quantity: l.quantity ?? 0 }))) : 'Sin stock cargado.'}</span>
+              </p>
+            </div>
           ) : canEdit ? (
             <StockForm accountSlug={accountSlug} productId={view.id} lines={view.lines} managed={view.managed} />
           ) : (

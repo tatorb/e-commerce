@@ -116,6 +116,7 @@ describe('el stock por medida y de los combos', () => {
       cancelled: false,
       delivered: false,
       lines: [{ listingId: 'MLA1', variationId: '11', sku: 'AROS-STD', quantity: 2 }],
+      shipmentId: null,
     });
     // Sin confirmar, Mercado Libre todavía no descontó nada.
     expect(parseOrder({ id: 1, status: 'payment_required', date_created: 'x', date_closed: null })).toMatchObject({ counts: false, cancelled: false });

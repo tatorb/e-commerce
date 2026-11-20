@@ -2,7 +2,7 @@ import { Prisma, type PrismaClient } from '@/generated/prisma/client';
 import type { ChannelKind } from '@/generated/prisma/enums';
 import { ConnectError } from '@/channels/connect';
 import { getChannelPublisher, PublishError } from '@/channels/publish';
-import { getChannelSales, SalesAccessError, type ChannelOrder, type ChannelOrderLine } from '@/channels/sales';
+import { getChannelSales, getChannelSalesLedger, SalesAccessError, type ChannelOrder, type ChannelOrderLine } from '@/channels/sales';
 import { fingerprint, parseFingerprints, parseRejections } from '@/domain/channel-sync';
 import { parseVariantListings, parseVariations, type VariantLike } from '@/domain/media';
 import { channelQuantities } from '@/domain/quantities';
@@ -16,6 +16,8 @@ import { variantListingOwners } from '@/lib/variant-listings';
 import { afterRestock } from '@/lib/restock';
 import { PLAN_SELECT, planFor, plansFor, singleMeasure, SOURCE_SELECT, sourceOf, type PlanRow, type StockPlan } from '@/lib/stock-plan';
 import { readOne } from '@/lib/channel-sync';
+import { addBranchStock, branchChange, productBranches, saleDeltas, startingBranch } from '@/lib/branches';
+import { syncFlex } from '@/lib/branch-flex';
 import { announceStockAlarms, markStockAlarms, settleStockAlarms, type AlarmEvent, type StockChange } from '@/lib/stock-alarms';
 
 // El stock de cada producto: cargarlo a mano, tomarlo del canal al empezar,
@@ -146,7 +148,13 @@ async function pushPlanned(
   return { ok: true };
 }
 
-export type SyncResult = { sent: number; failed: { publicationId: string; title: string; error: string }[]; pending: boolean };
+export type SyncResult = {
+  sent: number;
+  failed: { publicationId: string; title: string; error: string }[];
+  pending: boolean;
+  // Las publicaciones en que se prendió o apagó Flex por el stock de las sucursales.
+  flex?: { publicationId: string; on: boolean }[];
+};
 
 /** Sube a esas publicaciones la cantidad que les toca, solo a las que la tienen distinta en el canal. */
 export async function syncStock(
@@ -168,6 +176,9 @@ export async function syncStock(
     if (r.ok) result.sent++;
     else result.failed.push({ publicationId: row.id, title: titleOrUntitled(row.title), error: r.error });
   }
+  // Con sucursales con Flex: Flex sigue al stock de esas sucursales.
+  const flex = await syncFlex(db, { publicationIds: args.publicationIds, userId: args.userId ?? null });
+  if (flex.changed.length > 0) result.flex = flex.changed;
   return result;
 }
 
@@ -195,7 +206,7 @@ export async function reconcileStock(db: Db, opts: { budgetMs: number }): Promis
 /** Cambia el stock de un producto. Si todavía no lo llevaba la app, empieza ahora. Después lo sube a sus publicaciones. */
 export async function setProductStock(
   db: Db,
-  args: { accountId: string; productId: string; userId: string; stock: unknown; now?: Date },
+  args: { accountId: string; productId: string; userId: string; stock: unknown; now?: Date; branchId?: string | null },
 ): Promise<{ changed: number; sync: SyncResult }> {
   const product = await db.product.findFirst({
     where: { id: args.productId, accountId: args.accountId },
@@ -206,15 +217,24 @@ export async function setProductStock(
   const slots = stockSlots(product.variants);
   const wanted = parseStockChange(args.stock, slots);
   const starting = product.stockSince === null;
+  // Con sucursales, se carga lo de una: el del producto es la suma.
+  const branches = await productBranches(db, product.id);
+  const branch = branches.length === 0 ? null : (branches.find((b) => b.id === args.branchId) ?? (branches.length === 1 ? branches[0] : null));
+  if (branches.length > 0 && !branch) throw new StockError(`Elegí la sucursal: ${branches.map((b) => b.name).join(' o ')}.`);
   let changed = 0;
   const now = args.now ?? new Date();
   let events: AlarmEvent[] = [];
   await db.$transaction(async (tx) => {
     const changes: StockChange[] = [];
+    if (branch && starting) for (const slot of slots) wanted[slot.key] ??= 0;
+    const inBranch = branch ? new Map((await branchChange(tx, { productId: product.id, branchId: branch.id, wanted })).map((c) => [c.key, c])) : null;
     for (const slot of slots) {
       const before = starting ? null : (product.stock.find((s) => s.key === slot.key)?.quantity ?? 0);
-      const next = wanted[slot.key] ?? (starting ? 0 : null);
-      if (next === null || next === before) continue;
+      const here = inBranch?.get(slot.key) ?? null;
+      const next = here ? here.total : (wanted[slot.key] ?? (starting ? 0 : null));
+      const moved = here ? here.after - here.before : 0;
+      if (next === null || (next === before && moved === 0)) continue;
+      if (moved !== 0) await addBranchStock(tx, product.id, slot.key, { [branch!.id]: moved });
       // Solo las medidas que cambiaron: guardar otra no toca la alarma de esta.
       changes.push({ productId: product.id, key: slot.key, before: before ?? 0, after: next, cause: 'manual' });
       await tx.productStock.upsert({
@@ -223,7 +243,16 @@ export async function setProductStock(
         update: { quantity: next, label: slot.label },
       });
       await tx.stockMovement.create({
-        data: { productId: product.id, key: slot.key, kind: starting ? 'INITIAL' : 'MANUAL', delta: next - (before ?? 0), after: next, userId: args.userId, note: starting ? 'Cargado a mano.' : null },
+        data: {
+          productId: product.id,
+          key: slot.key,
+          kind: starting ? 'INITIAL' : 'MANUAL',
+          delta: next - (before ?? 0),
+          after: next,
+          userId: args.userId,
+          note: starting ? `Cargado a mano${branch ? ` en ${branch.name}` : ''}.` : branch ? `En ${branch.name}.` : null,
+          ...(moved !== 0 ? { branches: { [branch!.id]: moved } } : {}),
+        },
       });
       changed++;
     }
@@ -255,6 +284,7 @@ export async function dropOrphanStock(db: Db, args: { accountId: string; product
     const row = await tx.productStock.findUnique({ where: { productId_key: { productId: product.id, key: args.key } } });
     if (!row) return;
     await tx.productStock.delete({ where: { productId_key: { productId: product.id, key: args.key } } });
+    await tx.branchStock.deleteMany({ where: { productId: product.id, key: args.key } });
     await tx.stockMovement.create({
       data: {
         productId: product.id,
@@ -327,6 +357,8 @@ type SaleLine = {
   parts: SalePart[];
   reason?: string;
   unmanaged?: boolean;
+  // Se envía con Flex: con sucursales, sale de una con Flex.
+  flex?: boolean;
 };
 
 function parseSaleLines(raw: unknown): SaleLine[] {
@@ -417,6 +449,9 @@ async function moveStock(tx: Tx, lines: SaleLine[], sign: -1 | 1, args: { saleId
     if (!line.counted) continue;
     for (const part of line.parts) {
       const slot = await slotOf(tx, part.productId, part.key);
+      // Con sucursales: de cuál sale, o a cuál vuelve la cancelada.
+      const branches = sign < 0 ? await saleDeltas(tx, part.productId, part.key, part.quantity, line.flex === true) : await returnedDeltas(tx, part, args.saleId);
+      if (branches) await addBranchStock(tx, part.productId, part.key, branches);
       const after = await addStock(tx, part.productId, part.key, slot.label, sign * part.quantity);
       changes.push({ productId: part.productId, key: part.key, before: after - sign * part.quantity, after, cause: sign < 0 ? 'sale' : 'cancel' });
       await tx.stockMovement.create({
@@ -428,7 +463,8 @@ async function moveStock(tx: Tx, lines: SaleLine[], sign: -1 | 1, args: { saleId
           after,
           publicationId: line.publicationId,
           saleId: args.saleId,
-          note: `Venta ${args.orderId}`,
+          note: `Venta ${args.orderId}${line.flex ? ' por Flex' : ''}`,
+          ...(branches ? { branches } : {}),
         },
       });
       // Con "Mostrar más de 5", vender sin tener es parte del plan: lo avisan las alarmas de stock.
@@ -436,6 +472,30 @@ async function moveStock(tx: Tx, lines: SaleLine[], sign: -1 | 1, args: { saleId
     }
   }
   return changes;
+}
+
+/**
+ * A qué sucursal vuelven las unidades de una venta cancelada: a las mismas de
+ * las que salió. Si no se sabe, a la principal. Null si la cuenta no tiene sucursales.
+ */
+async function returnedDeltas(tx: Tx, part: SalePart, saleId: string): Promise<Record<string, number> | null> {
+  const branches = await productBranches(tx, part.productId);
+  if (branches.length === 0) return null;
+  const moves = await tx.stockMovement.findMany({ where: { saleId, productId: part.productId, key: part.key, kind: 'SALE' }, select: { delta: true, branches: true } });
+  const out: Record<string, number> = {};
+  let known = 0;
+  for (const m of moves) {
+    const b = m.branches && typeof m.branches === 'object' && !Array.isArray(m.branches) ? (m.branches as Record<string, unknown>) : null;
+    if (!b) continue;
+    for (const [id, d] of Object.entries(b)) {
+      if (typeof d !== 'number' || !branches.some((x) => x.id === id)) continue;
+      out[id] = (out[id] ?? 0) - d;
+      known -= d;
+    }
+  }
+  const left = part.quantity - known;
+  if (left > 0) out[branches[0].id] = (out[branches[0].id] ?? 0) + left;
+  return out;
 }
 
 const productsOf = (lines: SaleLine[]) => [...new Set(lines.filter((l) => l.counted).flatMap((l) => l.parts.map((p) => p.productId)))];
@@ -471,11 +531,31 @@ async function boostedOf(db: Db, lines: SaleLine[]): Promise<Set<string>> {
 }
 
 /**
+ * Si la venta se envía con Flex. Solo hace falta saberlo si la cuenta tiene
+ * sucursales con Flex: sale de lo leído en Ventas o, si no, del envío en el canal.
+ */
+async function orderIsFlex(db: Db, storeId: string, order: ChannelOrder): Promise<boolean> {
+  const store = await db.store.findUnique({ where: { id: storeId }, select: { channel: { select: { kind: true } }, account: { select: { branches: { where: { flex: true }, select: { id: true } } } } } });
+  if (!store || store.account.branches.length === 0) return false;
+  const known = await db.sale.findUnique({ where: { storeId_orderId: { storeId, orderId: order.orderId } }, select: { shipKind: true } });
+  if (known?.shipKind) return known.shipKind === 'flex';
+  const ledger = getChannelSalesLedger(store.channel.kind);
+  if (!ledger || !order.shipmentId) return false;
+  try {
+    const shipment = await withAccessToken(db, storeId, (token) => ledger.readShipment(token, order.shipmentId!));
+    return shipment?.kind === 'flex';
+  } catch (e) {
+    console.error('No se pudo leer el envío de la venta', e instanceof Error ? e.message : e);
+    return false;
+  }
+}
+
+/**
  * Anota una venta del canal: si se confirmó, descuenta las unidades del stock
  * de sus productos; si después se cancela sin haberse entregado, las devuelve.
  * Cada venta se cuenta una sola vez. Devuelve los productos que cambiaron.
  */
-export async function recordOrder(db: Db, args: { storeId: string; order: ChannelOrder; now?: Date }): Promise<string[]> {
+export async function recordOrder(db: Db, args: { storeId: string; order: ChannelOrder; now?: Date; flex?: boolean }): Promise<string[]> {
   const { order } = args;
   const now = args.now ?? new Date();
   const existing = await db.channelSale.findUnique({ where: { storeId_orderId: { storeId: args.storeId, orderId: order.orderId } } });
@@ -488,6 +568,7 @@ export async function recordOrder(db: Db, args: { storeId: string; order: Channe
     const lines: SaleLine[] = [];
     for (const line of order.lines) lines.push(await resolveLine(db, args.storeId, line, new Date(order.orderedAt), ownersOf));
     const counted = lines.some((l) => l.counted);
+    if (counted && (args.flex ?? (await orderIsFlex(db, args.storeId, order)))) for (const l of lines) l.flex = true;
     const boosted = await boostedOf(db, lines);
     let events: AlarmEvent[] = [];
     try {
@@ -758,6 +839,12 @@ async function startOne(db: Db, product: StartRow): Promise<boolean> {
     if (claimed.count === 0) return false;
     await tx.productStock.deleteMany({ where: { productId: product.id } });
     await tx.productStock.createMany({ data: lines.map((l) => ({ productId: product.id, key: l.key, label: l.label, quantity: l.quantity })) });
+    // Con sucursales, entra en la primera.
+    const first = startingBranch(await productBranches(tx, product.id));
+    if (first) {
+      await tx.branchStock.deleteMany({ where: { productId: product.id } });
+      await tx.branchStock.createMany({ data: lines.map((l) => ({ productId: product.id, key: l.key, branchId: first.id, quantity: l.quantity })) });
+    }
     await tx.stockMovement.createMany({
       data: lines.map((l) => ({ productId: product.id, key: l.key, kind: 'INITIAL' as const, delta: l.quantity, after: l.quantity, note: 'Tomado de sus publicaciones en el canal.' })),
     });
@@ -809,6 +896,8 @@ export async function loadProductStock(db: Db, args: { accountId: string; produc
   if (!product) return null;
   const slots = stockSlots(product.variants);
   const stock = new Map(product.stock.map((s) => [s.key, s]));
+  const branchList = await productBranches(db, product.id);
+  const branchRows = branchList.length ? await db.branchStock.findMany({ where: { productId: product.id }, select: { key: true, branchId: true, quantity: true } }) : [];
   const publications = await db.publication.findMany({
     where: { productId: product.id },
     orderBy: { createdAt: 'asc' },
@@ -844,6 +933,14 @@ export async function loadProductStock(db: Db, args: { accountId: string; produc
         alarm: row ? { lowAt: row.lowAt, outSince: row.outSince, remindedAt: row.remindedAt, cutAt: row.cutAt } : null,
       };
     }),
+    // Con sucursales: lo de cada una, por medida. El de arriba es la suma.
+    branches: branchList.map((br) => ({
+      ...br,
+      lines: slots.map((s) => {
+        const row = branchRows.find((r) => r.key === s.key && r.branchId === br.id);
+        return { key: s.key, label: s.label, quantity: row ? row.quantity : product.stockSince ? 0 : null };
+      }),
+    })),
     // Stock de medidas que ya no están en la ficha.
     orphans: product.stock.filter((s) => !slots.some((x) => x.key === s.key)),
     parts: product.kind === 'COMBO' ? sourceOf(product) : null,

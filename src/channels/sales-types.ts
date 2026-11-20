@@ -22,6 +22,8 @@ export type ChannelOrder = {
   cancelled: boolean;
   delivered: boolean;
   lines: ChannelOrderLine[];
+  // El envío, para saber si es Flex. Null o sin dato: sin envío por el canal.
+  shipmentId?: string | null;
 };
 
 /** El canal no deja leer las ventas, por ejemplo porque falta el permiso. */

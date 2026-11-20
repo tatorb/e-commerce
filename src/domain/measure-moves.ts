@@ -184,6 +184,10 @@ async function moveStock(tx: Tx, productId: string, keys: Map<string, string>, a
         return { ...r, productId, key, label: labelOf.get(key) ?? r.label };
       }),
     });
+    // El de cada sucursal, igual.
+    const branchRows = await tx.branchStock.findMany({ where: { productId, key: { in: moving.map((r) => r.key) } }, select: { key: true, branchId: true, quantity: true } });
+    await tx.branchStock.deleteMany({ where: { productId, key: { in: [...gone] } } });
+    if (branchRows.length > 0) await tx.branchStock.createMany({ data: branchRows.map((r) => ({ productId, key: keys.get(r.key)!, branchId: r.branchId, quantity: r.quantity })) });
     // El historial, de una vez por medida: así dos medidas que se cambian el nombre no se mezclan.
     const history = await tx.stockMovement.findMany({ where: { productId, key: { in: moving.map((r) => r.key) } }, select: { id: true, key: true } });
     for (const [old, now] of keys) {

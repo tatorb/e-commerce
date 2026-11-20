@@ -28,14 +28,17 @@ export async function setProductCostsAction(accountSlug: string, productId: stri
   });
 }
 
-export async function setProductStockAction(accountSlug: string, productId: string, stock: Record<string, string>): Promise<Result> {
+export async function setProductStockAction(accountSlug: string, productId: string, stock: Record<string, string>, branchId?: string | null): Promise<Result> {
   return act(accountSlug, { section: 'productos', does: 'Cambió el stock del producto', productId }, async ({ user, account }) => {
     try {
-      const r = await setProductStock(prisma, { accountId: account.id, productId: String(productId), userId: user.id, stock });
+      const r = await setProductStock(prisma, { accountId: account.id, productId: String(productId), userId: user.id, stock, branchId: branchId ? String(branchId) : null });
       revalidatePath(`/a/${accountSlug}`, 'layout');
       const sent = r.sync.sent > 0 ? ` Se subió a ${r.sync.sent === 1 ? '1 publicación' : `${r.sync.sent} publicaciones`}.` : '';
       const failed = r.sync.failed.length > 0 ? ` No se pudo subir a ${r.sync.failed.map((f) => `«${f.title}» (${f.error})`).join(', ')}: se vuelve a probar sola cada hora.` : '';
-      return { ok: true, message: `${r.changed === 0 ? 'No cambió nada.' : 'Guardado.'}${sent}${failed}` };
+      const flex = r.sync.flex?.length
+        ? ` Flex: se prendió en ${r.sync.flex.filter((f) => f.on).length} y se apagó en ${r.sync.flex.filter((f) => !f.on).length}, por el stock de las sucursales con Flex.`
+        : '';
+      return { ok: true, message: `${r.changed === 0 ? 'No cambió nada.' : 'Guardado.'}${sent}${failed}${flex}` };
     } catch (e) {
       if (e instanceof StockError) return { ok: false, error: e.message };
       throw e;

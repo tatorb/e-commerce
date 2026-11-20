@@ -13,6 +13,8 @@ import { formatDateTime, formatDuration, plural } from '@/lib/format';
 import { ALARM_FILTERS, alarmFilterOf, groupStockAlarms, loadStockAlarms, orderItems, orderSummaryText, parseAlarmFilter, type AlarmMeasure, type AlarmProduct } from '@/lib/stock-alarms';
 import { stockTaskSettings } from '@/lib/stock-task-recipients';
 import { StockTaskRecipients } from '@/components/tasks/StockTaskRecipients';
+import { BranchesCard } from '@/components/products/BranchesCard';
+import { accountBranches } from '@/lib/branches';
 import { cn } from '@/lib/utils/cn';
 
 // Alarmas de stock: las medidas que muestran más stock del que hay, con
@@ -34,7 +36,7 @@ export default async function StockAlarmsPage({ params, searchParams }: { params
   const [{ cuenta }, search] = await Promise.all([params, searchParams]);
   const { user, account } = await requireAccount(cuenta, 'alarmas');
   const filter = parseAlarmFilter(search.ver);
-  const [rows, recipients] = await Promise.all([loadStockAlarms(prisma, account.id), stockTaskSettings(prisma, account.id)]);
+  const [rows, recipients, branches] = await Promise.all([loadStockAlarms(prisma, account.id), stockTaskSettings(prisma, account.id), accountBranches(prisma, account.id)]);
   const groups = groupStockAlarms(rows);
   const shown = groups
     .map((g) => ({ ...g, measures: g.measures.filter((m) => alarmFilterOf(m, filter)) }))
@@ -70,6 +72,7 @@ export default async function StockAlarmsPage({ params, searchParams }: { params
         />
       </PageHeader>
       <PageBody>
+        <BranchesCard accountSlug={account.slug} branches={branches} canEdit={can(user.access, 'productos', 'write')} />
         <StockTaskRecipients
           accountSlug={account.slug}
           candidates={recipients.candidates}

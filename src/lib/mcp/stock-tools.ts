@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { matchSlot, StockError, stockSlots, stockText } from '@/domain/stock';
 import { setProductStock, setShowMore } from '@/lib/stock';
+import { accountBranches, branchStockText, findBranch } from '@/lib/branches';
 import { CostError, costsForClaude, loadProductCosts, setProductCosts } from '@/lib/costs';
 import { McpToolError, accountArg, defineTool, publicationArg, resolveAccount, resolvePublication } from './tool';
 
@@ -13,7 +14,7 @@ const setProductStockTool = defineTool({
   section: 'productos',
   title: 'Cambiar el stock del producto',
   description:
-    'Cambia el stock del producto de una publicación: las unidades que hay, o las de cada medida. Lo heredan todas sus publicaciones y las de los combos en que está, y la cantidad nueva se sube sola al canal. Las ventas del canal lo descuentan solas: usalo solo para lo que la persona te dice que cambió, por ejemplo mercadería que entró. Un combo no tiene stock propio: se cambia en sus piezas. También prende o apaga "Mostrar más de 5" (mostrar_mas_de_5): con stock de 5 o menos, también en 0, los canales muestran 6 y la publicación nunca se pausa sola. Cuando una medida queda en 1 o en 0, por una venta, un ajuste o una carga, sale la alarma con una tarea para reponer, y al día sin reponer otro aviso; si hay que pausar, se pausa a mano con set_publication_status. Cargar el stock resuelve sus alarmas. Antes de cambiarlo, mostrale a la persona qué vas a cambiar y esperá que confirme.',
+    'Cambia el stock del producto de una publicación: las unidades que hay, o las de cada medida. Lo heredan todas sus publicaciones y las de los combos en que está, y la cantidad nueva se sube sola al canal. Las ventas del canal lo descuentan solas: usalo solo para lo que la persona te dice que cambió, por ejemplo mercadería que entró. Un combo no tiene stock propio: se cambia en sus piezas. También prende o apaga "Mostrar más de 5" (mostrar_mas_de_5): con stock de 5 o menos, también en 0, los canales muestran 6 y la publicación nunca se pausa sola. Cuando una medida queda en 1 o en 0, por una venta, un ajuste o una carga, sale la alarma con una tarea para reponer, y al día sin reponer otro aviso; si hay que pausar, se pausa a mano con set_publication_status. Cargar el stock resuelve sus alarmas. En una cuenta con sucursales (get_branches), se carga el stock de una sucursal (sucursal) y el del producto es la suma; si una sucursal con Flex queda con o sin stock, Envíos Flex se prende o se apaga solo en sus publicaciones. Antes de cambiarlo, mostrale a la persona qué vas a cambiar y esperá que confirme.',
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg,
@@ -24,6 +25,12 @@ const setProductStockTool = defineTool({
       .optional()
       .describe('Las unidades de cada medida, si el producto tiene medidas. Las que no se mandan quedan como están.'),
     mostrar_mas_de_5: z.boolean().optional().describe('Prende o apaga "Mostrar más de 5" en el producto. Sin mandar, queda como está.'),
+    sucursal: z
+      .string()
+      .min(1)
+      .max(80)
+      .optional()
+      .describe('En una cuenta con sucursales (get_branches): la sucursal cuyo stock se carga, por su nombre. Las unidades son las de esa sucursal; el stock del producto es la suma de todas.'),
   }),
   readOnly: false,
   destructive: true,
@@ -57,13 +64,30 @@ const setProductStockTool = defineTool({
         stock[key] = m.unidades;
       }
     }
-    const r = await setProductStock(ctx.db, { accountId: account.id, productId: pub.product.id, userId: ctx.userId, stock });
+    const branches = await accountBranches(ctx.db, account.id);
+    let branchId: string | null = null;
+    if (branches.length > 0) {
+      const found = args.sucursal ? findBranch(branches, args.sucursal) : branches.length === 1 ? branches[0] : null;
+      if (!found) throw new McpToolError(`${args.sucursal ? `"${args.sucursal}" no es una sucursal de la cuenta.` : 'La cuenta tiene sucursales: pasá de cuál es el stock.'} Sucursales: ${branches.map((b) => b.name).join(', ')}.`);
+      branchId = found.id;
+    } else if (args.sucursal) {
+      throw new McpToolError('La cuenta no tiene sucursales: el stock es uno solo. Se crean con save_branch.');
+    }
+    let r;
+    try {
+      r = await setProductStock(ctx.db, { accountId: account.id, productId: pub.product.id, userId: ctx.userId, stock, branchId });
+    } catch (e) {
+      if (e instanceof StockError) throw new McpToolError(e.message);
+      throw e;
+    }
     if (args.mostrar_mas_de_5 !== undefined) await setShowMore(ctx.db, { accountId: account.id, productId: pub.product.id, on: args.mostrar_mas_de_5, userId: ctx.userId });
     const now = await ctx.db.productStock.findMany({ where: { productId: pub.product.id }, select: { key: true, quantity: true } });
     return {
       guardado: true,
       stock: stockText(slots.map((s) => ({ label: s.label, quantity: now.find((n) => n.key === s.key)?.quantity ?? 0 }))),
+      ...(branchId ? { stock_por_sucursal: await branchStockText(ctx.db, pub.product.id, slots) } : {}),
       publicaciones_actualizadas: r.sync.sent,
+      ...(r.sync.flex?.length ? { flex_cambiado_por_stock: r.sync.flex.map((f) => ({ publicacion_id: f.publicationId, flex: f.on ? 'prendido' : 'apagado' })) } : {}),
       ...(r.sync.failed.length > 0 ? { no_se_pudo_subir: r.sync.failed.map((f) => ({ publicacion: f.title, motivo: f.error })) } : {}),
     };
   },

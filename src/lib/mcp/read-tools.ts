@@ -1,4 +1,6 @@
 import { flexLabel } from '@/domain/flex';
+import { branchStockText } from '@/lib/branches';
+import { flexPlans } from '@/lib/branch-flex';
 import { competitorOwner, loadCompetitors } from '@/lib/competitors';
 import { z } from 'zod';
 import { parseWarranty, warrantyLabel } from '@/domain/warranty';
@@ -586,7 +588,7 @@ const getPublication = defineTool({
       loadCatalogData(ctx.db, id),
     ]);
     const product = pub.product;
-    const [combo, knowledge, plans, stock, buyers, visits, units, notes] = await Promise.all([
+    const [combo, knowledge, plans, stock, buyers, visits, units, notes, byBranch, flexPlan] = await Promise.all([
       loadCombo(ctx.db, product.id),
       loadKnowledge(ctx.db, product.id),
       plansFor(ctx.db, [id]),
@@ -598,6 +600,8 @@ const getPublication = defineTool({
       loadVisits(ctx.db, id).catch(() => null),
       unitsLast90(ctx.db, [id]),
       listNotes(ctx.db, { accountId: account.id, publicationId: id, take: NOTES_SHOWN }),
+      branchStockText(ctx.db, product.id, stockSlots(product.variants)),
+      flexPlans(ctx.db, [id]).then((m) => m.get(id) ?? null),
     ]);
     const plan = plans.get(id) ?? null;
     const r = research.research;
@@ -668,6 +672,14 @@ const getPublication = defineTool({
       datos_de_catalogo: catalogForClaude(catalog),
       // Si ofrece Envíos Flex, como lo leyó la app del canal. Se cambia con set_publication_flex.
       envios_flex: pub.channelCopy ? flexLabel(pub.channelCopy.flex) : 'Sin leer del canal',
+      // En una cuenta con sucursales: si Flex sigue al stock de las sucursales con Flex y qué le toca.
+      ...(flexPlan
+        ? {
+            flex_por_stock: flexPlan.follows
+              ? { sigue_al_stock: true, le_toca: flexLabel(flexPlan.on), motivo: flexPlan.reason }
+              : { sigue_al_stock: false, motivo: flexPlan.reason },
+          }
+        : {}),
       fotos_en_el_canal: pub.channelCopy ? { cantidad: Array.isArray(pub.channelCopy.photos) ? pub.channelCopy.photos.length : 0, leidas: when(pub.channelCopy.readAt, account) } : null,
       registro: pub.syncChanges.map((c) => ({
         fecha: when(c.createdAt, account),
@@ -740,6 +752,7 @@ const getPublication = defineTool({
         stock: stock.stockSince
           ? stockText(stockSlots(product.variants).map((s) => ({ label: s.label, quantity: stock.stock.find((x) => x.key === s.key)?.quantity ?? 0 })))
           : 'La app todavía no lleva el stock de este producto.',
+        ...(byBranch && stock.stockSince ? { stock_por_sucursal: byBranch } : {}),
         // El costo de reposición sin IVA, el de cada medida si tiene: la base del paso Precio.
         costo_de_reposicion_sin_iva: costsForClaude(costLines(stock).lines),
         // Con la opción, los canales muestran 6 con 5 o menos, también en 0, y cada medida tiene su alarma.

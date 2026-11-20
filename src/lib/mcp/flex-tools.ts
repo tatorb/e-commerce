@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { flexLabel } from '@/domain/flex';
 import { formatDateTime } from '@/lib/format';
 import { flexConfiguration, flexToday, setPublicationsFlex, type FlexSale } from '@/lib/flex';
+import { flexPlans, setFlexFollowsStock } from '@/lib/branch-flex';
 import { McpToolError, accountArg, defineTool, resolveAccount, resolvePublication } from './tool';
 
 // Envíos Flex desde Claude: las ventas Flex del día, la configuración de Flex
@@ -89,11 +90,13 @@ const setFlexTool = defineTool({
   section: 'subir',
   title: 'Prender o apagar Envíos Flex en publicaciones',
   description:
-    'Prende o apaga Envíos Flex en una o varias publicaciones, en el canal. Con Flex, las ventas que entran por Flex las entrega la tienda, en el día o al día siguiente según su configuración. En una familia, el cambio va a todas sus medidas. El canal pide que lo decida el vendedor: antes de cambiarlo, mostrale a la persona qué publicaciones vas a cambiar y si las prendés o apagás, y esperá que confirme. Devuelve cuáles cambiaron y cuáles no, con el motivo. get_publication dice si cada una tiene Flex.',
+    'Prende o apaga Envíos Flex en una o varias publicaciones, en el canal. Con Flex, las ventas que entran por Flex las entrega la tienda, en el día o al día siguiente según su configuración. En una familia, el cambio va a todas sus medidas. El canal pide que lo decida el vendedor: antes de cambiarlo, mostrale a la persona qué publicaciones vas a cambiar y si las prendés o apagás, y esperá que confirme. En una cuenta con sucursales (get_branches), Flex se prende y se apaga solo según el stock de las sucursales con Flex; prenderlo o apagarlo a mano deja esa publicación fuera de eso, hasta volver a seguir_stock. Devuelve cuáles cambiaron y cuáles no, con el motivo. get_publication dice si cada una tiene Flex y, con sucursales, qué le toca (flex_por_stock).',
   input: z.object({
     cuenta: accountArg,
     publicaciones: z.array(z.string().min(1)).min(1).max(100).describe('Las publicaciones: su id en la app, su código en el canal o su link.'),
-    flex: z.enum(['prender', 'apagar']),
+    flex: z
+      .enum(['prender', 'apagar', 'seguir_stock'])
+      .describe('prender o apagar a mano; seguir_stock: en una cuenta con sucursales, vuelve a prenderse y apagarse solo según el stock de las sucursales con Flex.'),
   }),
   readOnly: false,
   destructive: true,
@@ -101,6 +104,16 @@ const setFlexTool = defineTool({
     const account = await resolveAccount(ctx, args.cuenta);
     const ids: string[] = [];
     for (const ref of args.publicaciones) ids.push(await resolvePublication(ctx, account.id, ref));
+    if (args.flex === 'seguir_stock') {
+      if ((await ctx.db.branch.count({ where: { accountId: account.id } })) === 0) throw new McpToolError('La cuenta no tiene sucursales: Flex se cambia a mano. Las sucursales se crean con save_branch.');
+      const f = await setFlexFollowsStock(ctx.db, { accountId: account.id, publicationIds: ids, on: true, userId: ctx.userId });
+      const plans = await flexPlans(ctx.db, ids);
+      return {
+        siguen_al_stock: [...plans].map(([id, p]) => ({ publicacion_id: id, ...(p.follows ? { le_toca: flexLabel(p.on), motivo: p.reason } : { sigue: false, motivo: p.reason }) })),
+        cambiadas_en_el_canal: f.changed.length,
+        ...(f.failed.length > 0 ? { no_se_pudieron: f.failed.map((x) => ({ publicacion_id: x.publicationId, motivo: x.message })) } : {}),
+      };
+    }
     const on = args.flex === 'prender';
     const r = await setPublicationsFlex(ctx.db, { accountId: account.id, publicationIds: ids, on, userId: ctx.userId });
     if (r.done.length === 0 && r.failed.length > 0) {
