@@ -424,7 +424,9 @@ const JOIN_SELECT = {
   pipelineStep: true,
   pipelineRemoval: true,
   createdAt: true,
-  channelCopy: { select: { details: true, variations: true, fingerprints: true, agreed: true } },
+  mainOptionId: true,
+  channelStatus: true,
+  channelCopy: { select: { details: true, variations: true, fingerprints: true, agreed: true, channelProductId: true } },
 } satisfies Prisma.PublicationSelect;
 
 type JoinRow = Prisma.PublicationGetPayload<{ select: typeof JOIN_SELECT }>;
@@ -506,6 +508,12 @@ export async function joinFamily(
   const measures = measuresOf(product.variants);
   const measureOf = new Map(rows.map((r) => [r.id, memberMeasure(r, measures)]));
   if ([...measureOf.values()].some((m) => m === null)) throw new FamilyError('Falta elegir qué medida vende alguna publicación.');
+  // Una medida va una sola vez: dos principales vivas de la misma medida en productos distintos del canal no se juntan.
+  const mains = rows.filter((r) => !r.mainOptionId && !['CLOSED', 'DELETED'].includes(r.channelStatus));
+  for (const a of mains) {
+    const clash = mains.find((b) => b.id !== a.id && measureOf.get(b.id)!.key === measureOf.get(a.id)!.key && b.channelCopy?.channelProductId !== a.channelCopy?.channelProductId);
+    if (clash) throw new FamilyError(`${a.externalId ?? 'Una sin publicar'} y ${clash.externalId ?? 'una sin publicar'} venden la misma medida (${measureOf.get(a.id)!.label}) en productos distintos del canal: no van en la misma familia.`);
+  }
 
   const lead = rows.find((r) => r.id === existing?.leadId) ?? leadOf(rows, measures);
   const name = channelFamilyName(lead.channelCopy?.details) ?? rows.map((r) => channelFamilyName(r.channelCopy?.details)).find(Boolean) ?? null;
@@ -787,7 +795,7 @@ export async function joinKnownFamilies(db: PrismaClient, storeId: string, publi
       productId: true,
       variantKey: true,
       variantListings: true,
-      channelCopy: { select: { details: true, variations: true } },
+      channelCopy: { select: { details: true, variations: true, channelProductId: true } },
       product: { select: { variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } } } },
     },
   });
@@ -796,11 +804,21 @@ export async function joinKnownFamilies(db: PrismaClient, storeId: string, publi
     if (parseVariantListings(r.variantListings).length >= 2) continue;
     const channelFamilyId = familyRead(r.channelCopy?.details)?.channelFamilyId;
     if (!channelFamilyId) continue;
-    const family = await db.listingFamily.findUnique({ where: { storeId_channelFamilyId: { storeId, channelFamilyId } }, select: { productId: true } });
+    const family = await db.listingFamily.findUnique({
+      where: { storeId_channelFamilyId: { storeId, channelFamilyId } },
+      select: { productId: true, members: { where: { mainOptionId: null }, select: { variantKey: true, channelStatus: true, channelCopy: { select: { channelProductId: true, variations: true, details: true } } } } },
+    });
     if (!family || family.productId !== r.productId) continue;
     const measures = measuresOf(r.product.variants);
-    const known = r.variantKey ? measures.some((m) => m.key === r.variantKey) : soleMeasureOf(measures, r.channelCopy) !== null;
-    if (!known) continue;
+    const key = r.variantKey && measures.some((m) => m.key === r.variantKey) ? r.variantKey : (soleMeasureOf(measures, r.channelCopy)?.key ?? null);
+    if (!key) continue;
+    // La familia ya tiene esa medida en otro producto del canal, por ejemplo la vieja de un producto
+    // recreado: no se suma, así no comparte título, fotos ni pipeline con la nueva.
+    const mine = r.channelCopy?.channelProductId ?? null;
+    const taken = family.members.some(
+      (m) => !['CLOSED', 'DELETED'].includes(m.channelStatus) && (m.variantKey ?? soleMeasureOf(measures, m.channelCopy)?.key) === key && m.channelCopy?.channelProductId !== mine,
+    );
+    if (taken) continue;
     try {
       await db.$transaction((tx) => joinFamily(tx, { storeId, productId: r.productId, channelFamilyId, publicationIds: [r.id], userId: null }));
       joined++;

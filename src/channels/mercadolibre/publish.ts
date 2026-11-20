@@ -472,7 +472,8 @@ async function createMembers(accessToken: string, l: ChannelNewListing, family: 
         condition: 'new',
         pictures: keeper.of(m.pictures),
         attributes: [
-          ...l.attributes.map(attributeBody),
+          ...l.attributes.filter((a) => !m.attributes?.some((x) => x.id === a.id)).map(attributeBody),
+          ...(m.attributes ?? []).map(attributeBody),
           ...(m.sku ? [{ id: 'SELLER_SKU', value_name: m.sku }] : []),
           // Las categorías de repuestos no traen un campo de medida: va con su nombre.
           ...(m.measure ? [{ name: 'Medida', value_name: m.measure }] : []),

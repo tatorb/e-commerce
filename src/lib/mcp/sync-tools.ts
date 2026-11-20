@@ -4,6 +4,7 @@ import { fieldLabel } from '@/domain/sync-log';
 import { titleOrUntitled } from '@/domain/publication-title';
 import { chooseFaces, readOne, runSyncStep, startSync, syncableStores, SyncError } from '@/lib/channel-sync';
 import { ConnectError } from '@/channels/connect';
+import { assignSaleOptions } from '@/lib/sale-options';
 import { loadSyncOverview } from '@/lib/queries/sync';
 import { McpToolError, accountArg, defineTool, findPublication, resolveAccount, when, type AccountRef, type McpContext } from './tool';
 
@@ -178,6 +179,11 @@ const syncNowTool = defineTool({
           if (!(e instanceof McpToolError || e instanceof SyncError || e instanceof ConnectError)) throw e;
           leidas.push({ publicacion: ref, resultado: 'no se leyó', motivo: e.message });
         }
+      }
+      // Con lo leído, las opciones de venta vuelven a quedar con su principal, como al final de una lectura completa.
+      if (leidas.some((l) => l.resultado === 'leída')) {
+        const stores = await syncableStores(ctx.db, account.id);
+        for (const st of stores) await assignSaleOptions(ctx.db, st.id).catch((e) => console.error('No se pudieron agrupar las opciones de venta', e instanceof Error ? e.message : e));
       }
       if (args.publicaciones.length === 1 && leidas[0]?.resultado === 'leída') {
         ctx.touched = { ...ctx.touched, publicationId: await findPublication(ctx.db, account.id, args.publicaciones[0]) };

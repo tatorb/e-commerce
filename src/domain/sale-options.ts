@@ -62,8 +62,16 @@ export function planMainOptions(rows: OptionRow[]): Map<string, string | null> {
     if (!r.channelProductId) continue;
     groups.set(r.channelProductId, [...(groups.get(r.channelProductId) ?? []), r]);
   }
-  const target = new Map<string, string | null>(rows.map((r) => [r.id, null]));
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  // Sin leer del canal no se sabe con cuáles va: queda como está.
+  const target = new Map<string, string | null>(rows.map((r) => [r.id, r.channelProductId ? null : r.mainOptionId]));
   for (const group of groups.values()) {
+    // Las que cuelgan de una principal que todavía no se leyó del canal siguen colgando de ella: si
+    // se agruparan ahora, una opción pasaría a ser la principal, o cada una quedaría suelta.
+    if (group.some((r) => r.mainOptionId && byId.has(r.mainOptionId) && !byId.get(r.mainOptionId)!.channelProductId)) {
+      for (const r of group) target.set(r.id, r.mainOptionId);
+      continue;
+    }
     if (group.length < 2) continue;
     const main = chooseMain(group);
     for (const r of group) if (r.id !== main.id) target.set(r.id, main.id);

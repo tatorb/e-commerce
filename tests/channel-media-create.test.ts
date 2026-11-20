@@ -965,6 +965,58 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     expect((await db.publication.findUniqueOrThrow({ where: { id: pub.id } })).familyId).toBeNull();
   });
 
+  it('en una familia nueva, las fotos elegidas en la principal para todas van a cada medida, y lo que cambia con la medida va con el suyo', async () => {
+    await db.productVariant.createMany({
+      data: [
+        { productId, sku: 'SP-413-00', measure: 'STD', position: 0 },
+        { productId, sku: 'SP-413-50', measure: '0,50', position: 1 },
+      ],
+    });
+    await taxesInStore();
+    const pub = await db.publication.create({ data: { productId, storeId, title: 'Subconjunto Peugeot 1.6 SP-413', channelStatus: 'UNPUBLISHED' } });
+    await withPackage(pub.id);
+    const { familyByMeasure } = await import('@/lib/families');
+    const [otherId] = await db.$transaction((tx) => familyByMeasure(tx, { publicationId: pub.id, userId: null }));
+    await withPackage(otherId);
+    const general = await correctedPhoto('general.jpg');
+    await db.user.create({ data: { id: 'u-fam', email: 'fam@ejemplo.com', name: 'Persona de prueba', isAdmin: true } });
+    const ctx: McpContext = { db, userId: 'u-fam', access: { isAdmin: true, permissions: {}, accountIds: [] }, baseUrl: 'https://app.ejemplo.com' };
+    const { MEDIA_TOOLS } = await import('@/lib/mcp/media-tools');
+    const { WRITE_TOOLS } = await import('@/lib/mcp/write-tools');
+    const tools = [...MEDIA_TOOLS, ...WRITE_TOOLS];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const run = async (name: string, args: Record<string, unknown>): Promise<any> => {
+      const t = tools.find((x) => x.name === name)!;
+      return t.run(ctx, t.input.parse({ cuenta: 'prueba', ...args }));
+    };
+
+    // Elegida en la principal, para todas: la otra medida también la lleva.
+    await run('set_publication_media', { publicacion: pub.id, fotos: [{ foto: `corregida:${general}`, medidas: ['todas'] }] });
+    for (const id of [pub.id, otherId]) {
+      expect((await db.publication.findUniqueOrThrow({ where: { id } })).media).toEqual([{ kind: 'edit', editId: general }]);
+    }
+    const checks = await createChecks(db, { accountId, publicationId: pub.id });
+    expect(checks.checks.find((c) => c.label === 'Fotos')).toMatchObject({ ok: true });
+
+    // Un dato que cambia con la medida: cada una con el suyo.
+    const saved = await run('save_catalog_data', {
+      publicacion: pub.id,
+      por_medida: [
+        { medida: 'STD', valores: { CLUTCH_TYPE: 'Monodisco' } },
+        { medida: '0.50', valores: { CLUTCH_TYPE: 'Bidisco' } },
+      ],
+    });
+    expect(saved.datos_de_catalogo.por_medida).toEqual([
+      { medida: 'STD', publicacion: pub.id, valores: { 'Tipo de embrague': 'Monodisco' } },
+      { medida: '0,50', publicacion: otherId, valores: { 'Tipo de embrague': 'Bidisco' } },
+    ]);
+    await expect(run('save_catalog_data', { publicacion: pub.id, por_medida: [{ medida: '1,00', valores: { CLUTCH_TYPE: 'Bidisco' } }] })).rejects.toThrow('no tiene la medida «1,00»');
+
+    await createInChannel(db, { accountId, publicationId: pub.id, price: 80000, quantities: { 'sku:SP-413-00 medida:std': 2, 'sku:SP-413-50 medida:0.50': 5 }, listingType: 'clasica', userId: null });
+    const posts = calls.filter((c) => c.path === '/items').map((c) => c.body as { attributes: { id?: string; value_name: string }[] });
+    expect(posts.map((p) => p.attributes.filter((a) => a.id === 'CLUTCH_TYPE'))).toEqual([[{ id: 'CLUTCH_TYPE', value_name: 'Monodisco' }], [{ id: 'CLUTCH_TYPE', value_name: 'Bidisco' }]]);
+  });
+
   it('con varias medidas crea una publicación por medida, en su familia, cada una con su SKU, su cantidad y sus fotos', async () => {
     // El mismo SKU en las dos medidas, como en algunas fábricas.
     await db.productVariant.createMany({

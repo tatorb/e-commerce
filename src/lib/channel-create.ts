@@ -3,7 +3,7 @@ import { Prisma } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
 import { ConnectError } from '@/channels/connect';
 import { getChannelPublisher, PublishError, type ChannelAttributeUpdate, type ChannelPicture } from '@/channels/publish';
-import { mergeCatalogAttributes, normalizeText } from '@/domain/catalog-data';
+import { mergeCatalogAttributes, normalizeText, readCatalogValues } from '@/domain/catalog-data';
 import { faceValues, fingerprint, fingerprintsOf, priceText } from '@/domain/channel-sync';
 import { writeToFamily } from '@/domain/family-members';
 import { channelPhotos, measureText, parseMedia, type PhotoRef } from '@/domain/media';
@@ -436,6 +436,20 @@ async function create(db: Db, args: CreateArgs, info: CreateInfo): Promise<Creat
     );
   }
   const priceOf = (t: Target) => t.ownPrice ?? args.price;
+  // Los datos de catálogo de cada medida: los que cambian con ella, como el diámetro, van con el suyo.
+  const memberRows = await db.publication.findMany({ where: { id: { in: targets.map((t) => t.id!) } }, select: { id: true, attributes: true } });
+  const memberValues = new Map(memberRows.map((r) => [r.id, readCatalogValues(catalog.fields, parseNameValueList(r.attributes))]));
+  const ownOf = (t: Target) => {
+    const mine = memberValues.get(t.id!) ?? {};
+    return catalog.fields.filter((f) => mine[f.id] && mine[f.id] !== values[f.id]).map((f) => ({ id: f.id, value: mine[f.id], multiple: Boolean(f.multiple), label: f.label }));
+  };
+  const sentFor = (t: Target) => {
+    const own = ownOf(t);
+    return catalog.fields.flatMap((f) => {
+      const v = own.find((o) => o.id === f.id)?.value ?? values[f.id];
+      return v ? [{ name: f.label, value: v }] : [];
+    });
+  };
 
   // La de la publicación, la de la cuenta o la de la ficha.
   const { warranty } = warrantyForCreate(p.warranty, await accountWarranty(db, args.accountId), p.product.warranty);
@@ -457,6 +471,7 @@ async function create(db: Db, args: CreateArgs, info: CreateInfo): Promise<Creat
           price: priceOf(t),
           quantity: byMeasure ? args.quantities![t.key] : args.quantity!,
           pictures: own[i],
+          ...(ownOf(t).length > 0 ? { attributes: ownOf(t).map(({ id, value, multiple }) => ({ id, value, multiple })) } : {}),
         })),
       }),
     );
@@ -478,7 +493,7 @@ async function create(db: Db, args: CreateArgs, info: CreateInfo): Promise<Creat
       // La cara del canal, con lo que se mandó: la lectura de confirmación trae lo que guardó el canal.
       const ids = c.pictureIds && c.pictureIds.length === own[i].length ? c.pictureIds : [];
       const channelPrints = {
-        ...fingerprintsOf({ ...app, description: descriptionSent ? app.description : null, attributes: sentAttributes, photos: null }),
+        ...fingerprintsOf({ ...app, description: descriptionSent ? app.description : null, attributes: sentFor(t), photos: null }),
         photos: fingerprint('photos', channelPhotos(ids.map(() => ''), ids, [])),
         price: fingerprint('price', priceText(priceOf(t))),
         // Las cuotas y el descuento salen de la lectura de confirmación: si la app tiene otros, quedan para subir.
@@ -497,7 +512,7 @@ async function create(db: Db, args: CreateArgs, info: CreateInfo): Promise<Creat
         readAt: now,
         title: app.title,
         description: descriptionSent ? app.description : null,
-        attributes: sentAttributes,
+        attributes: sentFor(t),
         price: priceOf(t),
         status: 'ACTIVE' as const,
         url: c.url,

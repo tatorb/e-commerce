@@ -149,6 +149,9 @@ export async function photoSiblings(
     .filter((r) => {
       const theirs = r.channelCopy ? copyChannelProduct(r.channelCopy.details) : null;
       if (channelProduct && theirs) return theirs === channelProduct;
+      // La otra es de un producto del canal conocido y esta todavía no: no se sabe si son el mismo, y no se asume.
+      // Por ejemplo, una medida nueva sin publicar y la vieja de la misma medida.
+      if (theirs && !channelProduct) return false;
       return sole !== null && r.productId === p.productId && soleMeasureOf(measures, r.channelCopy, r.variantKey)?.key === sole.key;
     })
     .map((r) => ({ id: r.id, externalId: r.externalId! }));

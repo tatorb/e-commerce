@@ -40,6 +40,8 @@ export type ChannelNewMember = VariantLike & {
   price: number;
   quantity: number;
   pictures: number[];
+  // Los datos de catálogo que cambian con la medida, por ejemplo el diámetro: le ganan a los de la familia.
+  attributes?: ChannelAttributeUpdate[];
 };
 
 /**

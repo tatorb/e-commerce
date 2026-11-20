@@ -14,7 +14,8 @@ import {
   type CatalogField,
 } from '@/domain/catalog-data';
 import { parseNameValueList } from '@/domain/name-value';
-import { lockFamily } from '@/domain/family-members';
+import { familyMemberIds, lockFamily } from '@/domain/family-members';
+import { measuresOf } from '@/lib/media';
 import { categoryLabel, clashText, productChannelCategories, type ChannelCategoryGroup } from '@/lib/channel-category';
 
 // Los datos de catálogo de una publicación: busca el canal de su tienda y la
@@ -49,6 +50,8 @@ async function load(db: Db, publicationId: string) {
 const ref = (c: CategoryRef | null): CategoryRef | null => (c ? { id: c.id, name: c.name } : null);
 
 export type CatalogData = {
+  // En una familia, los campos que cambian con la medida, como el diámetro: el valor de cada medida.
+  byMeasure: { id: string; externalId: string | null; label: string; values: Record<string, string> }[];
   channelName: string;
   family: string | null;
   categories: CategoryRef[];
@@ -113,6 +116,7 @@ export async function loadCatalogData(db: Db, publicationId: string): Promise<Ca
   const values = readCatalogValues(fields, parseNameValueList(pub.attributes));
   const fromStore = await storeValues(db, pub.storeId, fields.filter((f) => f.sameInStore && !values[f.id]));
   return {
+    byMeasure: await measureValues(db, pub.id, fields),
     channelName,
     family,
     categories: catalog.categories,
@@ -130,6 +134,28 @@ export async function loadCatalogData(db: Db, publicationId: string): Promise<Ca
     categoryWarning: warningOf(channelName, ref(category), inChannel, productInChannel),
     categoryAlert: (await categoryAlerts(db, [pub.id])).get(pub.id) ?? null,
   };
+}
+
+/** En una familia, lo que cada medida tiene distinto en los datos de catálogo. Vacío si no cambia nada. */
+async function measureValues(db: Db, publicationId: string, fields: CatalogField[]): Promise<CatalogData['byMeasure']> {
+  const ids = await familyMemberIds(db, publicationId);
+  if (ids.length < 2 || fields.length === 0) return [];
+  const rows = await db.publication.findMany({
+    where: { id: { in: ids }, mainOptionId: null },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true, externalId: true, variantKey: true, attributes: true, product: { select: { variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } } } } },
+  });
+  if (rows.length < 2) return [];
+  const measures = measuresOf(rows[0].product.variants);
+  const all = rows.map((r) => ({ r, values: readCatalogValues(fields, parseNameValueList(r.attributes)) }));
+  const differ = fields.filter((f) => new Set(all.map((x) => x.values[f.id] ?? '')).size > 1).map((f) => f.id);
+  if (differ.length === 0) return [];
+  return all.map(({ r, values }) => ({
+    id: r.id,
+    externalId: r.externalId,
+    label: measures.find((m) => m.key === r.variantKey)?.label ?? 'Sin medida',
+    values: Object.fromEntries(differ.map((id) => [id, values[id] ?? ''])),
+  }));
 }
 
 /** Si la app y el canal no coinciden en la categoría. */
@@ -153,6 +179,8 @@ export async function saveCatalogData(
     category?: string | null;
     expectedCategoryId?: string;
     values: Record<string, string | string[] | null | undefined>;
+    // Solo esta medida de la familia: para los campos que cambian con la medida, como el diámetro.
+    onlyThis?: boolean;
   },
 ) {
   // Cualquier categoría del canal: si es un código que la app todavía no tiene, se lee del canal y se guarda.
@@ -196,7 +224,7 @@ export async function saveCatalogData(
       const merged = mergeCatalogAttributes(attributes, category.fields, values);
       await tx.publication.update({ where: { id: pub.id }, data: { attributes: merged } });
       // En cada medida cambian los mismos campos; lo demás de cada una queda como estaba.
-      for (const other of await tx.publication.findMany({ where: { id: { in: members.filter((id) => id !== pub.id) } }, select: { id: true, attributes: true } })) {
+      for (const other of args.onlyThis ? [] : await tx.publication.findMany({ where: { id: { in: members.filter((id) => id !== pub.id) } }, select: { id: true, attributes: true } })) {
         await tx.publication.update({
           where: { id: other.id },
           data: { attributes: mergeCatalogAttributes(parseNameValueList(other.attributes), category.fields, values) },

@@ -57,6 +57,28 @@ describe.skipIf(!url)('la vista previa de las familias', () => {
     return p;
   }
 
+  it('una medida vieja de otro producto del canal no se suma a la familia nueva que ya tiene esa medida, ni comparte sus fotos', async () => {
+    const lt = await product('Camisa LT-7', [
+      { sku: 'LT-7-30', measure: '-0,30' },
+      { sku: 'LT-7-60', measure: '-0,60' },
+    ]);
+    // La familia nueva, ya en la app con su código del canal.
+    const fresh = await listing(lt.id, 'MLA50', { sku: 'LT-7-30', family: { id: 'F7', listings: ['MLA50', 'MLA51'] }, productIdInChannel: 'UP-NUEVO-30' });
+    await db.channelCopy.update({ where: { publicationId: fresh.id }, data: { channelProductId: 'UP-NUEVO-30' } });
+    const family = await db.listingFamily.create({ data: { storeId, productId: lt.id, channelFamilyId: 'F7', leadId: fresh.id } });
+    await db.publication.update({ where: { id: fresh.id }, data: { familyId: family.id, variantKey: 'sku:LT-7-30 medida:-0.30' } });
+    // La vieja -0,30, que el canal puso en la misma familia por tener el mismo nombre.
+    const old = await listing(lt.id, 'MLA40', { sku: 'LT-7-30', family: { id: 'F7', listings: ['MLA40', 'MLA50'] }, productIdInChannel: 'UP-VIEJO-30' });
+    await db.channelCopy.update({ where: { publicationId: old.id }, data: { channelProductId: 'UP-VIEJO-30' } });
+    expect(await joinKnownFamilies(db, storeId, [old.id])).toBe(0);
+    expect((await db.publication.findUniqueOrThrow({ where: { id: old.id } })).familyId).toBeNull();
+
+    // Una medida sin publicar no comparte fotos con la vieja de la misma medida.
+    const { photoSiblings } = await import('@/lib/media');
+    const draft = await db.publication.create({ data: { productId: lt.id, storeId, title: 'Nueva -0,30', variantKey: 'sku:LT-7-30 medida:-0.30' } });
+    expect(await photoSiblings(db, { id: draft.id, productId: lt.id, storeId, variantKey: draft.variantKey, copy: null })).toEqual([]);
+  });
+
   it('join_family_measures: junta dos medidas de la misma familia del canal, y frena lo que no va', async () => {
     const lt = await product('Camisa LT-9', [
       { sku: 'LT-9-00', measure: 'STD' },

@@ -50,6 +50,19 @@ describe('la opción principal de cada medida', () => {
     expect(planMainOptions([row('a'), row('b', { mainOptionId: 'a' })]).size).toBe(0);
   });
 
+  it('las que cuelgan de una principal sin leer del canal siguen colgando de ella, y la sin leer no cambia', () => {
+    const rows = [
+      row('main', { channelProductId: null }),
+      row('tres', { channelProductId: 'UP-9', mainOptionId: 'main', plan: 3 }),
+      row('seis', { channelProductId: 'UP-9', mainOptionId: 'main', plan: 6 }),
+      row('suelta', { channelProductId: null, mainOptionId: 'main' }),
+    ];
+    expect(planMainOptions(rows).size).toBe(0);
+    // Leída la principal, quedan juntas en ella.
+    rows[0].channelProductId = 'UP-9';
+    expect(planMainOptions(rows).size).toBe(0);
+  });
+
   it('avisa cuando dos opciones vivas de la misma medida tienen la misma forma de cobro', () => {
     const options = [
       { id: 'a', status: 'ACTIVE' as const, installments: 3 },

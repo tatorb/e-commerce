@@ -20,7 +20,7 @@ import {
 } from '@/domain/pipeline';
 import { productInfoSchema, updateProductInfo } from '@/domain/product-info';
 import { TRAIN_BOT } from '@/domain/access';
-import { MediaError } from '@/lib/media';
+import { MediaError, measuresOf } from '@/lib/media';
 import { VideoError } from '@/lib/videos';
 import { copyMedia } from './media-tools';
 import { MAX_COMBO_ITEMS, MAX_COMBO_QUANTITY, setComboItems, setProductKind } from '@/domain/combos';
@@ -54,7 +54,7 @@ import {
 import { checkTitle, parsePastedSuggestions, wordKey } from '@/domain/titles';
 import { resolveExternalIds } from '@/lib/catalog';
 import { createPipelinePublication } from '@/domain/pipeline-publications';
-import { addFamilyMeasures, familyByMeasure, FamilyMeasureError } from '@/lib/families';
+import { addFamilyMeasures, familyByMeasure, FamilyMeasureError, familyOf } from '@/lib/families';
 import { savePublicationCode } from '@/lib/publication-code';
 import { QaError, saveQaTexts, setAutoAnswer } from '@/lib/publication-qa';
 import { loadSaleOptions, SaleOptionError, setMainOption } from '@/lib/sale-options';
@@ -928,7 +928,7 @@ const saveCatalogTool = defineTool({
   section: ['pipeline', 'publicaciones'],
   title: 'Guardar los datos de catálogo',
   description:
-    'Carga los datos de catálogo de la publicación: los campos del formulario del canal para su categoría, por ejemplo "Tipo de embrague" o "Incluye disco". Antes miralos en get_publication, en datos_de_catalogo: cada campo dice su tipo, sus opciones y lo cargado. Los de tipo opción y sí o no solo aceptan sus opciones; los de texto aceptan cualquier texto y sus sugerencias son las que usa el canal. Marca, número de pieza y origen salen de la ficha: se cambian con update_product_info. Lo que no se manda queda como está; null o vacío lo borra. Usá solo datos de la ficha, del fabricante o que te dio la persona, nunca supuestos.',
+    'Carga los datos de catálogo de la publicación: los campos del formulario del canal para su categoría, por ejemplo "Tipo de embrague" o "Incluye disco". Antes miralos en get_publication, en datos_de_catalogo: cada campo dice su tipo, sus opciones y lo cargado. Los de tipo opción y sí o no solo aceptan sus opciones; los de texto aceptan cualquier texto y sus sugerencias son las que usa el canal. Marca, número de pieza y origen salen de la ficha: se cambian con update_product_info. En una familia, valores va a todas las medidas; los campos que cambian con la medida, como el diámetro externo, van en por_medida. Lo que no se manda queda como está; null o vacío lo borra. Usá solo datos de la ficha, del fabricante o que te dio la persona, nunca supuestos.',
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg,
@@ -941,16 +941,42 @@ const saveCatalogTool = defineTool({
       .record(z.string(), z.union([z.string(), z.array(z.string()), z.null()]))
       .optional()
       .describe('Por campo, con su código (por ejemplo CLUTCH_TYPE) o su nombre: el valor. Los de varios valores aceptan una lista. Los números con unidad van con la unidad, por ejemplo "76.5 mm".'),
+    por_medida: z
+      .array(
+        z.object({
+          medida: z.string().min(1).describe('La medida de la familia, como en la ficha, por ejemplo "-0,30".'),
+          valores: z.record(z.string(), z.union([z.string(), z.array(z.string()), z.null()])),
+        }),
+      )
+      .max(30)
+      .optional()
+      .describe('En una familia, los campos que cambian con la medida, como el diámetro externo: el valor de cada medida. Se guarda solo en esa medida; create_in_channel y push_catalog_data mandan el de cada una.'),
   }),
   readOnly: false,
   destructive: true,
   async run(ctx, args) {
     const { account, id } = await target(ctx, args);
     const values = args.valores ?? {};
-    if (args.categoria === undefined && Object.keys(values).length === 0) {
-      throw new McpToolError('Mandá una categoría o al menos un valor.');
+    if (args.categoria === undefined && Object.keys(values).length === 0 && !args.por_medida?.length) {
+      throw new McpToolError('Mandá una categoría, al menos un valor o los valores por medida.');
     }
-    await saveCatalogData(ctx.db, { publicationId: id, category: args.categoria, values });
+    // Las medidas, antes de guardar nada: si alguna no está en la familia, no se guarda.
+    const perMeasure: { id: string; values: Record<string, string | string[] | null> }[] = [];
+    if (args.por_medida?.length) {
+      const family = await familyOf(ctx.db, id);
+      if (!family) throw new McpToolError('La publicación no es de una familia: los valores van en valores.');
+      const p = await ctx.db.publication.findUniqueOrThrow({ where: { id }, select: { product: { select: { variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } } } } } });
+      const measures = measuresOf(p.product.variants);
+      const norm = (x: string) => x.replace(/\s+/g, '').replace(/,/g, '.').toLowerCase();
+      for (const m of args.por_medida) {
+        const measure = measures.find((x) => norm(x.label) === norm(m.medida));
+        const member = measure ? family.members.find((x) => x.variantKey === measure.key) : undefined;
+        if (!member) throw new McpToolError(`La familia no tiene la medida «${m.medida}». Tiene ${measures.filter((x) => family.members.some((y) => y.variantKey === x.key)).map((x) => x.label).join(', ')}.`);
+        perMeasure.push({ id: member.id, values: m.valores });
+      }
+    }
+    if (args.categoria !== undefined || Object.keys(values).length > 0) await saveCatalogData(ctx.db, { publicationId: id, category: args.categoria, values });
+    for (const m of perMeasure) await saveCatalogData(ctx.db, { publicationId: m.id, values: m.values, onlyThis: true });
     return { listo: true, datos_de_catalogo: catalogForClaude(await loadCatalogData(ctx.db, id)), link_app: appLink(ctx, account, id) };
   },
 });

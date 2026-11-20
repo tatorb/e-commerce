@@ -1,5 +1,6 @@
 import { syncDriveTextImagesFor } from '@/lib/text-images/drive-files';
 import { z } from 'zod';
+import { loadFamilyMedia, saveFamilyMedia } from '@/lib/family-media';
 import type { PrismaClient } from '@/generated/prisma/client';
 import { photoKey, photoVariants, withMarks, withVariants, type PhotoRef } from '@/domain/media';
 import { loadMediaSources, MediaError, saveMedia, type MediaItem, type MediaSources } from '@/lib/media';
@@ -192,7 +193,7 @@ const setMediaTool = defineTool({
   section: ['pipeline', 'publicaciones'],
   title: 'Elegir y ordenar las fotos y los videos de una publicación',
   description:
-    'Elige qué fotos lleva la publicación y en qué orden (la primera es la portada), en qué medidas va cada una, qué videos son clips y de qué medidas es cada video. Usá las claves de get_publication_media. Lo que no mandes queda como está; «fotos» reemplaza la lista entera. ordenar_como_el_protocolo pone las fotos corregidas en el orden del protocolo de Registro de productos, cada una en su medida (el orden_del_protocolo de get_publication_media). Sin medidas, o con «todas», la foto va en todas. usar_las_del_canal vuelve a las que tiene en el canal. Queda en el borrador: se sube al canal desde la app, con Subir. Mostrale a la persona cómo va a quedar y esperá que confirme.',
+    'Elige qué fotos lleva la publicación y en qué orden (la primera es la portada), en qué medidas va cada una, qué videos son clips y de qué medidas es cada video. Usá las claves de get_publication_media. Lo que no mandes queda como está; «fotos» reemplaza la lista entera. ordenar_como_el_protocolo pone las fotos corregidas en el orden del protocolo de Registro de productos, cada una en su medida (el orden_del_protocolo de get_publication_media). Sin medidas, o con «todas», la foto va en todas. En una familia, como Organización de multimedia: se elige una vez para todas sus medidas, y cada publicación de la familia queda con las fotos de su medida. usar_las_del_canal vuelve a las que tiene en el canal. Queda en el borrador: se sube al canal desde la app, con Subir. Mostrale a la persona cómo va a quedar y esperá que confirme.',
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg,
@@ -228,7 +229,9 @@ const setMediaTool = defineTool({
       throw new McpToolError('No mandaste nada para cambiar.');
     }
     return asToolError(async () => {
-      const sources = await loadMediaSources(ctx.db, account.id, id);
+      // En una familia, como la pantalla: las fotos se eligen para todas sus medidas, y cada una toma las suyas.
+      const familySources = await loadFamilyMedia(ctx.db, account.id, id);
+      const sources = familySources ?? (await loadMediaSources(ctx.db, account.id, id));
       let refs: PhotoRef[] | null | undefined;
       if (args.usar_las_del_canal) refs = null;
       else if (args.ordenar_como_el_protocolo) {
@@ -253,7 +256,8 @@ const setMediaTool = defineTool({
         ? Object.fromEntries(args.medidas_de_los_videos.map((v) => [checkVideo(v.video), measureKeys(v.medidas, sources)]))
         : undefined;
       const clips = args.clips?.map(checkVideo);
-      await saveMedia(ctx.db, { accountId: account.id, publicationId: id, refs, videos, clips, userId: ctx.userId });
+      if (familySources) await saveFamilyMedia(ctx.db, { accountId: account.id, publicationId: id, refs, videos, clips, userId: ctx.userId });
+      else await saveMedia(ctx.db, { accountId: account.id, publicationId: id, refs, videos, clips, userId: ctx.userId });
       const out = await loadOut(ctx, account.id, id);
       return {
         listo: true,

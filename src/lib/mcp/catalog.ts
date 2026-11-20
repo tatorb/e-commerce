@@ -62,5 +62,15 @@ export function catalogForClaude(data: CatalogData | null) {
       ...(f.required ? { obligatorio: true } : {}),
       valor: data.values[f.id] ?? null,
     })),
+    // Lo que cambia con la medida, como el diámetro: el valor de cada medida de la familia.
+    ...(data.byMeasure.length > 0
+      ? {
+          por_medida: data.byMeasure.map((m) => ({
+            medida: m.label,
+            publicacion: m.externalId ?? m.id,
+            valores: Object.fromEntries(Object.entries(m.values).map(([id, v]) => [data.fields.find((f) => f.id === id)?.label ?? id, v || null])),
+          })),
+        }
+      : {}),
   };
 }
