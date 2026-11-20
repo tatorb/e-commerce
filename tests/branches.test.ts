@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PrismaClient } from '@/generated/prisma/client';
-import { branchOrder, flexWanted, saleSplit, type BranchLike } from '@/domain/branches';
+import { branchOrder, flexSaleBranch, flexWanted, type BranchLike } from '@/domain/branches';
 import { stockSlots, type StockSource } from '@/domain/stock';
 import type { ChannelOrder } from '@/channels/sales';
 
@@ -22,26 +22,24 @@ const { saveBranch, branchStockText } = await import('@/lib/branches');
 const { afterBranchFlex, flexPlans, reconcileFlex, setFlexFollowsStock } = await import('@/lib/branch-flex');
 const { setPublicationsFlex } = await import('@/lib/flex');
 const { recordOrder, setProductStock, loadProductStock } = await import('@/lib/stock');
+const { assignSaleBranch, salesWithoutBranch } = await import('@/lib/sale-branch');
 
 const norte: BranchLike = { id: 'norte', name: 'Norte', position: 0, flex: true, main: false };
-const sur: BranchLike = { id: 'sur', name: 'Sur', position: 1, flex: false, main: true };
+const sur: BranchLike = { id: 'sur', name: 'Sur', position: 1, flex: false, main: false };
 
 describe('las sucursales sin la base', () => {
-  it('la principal va primero', () => {
-    expect(branchOrder([norte, sur]).map((b) => b.id)).toEqual(['sur', 'norte']);
+  it('las sucursales van en su orden', () => {
+    expect(branchOrder([sur, norte]).map((b) => b.id)).toEqual(['norte', 'sur']);
   });
 
-  it('una venta Flex sale de la sucursal con Flex, aunque quede en negativo', () => {
-    expect(saleSplit([norte, sur], { norte: 3, sur: 10 }, 2, true)).toEqual({ norte: -2 });
-    expect(saleSplit([norte, sur], { norte: 0, sur: 10 }, 1, true)).toEqual({ norte: -1 });
-  });
-
-  it('las demás salen de la principal y, si no alcanza, de las otras; lo que falta queda en la principal', () => {
-    expect(saleSplit([norte, sur], { norte: 3, sur: 10 }, 2, false)).toEqual({ sur: -2 });
-    expect(saleSplit([norte, sur], { norte: 3, sur: 1 }, 2, false)).toEqual({ sur: -1, norte: -1 });
-    expect(saleSplit([norte, sur], { norte: 1, sur: 0 }, 3, false)).toEqual({ norte: -1, sur: -2 });
-    // Sin sucursal con Flex, una venta Flex sale como las demás.
-    expect(saleSplit([{ ...norte, flex: false }, sur], { norte: 0, sur: 5 }, 1, true)).toEqual({ sur: -1 });
+  it('una venta Flex sale de la sucursal con Flex, aunque quede en negativo; las demás no tienen sucursal hasta que se elige', () => {
+    const otraFlex: BranchLike = { ...sur, id: 'oeste', name: 'Oeste', flex: true, position: 2 };
+    expect(flexSaleBranch([norte, sur], { norte: 3, sur: 10 }, true)?.id).toBe('norte');
+    expect(flexSaleBranch([norte, sur], { norte: 0, sur: 10 }, true)?.id).toBe('norte');
+    // Con dos sucursales con Flex, la que más tiene.
+    expect(flexSaleBranch([norte, sur, otraFlex], { norte: 1, oeste: 4 }, true)?.id).toBe('oeste');
+    expect(flexSaleBranch([norte, sur], { norte: 3 }, false)).toBeNull();
+    expect(flexSaleBranch([{ ...norte, flex: false }, sur], { norte: 3 }, true)).toBeNull();
   });
 
   it('Flex: prendido si una sucursal con Flex tiene de todas las medidas que vende', () => {
@@ -114,7 +112,7 @@ describe.skipIf(!url)('las sucursales en la base', () => {
 
   beforeEach(async () => {
     await db.$executeRawUnsafe(
-      'TRUNCATE branch_stock, branches, stock_movements, channel_sales, product_stock, channel_sync_changes, channel_copies, sales, channel_connections, publications, products, stores, channels, accounts, users CASCADE',
+      'TRUNCATE tasks, branch_stock, branches, stock_movements, channel_sales, product_stock, channel_sync_changes, channel_copies, sales, channel_connections, publications, products, stores, channels, accounts, users CASCADE',
     );
     flex = { MLA1: false, MLA2: true, MLA3: false };
     shipments = {};
@@ -136,7 +134,7 @@ describe.skipIf(!url)('las sucursales en la base', () => {
         expiresAt: new Date(Date.now() + 6 * 3600_000),
       },
     });
-    const user = await db.user.create({ data: { id: 'persona', email: 'persona@ejemplo.com', name: 'Persona' } });
+    const user = await db.user.create({ data: { id: 'persona', email: 'persona@ejemplo.com', name: 'Persona', isAdmin: true } });
     accountId = account.id;
     storeId = store.id;
     userId = user.id;
@@ -172,12 +170,11 @@ describe.skipIf(!url)('las sucursales en la base', () => {
     const a = await product('Bomba BA-1', 4, 'MLA1', false);
     // Sin Flex en ninguna, crear una sucursal no toca el canal.
     const first = await saveBranch(db, { accountId, branch: { name: 'Norte' } });
-    expect(first).toMatchObject({ created: true, tookStock: 1, flexChanged: false, branch: { main: true } });
+    expect(first).toMatchObject({ created: true, tookStock: 1, flexChanged: false });
     const second = await saveBranch(db, { accountId, branch: { name: 'Sur' } });
-    expect(second).toMatchObject({ tookStock: 0, branch: { main: false } });
+    expect(second).toMatchObject({ tookStock: 0 });
     expect(await branchStock(a.productId)).toEqual({ Norte: 4 });
     await expect(saveBranch(db, { accountId, branch: { name: 'norte' } })).rejects.toThrow('Ya hay una sucursal norte.');
-    await expect(saveBranch(db, { accountId, branch: { id: first.branch.id, main: false } })).rejects.toThrow('Tiene que haber una principal');
 
     // Con dos sucursales hay que decir de cuál es.
     await expect(setProductStock(db, { accountId, productId: a.productId, userId, stock: { '': 6 } })).rejects.toThrow('Elegí la sucursal: Norte o Sur.');
@@ -199,10 +196,10 @@ describe.skipIf(!url)('las sucursales en la base', () => {
     ]);
   });
 
-  it('una venta Flex sale de la sucursal con Flex; las demás de la principal; la cancelada vuelve a la misma', async () => {
+  it('una venta Flex sale de la sucursal con Flex; otra baja el total y abre una tarea para elegir la sucursal; la cancelada vuelve a la misma', async () => {
     const a = await product('Bomba BA-1', 5, 'MLA1', false);
     const north = (await saveBranch(db, { accountId, branch: { name: 'Norte' } })).branch;
-    const south = (await saveBranch(db, { accountId, branch: { name: 'Sur', main: true } })).branch;
+    const south = (await saveBranch(db, { accountId, branch: { name: 'Sur' } })).branch;
     await saveBranch(db, { accountId, branch: { id: north.id, flex: true } });
     await setProductStock(db, { accountId, productId: a.productId, userId, stock: { '': 3 }, branchId: south.id });
     expect(await branchStock(a.productId)).toEqual({ Norte: 5, Sur: 3 });
@@ -215,18 +212,51 @@ describe.skipIf(!url)('las sucursales en la base', () => {
     shipments['55'] = 'self_service';
     await recordOrder(db, { storeId, order: order('9002', 'MLA1', 1, { shipmentId: '55' }) });
     expect(await branchStock(a.productId)).toEqual({ Norte: 2, Sur: 3 });
-    // Otra que no es Flex: de la principal (Sur) y lo que falta de Norte.
-    shipments['56'] = 'cross_docking';
-    await recordOrder(db, { storeId, order: order('9003', 'MLA1', 4, { shipmentId: '56' }) });
-    expect(await branchStock(a.productId)).toEqual({ Norte: 1, Sur: 0 });
-    expect(await total(a.productId)).toBe(1);
+    expect(await db.task.count()).toBe(0);
 
-    // Se cancela antes de entregarse: vuelve a las mismas.
-    await recordOrder(db, { storeId, order: order('9003', 'MLA1', 4, { cancelled: true, counts: false }) });
+    // Otra que no es Flex: baja el total, ninguna sucursal, y una tarea para elegirla.
+    shipments['56'] = 'cross_docking';
+    await recordOrder(db, { storeId, order: order('9003', 'MLA1', 2, { shipmentId: '56' }) });
     expect(await branchStock(a.productId)).toEqual({ Norte: 2, Sur: 3 });
-    expect(await total(a.productId)).toBe(5);
+    expect(await total(a.productId)).toBe(3);
+    const task = await db.task.findFirstOrThrow({ select: { title: true, description: true, status: true, assignees: { select: { userId: true } }, publications: { select: { publicationId: true } } } });
+    expect(task).toMatchObject({ title: 'Elegir de qué sucursal sale la venta 9003', status: 'PENDING', assignees: [{ userId }], publications: [{ publicationId: a.publicationId }] });
+    expect(task.description).toContain('2 unidades de Bomba BA-1');
+    expect(await branchStockText(db, a.productId, stockSlots([]))).toBe('Norte 2 · Sur 3 · 2 vendidas sin elegir sucursal');
+    expect((await salesWithoutBranch(db, accountId)).map((x) => x.orderId)).toEqual(['9003']);
+    // Cargar stock en una sucursal mientras tanto no devuelve lo vendido al total.
+    await setProductStock(db, { accountId, productId: a.productId, userId, stock: { '': 4 }, branchId: south.id });
+    expect(await total(a.productId)).toBe(4);
+
+    // Se elige Sur: baja Sur, el total queda igual y la tarea se cierra.
+    const sale = await db.channelSale.findFirstOrThrow({ where: { orderId: '9003' }, select: { id: true } });
+    const r = await assignSaleBranch(db, { accountId, saleId: sale.id, branchId: south.id, userId });
+    expect(r.assigned.map((x) => [x.branch, x.part.units])).toEqual([['Sur', 2]]);
+    expect(await branchStock(a.productId)).toEqual({ Norte: 2, Sur: 2 });
+    expect(await total(a.productId)).toBe(4);
+    expect((await db.task.findFirstOrThrow({ select: { status: true } })).status).toBe('DONE');
+    await expect(assignSaleBranch(db, { accountId, saleId: sale.id, branchId: south.id, userId })).rejects.toThrow('no tiene nada para elegir');
+
+    // Se cancela antes de entregarse: vuelve a la misma sucursal.
+    await recordOrder(db, { storeId, order: order('9003', 'MLA1', 2, { cancelled: true, counts: false }) });
+    expect(await branchStock(a.productId)).toEqual({ Norte: 2, Sur: 4 });
+    expect(await total(a.productId)).toBe(6);
     const note = await db.stockMovement.findFirst({ where: { productId: a.productId, kind: 'SALE', note: { contains: '9001' } }, select: { note: true } });
     expect(note!.note).toBe('Venta 9001 por Flex');
+  });
+
+  it('una venta sin sucursal que se cancela antes de elegirla vuelve solo al total y cierra su tarea', async () => {
+    const a = await product('Bomba BA-1', 5, 'MLA1', false);
+    await saveBranch(db, { accountId, branch: { name: 'Norte', flex: true } });
+    await saveBranch(db, { accountId, branch: { name: 'Sur' } });
+    await recordOrder(db, { storeId, order: order('9200', 'MLA1', 1), flex: false });
+    expect(await total(a.productId)).toBe(4);
+    expect((await db.task.findFirstOrThrow({ select: { status: true } })).status).toBe('PENDING');
+    await recordOrder(db, { storeId, order: order('9200', 'MLA1', 1, { cancelled: true, counts: false }) });
+    expect(await total(a.productId)).toBe(5);
+    expect(await branchStock(a.productId)).toEqual({ Norte: 5 });
+    expect((await db.task.findFirstOrThrow({ select: { status: true } })).status).toBe('DONE');
+    expect(await salesWithoutBranch(db, accountId)).toEqual([]);
   });
 
   it('Flex se prende y se apaga solo con el stock de la sucursal con Flex, lo anota, y lo cambiado a mano no lo sigue', async () => {

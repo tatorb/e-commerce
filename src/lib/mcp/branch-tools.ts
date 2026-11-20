@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { StockError } from '@/domain/stock';
 import { accountBranches, findBranch, saveBranch } from '@/lib/branches';
 import { afterBranchFlex, flexPlans } from '@/lib/branch-flex';
+import { assignSaleBranch, salesWithoutBranch } from '@/lib/sale-branch';
 import { McpToolError, accountArg, defineTool, resolveAccount } from './tool';
 
 // Las sucursales de la cuenta desde Claude: verlas y crearlas o cambiarlas,
@@ -22,7 +23,7 @@ const getBranchesTool = defineTool({
   section: 'productos',
   title: 'Ver las sucursales y su Flex',
   description:
-    'Las sucursales de la cuenta, cada una con su depósito: si despacha Envíos Flex y cuál es la principal, de la que salen primero las ventas que no son Flex. Con sucursales, el stock de cada producto es la suma del de cada una, las ventas Flex salen de una sucursal con Flex y Envíos Flex se prende y se apaga solo en cada publicación según haya stock en una sucursal con Flex. Devuelve también cuántas publicaciones siguen ese Flex, cuántas tienen que tenerlo prendido y cuántas lo tienen distinto en el canal (la pasada de cada hora lo corrige). El stock de cada sucursal de un producto se ve en get_publication (stock_por_sucursal).',
+    'Las sucursales de la cuenta, cada una con su depósito, y si despacha Envíos Flex. Con sucursales, el stock de cada producto es la suma del de cada una, las ventas Flex salen de una sucursal con Flex, las demás esperan que una persona elija de qué sucursal salieron (ventas_sin_sucursal, con una tarea abierta; se elige con assign_sale_branch) y Envíos Flex se prende y se apaga solo en cada publicación según haya stock en una sucursal con Flex. Devuelve también cuántas publicaciones siguen ese Flex, cuántas tienen que tenerlo prendido y cuántas lo tienen distinto en el canal (la pasada de cada hora lo corrige). El stock de cada sucursal de un producto se ve en get_publication (stock_por_sucursal).',
   input: z.object({ cuenta: accountArg }),
   readOnly: true,
   async run(ctx, args) {
@@ -33,7 +34,12 @@ const getBranchesTool = defineTool({
     const follow = plans.filter((p) => p.follows);
     return {
       cuenta: account.slug,
-      sucursales: branches.map((b) => ({ id: b.id, nombre: b.name, flex: b.flex, principal: b.main })),
+      sucursales: branches.map((b) => ({ id: b.id, nombre: b.name, flex: b.flex })),
+      ventas_sin_sucursal: (await salesWithoutBranch(ctx.db, account.id)).map((s) => ({
+        venta: s.orderId,
+        fecha: s.orderedAt.toISOString().slice(0, 10),
+        lineas: s.parts.map((p) => ({ linea: p.moveId, producto: p.product, ...(p.measure ? { medida: p.measure } : {}), unidades: p.units, publicacion: p.publication?.externalId ?? null })),
+      })),
       flex_por_stock: {
         siguen_al_stock: follow.length,
         con_flex_por_stock: follow.filter((p) => p.follows && p.on).length,
@@ -49,13 +55,12 @@ const saveBranchTool = defineTool({
   section: 'productos',
   title: 'Crear o cambiar una sucursal',
   description:
-    'Crea una sucursal de la cuenta, o cambia una que ya existe: su nombre, si despacha Envíos Flex y si es la principal. La primera sucursal que se crea se queda con todo el stock que ya estaba cargado y es la principal; las que se suman después empiezan en 0 y su stock se carga con set_product_stock (sucursal). Las ventas Flex salen de una sucursal con Flex; las demás, de la principal y, si no alcanza, de las otras. Prender o apagar el Flex de una sucursal prende o apaga Envíos Flex en Mercado Libre en las publicaciones que siguen al stock, según haya stock en una sucursal con Flex; si ninguna sucursal queda con Flex, se apaga en todas. Antes de hacerlo, mostrale a la persona qué va a cambiar y esperá que confirme.',
+    'Crea una sucursal de la cuenta, o cambia una que ya existe: su nombre y si despacha Envíos Flex. La primera sucursal que se crea se queda con todo el stock que ya estaba cargado; las que se suman después empiezan en 0 y su stock se carga con set_product_stock (sucursal). Las ventas Flex salen de una sucursal con Flex; en las demás, una persona elige de cuál salieron (assign_sale_branch). Prender o apagar el Flex de una sucursal prende o apaga Envíos Flex en Mercado Libre en las publicaciones que siguen al stock, según haya stock en una sucursal con Flex; si ninguna sucursal queda con Flex, se apaga en todas. Antes de hacerlo, mostrale a la persona qué va a cambiar y esperá que confirme.',
   input: z.object({
     cuenta: accountArg,
     sucursal: z.string().min(1).max(80).optional().describe('La sucursal a cambiar: su id o su nombre. Sin mandar, se crea una nueva con nombre.'),
     nombre: z.string().min(1).max(80).optional().describe('El nombre: el de la nueva, o el nuevo nombre.'),
     flex: z.boolean().optional().describe('Si despacha Envíos Flex. Sin mandar, queda como está (una nueva, sin Flex).'),
-    principal: z.boolean().optional().describe('true: pasa a ser la principal, de la que salen primero las ventas que no son Flex.'),
   }),
   readOnly: false,
   destructive: true,
@@ -72,7 +77,7 @@ const saveBranchTool = defineTool({
     }
     let r;
     try {
-      r = await saveBranch(ctx.db, { accountId: account.id, branch: { id, name: args.nombre, flex: args.flex, main: args.principal } });
+      r = await saveBranch(ctx.db, { accountId: account.id, branch: { id, name: args.nombre, flex: args.flex } });
     } catch (e) {
       if (e instanceof StockError) throw new McpToolError(e.message);
       throw e;
@@ -80,7 +85,7 @@ const saveBranchTool = defineTool({
     const flex = r.flexChanged ? await afterBranchFlex(ctx.db, { accountId: account.id, userId: ctx.userId, budgetMs: FLEX_BUDGET_MS }) : null;
     return {
       guardada: true,
-      sucursal: { id: r.branch.id, nombre: r.branch.name, flex: r.branch.flex, principal: r.branch.main },
+      sucursal: { id: r.branch.id, nombre: r.branch.name, flex: r.branch.flex },
       ...(r.tookStock > 0 ? { stock_que_paso_a_esta_sucursal: `${r.tookStock} medidas de productos con el stock que ya estaba cargado.` } : {}),
       ...(flex
         ? {
@@ -96,4 +101,53 @@ const saveBranchTool = defineTool({
   },
 });
 
-export const BRANCH_TOOLS = [getBranchesTool, saveBranchTool];
+const assignSaleBranchTool = defineTool({
+  name: 'assign_sale_branch',
+  section: 'productos',
+  title: 'Elegir de qué sucursal salió una venta',
+  description:
+    'En una cuenta con sucursales, una venta que no es Flex baja el stock total pero queda sin sucursal, con una tarea abierta, hasta que una persona dice de cuál salió. Esta herramienta lo dice: una sucursal para toda la venta, o una por línea (las líneas y sus números salen en get_branches, ventas_sin_sucursal). Baja el stock de esa sucursal, cierra la tarea y, si cambia el stock de una sucursal con Flex, prende o apaga Envíos Flex en Mercado Libre en las publicaciones que lo siguen. Usala solo con lo que te dice la persona, y antes mostrale qué vas a anotar y esperá que confirme.',
+  input: z.object({
+    cuenta: accountArg,
+    venta: z.string().min(1).max(40).describe('El número de la venta en el canal.'),
+    sucursal: z.string().min(1).max(80).optional().describe('La sucursal de toda la venta, por su nombre.'),
+    lineas: z
+      .array(z.object({ linea: z.number().int().positive(), sucursal: z.string().min(1).max(80) }))
+      .max(50)
+      .optional()
+      .describe('Una sucursal por línea, si salieron de sucursales distintas.'),
+  }),
+  readOnly: false,
+  destructive: true,
+  async run(ctx, args) {
+    const account = await resolveAccount(ctx, args.cuenta);
+    const branches = await accountBranches(ctx.db, account.id);
+    const pick = (ref: string) => {
+      const b = findBranch(branches, ref);
+      if (!b) throw new McpToolError(`"${ref}" no es una sucursal de la cuenta. Sucursales: ${branches.map((x) => x.name).join(', ')}.`);
+      return b.id;
+    };
+    if (!args.sucursal && !args.lineas?.length) throw new McpToolError('Pasá la sucursal de la venta, o la de cada línea.');
+    const sale = await ctx.db.channelSale.findFirst({ where: { orderId: args.venta.trim(), store: { accountId: account.id } }, select: { id: true } });
+    if (!sale) throw new McpToolError(`La venta ${args.venta} no está en la cuenta.`);
+    try {
+      const r = await assignSaleBranch(ctx.db, {
+        accountId: account.id,
+        saleId: sale.id,
+        branchId: args.sucursal ? pick(args.sucursal) : undefined,
+        byPart: Object.fromEntries((args.lineas ?? []).map((l) => [l.linea, pick(l.sucursal)])),
+        userId: ctx.userId,
+      });
+      return {
+        anotado: r.assigned.map((a) => ({ producto: a.part.product, ...(a.part.measure ? { medida: a.part.measure } : {}), unidades: a.part.units, sucursal: a.branch })),
+        ...(r.left > 0 ? { faltan: `${r.left} líneas sin sucursal: la tarea sigue abierta.` } : { tarea: 'cerrada' }),
+        ...(r.flex.changed.length ? { flex_cambiado_por_stock: r.flex.changed.map((f) => ({ publicacion_id: f.publicationId, flex: f.on ? 'prendido' : 'apagado' })) } : {}),
+      };
+    } catch (e) {
+      if (e instanceof StockError) throw new McpToolError(e.message);
+      throw e;
+    }
+  },
+});
+
+export const BRANCH_TOOLS = [getBranchesTool, saveBranchTool, assignSaleBranchTool];

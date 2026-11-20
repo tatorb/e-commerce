@@ -1,10 +1,11 @@
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
-import { branchOrder, branchText, mainBranch, saleSplit, type BranchLike } from '@/domain/branches';
+import { branchOrder, branchText, flexSaleBranch, type BranchLike } from '@/domain/branches';
 import { StockError } from '@/domain/stock';
 
 // Las sucursales de la cuenta y el stock de cada una. Con sucursales, el stock
 // del producto (product_stock) es siempre la suma del de cada sucursal: lo que
-// se sube a los canales y las alarmas siguen saliendo de ahí. Recibe la base
+// se sube a los canales y las alarmas siguen saliendo de ahí, menos lo
+// vendido que todavía espera que se elija la sucursal. Recibe la base
 // por parámetro para poder probarlo.
 
 type Db = PrismaClient;
@@ -13,7 +14,7 @@ type Tx = Prisma.TransactionClient;
 export const BRANCH_SELECT = { id: true, name: true, position: true, flex: true, main: true } as const;
 export type Branch = BranchLike;
 
-/** Las sucursales de la cuenta, la principal primero. */
+/** Las sucursales de la cuenta, en su orden. */
 export async function accountBranches(db: Db | Tx, accountId: string): Promise<Branch[]> {
   return branchOrder(await db.branch.findMany({ where: { accountId }, select: BRANCH_SELECT }));
 }
@@ -40,11 +41,21 @@ export async function addBranchStock(tx: Tx, productId: string, key: string, del
   }
 }
 
-/** De qué sucursales sale una venta. Null si la cuenta no tiene sucursales. */
-export async function saleDeltas(tx: Tx, productId: string, key: string, quantity: number, flex: boolean): Promise<Record<string, number> | null> {
+/**
+ * De qué sucursal sale una venta: none, la cuenta no tiene sucursales; branch,
+ * una venta Flex que sale de una sucursal con Flex; pending, la elige una persona.
+ */
+export async function saleBranch(tx: Tx, productId: string, key: string, flex: boolean): Promise<{ kind: 'none' } | { kind: 'branch'; branch: Branch } | { kind: 'pending' }> {
   const branches = await productBranches(tx, productId);
-  if (branches.length === 0) return null;
-  return saleSplit(branches, await branchQuantities(tx, productId, key), quantity, flex);
+  if (branches.length === 0) return { kind: 'none' };
+  const branch = flexSaleBranch(branches, await branchQuantities(tx, productId, key), flex);
+  return branch ? { kind: 'branch', branch } : { kind: 'pending' };
+}
+
+/** Las unidades vendidas de cada medida que todavía no tienen sucursal, por clave. */
+export async function pendingUnits(db: Db | Tx, productId: string): Promise<Record<string, number>> {
+  const rows = await db.stockMovement.groupBy({ by: ['key'], where: { productId, branchPending: true }, _sum: { delta: true } });
+  return Object.fromEntries(rows.map((r) => [r.key, -(r._sum.delta ?? 0)]));
 }
 
 /** El stock que se carga a mano en una sucursal, por medida: cuánto cambia en cada una. */
@@ -53,21 +64,23 @@ export async function branchChange(
   args: { productId: string; branchId: string; wanted: Record<string, number> },
 ): Promise<{ key: string; before: number; after: number; total: number }[]> {
   const rows = await tx.branchStock.findMany({ where: { productId: args.productId }, select: { key: true, branchId: true, quantity: true } });
+  // Lo vendido sin sucursal todavía ya bajó del total.
+  const pending = await pendingUnits(tx, args.productId);
   const out: { key: string; before: number; after: number; total: number }[] = [];
   for (const [key, after] of Object.entries(args.wanted)) {
     const here = rows.filter((r) => r.key === key);
     const before = here.find((r) => r.branchId === args.branchId)?.quantity ?? 0;
     const others = here.filter((r) => r.branchId !== args.branchId).reduce((sum, r) => sum + r.quantity, 0);
-    out.push({ key, before, after, total: others + after });
+    out.push({ key, before, after, total: others + after - (pending[key] ?? 0) });
   }
   return out;
 }
 
-export type BranchInput = { id?: string; name?: string; flex?: boolean; main?: boolean; position?: number };
+export type BranchInput = { id?: string; name?: string; flex?: boolean; position?: number };
 
 /**
  * Crea o cambia una sucursal. La primera de la cuenta se queda con todo el
- * stock que ya estaba cargado y es la principal; las que se suman después
+ * stock que ya estaba cargado; las que se suman después
  * empiezan en 0. Devuelve si cambió el Flex de alguna, para revisar las
  * publicaciones.
  */
@@ -85,11 +98,10 @@ export async function saveBranch(db: Db, args: { accountId: string; branch: Bran
     if (branch.id) {
       const before = existing.find((b) => b.id === branch.id);
       if (!before) throw new StockError('La sucursal no está en la cuenta.');
-      if (branch.main === false && before.main) throw new StockError('Tiene que haber una principal: marcá otra como principal.');
       flexChanged = branch.flex !== undefined && branch.flex !== before.flex;
       saved = await tx.branch.update({
         where: { id: branch.id },
-        data: { ...(name ? { name } : {}), ...(branch.flex !== undefined ? { flex: branch.flex } : {}), ...(branch.main ? { main: true } : {}), ...(branch.position !== undefined ? { position: branch.position } : {}) },
+        data: { ...(name ? { name } : {}), ...(branch.flex !== undefined ? { flex: branch.flex } : {}), ...(branch.position !== undefined ? { position: branch.position } : {}) },
         select: BRANCH_SELECT,
       });
     } else {
@@ -100,7 +112,6 @@ export async function saveBranch(db: Db, args: { accountId: string; branch: Bran
           accountId: args.accountId,
           name,
           flex: branch.flex ?? false,
-          main: first || branch.main === true,
           position: branch.position ?? existing.reduce((max, b) => Math.max(max, b.position + 1), 0),
         },
         select: BRANCH_SELECT,
@@ -114,7 +125,6 @@ export async function saveBranch(db: Db, args: { accountId: string; branch: Bran
         tookStock = rows.length;
       }
     }
-    if (saved.main) await tx.branch.updateMany({ where: { accountId: args.accountId, id: { not: saved.id } }, data: { main: false } });
     return { branch: saved, created, flexChanged, tookStock };
   });
 }
@@ -127,7 +137,7 @@ export function findBranch(branches: Branch[], ref: string): Branch | null {
 
 /** La sucursal en que entra el stock de partida de un producto nuevo: la primera. */
 export function startingBranch(branches: Branch[]): Branch | null {
-  return [...branches].sort((a, b) => a.position - b.position)[0] ?? mainBranch(branches);
+  return branchOrder(branches)[0] ?? null;
 }
 
 /**
@@ -139,7 +149,10 @@ export async function branchStockText(db: Db | Tx, productId: string, slots: { k
   const branches = await productBranches(db, productId);
   if (branches.length === 0) return null;
   const rows = await db.branchStock.findMany({ where: { productId }, select: { key: true, branchId: true, quantity: true } });
-  const line = (key: string) => branchText(branches, branches.map((b) => rows.find((r) => r.key === key && r.branchId === b.id)?.quantity ?? 0));
+  const pending = await pendingUnits(db, productId);
+  const line = (key: string) =>
+    branchText(branches, branches.map((b) => rows.find((r) => r.key === key && r.branchId === b.id)?.quantity ?? 0)) +
+    (pending[key] ? ` · ${pending[key]} vendidas sin elegir sucursal` : '');
   if (slots.length === 1) return line(slots[0].key);
   return slots.map((s) => `${s.label || 'Sin medida'}: ${line(s.key)}`).join('; ');
 }

@@ -59,7 +59,8 @@ describe('herramientas de escritura en la lista', () => {
     expect(tools.get('recreate_product_in_category')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('save_branch')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('get_branches')).toMatchObject({ readOnlyHint: true });
-    expect(tools.size).toBe(118);
+    expect(tools.get('assign_sale_branch')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+    expect(tools.size).toBe(119);
   });
 });
 

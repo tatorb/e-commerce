@@ -10,11 +10,11 @@ import { StatusText } from '@/components/pipeline/StatusText';
 import { saveBranchAction } from '@/app/a/[cuenta]/alarmas-stock/actions';
 
 // Las sucursales de la cuenta, cada una con su depósito: prender o apagar su
-// Flex, elegir la principal y sumar una nueva. Con sucursales, el stock del
+// Flex y sumar una nueva. Con sucursales, el stock del
 // producto es la suma del de cada una y Envíos Flex sigue al stock de las
 // sucursales con Flex.
 
-type Branch = { id: string; name: string; flex: boolean; main: boolean };
+type Branch = { id: string; name: string; flex: boolean };
 
 export function BranchesCard({ accountSlug, branches, canEdit }: { accountSlug: string; branches: Branch[]; canEdit: boolean }) {
   const router = useRouter();
@@ -23,7 +23,7 @@ export function BranchesCard({ accountSlug, branches, canEdit }: { accountSlug: 
   const [name, setName] = useState('');
   const [asking, setAsking] = useState<{ branch: Branch; flex: boolean } | null>(null);
 
-  function save(branch: { id?: string; name?: string; flex?: boolean; main?: boolean }, after?: () => void) {
+  function save(branch: { id?: string; name?: string; flex?: boolean }, after?: () => void) {
     setStatus(null);
     start(async () => {
       const r = await saveBranchAction(accountSlug, branch);
@@ -41,7 +41,7 @@ export function BranchesCard({ accountSlug, branches, canEdit }: { accountSlug: 
       description={
         branches.length === 0
           ? 'Sin sucursales, el stock es uno solo y Flex se cambia a mano en cada publicación. La primera sucursal que se crea se queda con todo el stock cargado.'
-          : 'El stock de cada producto es la suma del de cada sucursal. Las ventas Flex salen de una sucursal con Flex y las demás de la principal. Envíos Flex se prende y se apaga solo en cada publicación según haya stock en una sucursal con Flex.'
+          : 'El stock de cada producto es la suma del de cada sucursal. Las ventas Flex salen de una sucursal con Flex; en las demás, una tarea pide elegir de qué sucursal salieron. Envíos Flex se prende y se apaga solo en cada publicación según haya stock en una sucursal con Flex.'
       }
     >
       <SectionBody>
@@ -52,7 +52,6 @@ export function BranchesCard({ accountSlug, branches, canEdit }: { accountSlug: 
                 <span className="flex flex-wrap items-center gap-2 font-medium">
                   {b.name}
                   {b.flex ? <Badge variant="secondary">Con Flex</Badge> : <Badge variant="outline">Sin Flex</Badge>}
-                  {b.main ? <Badge variant="outline">Principal</Badge> : null}
                 </span>
                 {canEdit ? (
                   <span className="flex flex-wrap items-center gap-2">
@@ -75,11 +74,6 @@ export function BranchesCard({ accountSlug, branches, canEdit }: { accountSlug: 
                         <Button size="sm" variant="outline" access="productos" disabled={pending} onClick={() => setAsking({ branch: b, flex: !b.flex })}>
                           {b.flex ? 'Apagar Flex' : 'Prender Flex'}
                         </Button>
-                        {!b.main ? (
-                          <Button size="sm" variant="ghost" access="productos" disabled={pending} onClick={() => save({ id: b.id, main: true })}>
-                            Hacer principal
-                          </Button>
-                        ) : null}
                       </>
                     )}
                   </span>

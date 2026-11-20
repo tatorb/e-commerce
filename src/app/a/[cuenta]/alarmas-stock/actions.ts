@@ -6,6 +6,7 @@ import { act } from '@/lib/auth/guard';
 import { saveStockTaskRecipients, StockRecipientsError } from '@/lib/stock-task-recipients';
 import { saveBranch } from '@/lib/branches';
 import { afterBranchFlex } from '@/lib/branch-flex';
+import { assignSaleBranch } from '@/lib/sale-branch';
 import { StockError } from '@/domain/stock';
 
 // A quién le llegan las tareas de stock de la cuenta. Es asignar tareas: lo
@@ -27,19 +28,19 @@ export async function saveStockTaskRecipientsAction(accountSlug: string, userIds
   });
 }
 
-// Las sucursales: crear una, prender o apagar su Flex y elegir la principal.
+// Las sucursales: crear una y prender o apagar su Flex.
 // Cambiar el Flex de una sucursal prende o apaga Envíos Flex en el canal en las
 // publicaciones que siguen al stock: lo pide el permiso de editar Productos.
 
 type BranchResult = { ok: true; message: string } | { ok: false; error: string };
 
-export async function saveBranchAction(accountSlug: string, branch: { id?: string; name?: string; flex?: boolean; main?: boolean }) {
+export async function saveBranchAction(accountSlug: string, branch: { id?: string; name?: string; flex?: boolean }) {
   const spec = { section: 'productos', does: branch.id ? 'Cambió una sucursal' : 'Creó una sucursal' } as const;
   return act<BranchResult>(accountSlug, spec, async ({ account, user }) => {
     try {
       const r = await saveBranch(prisma, {
         accountId: account.id,
-        branch: { id: branch.id ? String(branch.id) : undefined, name: branch.name, flex: branch.flex, main: branch.main },
+        branch: { id: branch.id ? String(branch.id) : undefined, name: branch.name, flex: branch.flex },
       });
       let flex = '';
       if (r.flexChanged) {
@@ -49,6 +50,27 @@ export async function saveBranchAction(accountSlug: string, branch: { id?: strin
       revalidatePath(`/a/${account.slug}`, 'layout');
       const took = r.tookStock > 0 ? ' Se quedó con todo el stock que ya estaba cargado.' : '';
       return { ok: true, message: `Guardada.${took}${flex}` };
+    } catch (e) {
+      if (e instanceof StockError) return { ok: false, error: e.message };
+      throw e;
+    }
+  });
+}
+
+/** De qué sucursal salió lo que quedó sin sucursal de una venta: una por línea. */
+export async function assignSaleBranchAction(accountSlug: string, saleId: string, byPart: Record<string, string>) {
+  const spec = { section: 'productos', does: 'Eligió de qué sucursal salió una venta' } as const;
+  return act<BranchResult>(accountSlug, spec, async ({ account, user }) => {
+    try {
+      const r = await assignSaleBranch(prisma, {
+        accountId: account.id,
+        saleId: String(saleId),
+        byPart: Object.fromEntries(Object.entries(byPart ?? {}).map(([k, v]) => [Number(k), String(v)])),
+        userId: user.id,
+      });
+      revalidatePath(`/a/${account.slug}`, 'layout');
+      const flex = r.flex.changed.length ? ` Flex se prendió en ${r.flex.changed.filter((c) => c.on).length} y se apagó en ${r.flex.changed.filter((c) => !c.on).length} publicaciones.` : '';
+      return { ok: true, message: `${r.left > 0 ? 'Guardado. Faltan líneas por elegir.' : 'Guardado. La tarea se cerró.'}${flex}` };
     } catch (e) {
       if (e instanceof StockError) return { ok: false, error: e.message };
       throw e;

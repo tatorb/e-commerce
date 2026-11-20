@@ -114,7 +114,6 @@ export function ProductStockPanel({
                   <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
                     {b.name}
                     {b.flex ? <Badge variant="secondary">Con Flex</Badge> : null}
-                    {b.main ? <Badge variant="outline">Principal</Badge> : null}
                   </p>
                   {canEdit ? (
                     <StockForm accountSlug={accountSlug} productId={view.id} lines={b.lines} managed={view.managed} branchId={b.id} />
@@ -123,6 +122,11 @@ export function ProductStockPanel({
                   )}
                 </div>
               ))}
+              {view.unassigned.length > 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Vendidas sin elegir la sucursal: {stockText(view.unassigned)}. Ya se descontaron del total; se eligen en su tarea.
+                </p>
+              ) : null}
               <p className="text-sm">
                 Total: <span className="tabular-nums">{view.managed ? stockText(view.lines.map((l) => ({ label: l.label, quantity: l.quantity ?? 0 }))) : 'Sin stock cargado.'}</span>
               </p>

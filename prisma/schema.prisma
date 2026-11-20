@@ -2465,9 +2465,13 @@ model StockMovement {
   note          String?
   // En una cuenta con sucursales, cuánto cambió en cada una: { "<id de la sucursal>": delta }.
   branches      Json?
+  // Una venta que no es Flex, en una cuenta con sucursales: bajó el total y
+  // falta que una persona diga de qué sucursal salió (src/lib/sale-branch.ts).
+  branchPending Boolean       @default(false)
   createdAt     DateTime      @default(now())
 
   @@index([productId, createdAt])
+  @@index([productId, branchPending])
   @@map("stock_movements")
 }
 

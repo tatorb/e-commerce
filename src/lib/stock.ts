@@ -16,7 +16,8 @@ import { variantListingOwners } from '@/lib/variant-listings';
 import { afterRestock } from '@/lib/restock';
 import { PLAN_SELECT, planFor, plansFor, singleMeasure, SOURCE_SELECT, sourceOf, type PlanRow, type StockPlan } from '@/lib/stock-plan';
 import { readOne } from '@/lib/channel-sync';
-import { addBranchStock, branchChange, productBranches, saleDeltas, startingBranch } from '@/lib/branches';
+import { addBranchStock, branchChange, pendingUnits, productBranches, saleBranch, startingBranch } from '@/lib/branches';
+import { openSaleBranchTask, settleSaleBranchTask } from '@/lib/sale-branch';
 import { syncFlex } from '@/lib/branch-flex';
 import { announceStockAlarms, markStockAlarms, settleStockAlarms, type AlarmEvent, type StockChange } from '@/lib/stock-alarms';
 
@@ -449,8 +450,18 @@ async function moveStock(tx: Tx, lines: SaleLine[], sign: -1 | 1, args: { saleId
     if (!line.counted) continue;
     for (const part of line.parts) {
       const slot = await slotOf(tx, part.productId, part.key);
-      // Con sucursales: de cuál sale, o a cuál vuelve la cancelada.
-      const branches = sign < 0 ? await saleDeltas(tx, part.productId, part.key, part.quantity, line.flex === true) : await returnedDeltas(tx, part, args.saleId);
+      // Con sucursales: una venta Flex sale de la sucursal con Flex; las demás
+      // quedan sin sucursal hasta que una persona la elige. La cancelada vuelve
+      // a la sucursal de la que salió.
+      let branches: Record<string, number> | null = null;
+      let branchPending = false;
+      if (sign < 0) {
+        const from = await saleBranch(tx, part.productId, part.key, line.flex === true);
+        if (from.kind === 'branch') branches = { [from.branch.id]: -part.quantity };
+        branchPending = from.kind === 'pending';
+      } else {
+        branches = await returnedDeltas(tx, part, args.saleId);
+      }
       if (branches) await addBranchStock(tx, part.productId, part.key, branches);
       const after = await addStock(tx, part.productId, part.key, slot.label, sign * part.quantity);
       changes.push({ productId: part.productId, key: part.key, before: after - sign * part.quantity, after, cause: sign < 0 ? 'sale' : 'cancel' });
@@ -463,8 +474,9 @@ async function moveStock(tx: Tx, lines: SaleLine[], sign: -1 | 1, args: { saleId
           after,
           publicationId: line.publicationId,
           saleId: args.saleId,
-          note: `Venta ${args.orderId}${line.flex ? ' por Flex' : ''}`,
+          note: `Venta ${args.orderId}${line.flex ? ' por Flex' : ''}${branchPending ? ', falta elegir la sucursal' : ''}`,
           ...(branches ? { branches } : {}),
+          branchPending,
         },
       });
       // Con "Mostrar más de 5", vender sin tener es parte del plan: lo avisan las alarmas de stock.
@@ -476,15 +488,25 @@ async function moveStock(tx: Tx, lines: SaleLine[], sign: -1 | 1, args: { saleId
 
 /**
  * A qué sucursal vuelven las unidades de una venta cancelada: a las mismas de
- * las que salió. Si no se sabe, a la principal. Null si la cuenta no tiene sucursales.
+ * las que salió. Si todavía no se había elegido la sucursal, a ninguna: solo
+ * vuelven al total y ya no hay que elegirla. Si no se sabe, a la primera.
+ * Null si la cuenta no tiene sucursales.
  */
 async function returnedDeltas(tx: Tx, part: SalePart, saleId: string): Promise<Record<string, number> | null> {
   const branches = await productBranches(tx, part.productId);
   if (branches.length === 0) return null;
-  const moves = await tx.stockMovement.findMany({ where: { saleId, productId: part.productId, key: part.key, kind: 'SALE' }, select: { delta: true, branches: true } });
+  const moves = await tx.stockMovement.findMany({
+    where: { saleId, productId: part.productId, key: part.key, kind: 'SALE' },
+    select: { id: true, delta: true, branches: true, branchPending: true },
+  });
   const out: Record<string, number> = {};
   let known = 0;
   for (const m of moves) {
+    if (m.branchPending) {
+      await tx.stockMovement.update({ where: { id: m.id }, data: { branchPending: false } });
+      known -= m.delta;
+      continue;
+    }
     const b = m.branches && typeof m.branches === 'object' && !Array.isArray(m.branches) ? (m.branches as Record<string, unknown>) : null;
     if (!b) continue;
     for (const [id, d] of Object.entries(b)) {
@@ -594,6 +616,7 @@ export async function recordOrder(db: Db, args: { storeId: string; order: Channe
       throw e;
     }
     await announceStockAlarms(db, events, now);
+    await openSaleBranchTask(db, { storeId: args.storeId, orderId: order.orderId, now });
     return productsOf(lines);
   }
 
@@ -617,6 +640,8 @@ export async function recordOrder(db: Db, args: { storeId: string; order: Channe
       return true;
     });
     await announceStockAlarms(db, events, now);
+    // Cancelada antes de elegir la sucursal: ya no hay que elegirla.
+    await settleSaleBranchTask(db, { saleId: existing.id, now });
     return changed ? productsOf(lines) : [];
   }
   await db.channelSale.update({ where: { id: existing.id }, data: { checkedAt: now, delivered: order.delivered || existing.delivered } });
@@ -646,6 +671,8 @@ async function countLate(db: Db, productId: string, since: Date): Promise<void> 
       await tx.channelSale.update({ where: { id: sale.id }, data: { status: 'COUNTED', lines: next as Prisma.InputJsonValue } });
       await moveStock(tx, next.filter((_, i) => late.includes(lines[i])), -1, { saleId: sale.id, orderId: sale.orderId });
     });
+    const store = await db.channelSale.findUniqueOrThrow({ where: { id: sale.id }, select: { storeId: true } });
+    await openSaleBranchTask(db, { storeId: store.storeId, orderId: sale.orderId });
   }
 }
 
@@ -898,6 +925,7 @@ export async function loadProductStock(db: Db, args: { accountId: string; produc
   const stock = new Map(product.stock.map((s) => [s.key, s]));
   const branchList = await productBranches(db, product.id);
   const branchRows = branchList.length ? await db.branchStock.findMany({ where: { productId: product.id }, select: { key: true, branchId: true, quantity: true } }) : [];
+  const unassigned = branchList.length ? await pendingUnits(db, product.id) : {};
   const publications = await db.publication.findMany({
     where: { productId: product.id },
     orderBy: { createdAt: 'asc' },
@@ -941,6 +969,8 @@ export async function loadProductStock(db: Db, args: { accountId: string; produc
         return { key: s.key, label: s.label, quantity: row ? row.quantity : product.stockSince ? 0 : null };
       }),
     })),
+    // Lo vendido que todavía espera que se elija la sucursal, por medida.
+    unassigned: slots.filter((s) => unassigned[s.key]).map((s) => ({ label: s.label, quantity: unassigned[s.key] })),
     // Stock de medidas que ya no están en la ficha.
     orphans: product.stock.filter((s) => !slots.some((x) => x.key === s.key)),
     parts: product.kind === 'COMBO' ? sourceOf(product) : null,

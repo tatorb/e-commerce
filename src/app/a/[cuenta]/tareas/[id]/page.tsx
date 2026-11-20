@@ -14,6 +14,10 @@ import { prisma } from '@/lib/db';
 import { formatDateTime } from '@/lib/format';
 import { assignablePeople, getTask } from '@/lib/tasks';
 import { cn } from '@/lib/utils/cn';
+import { can } from '@/domain/access';
+import { SaleBranchCard } from '@/components/tasks/SaleBranchCard';
+import { accountBranches } from '@/lib/branches';
+import { pendingSaleParts } from '@/lib/sale-branch';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,6 +47,11 @@ export default async function TaskPage({ params }: { params: Promise<{ cuenta: s
   const due = dueText(task, now, tz);
   const remind = remindText(task.remindAt, tz);
   const flags = taskFlags(task, now, tz);
+  // La tarea de una venta sin sucursal: elegirla acá.
+  const auto = await prisma.task.findUnique({ where: { id: task.id }, select: { autoKey: true } });
+  const saleId = auto?.autoKey?.startsWith('sucursal:') ? auto.autoKey.slice('sucursal:'.length) : null;
+  const sale = saleId ? await prisma.channelSale.findFirst({ where: { id: saleId, store: { accountId: account.id } }, select: { id: true, orderId: true } }) : null;
+  const [saleParts, branches] = sale ? await Promise.all([pendingSaleParts(prisma, sale.id), accountBranches(prisma, account.id)]) : [[], []];
 
   return (
     <>
@@ -101,6 +110,17 @@ export default async function TaskPage({ params }: { params: Promise<{ cuenta: s
             </div>
           </SectionBody>
         </SectionCard>
+
+        {sale ? (
+          <SaleBranchCard
+            accountSlug={account.slug}
+            saleId={sale.id}
+            orderId={sale.orderId}
+            parts={saleParts.map((p) => ({ moveId: p.moveId, product: p.product, measure: p.measure, units: p.units }))}
+            branches={branches.map((b) => ({ id: b.id, name: b.name }))}
+            canEdit={can(user.access, 'productos', 'write')}
+          />
+        ) : null}
 
         <SectionCard title="Publicaciones" count={task.publications.length} description="Las publicaciones sobre las que es la tarea.">
           {task.publications.length > 0 ? (
