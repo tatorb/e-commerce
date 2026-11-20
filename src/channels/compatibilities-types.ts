@@ -17,6 +17,8 @@ export type ChannelVehicle = {
   // En las que cargó el canal, cuántos vehículos son de esa marca.
   total: number | null;
   note: string | null;
+  // El modelo del vehículo en el catálogo, si el canal lo informa.
+  modelId?: string | null;
 };
 
 export type ChannelCompatibilityRead = {

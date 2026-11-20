@@ -116,7 +116,11 @@ export function parseVehicle(raw: unknown): ChannelVehicle | null {
   // Las que cargó Mercado Libre llegan sin código y con el total de la marca.
   const byChannel = raw.source === 'CATALOGO' || (id === null && vehicleId === null);
   const total = typeof raw.total === 'number' ? raw.total : null;
-  return { id, vehicleId, name, byChannel, total, note: str(raw.note) };
+  // Con extended, a veces trae los atributos del vehículo: el modelo, para no confundir Focus con Focus 2.
+  const attrs = Array.isArray(raw.attributes) ? raw.attributes.filter(isObj) : [];
+  const model = attrs.find((a) => a.id === 'MODEL' || a.id === 'CAR_AND_VAN_MODEL');
+  const modelId = model ? (str(model.value_id) ?? (typeof model.value_id === 'number' ? String(model.value_id) : null)) : null;
+  return { id, vehicleId, name, byChannel, total, note: str(raw.note), ...(modelId ? { modelId } : {}) };
 }
 
 /** La lista de compatibilidades de una respuesta: { products: [...] }, o la lista sola. */

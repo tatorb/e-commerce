@@ -237,6 +237,11 @@ export type TranslatedLine = {
   // Los nombres como los tiene el catálogo, para reconocer lo cargado.
   brandName: string | null;
   modelNames: string[];
+  // Los códigos de esos modelos en el catálogo, y todos los modelos de la marca:
+  // un vehículo cargado es de la línea solo si es de uno de esos modelos, aunque
+  // otro empiece con el mismo nombre (Focus y Focus 2 son modelos distintos).
+  modelIds?: string[];
+  brandModels?: { id: string; name: string }[];
   groups: TargetGroup[];
   // Lo que conviene saber aunque se haya traducido, por ejemplo una versión excluida que el catálogo no tiene.
   notes: string[];
@@ -268,7 +273,39 @@ export function groupLabel(g: Pick<TargetGroup, 'brand' | 'model' | 'year' | 'fu
 // ───────────────────────────── La comparación ─────────────────────────────
 
 /** Un vehículo cargado en el canal, como lo necesita la comparación. */
-export type LoadedVehicle = { id: string | null; vehicleId: string | null; name: string; byChannel: boolean; total: number | null };
+export type LoadedVehicle = {
+  id: string | null;
+  vehicleId: string | null;
+  name: string;
+  byChannel: boolean;
+  total: number | null;
+  // El modelo del vehículo en el catálogo, si el canal lo informa.
+  modelId?: string | null;
+};
+
+/**
+ * De qué modelo del catálogo es un vehículo cargado: el que informa el canal
+ * o, si no, el de nombre más largo que aparece en su nombre ("Ford Focus 2
+ * 2009" es el Focus 2, no el Focus). Null si no se reconoce ninguno.
+ */
+export function vehicleModel(v: Pick<LoadedVehicle, 'name' | 'modelId'>, models: { id: string; name: string }[], brand?: string | null): { id: string; name: string } | null {
+  if (v.modelId) {
+    const known = models.find((m) => m.id === v.modelId);
+    if (known) return known;
+  }
+  const longest = (list: { id: string; name: string }[]) => [...list].sort((a, b) => norm(b.name).length - norm(a.name).length)[0] ?? null;
+  // El canal nombra marca, modelo y año: primero el que va justo después de la marca, así una
+  // palabra de la versión que se llame como otro modelo no confunde.
+  const name = ` ${norm(v.name)} `;
+  const b = brand ? norm(brand) : '';
+  const at = b ? name.indexOf(` ${b} `) : -1;
+  if (at >= 0) {
+    const after = name.slice(at + b.length + 1);
+    const next = longest(models.filter((m) => after.startsWith(` ${norm(m.name)} `)));
+    if (next) return next;
+  }
+  return longest(models.filter((m) => hasWords(v.name, m.name)));
+}
 
 export type VehicleVerdict =
   | { kind: 'covered'; line: number; year: number | null; displacement: string | null }
@@ -326,7 +363,12 @@ export function judgeVehicle(v: LoadedVehicle, lines: TranslatedLine[]): Vehicle
     // El modelo como lo llama el catálogo y como lo escribe la ficha: el canal a veces nombra igual
     // de las dos formas ("Megane 2" en el catálogo, "1.9 Rn Expression Renault Ar Megane2" en el nombre).
     const models = [...new Set([...l.modelNames, ...l.rule.models])];
-    const model = brand && hasWords(v.name, brand) ? models.find((m) => hasWords(v.name, m)) : undefined;
+    if (!brand || !hasWords(v.name, brand)) continue;
+    // Por el código del modelo en el catálogo: un vehículo de otro modelo no es de la línea
+    // aunque su nombre empiece igual (Focus 2, Focus III, Fiesta Kinetic).
+    const catalogModel = l.modelIds?.length && l.brandModels?.length ? vehicleModel(v, l.brandModels, brand) : null;
+    if (catalogModel && !l.modelIds!.includes(catalogModel.id)) continue;
+    const model = catalogModel ? catalogModel.name : models.find((m) => hasWords(v.name, m));
     if (!model) continue;
     if (l.status === 'review') {
       // Una línea a revisar con años no explica un vehículo de otro año, si hay otra línea del mismo

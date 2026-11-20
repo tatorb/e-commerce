@@ -20,6 +20,7 @@ import {
   pickYears,
   powerOf,
   splitVehicleName,
+  vehicleModel,
   yearOf,
   type FichaCompatibility,
   type TranslatedLine,
@@ -212,6 +213,35 @@ describe('lo cargado contra lo que sale de la ficha', () => {
     };
     expect(judgeVehicle(v('Renault Megane 2 2003 1.9 Rn AR'), [megane2])).toMatchObject({ kind: 'covered', year: 2003 });
     expect(judgeVehicle(v('1.9 Rn Expression Renault Ar Megane2'), [megane2])).toMatchObject({ kind: 'covered' });
+  });
+
+  it('por el código del modelo en el catálogo: un Focus 2 no es un Focus, aunque el nombre empiece igual', () => {
+    const brandModels = [
+      { id: '68463', name: 'Focus' },
+      { id: '68470', name: 'Focus 2' },
+      { id: '68471', name: 'Focus III' },
+      { id: '68480', name: 'Fiesta' },
+      { id: '68481', name: 'Fiesta Kinetic' },
+    ];
+    const focus: TranslatedLine = {
+      ...amarok,
+      rule: lineRule(ficha({ vehicleBrand: 'Ford', model: 'Focus', engine: '1.8', fuel: 'Diésel', yearFrom: 1998, yearTo: 2009 }), 7),
+      brandName: 'Ford',
+      modelNames: ['Focus'],
+      modelIds: ['68463'],
+      brandModels,
+    };
+    const otro = { kind: 'extra', reason: 'No sale de la ficha: esa marca y ese modelo no están.' };
+    expect(judgeVehicle(v('Ford Focus 2 2009 1.8 Tdci Ghia Mt AR'), [focus])).toEqual(otro);
+    expect(judgeVehicle(v('Ford Focus III 2009 1.8 Tdci AR'), [focus])).toEqual(otro);
+    expect(judgeVehicle(v('Ford Focus 2009 1.8 Tdci Ghia AR'), [focus])).toMatchObject({ kind: 'covered', year: 2009 });
+    // Si el canal dice el modelo del vehículo, vale eso.
+    expect(judgeVehicle({ ...v('Ford Focus 2008 1.8 Tddi AR'), modelId: '68470' }, [focus])).toEqual(otro);
+    expect(vehicleModel({ name: 'Ford Fiesta Kinetic 2012 1.6 AR' }, brandModels)?.name).toBe('Fiesta Kinetic');
+    expect(vehicleModel({ name: 'Ford Fiesta 2012 1.6 AR' }, brandModels)?.name).toBe('Fiesta');
+    expect(vehicleModel({ name: 'Ford Focus 2.0 2005 AR' }, brandModels)?.name).toBe('Focus');
+    // Una palabra de la versión que se llama como otro modelo no confunde: va el que sigue a la marca.
+    expect(vehicleModel({ name: 'Ford Fiesta 2012 1.6 Focus AR' }, brandModels, 'Ford')?.name).toBe('Fiesta');
   });
 
   it('una versión GNC de fábrica va en la línea de nafta, salvo que la ficha diga que no va', () => {

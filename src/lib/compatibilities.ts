@@ -326,6 +326,8 @@ export async function translateLine(cat: Catalog, rule: LineRule): Promise<Trans
     picked.push(model);
   }
   out.modelNames = picked.map((m) => m.name);
+  out.modelIds = picked.map((m) => m.id);
+  out.brandModels = models.map((m) => ({ id: m.id, name: m.name }));
   if (Object.keys(only).length > 0) out.onlyVersions = only;
 
   // Por qué no salió nada, si al final no sale ningún vehículo.
@@ -540,6 +542,7 @@ export function mergeLoaded(listing: ChannelVehicle[], product: ChannelVehicle[]
       out.push({
         id: v.id,
         vehicleId: v.vehicleId,
+        ...(v.modelId ? { modelId: v.modelId } : {}),
         name: v.name,
         byChannel: v.byChannel,
         total: v.total,
