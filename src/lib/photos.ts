@@ -196,37 +196,55 @@ const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is
  * Las que subió la app (corregidas e imágenes con texto) ya son de la app: no
  * se vuelven a bajar como originales.
  */
-async function publishedPhotos(db: PrismaClient, args: { productId: string; publicationId?: string | null }): Promise<string[]> {
-  const [assets, pubs] = await Promise.all([
+async function publishedPhotos(db: PrismaClient, args: { productId: string; publicationId?: string | null }): Promise<{ list: PublishedPhoto[]; texts: PublishedPhoto[] }> {
+  const [assets, pubs, textLinks] = await Promise.all([
     db.asset.findMany({ where: { productId: args.productId, kind: 'PHOTO' }, orderBy: [{ position: 'asc' }, { createdAt: 'asc' }], select: { url: true } }),
     db.publication.findMany({
       where: { productId: args.productId, channelCopy: { isNot: null } },
       orderBy: { createdAt: 'asc' },
-      select: {
-        id: true,
-        channelCopy: { select: { photos: true, photoIds: true, photoOrigins: true } },
-        textImages: { select: { channelPhotoId: true } },
-      },
+      select: { id: true, externalId: true, channelCopy: { select: { photos: true, photoIds: true, photoOrigins: true } } },
+    }),
+    // Las imágenes con texto que la app reconoce en el canal, en cualquier publicación del producto.
+    db.publicationTextImage.findMany({
+      where: { channelPhotoId: { not: null }, publication: { productId: args.productId } },
+      select: { channelPhotoId: true, textImage: { select: { slot: true, fromDrive: true, fileName: true } } },
     }),
   ]);
+  const textOf = new Map(textLinks.map((t) => [t.channelPhotoId!, t.textImage]));
   const ordered = [...pubs.filter((p) => p.id === args.publicationId), ...pubs.filter((p) => p.id !== args.publicationId)];
+  const texts: PublishedPhoto[] = [];
   const fromChannel = ordered.flatMap((p) => {
     const copy = p.channelCopy as CopyPhotos;
     const ids = strings(copy.photoIds);
-    const origins = copy.photoOrigins && typeof copy.photoOrigins === 'object' ? Object.keys(copy.photoOrigins as object) : [];
-    const ours = new Set([...origins, ...p.textImages.map((t) => t.channelPhotoId).filter((x): x is string => Boolean(x))]);
-    return strings(copy.photos).filter((_, i) => !ids[i] || !ours.has(ids[i]));
+    const origins = new Set(copy.photoOrigins && typeof copy.photoOrigins === 'object' ? Object.keys(copy.photoOrigins as object) : []);
+    return strings(copy.photos).flatMap((url, i): PublishedPhoto[] => {
+      const source = `${p.externalId ?? 'sin código'}, foto ${i + 1}`;
+      const id = ids[i];
+      const text = id ? textOf.get(id) : undefined;
+      if (text) {
+        texts.push({ url, source, channelPhotoId: id, note: text.fromDrive ? `Es la imagen con texto del Drive ${text.fileName ?? ''}`.trim() : `Es la imagen con texto ${text.slot}` });
+        return [];
+      }
+      // Las que subió la app desde una foto corregida ya son de la app.
+      if (id && origins.has(id)) return [];
+      return [{ url, source, channelPhotoId: id ?? null, note: null }];
+    });
   });
   const seen = new Set<string>();
-  const out: string[] = [];
-  for (const url of [...assets.map((a) => a.url), ...fromChannel]) {
-    const key = channelPhotoUrl(url) ?? url;
+  const list: PublishedPhoto[] = [];
+  for (const photo of [...assets.map((a, i) => ({ url: a.url, source: `ficha del producto, foto ${i + 1}`, channelPhotoId: null, note: null })), ...fromChannel]) {
+    const key = channelPhotoUrl(photo.url) ?? photo.url;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push(url);
+    list.push(photo);
   }
-  return out;
+  return { list, texts };
 }
+
+/** Una foto publicada del producto y de dónde sale: de qué código del canal y en qué lugar, o de la ficha. */
+export type PublishedPhoto = { url: string; source: string; channelPhotoId: string | null; note: string | null };
+
+export type AddedPhoto = { source: string; result: 'sumada' | 'ya estaba' | 'no se sumó'; reason: string | null };
 
 /**
  * Suma a la línea las fotos publicadas del producto, en su tamaño más grande:
@@ -236,8 +254,8 @@ export async function addChannelPhotos(
   db: PrismaClient,
   args: { productId: string; userId: string | null; publicationId?: string | null },
   deps: ChannelPhotoDeps,
-): Promise<{ added: number; already: number; failed: string[] }> {
-  const [urls, edits] = await Promise.all([
+): Promise<{ added: number; already: number; failed: string[]; photos: AddedPhoto[] }> {
+  const [{ list: urls, texts }, edits] = await Promise.all([
     publishedPhotos(db, args),
     db.photoEdit.findMany({ where: { productId: args.productId, archivedAt: null, channelUrl: { not: null } }, select: { channelUrl: true } }),
   ]);
@@ -246,14 +264,18 @@ export async function addChannelPhotos(
   let added = 0;
   let already = 0;
   const failed: string[] = [];
-  for (const [i, url] of urls.entries()) {
+  // Las imágenes con texto ya son de la app: no se suman.
+  const photos: AddedPhoto[] = texts.map((t) => ({ source: t.source, result: 'no se sumó', reason: `${t.note}: ya es de la app.` }));
+  for (const [i, { url, source }] of urls.entries()) {
     const full = channelPhotoUrl(url);
     if (!full) {
       failed.push(`Foto ${i + 1}: no es un link de un canal conocido.`);
+      photos.push({ source, result: 'no se sumó', reason: 'No es un link de un canal conocido.' });
       continue;
     }
     if (taken.has(full)) {
       already++;
+      photos.push({ source, result: 'ya estaba', reason: null });
       continue;
     }
     try {
@@ -274,11 +296,14 @@ export async function addChannelPhotos(
       });
       taken.add(full);
       added++;
+      photos.push({ source, result: 'sumada', reason: null });
     } catch (e) {
-      failed.push(`Foto ${i + 1}: ${e instanceof PhotoError ? e.message : 'no se pudo bajar.'}`);
+      const why = e instanceof PhotoError ? e.message : 'no se pudo bajar.';
+      failed.push(`Foto ${i + 1} (${source}): ${why}`);
+      photos.push({ source, result: 'no se sumó', reason: why });
     }
   }
-  return { added, already, failed };
+  return { added, already, failed, photos };
 }
 
 // ───────────────────────────── Para la pantalla ─────────────────────────────
@@ -296,5 +321,5 @@ export async function loadPhotoLine(db: PrismaClient, productId: string) {
 }
 
 export async function countChannelPhotos(db: PrismaClient, productId: string, publicationId?: string | null) {
-  return (await publishedPhotos(db, { productId, publicationId })).filter((url) => channelPhotoUrl(url) !== null).length;
+  return (await publishedPhotos(db, { productId, publicationId })).list.filter((p) => channelPhotoUrl(p.url) !== null).length;
 }

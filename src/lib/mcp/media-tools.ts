@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { PrismaClient } from '@/generated/prisma/client';
 import { photoKey, photoVariants, withMarks, withVariants, type PhotoRef } from '@/domain/media';
 import { loadMediaSources, MediaError, saveMedia, type MediaItem, type MediaSources } from '@/lib/media';
-import { addChannelPhotosOf, setPhotoAsIs, tidyCorrected } from '@/lib/photo-commands';
+import { addChannelPhotosDetail, setPhotoAsIs, tidyCorrected } from '@/lib/photo-commands';
 import { PhotoError } from '@/lib/photos';
 import { PhotoQueueError, redoFromScratch, unansweredPhotosOfAccount } from '@/lib/photo-queue';
 import { storageError } from '@/lib/stored-files';
@@ -272,14 +272,19 @@ const addChannelPhotosTool = defineTool({
   section: ['pipeline', 'productos'],
   title: 'Sumar al paso Fotos las fotos del canal',
   description:
-    'Baja las fotos que la publicación tiene en el canal, en su tamaño más grande, y las suma a la línea del paso Fotos del producto para corregirlas o usarlas tal cual. Las que ya estaban no se repiten. Las fotos son del producto: las ven todas sus publicaciones.',
+    'Baja las fotos que la publicación tiene en el canal, en su tamaño más grande, y las suma a la línea del paso Fotos del producto para corregirlas o usarlas tal cual. También trae las de la ficha y las de las otras publicaciones del producto. Las que ya estaban no se repiten, y las imágenes con texto de la app no se suman. En fotos dice, por cada una, de dónde sale (el código del canal y el lugar, o la ficha) y qué pasó con ella. Las fotos son del producto: las ven todas sus publicaciones.',
   input: z.object({ cuenta: accountArg, publicacion: publicationArg }),
   readOnly: false,
   async run(ctx, args) {
     const { account, id } = await target(ctx, args);
     const pub = await ctx.db.publication.findUniqueOrThrow({ where: { id }, select: { productId: true } });
-    const message = await asToolError(() => addChannelPhotosOf(ctx.db, { productId: pub.productId, userId: ctx.userId, publicationId: id }));
-    return { listo: true, resultado: message, link_app: appLink(ctx, account, id) };
+    const r = await asToolError(() => addChannelPhotosDetail(ctx.db, { productId: pub.productId, userId: ctx.userId, publicationId: id }));
+    return {
+      listo: true,
+      resultado: r.message,
+      fotos: r.photos.map((f) => ({ de: f.source, resultado: f.result, ...(f.reason ? { motivo: f.reason } : {}) })),
+      link_app: appLink(ctx, account, id),
+    };
   },
 });
 

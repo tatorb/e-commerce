@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { planLabel } from '@/domain/pricing';
 import { CatalogError } from '@/domain/catalog-data';
 import { ConnectError } from '@/channels/connect';
 import { applyRecreate, planRecreate, RecreateError, type RecreatePlan } from '@/lib/recreate';
@@ -25,6 +26,9 @@ const planOut = (p: RecreatePlan) => ({
     ...(o.main ? { principal: true } : {}),
     al_final: o.closeBlocked ? `No se puede finalizar ahora: ${o.closeBlocked}` : 'Se finaliza.',
   })),
+  ...(p.resume
+    ? { ya_creadas: p.resume.existing.map((e) => ({ codigo: e.externalId, forma_de_cobro: planLabel(e.plan), principal: e.id === p.resume!.newMainId })) }
+    : {}),
   se_crea: p.toCreate.map((t) => ({ forma_de_cobro: t.label, precio: t.price, como: t.main ? 'principal nueva, otro producto del canal' : 'opción de venta de la nueva' })),
   falta_antes_de_aplicar: p.missing,
   avisos: p.notes,
@@ -35,7 +39,7 @@ const recreateTool = defineTool({
   section: 'pipeline',
   title: 'Recrear el producto en otra categoría',
   description:
-    'Recrea un producto en otra categoría del canal: para cuando el canal le cambió la categoría a una opción de venta y el producto del canal ya no acepta opciones nuevas ("Item\'s category domain differs from UserProduct domain"). Con solo_mostrar (así viene) no cambia nada: lista las opciones vivas del producto con su forma de cobro, precio, estado, visitas y ventas, qué se va a crear y lo que falta. Al aplicar, en este orden: pone la categoría en la publicación nueva (una sin publicar del producto, o una copia de la principal), la crea en el canal como otro producto, crea sus opciones con los mismos precios por forma de cobro, las confirma leyéndolas del canal, le pasa el trabajo del pipeline (paso, historial, título y descripción en trabajo, competencia, búsquedas, posiciones, notas) y recién al final finaliza las viejas. Si algo de la creación falla, no finaliza ninguna. Las que el canal no deja finalizar (en revisión) quedan en una tarea, se reintentan solas cada hora y se ven en Por subir, Por finalizar. La categoría puede ser cualquier código de categoría del canal. Crea y finaliza publicaciones de verdad: antes mostrale a la persona el plan y esperá que confirme.',
+    'Recrea un producto en otra categoría del canal: para cuando el canal le cambió la categoría a una opción de venta y el producto del canal ya no acepta opciones nuevas ("Item\'s category domain differs from UserProduct domain"). Con solo_mostrar (así viene) no cambia nada: lista las opciones vivas del producto con su forma de cobro, precio, estado, visitas y ventas, qué se va a crear y lo que falta. Al aplicar, en este orden: pone la categoría en la publicación nueva (una sin publicar del producto, o una copia de la principal), la crea en el canal como otro producto, crea sus opciones con los mismos precios por forma de cobro, las confirma leyéndolas del canal, le pasa el trabajo del pipeline (paso, historial, título y descripción en trabajo, competencia, búsquedas, posiciones, notas) y recién al final finaliza las viejas. Si algo de la creación falla, no finaliza ninguna. Si se corta a mitad, volver a llamarla retoma: reconoce la nueva ya creada (ya_creadas), crea solo las formas de cobro que le faltan y finaliza las viejas que quedan, sin duplicar. Si la nueva no tiene fotos elegidas, le copia las de la principal vieja en el mismo orden: las del canal tal cual y las imágenes con texto como esas imágenes (las de cada publicación, copiadas a la nueva). No hereda el Tipo de vehículo ni lo que no es del formulario de la categoría destino. Las que el canal no deja finalizar (en revisión) quedan en una tarea, se reintentan solas cada hora y se ven en Por subir, Por finalizar. La categoría puede ser cualquier código de categoría del canal. Crea y finaliza publicaciones de verdad: antes mostrale a la persona el plan y esperá que confirme.',
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg.describe('Cualquier publicación del producto: la nueva sin publicar, o una de las viejas.'),

@@ -4,7 +4,7 @@ import { asIsProblem } from '@/domain/media';
 import { uploadContent, withDriveToken } from '@/lib/drive';
 import { plural } from '@/lib/format';
 import { photoFolderId, photoOwner, syncCorrected } from '@/lib/photo-files';
-import { addChannelPhotos, PhotoError, type AsIsCheck } from '@/lib/photos';
+import { addChannelPhotos, PhotoError, type AddedPhoto, type AsIsCheck } from '@/lib/photos';
 import { setAsIs } from '@/lib/photo-queue';
 import { placeShotPhotosQuietly } from '@/lib/shoot';
 import { driveRef, storageError } from '@/lib/stored-files';
@@ -35,6 +35,14 @@ export async function tidyCorrected(db: PrismaClient, productId: string) {
 
 /** Suma al paso Fotos las fotos que el producto tiene publicadas en el canal, en su tamaño más grande. */
 export async function addChannelPhotosOf(db: PrismaClient, args: { productId: string; userId: string | null; publicationId?: string | null }): Promise<string> {
+  return (await addChannelPhotosDetail(db, args)).message;
+}
+
+/** Lo mismo, con cada foto: de qué código del canal y de qué lugar sale, y qué pasó con ella. */
+export async function addChannelPhotosDetail(
+  db: PrismaClient,
+  args: { productId: string; userId: string | null; publicationId?: string | null },
+): Promise<{ message: string; photos: AddedPhoto[] }> {
   const owner = await photoOwner(db, args.productId);
   const r = await withDriveToken(db, async (token, email) => {
     const folderId = await photoFolderId(db, token, email, owner, 'originales');
@@ -55,7 +63,7 @@ export async function addChannelPhotosOf(db: PrismaClient, args: { productId: st
     ...r.failed,
   ];
   if (r.added === 0 && r.failed.length > 0) throw new PhotoError(parts.filter(Boolean).join(' '));
-  return parts.filter(Boolean).join(' ');
+  return { message: parts.filter(Boolean).join(' '), photos: r.photos };
 }
 
 /**

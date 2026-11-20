@@ -664,7 +664,7 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
       },
     };
     const r = await addChannelPhotos(db, { productId, userId }, channelDeps);
-    expect(r).toEqual({ added: 2, already: 0, failed: ['Foto 3: no es un link de un canal conocido.'] });
+    expect(r).toMatchObject({ added: 2, already: 0, failed: ['Foto 3: no es un link de un canal conocido.'] });
     expect(asked).toEqual([
       'https://http2.mlstatic.com/D_111-MLA1_012024-F.jpg',
       'https://http2.mlstatic.com/D_222-MLA2_012024-F.jpg',
@@ -695,7 +695,12 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     const mainId = (
       await db.publication.create({ data: { productId, storeId, externalId: 'MLA1', title: 'Kit', channelCopy: { create: copy(['111-MLA1_012024', '333-MLA3_012024', '222-MLA2_012024'], { '333-MLA3_012024': 'una-corregida' }) } } })
     ).id;
-    await db.publication.create({ data: { productId, storeId, externalId: 'MLA2', title: 'Kit', mainOptionId: mainId, channelCopy: { create: copy(['111-MLA1_012024', '222-MLA2_012024']) } } });
+    const optionId = (
+      await db.publication.create({ data: { productId, storeId, externalId: 'MLA2', title: 'Kit', mainOptionId: mainId, channelCopy: { create: copy(['111-MLA1_012024', '222-MLA2_012024', '444-MLA4_012024']) } } })
+    ).id;
+    // La 444 es la imagen con texto 1 de la opción: ya es de la app, no se suma.
+    const piece = await db.textImage.create({ data: { accountId, content: {}, slot: 1, pngRef: 'drive:png', pngAt: new Date() } });
+    await db.publicationTextImage.create({ data: { publicationId: optionId, textImageId: piece.id, channelPhotoId: '444-MLA4_012024' } });
     const asked: string[] = [];
     const deps = {
       fetch: (async (u: string) => {
@@ -706,7 +711,13 @@ describe.skipIf(!url)('línea de imágenes en la base', () => {
     };
     expect(await countChannelPhotos(db, productId, mainId)).toBe(2);
     const r = await addChannelPhotos(db, { productId, userId, publicationId: mainId }, deps);
-    expect(r).toEqual({ added: 2, already: 0, failed: [] });
+    expect(r).toMatchObject({ added: 2, already: 0, failed: [] });
+    // De qué código y de qué lugar sale cada una, y la imagen con texto que no se sumó.
+    expect(r.photos.map((f) => [f.source, f.result, f.reason])).toEqual([
+      ['MLA2, foto 3', 'no se sumó', 'Es la imagen con texto 1: ya es de la app.'],
+      ['MLA1, foto 1', 'sumada', null],
+      ['MLA1, foto 3', 'sumada', null],
+    ]);
     expect(asked).toEqual(['https://http2.mlstatic.com/D_111-MLA1_012024-F.jpg', 'https://http2.mlstatic.com/D_222-MLA2_012024-F.jpg']);
     const again = await addChannelPhotos(db, { productId, userId, publicationId: mainId }, deps);
     expect([again.added, again.already]).toEqual([0, 2]);

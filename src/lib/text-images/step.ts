@@ -328,7 +328,9 @@ export async function generateTextImage(
   const old = row.pngRef;
   await db.textImage.update({ where: { id: row.id }, data: { pngRef: ref, pngAt: at, pngHash: hash, updatedById: args.userId } });
   // El anterior, a la papelera del Drive. Si no se puede, queda ahí.
-  if (old && old !== ref) await removeStored(db, old).catch((e) => console.error('No se pudo sacar el PNG anterior del Drive.', e));
+  // Si otra imagen con texto usa el mismo archivo (una copiada al recrear la publicación), queda.
+  const shared = old && old !== ref ? await db.textImage.count({ where: { pngRef: old, id: { not: row.id } } }) : 0;
+  if (old && old !== ref && shared === 0) await removeStored(db, old).catch((e) => console.error('No se pudo sacar el PNG anterior del Drive.', e));
   // Donde el canal tiene la anterior, la nueva va en su lugar: el borrador con las mismas fotos del canal, en el mismo orden.
   const drafts = await draftsForTextImage(db, { textImageId: row.id, publicationIds: ids });
   // Las demás, como siempre: con lugar fijo, queda en su lugar en Organización de multimedia.

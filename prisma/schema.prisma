@@ -572,6 +572,9 @@ model Publication {
   closeWantedAt     DateTime?
   closeWantedWhy    String?
   closeTaskId       String?
+  // La principal nueva de un producto recreado en otra categoría: la principal vieja de la que salió.
+  // Si el recreado se corta a mitad, con esto se retoma sin crear otra.
+  recreatedFromId   String?
   // La familia, cuando el canal guarda cada medida como una publicación aparte
   // y las agrupa (src/lib/families.ts). Sin familia: una publicación suelta.
   familyId          String?
