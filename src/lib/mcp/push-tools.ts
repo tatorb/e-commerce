@@ -59,7 +59,7 @@ const TEXTS: Record<Field, { name: string; title: string; the: string; it: strin
     from: 'save_catalog_data, normalize_sale_options o el paso Información',
     show: 'qué datos de catálogo se van a mandar y a cuáles',
     more:
-      'También manda marca, número de pieza y origen de la ficha del producto cuando el canal tiene otro valor: eso solo ya deja los datos de catálogo por subir. de_la_ficha dice qué se mandó; después vuelve a leer la publicación y, si el canal no lo tomó, lo dice en motivo.',
+      'Borra en el canal los datos del formulario que la app sacó (save_catalog_data con null); si el canal no los borra, lo dice en motivo. También manda marca, número de pieza y origen de la ficha del producto cuando el canal tiene otro valor: eso solo ya deja los datos de catálogo por subir. de_la_ficha dice qué se mandó; después vuelve a leer la publicación y, si el canal no lo tomó, lo dice en motivo.',
   },
   warranty: {
     name: 'push_warranties',

@@ -161,7 +161,7 @@ export type CategoryAlert = { text: string; changedAt: Date | null; split: boole
 export async function categoryAlerts(db: Db, publicationIds: string[], now = new Date()): Promise<Map<string, CategoryAlert>> {
   const out = new Map<string, CategoryAlert>();
   if (publicationIds.length === 0) return out;
-  const pubs = await db.publication.findMany({ where: { id: { in: publicationIds } }, select: { id: true, productId: true, storeId: true } });
+  const pubs = await db.publication.findMany({ where: { id: { in: publicationIds } }, select: { id: true, productId: true, storeId: true, channelCategory: true } });
   const productIds = [...new Set(pubs.map((p) => p.productId))];
   const since = new Date(now.getTime() - ALERT_DAYS * 86_400_000);
   const [changes, live] = await Promise.all([
@@ -170,15 +170,18 @@ export async function categoryAlerts(db: Db, publicationIds: string[], now = new
       orderBy: { createdAt: 'desc' },
       select: { createdAt: true, message: true, publication: { select: { productId: true, storeId: true, externalId: true } } },
     }),
+    // Con la misma regla que list_category_clashes: lo que dice la última lectura del canal.
     db.publication.findMany({
-      where: { productId: { in: productIds }, externalId: { not: null }, channelStatus: { in: ['ACTIVE', 'PAUSED'] }, channelCopy: { is: { missingSince: null, categoryId: { not: null } } } },
+      where: { productId: { in: productIds }, externalId: { not: null }, channelCopy: { is: { ...LIVE, categoryId: { not: null } } } },
       select: { productId: true, storeId: true, channelCopy: { select: { categoryId: true } } },
     }),
   ]);
   for (const p of pubs) {
-    const change = changes.find((c) => c.publication.productId === p.productId && c.publication.storeId === p.storeId);
     const categories = new Set(live.filter((l) => l.productId === p.productId && l.storeId === p.storeId).map((l) => l.channelCopy!.categoryId));
     const split = categories.size > 1;
+    // El cambio del canal se avisa mientras la app no lo tomó: si todas sus activas ya están en la categoría de la app, no.
+    const pending = p.channelCategory !== null && categories.size > 0 && !categories.has(p.channelCategory);
+    const change = split || pending ? changes.find((c) => c.publication.productId === p.productId && c.publication.storeId === p.storeId) : undefined;
     if (!change && !split) continue;
     const parts = [
       change ? `El canal cambió por su cuenta la categoría de ${change.publication.externalId ?? 'una publicación del producto'}: ${change.message ?? ''}`.trim() : null,

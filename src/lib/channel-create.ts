@@ -3,6 +3,8 @@ import { Prisma } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
 import { ConnectError } from '@/channels/connect';
 import { getChannelPublisher, PublishError, type ChannelAttributeUpdate, type ChannelPicture } from '@/channels/publish';
+import { planLabel } from '@/domain/pricing';
+import { packageState } from '@/lib/package-check';
 import { mergeCatalogAttributes, normalizeText, readCatalogValues } from '@/domain/catalog-data';
 import { faceValues, fingerprint, fingerprintsOf, priceText } from '@/domain/channel-sync';
 import { writeToFamily } from '@/domain/family-members';
@@ -256,6 +258,10 @@ export async function createChecks(db: Db, args: { accountId: string; publicatio
     });
   }
 
+  // El paquete más chico que el empaque que calcula el canal: lo rechaza al crear otra opción o medida.
+  const pack = await packageState(db, p.id);
+  if (pack.warning) checks.push({ label: 'Paquete', ok: false, detail: pack.warning, blocking: false });
+
   // Para crear hace falta al menos una foto en cada medida.
   const short = targets.filter((t) => t.media.length < minPhotos);
   const shortText = (t: Target) => (t.media.length ? `${t.label} tiene ${fotos(t.media.length)}` : `${t.label} no tiene ninguna`);
@@ -333,6 +339,8 @@ type CreateArgs = {
   now?: Date;
   // Desde el flujo de recrear el producto en otra categoría.
   recreate?: boolean;
+  // La forma de cobro con que se crea, como en create_sale_option: se pone apenas se crea. Sin decirla, la del tipo.
+  plan?: number;
 };
 type Created = {
   // La primera que se creó.
@@ -549,6 +557,19 @@ async function create(db: Db, args: CreateArgs, info: CreateInfo): Promise<Creat
       });
     }
   });
+
+  // La forma de cobro pedida, como en create_sale_option: el tipo solo no alcanza para saber cuántas cuotas lleva.
+  if (args.plan !== undefined) {
+    for (const { t, c } of done) {
+      try {
+        await withAccessToken(db, p.store.id, (token) => publisher.setInstallments(token, c.externalId, args.plan!));
+        await db.publication.update({ where: { id: t.id! }, data: { installments: args.plan } });
+      } catch (e) {
+        if (!(e instanceof PublishError)) throw e;
+        warnings.push(`${t.label || 'La publicación'} se creó, pero no tomó ${planLabel(args.plan).toLowerCase()}: ${e.message}`);
+      }
+    }
+  }
 
   let confirmed = true;
   for (const { t } of done) {

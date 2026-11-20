@@ -1,3 +1,4 @@
+import { packageState } from '@/lib/package-check';
 import { clashText, productChannelCategories } from '@/lib/channel-category';
 import { Prisma, type PrismaClient } from '@/generated/prisma/client';
 import type { ChannelStatus } from '@/generated/prisma/enums';
@@ -268,7 +269,11 @@ export async function createSaleOption(
         warranty,
       });
     } catch (e) {
-      if (e instanceof PublishError) throw new SaleOptionCopyError(`${channelName} no la creó: ${e.message}`);
+      if (e instanceof PublishError) {
+        // El paquete chico: con la medida del empaque que calcula el canal, para cargarla.
+        const pack = /packag/i.test(e.message) ? await packageState(db, source.id) : null;
+        throw new SaleOptionCopyError(`${channelName} no la creó: ${e.message}${pack?.warning ? ` ${pack.warning}` : ''}`);
+      }
       throw e;
     }
     warnings.push(...member.warnings);

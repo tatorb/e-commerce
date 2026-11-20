@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { loadOptionTable } from '@/lib/option-table';
 import { familyMemberIds } from '@/domain/family-members';
 import { createChecks, createInChannel, CreateError } from '@/lib/channel-create';
 import { syncStock } from '@/lib/stock';
@@ -56,12 +57,21 @@ const createInChannelTool = defineTool({
   section: 'subir',
   title: 'Crear la publicación en el canal',
   description:
-    'Crea en el canal una publicación que todavía no está publicada, como el botón "Crear en el canal" del paso Publicación: con el título, la descripción, la categoría, los datos de catálogo y las fotos que tiene en la app. Si el producto tiene varias medidas, crea una publicación por medida, todas en la misma familia, cada una con su SKU, su cantidad y sus fotos; la que tiene precio propio va con el suyo. Alcanza con una foto en cada medida. Antes, mirá con get_create_step que no falte nada. El precio, sin mandarlo, es el guardado en el paso Precio. La cantidad, sin mandarla, es el stock del producto (de cada medida); si el producto no lleva stock en la app, pasala. Al crearla, la app carga el código del canal de cada medida y sube el stock. Devuelve el código y el link de cada una, o el motivo exacto si el canal no la aceptó. Crea la publicación de verdad en el canal: antes, mostrale a la persona el título, las medidas, el precio, la cantidad de cada medida y el tipo de publicación, y esperá que confirme.',
+    'Crea en el canal una publicación que todavía no está publicada, como el botón "Crear en el canal" del paso Publicación: con el título, la descripción, la categoría, los datos de catálogo y las fotos que tiene en la app. Si el producto tiene varias medidas, crea una publicación por medida, todas en la misma familia, cada una con su SKU, su cantidad y sus fotos; la que tiene precio propio va con el suyo. Alcanza con una foto en cada medida. Antes, mirá con get_create_step que no falte nada. El precio, sin mandarlo, es el guardado en el paso Precio. La cantidad, sin mandarla, es el stock del producto (de cada medida); si el producto no lleva stock en la app, pasala. Al crearla, la app carga el código del canal de cada medida y sube el stock. Devuelve el código y el link de cada una, o el motivo exacto si el canal no la aceptó. Crea la publicación de verdad en el canal: antes, mostrale a la persona el título, las medidas, el precio, la cantidad de cada medida y el tipo de publicación, y esperá que confirme. Con tipo premium, forma_de_cobro dice cuántas cuotas sin interés lleva: se ponen al crearla y el precio, sin mandarlo, es el de esas cuotas.',
   input: z.object({
     cuenta: accountArg,
     publicacion: publicationArg,
     tipo: z.string().min(1).max(40).describe('El tipo de publicación: su tipo en tipos_de_publicacion de get_create_step, por ejemplo "clasica" o "premium".'),
-    precio: z.number().positive().max(1_000_000_000).optional().describe('El precio publicado, en pesos. Sin mandarlo, el guardado en el paso Precio.'),
+    forma_de_cobro: z
+      .enum(['3', '6', '9', '12'])
+      .optional()
+      .describe('Con tipo premium, obligatoria: cuántas cuotas sin interés lleva. Se pone apenas se crea, como en create_sale_option, y sin precio va el de esa forma de cobro.'),
+    precio: z
+      .number()
+      .positive()
+      .max(1_000_000_000)
+      .optional()
+      .describe('El precio publicado, en pesos. Sin mandarlo, el guardado en el paso Precio; con forma_de_cobro, el de esa forma de cobro desde el precio sin cuotas guardado.'),
     cantidad: z.number().int().min(1).max(99_999).optional().describe('Sin medidas: la cantidad. Sin mandarla, el stock del producto.'),
     cantidades: z
       .array(z.object({ medida: z.string().min(1).max(200), cantidad: z.number().int().min(1).max(99_999) }))
@@ -81,7 +91,18 @@ const createInChannelTool = defineTool({
       if (missing.length > 0) throw new McpToolError(`Todavía no se puede crear: ${missing.map((c) => `${c.label}: ${c.detail}`).join(' ')}`);
       const type = info.listingTypes.find((t) => t.value === args.tipo.trim().toLowerCase());
       if (!type) throw new McpToolError(`Ese tipo de publicación no está. Los que acepta ${info.channelName}: ${info.listingTypes.map((t) => t.value).join(', ')}.`);
-      const price = args.precio ?? info.price;
+      // Premium es con cuotas sin interés: hay que decir cuántas, y el precio es el de esas cuotas.
+      if (type.value === 'premium' && !args.forma_de_cobro) {
+        throw new McpToolError('Con tipo premium, decí cuántas cuotas sin interés lleva en forma_de_cobro (3, 6, 9 o 12): el precio y las cuotas salen de ahí. Si la medida ya está publicada, para sumarle otra forma de cobro usá create_sale_option.');
+      }
+      if (args.forma_de_cobro && type.value !== 'premium') throw new McpToolError('Las cuotas sin interés van con tipo premium.');
+      const plan = args.forma_de_cobro ? Number(args.forma_de_cobro) : undefined;
+      let price = args.precio ?? (plan === undefined ? info.price : null);
+      if (plan !== undefined && price === null) {
+        const table = await loadOptionTable(ctx.db, { accountId: account.id, publicationId: id, campaigns: false });
+        price = table?.groups.flatMap((g) => g.rows).find((r) => r.plan === plan)?.price ?? null;
+        if (price === null) throw new McpToolError(`No se pudo calcular el precio de ${plan} cuotas: falta el costo o el precio sin cuotas guardado. Pasá el precio.`);
+      }
       if (price === null) throw new McpToolError('Falta el precio: guardalo en el paso Precio con save_price o pasalo en precio.');
 
       // El stock, si alcanza para empezar.
@@ -108,7 +129,7 @@ const createInChannelTool = defineTool({
         if (short.length > 0) throw new McpToolError(`Falta la cantidad de ${short.join(', ')}${info.stock ? ', que no tiene stock' : ''}: pasala en cantidades.`);
       }
 
-      const created = await createInChannel(ctx.db, { accountId: account.id, publicationId: id, price, quantity, quantities, listingType: type.value, userId: ctx.userId });
+      const created = await createInChannel(ctx.db, { accountId: account.id, publicationId: id, price, quantity, quantities, listingType: type.value, plan, userId: ctx.userId });
       // Como el botón: si el producto lleva stock en la app, queda con ese, en cada medida de la familia.
       const members = await familyMemberIds(ctx.db, id);
       await syncStock(ctx.db, { publicationIds: members, userId: ctx.userId, note: 'Al crearla, con el stock del producto.' }).catch((e) =>

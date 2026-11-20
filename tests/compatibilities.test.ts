@@ -321,6 +321,44 @@ describe('la ficha llevada al catálogo', () => {
   });
 });
 
+describe('un motor que el catálogo solo distingue por potencia', () => {
+  // Inventado, con la forma del catálogo: la Fiorino diésel 1.7 sin versiones, aspirada de 58 cv o turbo de 72 cv.
+  const lists: Record<string, { id: string; name: string }[]> = {
+    brand: [{ id: 'f', name: 'Fiat' }],
+    model: [{ id: 'fio', name: 'Fiorino' }],
+    fuel: [{ id: 'd', name: 'Diésel' }],
+    engine: [{ id: 'e17', name: '1.7' }],
+    power: [{ id: 'p58', name: '58 cv' }, { id: 'p72', name: '72 cv' }],
+    version: [],
+    year: [{ id: 'y99', name: '1999' }, { id: 'y00', name: '2000' }],
+  };
+  const asked: string[] = [];
+  const cat = {
+    values: async (field: string, known: { field: string; id: string }[]) => {
+      asked.push(`${field}:${known.map((k) => k.id).join(',')}`);
+      return lists[field] ?? null;
+    },
+    count: async () => null,
+    known: async () => ({ intruders: [], unfilled: 0, sent: false }),
+  };
+
+  it('con la potencia en la ficha, filtra por ella aunque el catálogo no tenga versiones', async () => {
+    const line = await translateLine(cat as never, lineRule(ficha({ vehicleBrand: 'Fiat', model: 'Fiorino', engine: '1.7 D', fuel: 'Diésel', power: '58 cv', excludedVersions: 'TD, Turbo' }), 0));
+    expect(line.status).toBe('ok');
+    expect(line.groups.map((g) => [g.year, g.power, g.filters.map((f) => f.id)])).toEqual([
+      [1999, 58, ['f', 'fio', 'd', 'e17', 'p58', 'y99']],
+      [2000, 58, ['f', 'fio', 'd', 'e17', 'p58', 'y00']],
+    ]);
+    expect(line.notes).toContain('El catálogo no tiene versiones de Fiat Fiorino: se filtró por la potencia de la ficha (58 cv).');
+  });
+
+  it('sin la potencia, queda a revisar y dice qué potencias distingue el catálogo', async () => {
+    const line = await translateLine(cat as never, lineRule(ficha({ vehicleBrand: 'Fiat', model: 'Fiorino', engine: '1.7 D', fuel: 'Diésel', excludedVersions: 'TD, Turbo' }), 0));
+    expect(line.status).toBe('review');
+    expect(line.reason).toContain('las distingue por potencia (58 cv, 72 cv): cargá la potencia en la línea de la ficha');
+  });
+});
+
 describe('cómo responde Mercado Libre', () => {
   it('lee las compatibilidades de la tienda y las que cargó Mercado Libre, que vienen solo con la marca', () => {
     expect(

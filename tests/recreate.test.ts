@@ -274,5 +274,11 @@ describe.skipIf(!url)('recrear un producto en otra categoría', () => {
     expect(alert.split).toBe(true);
     expect(alert.text).toContain('cambió por su cuenta la categoría de MLA100');
     expect(alert.text).toContain('2 categorías');
+    // Con la última lectura todas en la misma categoría, el aviso desaparece aunque el cambio sea reciente.
+    await db.channelCopy.updateMany({ data: { categoryId: 'MLA9999' } });
+    expect((await categoryAlerts(db, [three, oldMain])).size).toBe(0);
+    // Una finalizada en otra categoría no cuenta, aunque la app la tenga como activa.
+    await db.channelCopy.update({ where: { publicationId: nine }, data: { categoryId: 'MLA1', status: 'CLOSED' } });
+    expect((await categoryAlerts(db, [three])).size).toBe(0);
   });
 });

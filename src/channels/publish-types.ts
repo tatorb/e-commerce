@@ -10,7 +10,8 @@ export type PublishField = 'title' | 'description' | 'attributes' | 'photos' | '
 export const PUBLISH_FIELDS: PublishField[] = ['title', 'description', 'attributes', 'photos', 'price', 'installments', 'discount', 'quantity', 'warranty'];
 
 /** Un dato de catálogo para subir: el código del campo en el canal y su valor; con multiple, varios separados por coma. */
-export type ChannelAttributeUpdate = { id: string; value: string; multiple: boolean };
+// remove: borrar el dato en el canal (value no se usa).
+export type ChannelAttributeUpdate = { id: string; value: string; multiple: boolean; remove?: boolean };
 
 /** El canal no aceptó el cambio. El mensaje explica por qué, en castellano. */
 export class PublishError extends Error {}

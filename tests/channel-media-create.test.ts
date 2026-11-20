@@ -165,6 +165,8 @@ type Item = {
   // Sin variantes: el SKU de la publicación y el producto de usuario al que pertenece.
   sku?: string;
   userProduct?: string;
+  listing_type_id?: string;
+  tags?: string[];
 };
 
 describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
@@ -240,6 +242,17 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
       }
       if (desc) return descriptions[desc[1]] ? json(200, { plain_text: descriptions[desc[1]] }) : json(404, {});
       const item = u.pathname.match(/^\/items\/(\w+)$/);
+      // Las cuotas: el tipo y las etiquetas de la publicación.
+      if (item && req.method === 'GET' && u.searchParams.get('attributes') === 'listing_type_id,tags') {
+        const it = items[item[1]];
+        return it ? json(200, { id: item[1], listing_type_id: it.listing_type_id ?? 'gold_pro', tags: it.tags ?? [] }) : json(404, {});
+      }
+      if (item && req.method === 'PUT' && body.tags) {
+        const it = items[item[1]];
+        if (!it) return json(404, {});
+        it.tags = body.tags;
+        return json(200, { id: item[1] });
+      }
       if (item && req.method === 'GET' && u.searchParams.get('attributes') === 'variations') {
         const it = items[item[1]];
         return it ? json(200, { id: item[1], variations: it.variations ?? [] }) : json(404, {});
@@ -1087,6 +1100,27 @@ describe.skipIf(!url)('fotos y publicaciones nuevas en la base', () => {
     expect(await state(other.id)).toEqual({ draft: [], choose: [], rejected: [] });
     // Ya no queda nada para crear.
     expect((await createChecks(db, { accountId, publicationId: other.id })).blocked).toBe('Todas las medidas ya están publicadas en Mercado Libre.');
+  });
+
+  it('premium pide cuántas cuotas lleva, y las pone al crearla', async () => {
+    const pub = await db.publication.create({ data: { productId, storeId, title: 'Kit Embrague Ford Ka 1.6', channelStatus: 'UNPUBLISHED', attributes: [{ name: 'Tipo de embrague', value: 'Monodisco' }] } });
+    await saveMedia(db, { accountId, publicationId: pub.id, refs: [{ kind: 'asset', url: 'https://otra/foto.jpg' }] });
+    await taxesInStore();
+    await withPackage(pub.id);
+    await db.user.create({ data: { id: 'u-prem', email: 'prem@ejemplo.com', name: 'Persona de prueba', isAdmin: true } });
+    const ctx: McpContext = { db, userId: 'u-prem', access: { isAdmin: true, permissions: {}, accountIds: [] }, baseUrl: 'https://app.ejemplo.com' };
+    const { CREATE_TOOLS } = await import('@/lib/mcp/create-tools');
+    const tool = CREATE_TOOLS.find((t) => t.name === 'create_in_channel')!;
+    const run = (args: Record<string, unknown>) => tool.run(ctx, tool.input.parse({ cuenta: 'prueba', publicacion: pub.id, cantidad: 2, ...args }));
+    await expect(run({ tipo: 'premium', precio: 50000 })).rejects.toThrow('decí cuántas cuotas sin interés lleva');
+    await expect(run({ tipo: 'clasica', forma_de_cobro: '6', precio: 50000 })).rejects.toThrow('van con tipo premium');
+    expect(calls.some((c) => c.path === '/items')).toBe(false);
+
+    // Premium sola son 6 cuotas en el canal: con 3, después de crearla se le ponen, lo mismo que hace create_sale_option.
+    const made = await createInChannel(db, { accountId, publicationId: pub.id, price: 52000, quantity: 2, listingType: 'premium', plan: 3, userId: null });
+    expect(made.warnings).toEqual([]);
+    expect(calls.find((c) => c.method === 'PUT' && c.path === '/items/MLA900')?.body).toEqual({ tags: [expect.stringMatching(/3/)] });
+    expect((await db.publication.findUniqueOrThrow({ where: { id: pub.id } })).installments).toBe(3);
   });
 
   it('crea la publicación con sus datos, fotos y descripción, y queda con su código y al día', async () => {

@@ -1,7 +1,7 @@
 import type { ChannelStatus } from '@/generated/prisma/enums';
 import { BULK_MAX, MercadoLibreRequestError, mlGet, readItems } from './http';
 import { mercadolibreCatalog } from './catalog';
-import type { ChannelFamily, ChannelListing, ChannelListings, ListingStatus } from '../listings-types';
+import type { ChannelFamily, ChannelListing, ChannelListings, ChannelPackage, ListingStatus } from '../listings-types';
 import { LOW_INTEREST_PLAN } from '@/domain/pricing';
 import { warrantyOf } from './warranty';
 
@@ -48,6 +48,7 @@ const BRAND = 'BRAND';
 const PART_NUMBER = 'PART_NUMBER';
 const ORIGIN = 'ORIGIN';
 const SELLER_SKU = 'SELLER_SKU';
+const PACKAGE_IDS = ['PACKAGE_HEIGHT', 'PACKAGE_WIDTH', 'PACKAGE_LENGTH', 'PACKAGE_WEIGHT'];
 
 type Obj = Record<string, unknown>;
 
@@ -175,6 +176,29 @@ export function flexOfItem(item: Obj): boolean | null {
   return null;
 }
 
+/**
+ * El empaque que calcula Mercado Libre para el producto: sus datos PACKAGE_* o,
+ * si no vinieron, las dimensiones del envío ("23x23x10,1680": cm y g).
+ */
+export function factoryPackageOf(item: Obj): ChannelPackage | null {
+  const attrs = arr(item.attributes).filter(isObj);
+  const amount = (id: string, unit: 'cm' | 'g'): number | null => {
+    const a = attrs.find((x) => x.id === id);
+    const raw = a ? attributeValue(a) : null;
+    if (!raw) return null;
+    const m = raw.replace(',', '.').match(/^([\d.]+)\s*(mm|cm|m|g|kg)?$/i);
+    if (!m) return null;
+    const n = Number(m[1]);
+    const u = (m[2] ?? unit).toLowerCase();
+    return u === 'mm' ? n / 10 : u === 'm' ? n * 100 : u === 'kg' ? n * 1000 : n;
+  };
+  const [height, width, length, weight] = [amount('PACKAGE_HEIGHT', 'cm'), amount('PACKAGE_WIDTH', 'cm'), amount('PACKAGE_LENGTH', 'cm'), amount('PACKAGE_WEIGHT', 'g')];
+  if (height && width && length && weight) return { height, width, length, weight };
+  const dims = isObj(item.shipping) ? str(item.shipping.dimensions) : null;
+  const m = dims?.match(/^([\d.]+)x([\d.]+)x([\d.]+),([\d.]+)$/);
+  return m ? { height: Number(m[1]), width: Number(m[2]), length: Number(m[3]), weight: Number(m[4]) } : null;
+}
+
 /** Una publicación de Mercado Libre en el formato neutro. Sin la descripción ni las visitas, que se piden aparte. */
 export function parseItem(item: Obj): ChannelListing {
   const attributes: ChannelListing['attributes'] = [];
@@ -191,6 +215,8 @@ export function parseItem(item: Obj): ChannelListing {
     const id = str(a.id);
     const value = attributeValue(a);
     if (!id || !value) continue;
+    // El empaque que calcula Mercado Libre no es un dato para cargar: va aparte.
+    if (PACKAGE_IDS.includes(id)) continue;
     if (id === BRAND) brand = value;
     else if (id === PART_NUMBER) partNumber = value;
     else if (id === ORIGIN) origin = value;
@@ -250,6 +276,7 @@ export function parseItem(item: Obj): ChannelListing {
     // En el modelo de producto de usuario: las publicaciones del mismo producto comparten sus fotos.
     channelProductId: str(item.user_product_id),
     channelFamilyName: str(item.family_name),
+    factoryPackage: factoryPackageOf(item),
     // Solo si vino el dato: sin pedirlo, no se sabe cuál tiene.
     ...('sale_terms' in item ? { warranty: warrantyOf(item) } : {}),
   };

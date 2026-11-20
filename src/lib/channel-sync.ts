@@ -11,6 +11,7 @@ import {
   channelFaceValues,
   faceSummary,
   faceValues,
+  attributeDiff,
   fingerprintsOf,
   discountText,
   heldDiscount,
@@ -135,6 +136,12 @@ export function readOrder(publications: { externalId: string | null; pipelineSta
     .filter((p) => p.externalId)
     .sort((a, b) => rank(a) - rank(b) || (a.channelCopy?.readAt.getTime() ?? 0) - (b.channelCopy?.readAt.getTime() ?? 0) || a.externalId!.localeCompare(b.externalId!))
     .map((p) => p.externalId!);
+}
+
+/** Si lo único distinto entre los datos de catálogo de la app y los del canal son los que la app sacó. */
+function onlyRemoved(app: NameValue[], channel: NameValue[]): boolean {
+  const d = attributeDiff(app, channel);
+  return d.changed.length === 0 && d.added.length === 0 && d.removed.length > 0;
 }
 
 // ───────────────────────────── Una publicación ─────────────────────────────
@@ -277,6 +284,18 @@ async function applyListing(
       shown: listing.title ? fingerprint('title', listing.title) : null,
     });
   }
+  // Los datos de catálogo que la app sacó y el canal todavía tiene, mientras no se borran allá: si cambió algo
+  // más en el canal (por ejemplo, porque se subió otro dato desde otra opción de la medida), no es para elegir.
+  // Lo único distinto es lo que la app quiere borrar: queda como borrador, para subir.
+  if (
+    lastAgreed.attributes !== undefined &&
+    appPrints.attributes !== lastAgreed.attributes &&
+    channelPrints.attributes !== lastAgreed.attributes &&
+    appPrints.attributes !== channelPrints.attributes &&
+    onlyRemoved(app.attributes, channel.attributes)
+  ) {
+    lastAgreed.attributes = channelPrints.attributes;
+  }
   const plans = planFaces(appPrints, channelPrints, lastAgreed);
   const hold = heldDiscount(app.discount, channel.discount, p.channelCopy, ctx.now);
 
@@ -352,6 +371,7 @@ async function applyListing(
       categoryName: listing.categoryName,
       channelProductId: listing.channelProductId ?? null,
       channelFamilyName: listing.channelFamilyName ?? null,
+      factoryPackage: listing.factoryPackage ?? null,
       // El título ya se compara con el nombre de la familia: lo acordado es sobre ese.
       titleBasis: listing.channelFamilyName ? 'family' : null,
       ...familyDetails(family, p.channelCopy?.details, ctx.now),

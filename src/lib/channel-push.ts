@@ -33,7 +33,7 @@ import {
 import { channelPhotos, parseVariantListings, parseVariations, variantKey, withMarks, type ChannelVariation, type PhotoRef } from '@/domain/media';
 import { quantityKey, totalQuantity, type QuantityLine } from '@/domain/quantities';
 import { needsReactivation } from '@/domain/channel-status';
-import type { NameValue } from '@/domain/name-value';
+import { parseNameValueList, type NameValue } from '@/domain/name-value';
 import { writeContentField } from '@/domain/content';
 import { LATEST_MEASUREMENTS } from '@/domain/measurements';
 import { resolveTitleLock } from '@/domain/title-lock';
@@ -215,12 +215,12 @@ function planAttributes(
   channel: FaceValues,
   copy: { categoryId: string | null; attributeIds: unknown },
   adapter: ChannelAdapter,
-): { updates: ChannelAttributeUpdate[]; sent: NameValue[]; problems: string[] } {
+): { updates: ChannelAttributeUpdate[]; sent: NameValue[]; removed: NameValue[]; problems: string[] } {
   const diff = attributeDiff(app.attributes, channel.attributes);
   const category = copy.categoryId ? (adapter.catalog?.category(copy.categoryId) ?? null) : null;
   const own = category?.fields.filter((f) => !f.fromProduct) ?? [];
   const ids = parseAttributeIds(copy.attributeIds);
-  const plan = { updates: [] as ChannelAttributeUpdate[], sent: [] as NameValue[], problems: [] as string[] };
+  const plan = { updates: [] as ChannelAttributeUpdate[], sent: [] as NameValue[], removed: [] as NameValue[], problems: [] as string[] };
   const unknown: string[] = [];
   for (const a of [...diff.changed.map((c) => ({ name: c.name, value: c.to })), ...diff.added]) {
     const field = findField(own, a.name);
@@ -245,9 +245,18 @@ function planAttributes(
   if (unknown.length > 0) {
     plan.problems.push(`${names(unknown.map((n) => `«${n}»`))} no ${unknown.length > 1 ? 'son campos' : 'es un campo'} de la categoría en ${adapter.name}.`);
   }
-  if (diff.removed.length > 0) {
+  // Lo que la app sacó (save_catalog_data con null) y sigue en el canal: si es un campo del formulario, se borra allá.
+  const keep: NameValue[] = [];
+  for (const a of diff.removed) {
+    const field = findField(own, a.name);
+    if (field) {
+      plan.updates.push({ id: field.id, value: '', multiple: Boolean(field.multiple), remove: true });
+      plan.removed.push(a);
+    } else keep.push(a);
+  }
+  if (keep.length > 0) {
     plan.problems.push(
-      `${names(diff.removed.map((a) => `«${a.name}»`))} ${diff.removed.length > 1 ? 'están' : 'está'} en ${adapter.name} y no en la app: para borrarlo hay que hacerlo allá.`,
+      `${names(keep.map((a) => `«${a.name}»`))} ${keep.length > 1 ? 'están' : 'está'} en ${adapter.name} y no en la app, y no ${keep.length > 1 ? 'son campos' : 'es un campo'} del formulario de la categoría: para borrarlo hay que hacerlo allá.`,
     );
   }
   return plan;
@@ -409,6 +418,8 @@ export async function pushDrafts(
   // descuento que ya estaba se vuelve a subir.
   const fields = FACE_FIELDS.filter((f) => wanted.includes(f) || (f === 'discount' && wanted.includes('price')));
   let resendDiscount = false;
+  // Los datos de catálogo que se mandaron a borrar: la relectura confirma que el canal los borró.
+  let toDelete: NameValue[] = [];
   // La cantidad que repone stock a una publicación frenada sin stock, si se sube.
   let restock: QuantityLine[] | null = null;
   let current: FaceField | null = null;
@@ -432,15 +443,17 @@ export async function pushDrafts(
       let problems: string[] = [];
       let extra: Prisma.ChannelCopyUpdateInput = {};
       if (field === 'attributes') {
-        const plan = !ownAttributes ? { updates: [], sent: [], problems: [] } : planAttributes(app, channel, copy, adapter);
+        const plan = !ownAttributes ? { updates: [], sent: [], removed: [], problems: [] } : planAttributes(app, channel, copy, adapter);
         problems = plan.problems;
         const updates = [...plan.updates, ...ficha.map((f) => ({ id: f.id, value: f.to, multiple: false }))];
         if (updates.length === 0) {
           await reject(field, problems.join(' ') || 'No hay datos de catálogo para subir.');
           continue;
         }
-        value = mergeAttributes(channel.attributes, plan.sent);
+        const gone = new Set(plan.removed.map((a) => normalizeText(a.name)));
+        value = mergeAttributes(channel.attributes, plan.sent).filter((a) => !gone.has(normalizeText(a.name)));
         if (ficha.length > 0) result.ficha = { sent: ficha, notTaken: [] };
+        if (plan.removed.length > 0) toDelete = plan.removed;
         send = async () => {
           await withAccessToken(db, p.store.id, (token) => eachTarget(p, (id) => publisher.updateAttributes(token, id, updates)));
           // Lo de la ficha ya está en el canal: la relectura confirma si lo tomó.
@@ -578,6 +591,16 @@ export async function pushDrafts(
     });
     try {
       result.confirmed = (await readOne(db, { accountId: args.accountId, publicationId: p.id })) !== null;
+      // Lo que se mandó a borrar y, releído, sigue en el canal.
+      if (toDelete.length > 0 && result.confirmed) {
+        const after = await db.channelCopy.findUnique({ where: { publicationId: p.id }, select: { attributes: true } });
+        const still = parseNameValueList(after?.attributes).filter((a) => toDelete.some((d) => normalizeText(d.name) === normalizeText(a.name)));
+        if (still.length > 0) {
+          const message = `${channelName} aceptó el pedido pero no borró ${names(still.map((a) => `«${a.name}»`))}: sigue ${names(still.map((a) => `«${a.value}»`))}. Puede que la categoría no deje dejarlo vacío.`;
+          result.rejected.push({ field: 'attributes', message });
+          await db.channelSyncChange.create({ data: { publicationId: p.id, field: 'attributes', kind: 'REJECTED', before: asJson(still), after: asJson([]), message, userId: args.userId } });
+        }
+      }
       // Lo de la ficha que, releído, el canal no tomó: a veces lo acepta y lo deja como estaba.
       if (result.ficha && result.confirmed) {
         const after = await db.channelCopy.findUnique({ where: { publicationId: p.id }, select: { details: true } });

@@ -512,6 +512,8 @@ async function createMembers(accessToken: string, l: ChannelNewListing, family: 
 
 /** Un dato de catálogo como lo pide Mercado Libre: un valor por nombre, o la lista si acepta varios. */
 function attributeBody(a: ChannelAttributeUpdate) {
+  // Para borrar un dato, Mercado Libre lo pide con su valor vacío.
+  if (a.remove) return { id: a.id, value_id: null, value_name: null };
   if (!a.multiple) return { id: a.id, value_name: a.value };
   const names = a.value
     .split(',')

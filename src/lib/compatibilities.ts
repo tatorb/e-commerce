@@ -384,17 +384,33 @@ export async function translateLine(cat: Catalog, rule: LineRule): Promise<Trans
           const onlyVersion = only[model.name];
           if (rule.exclude.length > 0 || displacementByVersion || powerByVersion || onlyVersion) {
             const all = await cat.values('version', known);
-            if (!all || all.length === 0) return review(`No se pudieron leer las versiones de ${what} para filtrarlas.`);
-            versions = all.filter((v) => !isExcluded(v.name, rule.exclude) && (!onlyVersion || hasWords(v.name, onlyVersion)));
-            if (rule.exclude.length > 0 && versions.length === all.length) {
-              const note = `Ninguna versión de ${what} se llama ${rule.exclude.join(' ni ')}: no se dejó afuera ninguna.`;
+            if ((!all || all.length === 0) && power && !displacementByVersion && !onlyVersion) {
+              // El catálogo no tiene versiones, pero la potencia de la ficha ya distingue el motor
+              // (por ejemplo Fiorino 1.7 aspirado 58 cv y 1.7 TD 72 cv): alcanza con eso.
+              const note = `El catálogo no tiene versiones de ${what}: se filtró por la potencia de la ficha (${rule.power} cv).`;
               if (!out.notes.includes(note)) out.notes.push(note);
+            } else if (!all || all.length === 0) {
+              // Sin versiones para dejar afuera las que no van: si el catálogo distingue por potencia, se dice cuál cargar.
+              const powersHere = rule.power ? null : await cat.values('power', known);
+              return review(
+                powersHere && powersHere.length > 1
+                  ? `El catálogo no tiene versiones de ${what} para dejar afuera ${rule.exclude.join(', ') || 'las que no van'}, pero las distingue por potencia (${names(powersHere)}): cargá la potencia en la línea de la ficha.`
+                  : `No se pudieron leer las versiones de ${what} para filtrarlas.`,
+              );
             }
-            if (displacementByVersion) versions = versions.filter((v) => displacementOf(v.name) === rule.displacement);
-            if (powerByVersion) versions = versions.filter((v) => powerOf(v.name) === rule.power);
-            if (versions.length === 0) {
-              lastWhy = `ninguna versión de ${what} cumple con los datos de la ficha`;
-              continue;
+            if (all && all.length > 0) {
+              let list = all.filter((v) => !isExcluded(v.name, rule.exclude) && (!onlyVersion || hasWords(v.name, onlyVersion)));
+              if (rule.exclude.length > 0 && list.length === all.length) {
+                const note = `Ninguna versión de ${what} se llama ${rule.exclude.join(' ni ')}: no se dejó afuera ninguna.`;
+                if (!out.notes.includes(note)) out.notes.push(note);
+              }
+              if (displacementByVersion) list = list.filter((v) => displacementOf(v.name) === rule.displacement);
+              if (powerByVersion) list = list.filter((v) => powerOf(v.name) === rule.power);
+              if (list.length === 0) {
+                lastWhy = `ninguna versión de ${what} cumple con los datos de la ficha`;
+                continue;
+              }
+              versions = list;
             }
           }
           const yearList = await cat.values('year', known);

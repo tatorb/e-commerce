@@ -72,6 +72,8 @@ export type ChannelListing = {
   // El nombre de la familia, cuando el canal agrupa las medidas en una
   // familia: es el título que comparten todas.
   channelFamilyName?: string | null;
+  // El empaque que calcula el canal para el producto (en Mercado Libre, "Empaque de fábrica"), en cm y g. Null si no lo informa.
+  factoryPackage?: ChannelPackage | null;
   // La garantía: sin garantía, type none. Sin el dato, el canal no la informa.
   warranty?: Warranty | null;
 };
@@ -110,3 +112,6 @@ export interface ChannelListings {
    */
   readDailyVisits?(accessToken: string, listingId: string, days: number): Promise<{ day: string; visits: number }[] | null>;
 }
+
+/** Las medidas de un paquete: alto, ancho y largo en cm, peso en g. */
+export type ChannelPackage = { height: number; width: number; length: number; weight: number };

@@ -487,7 +487,13 @@ describe.skipIf(!url)('juntar y separar familias', () => {
       pipelineStep: 'PRICE',
       variantKey: 'sku:SP-9-00 medida:std',
     });
-    await db.channelCopy.update({ where: { publicationId: std.id }, data: { photos: ['https://ml/a.jpg', 'https://ml/b.jpg'], photoIds: ['FOTO-A', 'FOTO-B'] } });
+    // Después del último push de fotos: en el canal, dos fotos y la imagen con texto nueva, dos veces por error.
+    await db.channelCopy.update({
+      where: { publicationId: std.id },
+      data: { photos: ['https://ml/a.jpg', 'https://ml/t.jpg', 'https://ml/b.jpg', 'https://ml/t2.jpg'], photoIds: ['FOTO-A', 'FOTO-T', 'FOTO-B', 'FOTO-T2'] },
+    });
+    const piece = await db.textImage.create({ data: { accountId, content: {}, slot: 1, pngRef: 'drive:png', pngAt: now } });
+    await db.publicationTextImage.create({ data: { publicationId: std.id, textImageId: piece.id, channelPhotoId: 'FOTO-T' } });
     const fam = await db.listingFamily.create({ data: { storeId, productId: p.id, leadId: std.id, channelFamilyId: 'FAM-9' } });
     const one = await listing(p.id, 'MLA92', 'SP-9-100', null, { variantKey: 'sku:SP-9-100 medida:1.00' });
     await db.publication.updateMany({ where: { id: { in: [std.id, one.id] } }, data: { familyId: fam.id } });
@@ -514,7 +520,14 @@ describe.skipIf(!url)('juntar y separar familias', () => {
     });
     expect(Number(added.price)).toBe(150000);
     // Las fotos de la familia: las que tiene en el canal, que se reusan por su código.
-    expect((added.media as { kind: string; id: string }[]).map((m) => `${m.kind}:${m.id}`)).toEqual(['channel:FOTO-A', 'channel:FOTO-B']);
+    // La imagen con texto va como tal, una sola vez, y queda también en la medida nueva.
+    expect((added.media as { kind: string; id: string }[]).map((m) => `${m.kind}:${m.id}`)).toEqual(['channel:FOTO-A', `text:${piece.id}`, 'channel:FOTO-B', 'channel:FOTO-T2']);
+    expect(await db.publicationTextImage.count({ where: { publicationId: added.id, textImageId: piece.id } })).toBe(1);
+    // Las fotos del canal de la otra medida están disponibles: no dicen "Ya no está disponible".
+    const { loadMediaSources } = await import('@/lib/media');
+    const sources = await loadMediaSources(db, accountId, added.id);
+    expect(sources.current.map((m) => m.note)).not.toContain('Ya no está disponible');
+    expect(sources.current[0].note).toBe('En Mercado Libre, en MLA91');
     // Ya están todas.
     await expect(db.$transaction((tx) => addFamilyMeasures(tx, { publicationId: std.id, userId: null }))).rejects.toThrow('Todas las medidas');
   });

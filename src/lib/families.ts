@@ -4,9 +4,10 @@ import { getChannelAdapter } from '@/channels';
 import { fingerprint } from '@/domain/channel-sync';
 import { channelFamilyNameOf, comparableText, distinctTexts, familyRead, pipelineRank } from '@/domain/families';
 import { lockFamily } from '@/domain/family-members';
-import { channelPhotos, parseMedia, parseVariantListings, variantKey, type PhotoRef } from '@/domain/media';
+import { channelPhotos, parseMedia, parseVariantListings, photoKey, variantKey, withMarks, type PhotoRef } from '@/domain/media';
+import { channelTextMarks } from '@/lib/text-images/channel-codes';
 import { PIPELINE_STEP_LABEL, PIPELINE_STEPS, pipelineLabel } from '@/domain/pipeline';
-import { measuresOf, soleMeasureOf, soleMeasurePhotos, type Measure } from '@/lib/media';
+import { measuresOf, photoOriginsOf, soleMeasureOf, soleMeasurePhotos, type Measure } from '@/lib/media';
 import { productCode } from '@/lib/publication-facts';
 
 // Las familias en la app: cuando el canal guarda cada medida como una
@@ -705,7 +706,7 @@ export async function addFamilyMeasures(
     where: { id: { in: ids } },
     include: {
       family: { select: { leadId: true } },
-      channelCopy: { select: { photos: true, photoIds: true, missingSince: true, variations: true, details: true } },
+      channelCopy: { select: { photos: true, photoIds: true, photoOrigins: true, missingSince: true, variations: true, details: true } },
       product: { select: { variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } } } },
     },
   });
@@ -740,12 +741,36 @@ export async function addFamilyMeasures(
     familyId = (await tx.listingFamily.create({ data: { storeId: head.storeId, productId: head.productId, leadId: head.id }, select: { id: true } })).id;
     await tx.publication.update({ where: { id: head.id }, data: { familyId } });
   }
-  // Las fotos de la familia: las elegidas en la app y, si sigue a las del canal, las que tiene en el canal.
-  const media = parseMedia(head.media) ?? (head.channelCopy && !head.channelCopy.missingSince ? channelPhotos(head.channelCopy.photos, head.channelCopy.photoIds) : []);
+  // Las fotos de la familia: las elegidas en la app y, si sigue a las del canal (como queda después de subirlas),
+  // las que tiene en el canal. Las que la app subió van como lo que son: las imágenes con texto y las corregidas,
+  // una sola vez cada una; las demás del canal, por su código.
+  const copy = head.channelCopy && !head.channelCopy.missingSince ? head.channelCopy : null;
+  const raw = parseMedia(head.media) ?? (copy ? channelPhotos(copy.photos, copy.photoIds) : []);
+  const marks = await channelTextMarks(tx, { productId: head.productId, photoIds: raw.flatMap((r) => (r.kind === 'channel' ? [r.id] : [])) });
+  const origins = photoOriginsOf(copy?.photoOrigins);
+  const seen = new Set<string>();
+  const media: PhotoRef[] = [];
+  const texts = new Set<string>();
+  for (const r of raw) {
+    const mark = r.kind === 'channel' ? marks.get(r.id) : undefined;
+    const ref: PhotoRef = mark
+      ? withMarks({ kind: 'text', id: mark.textImageId }, r)
+      : r.kind === 'channel' && origins[r.id]
+        ? withMarks({ kind: 'edit', editId: origins[r.id] }, r)
+        : r;
+    if (ref.kind === 'text') texts.add(ref.id);
+    if (seen.has(photoKey(ref))) continue;
+    seen.add(photoKey(ref));
+    media.push(ref);
+  }
   const out: { id: string; label: string; sku: string | null }[] = [];
   for (const m of wanted) {
     const photos = media.length > 0 ? soleMeasurePhotos(media, measures, m) : null;
     const id = await copyMember(tx, head, { familyId, variantKey: m.key, externalId: null, media: photos && photos.length > 0 ? photos : null, at, userId: args.userId });
+    // Las imágenes con texto de la familia también son de la medida nueva.
+    for (const textImageId of texts) {
+      await tx.publicationTextImage.upsert({ where: { publicationId_textImageId: { publicationId: id, textImageId } }, create: { publicationId: id, textImageId }, update: {} });
+    }
     out.push({ id, label: m.label, sku: m.sku });
   }
   return out;

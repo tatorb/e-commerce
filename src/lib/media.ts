@@ -1,3 +1,4 @@
+import { familyMemberIds } from '@/domain/family-members';
 import type { PrismaClient } from '@/generated/prisma/client';
 import { Prisma } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
@@ -267,6 +268,19 @@ function shotOf(e: Pick<FinishedEdit, 'step' | 'measure' | 'measureLabel'>, meas
 /** Cómo se nombra una foto del paso Fotos en la lista. */
 const editLabel = (e: { asIs: boolean }, n: number) => (e.asIs ? `Original ${n}, sin editar` : `Corregida ${n}`);
 
+/** Las fotos del canal de las otras medidas de la familia de una publicación: código de la foto → código de la publicación. */
+async function familyChannelPhotos(db: Db, publicationId: string): Promise<Map<string, string>> {
+  const ids = (await familyMemberIds(db, publicationId)).filter((id) => id !== publicationId);
+  if (ids.length === 0) return new Map();
+  const rows = await db.publication.findMany({ where: { id: { in: ids }, externalId: { not: null } }, select: { externalId: true, channelCopy: { select: { photoIds: true, missingSince: true } } } });
+  const out = new Map<string, string>();
+  for (const r of rows) {
+    if (!r.channelCopy || r.channelCopy.missingSince) continue;
+    for (const id of Array.isArray(r.channelCopy.photoIds) ? r.channelCopy.photoIds : []) if (typeof id === 'string' && !out.has(id)) out.set(id, r.externalId!);
+  }
+  return out;
+}
+
 /** De qué foto corregida salió cada foto que la app subió al canal, por su código allá. */
 export function photoOriginsOf(raw: unknown): Record<string, string> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
@@ -427,13 +441,17 @@ export async function loadMediaSources(db: Db, accountId: string, publicationId:
   const all = new Map([...channel, ...corrected, ...text, ...assets].map((m) => [m.key, m]));
   const saved = parseMedia(p.media);
   const media = saved && sole ? soleMeasurePhotos(saved, allMeasures, sole) : saved;
+  // Una foto del canal que no es de esta publicación pero sigue en otra medida de la familia: está disponible.
+  const missingChannel = (media ?? []).flatMap((r) => (r.kind === 'channel' && !all.has(photoKey(r)) ? [r.id] : []));
+  const inFamily = missingChannel.length > 0 ? await familyChannelPhotos(db, p.id) : new Map<string, string>();
   const current = (media ?? channel.map((c) => c.ref)).map((ref): MediaItem => {
+    const elsewhere = ref.kind === 'channel' ? inFamily.get(ref.id) : undefined;
     const found = all.get(photoKey(ref)) ?? {
       ref,
       key: photoKey(ref),
       thumb: ref.kind === 'edit' || ref.kind === 'text' ? null : ref.url || null,
       label: ref.kind === 'edit' ? 'Corregida' : ref.kind === 'text' ? 'Imagen con texto' : 'Foto',
-      note: 'Ya no está disponible',
+      note: elsewhere ? `En ${channelName}, en ${elsewhere}` : 'Ya no está disponible',
     };
     // Con las medidas que tiene en esta publicación; las que ya no están en la ficha se caen.
     const kept = marks(photoVariants(ref));

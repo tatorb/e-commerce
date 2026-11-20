@@ -58,6 +58,8 @@ import { visitsForClaude } from '@/domain/visits';
 import { loadSaleOptions, type SaleOptions } from '@/lib/sale-options';
 import { listNotes, notesByCard, type NoteView } from '@/lib/publication-notes';
 import { titlesNotPushed, type TitleNotPushed } from '@/lib/title-push-state';
+import { packageState } from '@/lib/package-check';
+import { packageText } from '@/domain/package';
 
 // Las notas del equipo que se muestran en una publicación, las más nuevas.
 const NOTES_SHOWN = 30;
@@ -615,8 +617,18 @@ const getPublication = defineTool({
       : [];
     const optionsOf = new Map(familyOptions);
     const notPushed = (await titlesNotPushed(ctx.db, { accountId: account.id, publicationIds: [id] })).get(id);
+    const pack = await packageState(ctx.db, id);
     return {
       ...summary(ctx, account, scored),
+      ...(pack.loaded || pack.factory
+        ? {
+            paquete: {
+              cargado: pack.loaded ? packageText(pack.loaded) : 'falta cargarlo en los datos de catálogo',
+              empaque_de_fabrica_del_canal: pack.factory ? `${packageText(pack.factory)}${pack.from ? `, leído de ${pack.from}` : ''}` : 'el canal no lo informa',
+              ...(pack.warning ? { aviso: pack.warning } : {}),
+            },
+          }
+        : {}),
       ...(notPushed ? { titulo_sin_subir: titleNotPushedOut(notPushed, account) } : {}),
       // El estado tal como lo leyó del canal, con el motivo que informa.
       ...(copyState

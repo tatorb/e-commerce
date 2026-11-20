@@ -13,6 +13,7 @@ import { faceSummary, faceValues, fingerprint, fingerprintsOf } from '@/domain/c
 import { DraftError, pushDrafts, PushError, renewDiscounts, saveDraft } from '@/lib/channel-push';
 import { discardDrafts, readOne, runSyncStep, startSync } from '@/lib/channel-sync';
 import { listToPush } from '@/lib/queries/sync';
+import { saveCatalogData } from '@/lib/catalog-data';
 import { encrypt } from '@/lib/crypto';
 import { savePriceDecision } from '@/lib/pricing';
 import { readPromotions } from '@/lib/channel-promotions';
@@ -215,6 +216,8 @@ describe.skipIf(!url)('subir al canal en la base', () => {
           for (const a of body.attributes as Attribute[]) {
             // Inventado: un origen que el canal acepta y deja como estaba.
             if (a.id === 'ORIGIN' && a.value_name === 'Corea') continue;
+            // Inventado: un dato que la categoría no deja vaciar; el canal acepta el pedido y lo deja.
+            if (a.id === 'CLUTCH_TYPE' && a.value_name === null) continue;
             const list = (it.attributes ??= []);
             const at = list.findIndex((x) => x.id === a.id);
             const next = { id: a.id, name: at >= 0 ? list[at].name : a.id, value_name: a.value_name ?? null, ...(a.values ? { values: a.values } : {}) };
@@ -706,6 +709,35 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     expect(writes.map((w) => w.body)).toEqual([{ attributes: [{ id: 'ITEM_CONDITION', value_name: 'Usado' }] }]);
     expect((await state('MLA1')).rejected).toHaveLength(1);
   });
+  it('un dato de catálogo sacado en la app se borra en el canal, y si el canal no lo borra lo dice', async () => {
+    const p = await pub('MLA1');
+    // save_catalog_data con null: queda para borrar.
+    await saveCatalogData(db, { publicationId: p.id, category: 'MLA373460', values: { INCLUDES_DISC: null } });
+    expect((await state('MLA1')).draft).toEqual(['attributes']);
+    writes.length = 0;
+    const r = await pushDrafts(db, { accountId, publicationId: p.id, fields: ['attributes'], userId: null });
+    expect(r).toMatchObject({ sent: ['attributes'], rejected: [], confirmed: true });
+    expect(writes.map((w) => w.body)).toEqual([{ attributes: [{ id: 'INCLUDES_DISC', value_id: null, value_name: null }] }]);
+    expect((await pub('MLA1')).channelCopy?.attributes).not.toContainEqual(expect.objectContaining({ name: 'Incluye disco' }));
+    expect(await state('MLA1')).toEqual({ draft: [], choose: [], rejected: [] });
+
+    // Uno que la categoría no deja vaciar: el canal acepta el pedido y lo deja. Se avisa con el motivo.
+    await saveCatalogData(db, { publicationId: p.id, values: { CLUTCH_TYPE: null } });
+    const again = await pushDrafts(db, { accountId, publicationId: p.id, fields: ['attributes'], userId: null });
+    expect(again.rejected).toEqual([{ field: 'attributes', message: expect.stringContaining('no borró «Tipo de embrague»: sigue «Monodisco»') }]);
+  });
+
+  it('lo único distinto es un dato que la app sacó: si el canal cambia otro, sigue para subir y no para elegir', async () => {
+    const p = await pub('MLA1');
+    await saveCatalogData(db, { publicationId: p.id, category: 'MLA373460', values: { INCLUDES_DISC: null } });
+    // En el canal cambia otro dato, por ejemplo subido desde otra opción de la medida.
+    items.MLA1.attributes!.find((a) => a.id === 'COLOR')!.value_name = 'Negro';
+    items.MLA1.last_updated = '2026-11-21T10:00:00.000Z';
+    await db.publication.update({ where: { id: p.id }, data: { attributes: [{ name: 'Tipo de embrague', value: 'Monodisco' }, { name: 'Condición del ítem', value: 'Nuevo' }, { name: 'Color', value: 'Negro' }] } });
+    await readOne(db, { accountId, publicationId: p.id });
+    expect(await state('MLA1')).toMatchObject({ draft: ['attributes'], choose: [] });
+  });
+
   it('marca, número de pieza y origen de la ficha van con los datos de catálogo si el canal tiene otro', async () => {
     items.MLA1.attributes!.push({ id: 'ORIGIN', name: 'Origen', value_name: 'Taiwán' });
     const p = await pub('MLA1');
