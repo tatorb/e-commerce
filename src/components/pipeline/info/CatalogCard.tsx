@@ -149,6 +149,7 @@ export function CatalogCard({
             fields={data.fields}
             saved={data.values}
             fromStore={data.fromStore}
+            fromSpecs={data.fromSpecs}
             pending={action.pending}
             onDirty={(d) => {
               setDirty(d);
@@ -182,6 +183,7 @@ function CatalogFields({
   fields,
   saved,
   fromStore,
+  fromSpecs,
   pending,
   onDirty,
   onSave,
@@ -189,6 +191,8 @@ function CatalogFields({
   fields: CatalogField[];
   saved: Record<string, string>;
   fromStore: CatalogData['fromStore'];
+  // Lo que propone la ficha técnica para los campos vacíos.
+  fromSpecs: CatalogData['fromSpecs'];
   pending: boolean;
   onDirty: (dirty: boolean) => void;
   onSave: (values: Record<string, string>) => void;
@@ -204,6 +208,15 @@ function CatalogFields({
     onDirty(JSON.stringify(fromDraft(fields, next)) !== JSON.stringify(fromDraft(fields, initial)));
   }
 
+  // Los campos vacíos para los que la ficha técnica tiene el dato: se cargan con un botón y se guardan con Guardar.
+  const proposals = fields.filter((f) => fromSpecs[f.id] && !(draft.values[f.id] ?? '').trim());
+  function applyProposals() {
+    const filled = toDraft(proposals, Object.fromEntries(proposals.map((f) => [f.id, fromSpecs[f.id].value])));
+    const next = { values: { ...draft.values, ...filled.values }, units: { ...draft.units, ...filled.units } };
+    setDraft(next);
+    onDirty(true);
+  }
+
   if (fields.length === 0) {
     return <p className="text-sm text-muted-foreground">Esta categoría no tiene otros campos para cargar.</p>;
   }
@@ -216,6 +229,16 @@ function CatalogFields({
         onSave(fromDraft(fields, draft));
       }}
     >
+      {proposals.length > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm">
+          <p>
+            La ficha técnica del producto tiene {proposals.map((f) => `${f.label}: ${fromSpecs[f.id].value}`).join(' · ')}.
+          </p>
+          <Button type="button" size="sm" variant="outline" disabled={pending} onClick={applyProposals}>
+            Usar
+          </Button>
+        </div>
+      ) : null}
       <div className="grid gap-x-6 gap-y-4 md:grid-cols-2">
         {fields.map((f) => (
           <FieldInput

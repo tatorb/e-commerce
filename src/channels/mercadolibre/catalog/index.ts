@@ -35,6 +35,8 @@ const byBase = new Map(
 const byId = new Map(ML_CATEGORIES.map((c) => [c.id, c]));
 // Las que se trajeron del canal y quedaron guardadas en la app: se suman con register.
 const extra = new Map<string, CatalogCategory & { path?: string | null }>();
+// Las de la lista fija con los campos de más que se leyeron del canal.
+const merged = new Map<string, CatalogCategory>();
 const familiesOf = new Map<string, string[]>();
 for (const [family, id] of Object.entries(FAMILY_CATEGORY)) familiesOf.set(id, [...(familiesOf.get(id) ?? []), family]);
 
@@ -55,10 +57,23 @@ export const mercadolibreCatalog: ChannelCatalog = {
     const t = words(title ?? '');
     return families.find((f) => t.includes(words(familyBase(f) ?? f))) ?? families[0];
   },
-  category: (id) => byId.get(id) ?? extra.get(id.toUpperCase()) ?? null,
+  category: (id) => merged.get(id.toUpperCase()) ?? byId.get(id) ?? extra.get(id.toUpperCase()) ?? null,
   productFieldIds: { brand: 'BRAND', partNumber: 'PART_NUMBER', origin: 'ORIGIN' },
   register(category) {
-    if (!byId.has(category.id)) extra.set(category.id.toUpperCase(), category);
+    const fixed = byId.get(category.id.toUpperCase());
+    if (!fixed) {
+      extra.set(category.id.toUpperCase(), category);
+      return;
+    }
+    // Una de la lista fija leída del canal: a sus campos se suman los que el canal acepta y la lista no tiene.
+    const more = category.fields.filter((f) => !fixed.fields.some((x) => x.id === f.id)).map((f) => ({ ...f, extra: true }));
+    if (more.length === 0) return;
+    const tail = fixed.fields.filter((f) => f.sameInStore || /^SELLER_PACKAGE_/.test(f.id));
+    merged.set(fixed.id, { ...fixed, fields: [...fixed.fields.filter((f) => !tail.includes(f)), ...more, ...tail] });
+  },
+  forget() {
+    extra.clear();
+    merged.clear();
   },
   async fetchCategory(id, accessToken) {
     if (!isMlaCategoryId(id)) return null;

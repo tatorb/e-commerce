@@ -60,7 +60,11 @@ export function catalogForClaude(data: CatalogData | null) {
       ...(f.units ? { unidades: f.units } : {}),
       ...(f.multiple ? { varios_valores: true } : {}),
       ...(f.required ? { obligatorio: true } : {}),
+      // El canal lo acepta aunque su formulario no lo muestre de entrada.
+      ...(f.extra ? { fuera_del_formulario_del_canal: true } : {}),
       valor: data.values[f.id] ?? null,
+      // La ficha técnica del producto tiene el dato: no está guardado, se guarda con save_catalog_data.
+      ...(data.fromSpecs[f.id] ? { propuesto_de_la_ficha_tecnica: data.fromSpecs[f.id].value, sale_del_dato: data.fromSpecs[f.id].spec } : {}),
     })),
     // Lo que cambia con la medida, como el diámetro: el valor de cada medida de la familia.
     ...(data.byMeasure.length > 0

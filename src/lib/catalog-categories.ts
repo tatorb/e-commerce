@@ -30,6 +30,44 @@ export async function loadSavedCategories(db: Db, kind: ChannelKind): Promise<vo
 /** Para las pruebas: que la próxima vez se vuelvan a leer de la base. */
 export function forgetSavedCategories(): void {
   loadedAt.clear();
+  triedAt.clear();
+  getChannelAdapter('MERCADOLIBRE').catalog?.forget?.();
+}
+
+// Si no se pudo leer del canal, no se vuelve a probar antes de este tiempo.
+const RETRY_MS = 3600_000;
+const triedAt = new Map<string, number>();
+
+/**
+ * Los campos de una categoría con todo lo que acepta el canal, no solo los de
+ * su formulario: la primera vez se lee de la API de categorías con la llave de
+ * la tienda y queda guardado. Sirve también para las de la lista fija, que
+ * así suman los campos que la lista no tiene. Si no se puede leer, queda como
+ * estaba. Devuelve si cambió algo.
+ */
+export async function ensureFullCategory(db: PrismaClient, args: { storeId: string; kind: ChannelKind; categoryId: string }): Promise<boolean> {
+  const catalog = getChannelAdapter(args.kind).catalog;
+  if (!catalog?.fetchCategory || !catalog.register) return false;
+  const code = args.categoryId.trim().toUpperCase();
+  const key = `${args.kind}:${code}`;
+  const tried = triedAt.get(key);
+  if (tried && Date.now() - tried < RETRY_MS) return false;
+  triedAt.set(key, Date.now());
+  const saved = await db.channelCategory.findUnique({ where: { kind_categoryId: { kind: args.kind, categoryId: code } }, select: { full: true } });
+  if (saved?.full) return false;
+  let read;
+  try {
+    read = await withAccessToken(db, args.storeId, (token) => catalog.fetchCategory!(code, token));
+  } catch (e) {
+    console.error('No se pudieron leer los campos de la categoría del canal', e instanceof Error ? e.message : e);
+    return false;
+  }
+  // Sin ningún campo propio de la categoría, el canal no devolvió su formulario: queda como estaba.
+  if (!read || !read.fields.some((f) => !f.sameInStore && !/^SELLER_PACKAGE_/.test(f.id))) return false;
+  const data = { name: read.name, path: read.path, fields: read.fields as unknown as Prisma.InputJsonValue, fetchedAt: new Date(), full: true };
+  await db.channelCategory.upsert({ where: { kind_categoryId: { kind: args.kind, categoryId: code } }, create: { kind: args.kind, categoryId: code, ...data }, update: data });
+  catalog.register({ id: code, name: read.name, path: read.path, fields: read.fields });
+  return true;
 }
 
 /**
@@ -50,7 +88,7 @@ export async function ensureChannelCategory(db: PrismaClient, args: { storeId: s
   const read = await withAccessToken(db, args.storeId, (token) => catalog.fetchCategory!(code, token));
   if (!read) throw new CatalogError(`${code} no es una categoría de ${adapter.name}: revisá el código.`);
   if (!read.leaf) throw new CatalogError(`${read.name} (${code}) tiene subcategorías: en ${adapter.name} se publica en una de ellas. Elegí la de abajo que corresponda.`);
-  const data = { name: read.name, path: read.path, fields: read.fields as unknown as Prisma.InputJsonValue, fetchedAt: new Date() };
+  const data = { name: read.name, path: read.path, fields: read.fields as unknown as Prisma.InputJsonValue, fetchedAt: new Date(), full: true };
   await db.channelCategory.upsert({ where: { kind_categoryId: { kind: args.kind, categoryId: code } }, create: { kind: args.kind, categoryId: code, ...data }, update: data });
   const category = { id: code, name: read.name, path: read.path, fields: read.fields };
   catalog.register(category);

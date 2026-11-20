@@ -29,6 +29,11 @@ export type CatalogField = {
    * publicación no lo tiene, va el de la mayoría de las publicaciones de la tienda.
    */
   sameInStore?: boolean;
+  /**
+   * El canal lo acepta pero su formulario no lo muestra de entrada, como el
+   * diámetro del disco de un kit de embrague: va aparte, en "Más datos".
+   */
+  extra?: boolean;
 };
 
 export type CatalogCategory = { id: string; name: string; fields: CatalogField[] };
@@ -47,6 +52,8 @@ export interface ChannelCatalog {
    * la API del canal y guardada en la app: desde ahí category la encuentra.
    */
   register?(category: CatalogCategory & { path?: string | null }): void;
+  /** Para las pruebas: olvida lo sumado con register. */
+  forget?(): void;
   /**
    * Lee del canal cualquier categoría con su formulario. Null si no existe.
    * leaf: si se puede publicar en ella (no tiene subcategorías).
@@ -102,6 +109,44 @@ export function findCategory(catalog: ChannelCatalog, key: string): CatalogCateg
   const k = normalizeText(key);
   const match = catalog.categories.find((c) => normalizeText(c.id) === k || normalizeText(c.name) === k);
   return match ? catalog.category(match.id) : null;
+}
+
+/**
+ * Lo que la ficha técnica del producto propone para los campos vacíos: el
+ * dato que se llama igual que el campo, o como se lo suele llamar en la ficha
+ * ("Diámetro" es el diámetro del disco, "Cantidad de estrías del disco" las
+ * estrías). Solo si el valor sirve para el campo; un número sin unidad lleva
+ * la del campo. No guarda nada: es una propuesta.
+ */
+const SPEC_NAMES: Record<string, string[]> = {
+  'diametro del disco': ['diametro', 'diametro de disco', 'diametro disco'],
+  'cantidad de estrias': ['cantidad de estrias del disco', 'estrias', 'estrias del disco', 'numero de estrias'],
+  'cantidad de dientes': ['dientes', 'numero de dientes', 'cantidad de dientes del disco'],
+};
+
+export function proposeFromSpecs(fields: CatalogField[], values: Record<string, string>, specs: NameValue[]): Record<string, { value: string; spec: string }> {
+  const out: Record<string, { value: string; spec: string }> = {};
+  for (const f of fields) {
+    if (f.fromProduct || values[f.id]) continue;
+    const label = normalizeText(f.label);
+    const names = [label, ...(SPEC_NAMES[label] ?? [])];
+    const spec = names.map((n) => specs.find((s) => normalizeText(s.name) === n && s.value.trim())).find(Boolean);
+    if (!spec) continue;
+    const raw = spec.value.trim();
+    for (const candidate of [raw, f.type === 'number_unit' && f.defaultUnit ? `${raw} ${f.defaultUnit}` : null]) {
+      if (!candidate) continue;
+      try {
+        const clean = cleanCatalogValues([f], { [f.id]: candidate })[f.id];
+        if (typeof clean === 'string' && clean) {
+          out[f.id] = { value: clean, spec: spec.name };
+          break;
+        }
+      } catch (e) {
+        if (!(e instanceof CatalogError)) throw e;
+      }
+    }
+  }
+  return out;
 }
 
 /** Los campos que se cargan en la tarjeta: todos menos los que salen de la ficha. */

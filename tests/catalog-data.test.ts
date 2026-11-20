@@ -113,8 +113,8 @@ describe('cualquier categoría de Mercado Libre', () => {
       { id: 'BORE', label: 'Diámetro', type: 'number_unit', units: ['mm', 'cm'], defaultUnit: 'mm' },
       { id: 'OEM', label: 'Código OEM', type: 'text', multiple: true },
     ]);
-    // Sin los ocultos ni la condición; el paquete y los impuestos van siempre, una sola vez.
-    expect(c.fields.map((f) => f.id)).not.toContain('HIDDEN_ONE');
+    // Los que el formulario esconde van aparte, al final; sin la condición; el paquete y los impuestos van siempre, una sola vez.
+    expect(c.fields[5]).toEqual({ id: 'HIDDEN_ONE', label: 'Oculto', type: 'text', extra: true });
     expect(c.fields.map((f) => f.id)).not.toContain('ITEM_CONDITION');
     expect(c.fields.filter((f) => f.id === 'SELLER_PACKAGE_WEIGHT')).toHaveLength(1);
     expect(c.fields.map((f) => f.id)).toContain('VALUE_ADDED_TAX');
@@ -319,15 +319,63 @@ describe.skipIf(!url)('datos de catálogo de una publicación', () => {
     expect(after).toMatchObject({ category: { id: 'MLA458790', name: 'Kits de Reconstrucción' }, values: { KIT_TYPE: 'Completo' }, categoryWarning: null });
     expect(catalogForClaude(after)).not.toHaveProperty('usar_la_del_canal');
     expect(await db.channelCategory.findUniqueOrThrow({ where: { kind_categoryId: { kind: 'MERCADOLIBRE', categoryId: 'MLA458790' } } })).toMatchObject({ name: 'Kits de Reconstrucción' });
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls.filter(([id]) => id === 'MLA458790')).toHaveLength(1);
     // Ya guardada, no se vuelve a pedir, aunque el servidor arranque de cero.
     forgetSavedCategories();
     await saveCatalogData(db, { publicationId: kitId, category: 'MLA458790', values: {} });
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls.filter(([id]) => id === 'MLA458790')).toHaveLength(1);
 
     // Un código que no existe, o una categoría con subcategorías, no se usa.
     await expect(saveCatalogData(db, { publicationId: kitId, category: 'MLA999999', values: {} })).rejects.toThrow('no es una categoría de Mercado Libre');
     await expect(saveCatalogData(db, { publicationId: kitId, category: 'MLA1747', values: {} })).rejects.toThrow('tiene subcategorías');
+    fetch.mockRestore();
+  });
+
+  it('kits de embrague: suma los atributos que el canal acepta y la lista fija no tiene, los propone de la ficha técnica y deja vaciarlos', async () => {
+    // Lo que devuelve la API de categorías: el formulario y, escondidos, los datos del disco.
+    const info = { id: 'MLA373460', name: 'Kits de Embrague', children_categories: [], settings: { listing_allowed: true } };
+    const units = [{ id: 'mm', name: 'mm' }, { id: 'cm', name: 'cm' }];
+    const attributes = [
+      { id: 'BRAND', name: 'Marca', value_type: 'string', tags: { required: true } },
+      { id: 'CLUTCH_TYPE', name: 'Tipo de embrague', value_type: 'list', values: [{ name: 'Monodisco' }], tags: {} },
+      { id: 'DISC_DIAMETER', name: 'Diámetro del disco', value_type: 'number_unit', allowed_units: units, default_unit: 'mm', tags: { hidden: true } },
+      { id: 'SPLINES_NUMBER', name: 'Cantidad de estrías', value_type: 'number', tags: { others: true } },
+      { id: 'TEETH_NUMBER', name: 'Cantidad de dientes', value_type: 'number', tags: { hidden: true } },
+      { id: 'INPUT_SHAFT_DIAMETER', name: 'Diámetro del eje de entrada', value_type: 'number_unit', allowed_units: units, default_unit: 'mm', tags: { hidden: true } },
+      { id: 'IS_KIT', name: 'Es kit', value_type: 'boolean', tags: { read_only: true } },
+    ];
+    const fetch = vi.spyOn(mercadolibreCatalog, 'fetchCategory').mockImplementation(async (id) => (id === 'MLA373460' ? categoryFromApi(id, info, attributes) : null));
+    const { productId } = await db.publication.findUniqueOrThrow({ where: { id: kitId }, select: { productId: true } });
+    await db.product.update({
+      where: { id: productId },
+      data: { specs: [{ name: 'Diámetro', value: '180' }, { name: 'Cantidad de estrías del disco', value: '26' }, { name: 'Peso', value: '4 kg' }] },
+    });
+
+    const data = (await loadCatalogData(db, kitId))!;
+    const ids = data.fields.map((f) => f.id);
+    // Los de la lista fija siguen, los nuevos van después y antes del paquete; los de solo lectura no entran.
+    expect(ids.slice(0, 2)).toEqual(['CLUTCH_TYPE', 'INCLUDES_CLUTCH_PLATE']);
+    expect(ids).toEqual(expect.arrayContaining(['DISC_DIAMETER', 'SPLINES_NUMBER', 'TEETH_NUMBER', 'INPUT_SHAFT_DIAMETER']));
+    expect(ids).not.toContain('IS_KIT');
+    expect(ids.indexOf('DISC_DIAMETER')).toBeLessThan(ids.indexOf('SELLER_PACKAGE_HEIGHT'));
+    expect(data.fields.find((f) => f.id === 'DISC_DIAMETER')).toMatchObject({ label: 'Diámetro del disco', type: 'number_unit', extra: true });
+    // La ficha técnica los propone, con la unidad del campo; no quedan guardados.
+    expect(data.fromSpecs).toEqual({ DISC_DIAMETER: { value: '180 mm', spec: 'Diámetro' }, SPLINES_NUMBER: { value: '26', spec: 'Cantidad de estrías del disco' } });
+    expect(data.values.DISC_DIAMETER).toBeUndefined();
+    const claude = catalogForClaude(data)!;
+    expect(claude.campos.find((c) => c.campo === 'DISC_DIAMETER')).toMatchObject({ fuera_del_formulario_del_canal: true, valor: null, propuesto_de_la_ficha_tecnica: '180 mm', sale_del_dato: 'Diámetro' });
+    expect((await db.channelCategory.findUniqueOrThrow({ where: { kind_categoryId: { kind: 'MERCADOLIBRE', categoryId: 'MLA373460' } } })).full).toBe(true);
+
+    // Se guardan como cualquier campo, por código o por nombre, y uno que no aplica se vacía.
+    await db.publication.update({ where: { id: kitId }, data: { attributes: [{ name: 'Diámetro del eje de entrada', value: '25 mm' }, { name: 'Diámetro del disco', value: '210 mm' }] } });
+    const saved = await saveCatalogData(db, { publicationId: kitId, values: { 'Diámetro del disco': '180 mm', SPLINES_NUMBER: '26', INPUT_SHAFT_DIAMETER: null } });
+    expect(saved.values).toMatchObject({ DISC_DIAMETER: '180 mm', SPLINES_NUMBER: '26' });
+    expect(saved.values.INPUT_SHAFT_DIAMETER).toBeUndefined();
+    expect((await loadCatalogData(db, kitId))!.fromSpecs).toEqual({});
+    // Leída una vez: aunque el servidor arranque de cero, sale de lo guardado.
+    forgetSavedCategories();
+    expect((await loadCatalogData(db, kitId))!.fields.map((f) => f.id)).toContain('TEETH_NUMBER');
+    expect(fetch.mock.calls.filter(([id]) => id === 'MLA373460')).toHaveLength(1);
     fetch.mockRestore();
   });
 });

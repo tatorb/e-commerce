@@ -1,4 +1,4 @@
-import { ensureChannelCategory, loadSavedCategories } from '@/lib/catalog-categories';
+import { ensureChannelCategory, ensureFullCategory, loadSavedCategories } from '@/lib/catalog-categories';
 import { categoryAlerts, type CategoryAlert } from '@/lib/channel-category';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { getChannelAdapter } from '@/channels';
@@ -9,6 +9,7 @@ import {
   findCategory,
   mergeCatalogAttributes,
   normalizeText,
+  proposeFromSpecs,
   readCatalogValues,
   resolveCatalog,
   type CatalogField,
@@ -36,7 +37,7 @@ async function load(db: Db, publicationId: string) {
       productId: true,
       channelCopy: { select: { categoryId: true, details: true, missingSince: true } },
       store: { select: { channel: { select: { kind: true, name: true } } } },
-      product: { select: { productType: true, brand: true, partNumber: true, origin: true } },
+      product: { select: { productType: true, brand: true, partNumber: true, origin: true, specs: true } },
     },
   });
   if (!pub) throw new CatalogError('La publicación no existe.');
@@ -44,6 +45,11 @@ async function load(db: Db, publicationId: string) {
   const adapter = getChannelAdapter(channel.kind, channel.name);
   // Las categorías que se trajeron del canal: cualquiera, no solo las de la lista fija.
   await loadSavedCategories(db, channel.kind);
+  // Los campos de su categoría con todo lo que acepta el canal: la primera vez se leen de allá.
+  if (adapter.catalog && '$transaction' in db) {
+    const now = resolveCatalog(adapter.catalog, pub.product.productType?.trim() || null, pub.channelCategory).category;
+    if (now) await ensureFullCategory(db as PrismaClient, { storeId: pub.storeId, kind: channel.kind, categoryId: now.id });
+  }
   return { pub, adapter, channelName: channel.name, catalog: adapter.catalog };
 }
 
@@ -70,6 +76,8 @@ export type CatalogData = {
    * valor de la mayoría de las publicaciones de la tienda, y de cuántas.
    */
   fromStore: Record<string, { value: string; count: number; total: number }>;
+  /** Lo que propone la ficha técnica del producto para los campos vacíos, y de qué dato sale. No está guardado. */
+  fromSpecs: Record<string, { value: string; spec: string }>;
   /** La categoría que tiene la publicación en el canal, como se leyó. Null si todavía no se leyó. */
   inChannel: CategoryRef | null;
   /** En qué categorías tiene el canal las publicaciones activas del producto en la tienda. */
@@ -129,6 +137,7 @@ export async function loadCatalogData(db: Db, publicationId: string): Promise<Ca
       .map((field) => ({ field, value: pub.product[field.fromProduct!]?.trim() || null })),
     values,
     fromStore,
+    fromSpecs: proposeFromSpecs(fields, values, parseNameValueList(pub.product.specs)),
     inChannel,
     productInChannel,
     categoryWarning: warningOf(channelName, ref(category), inChannel, productInChannel),
@@ -191,6 +200,8 @@ export async function saveCatalogData(
       if (looksLikeCode) await ensureChannelCategory(db, { storeId: first.pub.storeId, kind: first.pub.store.channel.kind, categoryId: args.category });
     }
   }
+  // Con los campos de la categoría al día: la primera vez se leen del canal.
+  await load(db, args.publicationId);
   return db.$transaction(async (tx) => {
     // De a un cambio por publicación a la vez, así no se pisan los atributos.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`attributes:${args.publicationId}`}))`;

@@ -1235,6 +1235,8 @@ model ChannelCategory {
   // Los campos del formulario, como CatalogField de src/domain/catalog-data.ts.
   fields     Json
   fetchedAt  DateTime    @default(now())
+  // Se leyó con todos los atributos que acepta el canal, no solo los de su formulario.
+  full       Boolean     @default(false)
 
   @@id([kind, categoryId])
   @@map("channel_categories")
