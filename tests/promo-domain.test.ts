@@ -112,7 +112,7 @@ describe('promociones: etiquetas y reglas', () => {
     expect(r.timing).toEqual(DEFAULT_RULES.timing);
     expect(readRules({ timing: { baseDays: 10 } }).timing.baseDays).toBe(10);
     expect(r.recipes.MATURE).toMatchObject({ base: true, baseMarginPct: 22, events: 'always' });
-    expect(patchRules(DEFAULT_RULES, { classify: { newDays: 45 } }).classify).toMatchObject({ newDays: 45, matureUnits90: 20 });
+    expect(patchRules(DEFAULT_RULES, { classify: { newDays: 45 } }).classify).toMatchObject({ newDays: 45, matureUnits90: 3, clearanceAuto: false, growingMinUnits90: 1 });
     expect(thresholdsProblem({ healthyMarginPct: 15, floorMarginPct: 10 })).toBeNull();
     expect(thresholdsProblem({ healthyMarginPct: 9, floorMarginPct: 10 })).toContain('piso');
   });
@@ -292,12 +292,18 @@ describe('promociones: la regla que propone etiquetas y el aviso al subir el pre
 
   it('el ciclo de vida sale de la antigüedad y las ventas', () => {
     expect(proposeLifecycle(facts({ ageDays: 20 }), rules)).toMatchObject({ value: 'NEW' });
-    expect(proposeLifecycle(facts({ units90: 0, units30: 0, unitsClearance: 0 }), rules)).toMatchObject({ value: 'CLEARANCE' });
+    // De partida, "a liquidar" es solo a mano, y lo que no vendió nada queda sin ciclo de vida.
+    const none = proposeLifecycle(facts({ units90: 0, units30: 0, unitsClearance: 0 }), rules);
+    expect(none).toMatchObject({ value: null });
+    expect(none!.why).toContain('queda sin ciclo de vida');
+    expect(proposeLifecycle(facts({ units90: 6, units30: 2 }), rules)).toMatchObject({ value: 'MATURE' });
+    expect(proposeLifecycle(facts({ units90: 6, units30: 5 }), rules)).toMatchObject({ value: 'GROWING' });
+    expect(proposeLifecycle(facts({ units90: 2 }), rules)).toMatchObject({ value: 'GROWING' });
+    // Con la regla de liquidar prendida y todos con ciclo de vida.
+    const loose = { ...rules, clearanceAuto: true, growingMinUnits90: 0 };
+    expect(proposeLifecycle(facts({ units90: 0, units30: 0, unitsClearance: 0 }), loose)).toMatchObject({ value: 'CLEARANCE' });
     // Sin stock no hay qué liquidar.
-    expect(proposeLifecycle(facts({ units90: 0, units30: 0, unitsClearance: 0, stock: 0 }), rules)).toMatchObject({ value: 'GROWING' });
-    expect(proposeLifecycle(facts({ units90: 60, units30: 20 }), rules)).toMatchObject({ value: 'MATURE' });
-    expect(proposeLifecycle(facts({ units90: 60, units30: 40 }), rules)).toMatchObject({ value: 'GROWING' });
-    expect(proposeLifecycle(facts({ units90: 5 }), rules)).toMatchObject({ value: 'GROWING' });
+    expect(proposeLifecycle(facts({ units90: 0, units30: 0, unitsClearance: 0, stock: 0 }), loose)).toMatchObject({ value: 'GROWING' });
     // Sin las ventas completas de la tienda no propone nada.
     expect(proposeLifecycle(facts({ units90: null, units30: null, unitsClearance: null }), rules)).toBeNull();
     expect(proposeLifecycle(facts({ ageDays: 20 }), rules)!.why).toContain('20 días');

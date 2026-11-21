@@ -45,6 +45,8 @@ export function RulesForm({ accountSlug, thresholds, rules }: { accountSlug: str
     ) as unknown as Record<Lifecycle, Omit<Recipe, 'baseMarginPct' | 'eventMarginPct' | 'peakMarginPct' | 'baseSteps'> & { baseMarginPct: string; eventMarginPct: string; peakMarginPct: string; steps: string }>,
   );
   const [classify, setClassify] = useState(() => Object.fromEntries(Object.entries(rules.classify).map(([k, v]) => [k, String(v)])) as Record<keyof PromoRules['classify'], string>);
+  // Si la regla propone "a liquidar": apagado, esa etiqueta se pone solo a mano.
+  const [clearanceAuto, setClearanceAuto] = useState(rules.classify.clearanceAuto);
   const [timing, setTiming] = useState(() => Object.fromEntries(Object.entries(rules.timing).map(([k, v]) => [k, String(v)])) as Record<keyof PromoRules['timing'], string>);
   const setRecipe = (l: Lifecycle, patch: Partial<(typeof recipes)[Lifecycle]>) => setRecipes((r) => ({ ...r, [l]: { ...r[l], ...patch } }));
 
@@ -72,7 +74,7 @@ export function RulesForm({ accountSlug, thresholds, rules }: { accountSlug: str
             return [l, { base: r.base, baseMarginPct: margin(r.baseMarginPct), baseSteps: steps(r.steps), events: r.events, eventMarginPct: margin(r.eventMarginPct), peaks: r.peaks, peakMarginPct: margin(r.peakMarginPct), volume: r.volume }];
           }),
         ),
-        classify: Object.fromEntries(Object.entries(classify).map(([k, v]) => [k, num(v)])),
+        classify: { ...Object.fromEntries(Object.entries(classify).filter(([k]) => k !== 'clearanceAuto').map(([k, v]) => [k, num(v)])), clearanceAuto },
         timing: Object.fromEntries(Object.entries(timing).map(([k, v]) => [k, num(v)])),
       };
       done(await saveRulesAction(accountSlug, patch as Parameters<typeof saveRulesAction>[1]).catch(() => null), 'Reglas guardadas. Valen desde el próximo armado del almanaque: lo que ya está prendido no se toca.');
@@ -157,9 +159,25 @@ export function RulesForm({ accountSlug, thresholds, rules }: { accountSlug: str
       <SectionCard title="Cómo propone las etiquetas la regla" icon={<SlidersHorizontal />} description="Los números del ciclo de vida y de la competencia. Lo puesto a mano no se pisa. Se guardan con el botón Guardar reglas.">
         <div className="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Nueva a posicionar" suffix="días" value={classify.newDays} onChange={(v) => setClassify((c) => ({ ...c, newDays: v }))} hint="Publicada hace menos de estos días." />
-          <Field label="Madurada" suffix="unidades en 90 días" value={classify.matureUnits90} onChange={(v) => setClassify((c) => ({ ...c, matureUnits90: v }))} hint="Con estas ventas o más y ventas parejas. Con menos, en crecimiento." />
+          <Field label="Madurada" suffix="unidades en 90 días" value={classify.matureUnits90} onChange={(v) => setClassify((c) => ({ ...c, matureUnits90: v }))} hint="Con estas ventas o más y ventas parejas." />
           <Field label="Ventas parejas" suffix="%" value={classify.matureGrowthPct} onChange={(v) => setClassify((c) => ({ ...c, matureGrowthPct: v }))} hint="Lo del último mes no pasa por más de este % al promedio mensual de los 90 días." />
-          <Field label="A liquidar" suffix="días sin vender" value={classify.clearanceDays} onChange={(v) => setClassify((c) => ({ ...c, clearanceDays: v }))} hint="Sin ventas en ese plazo y con stock." />
+          <Field
+            label="En crecimiento"
+            suffix="unidades en 90 días, como mínimo"
+            value={classify.growingMinUnits90}
+            onChange={(v) => setClassify((c) => ({ ...c, growingMinUnits90: v }))}
+            hint="Con menos ventas que estas, la regla no le pone ciclo de vida: queda sin almanaque hasta ponérselo a mano. Con 0, todos llevan."
+          />
+          <div className="space-y-2 text-sm">
+            <label className="flex items-start gap-2">
+              <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[hsl(var(--primary))]" checked={clearanceAuto} onChange={(e) => setClearanceAuto(e.target.checked)} />
+              <span>
+                <span className="font-medium">La regla propone «A liquidar»</span>
+                <span className="block text-xs text-muted-foreground">Apagado, esa etiqueta se pone solo a mano.</span>
+              </span>
+            </label>
+            {clearanceAuto ? <Field label="A liquidar" suffix="días sin vender" value={classify.clearanceDays} onChange={(v) => setClassify((c) => ({ ...c, clearanceDays: v }))} hint="Sin ventas en ese plazo y con stock." /> : null}
+          </div>
           <Field label="Pelea por precio" suffix="%" value={classify.priceFightPct} onChange={(v) => setClassify((c) => ({ ...c, priceFightPct: v }))} hint="El competidor más barato está a este % o menos por encima del sin cuotas." />
           <Field label="Relevar la competencia" suffix="días" value={classify.competitorDays} onChange={(v) => setClassify((c) => ({ ...c, competitorDays: v }))} hint="Cada cuánto hay que volver a mirar los precios de la competencia." />
         </div>

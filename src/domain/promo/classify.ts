@@ -27,7 +27,7 @@ export type Proposal<T> = { value: T | null; why: string } | null;
 export function proposeLifecycle(f: ProductFacts, rules: ClassifyRules): Proposal<Lifecycle> {
   if (f.ageDays !== null && f.ageDays < rules.newDays) return { value: 'NEW', why: `Se publicó hace ${f.ageDays} días, menos de ${rules.newDays}.` };
   if (f.units90 === null) return null;
-  if (f.unitsClearance === 0 && (f.stock === null || f.stock > 0) && f.ageDays !== null && f.ageDays >= rules.clearanceDays) {
+  if (rules.clearanceAuto && f.unitsClearance === 0 && (f.stock === null || f.stock > 0) && f.ageDays !== null && f.ageDays >= rules.clearanceDays) {
     return { value: 'CLEARANCE', why: `No vendió en ${rules.clearanceDays} días${f.stock !== null ? ` y quedan ${f.stock} en stock` : ''}.` };
   }
   if (f.units90 >= rules.matureUnits90 && f.units30 !== null) {
@@ -35,6 +35,9 @@ export function proposeLifecycle(f: ProductFacts, rules: ClassifyRules): Proposa
     const steady = (f.units90 / 3) * (1 + rules.matureGrowthPct / 100);
     if (f.units30 <= steady) return { value: 'MATURE', why: `Vendió ${f.units90} en 90 días y ${f.units30} en los últimos 30: se vende parejo.` };
     return { value: 'GROWING', why: `Vendió ${f.units90} en 90 días y ${f.units30} en los últimos 30: viene creciendo.` };
+  }
+  if (f.units90 < rules.growingMinUnits90) {
+    return { value: null, why: `Vendió ${f.units90} en 90 días, menos de ${rules.growingMinUnits90}: queda sin ciclo de vida y sin almanaque hasta ponérselo a mano.` };
   }
   return { value: 'GROWING', why: `Vendió ${f.units90} en 90 días, menos de las ${rules.matureUnits90} de una madurada.` };
 }
