@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { SectionCard } from '@/components/ui/section-card';
+import { CHANNEL_STATUS_LABEL } from '@/domain/channel-status';
 import { formatPrice } from '@/domain/money';
 import { INSTALLMENT_PLANS, planLabel } from '@/domain/pricing';
 import { LAYER_LABEL } from '@/domain/promo/plan';
@@ -53,6 +54,9 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
   const columns = grid.columns;
   const columnKey = (c: GridColumn) => c.slotId ?? `canal:${c.group}`;
   const current = columns.find((c) => columnKey(c) === picked) ?? columns.find((c) => !c.cancelled) ?? columns[0] ?? null;
+  const severalTitles = new Set(grid.measures.map((m) => m.title ?? '')).size > 1;
+  // Lo que deja en pesos: la rentabilidad es sobre el costo.
+  const money = (marginPct: number | null, cost: number | null) => (marginPct === null || cost === null ? null : formatPrice(Math.round((cost * marginPct) / 100)));
   const cellOf = useMemo(() => new Map((current?.cells ?? []).map((c) => [c.publicationId, c])), [current]);
   // Una columna por forma de cobro, y una más si alguna publicación tiene una que la app no conoce.
   const plans: (number | null)[] = [...INSTALLMENT_PLANS, ...(grid.measures.some((m) => m.options.some((o) => o.plan === null)) ? [null] : [])];
@@ -217,6 +221,9 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
                   <td className="px-1 align-top">
                     {/* Sin medida: la única del producto, o una publicación de la que la app no sabe qué medida vende. */}
                     <p className="font-medium">{m.measure ?? (grid.measures.length > 1 ? 'Medida sin identificar' : 'Única')}</p>
+                    {/* Con más de una publicación distinta del mismo producto, el título dice cuál es cada fila. */}
+                    {severalTitles && m.title ? <p className="mt-0.5 leading-snug text-muted-foreground">{m.title}</p> : null}
+                    {m.measure === null && grid.measures.length > 1 ? <p className="mt-0.5 leading-snug text-muted-foreground">La app no sabe qué medida vende: sin eso tampoco sabe su stock.</p> : null}
                     {m.stock !== null ? <p className="text-muted-foreground">Stock {m.stock}</p> : null}
                   </td>
                   {plans.map((plan) => (
@@ -245,24 +252,32 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
                               />
                             ) : null}
                           </span>
+                          {o.status !== 'ACTIVE' ? <span className="mt-0.5 block text-[11px] font-medium">{CHANNEL_STATUS_LABEL[o.status as keyof typeof CHANNEL_STATUS_LABEL] ?? o.status} en {grid.channelName}</span> : null}
                           {cell ? (
                             <>
-                              <span className="mt-1 block font-semibold">{cell.label}</span>
+                              <span className="mt-1 block text-[10px] uppercase tracking-wide text-muted-foreground">En esta oferta</span>
+                              <span className="block font-semibold">{cell.label}</span>
                               {cell.price !== null && cell.state !== 'OUT' ? (
                                 <span className="block">
-                                  {formatPrice(cell.price)}
-                                  {cell.discountPct !== null ? ` (${pct(cell.discountPct)})` : ''}
+                                  El comprador paga {formatPrice(cell.price)}
+                                  {cell.discountPct !== null ? ` (${pct(cell.discountPct)} de descuento)` : ''}
                                 </span>
                               ) : null}
-                              {cell.marginPct !== null ? <span className="block">Deja {pct(cell.marginPct)}</span> : null}
+                              {cell.marginPct !== null ? (
+                                <span className="block">
+                                  Deja {pct(cell.marginPct)}
+                                  {money(cell.marginPct, o.cost) ? `, ${money(cell.marginPct, o.cost)}` : ''}
+                                </span>
+                              ) : null}
                               {cell.text ? <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">{cell.text}</span> : null}
                               {cell.lastError && cell.state !== 'FAILED' ? <span className="mt-0.5 block text-[11px] leading-snug text-destructive">{cell.lastError}</span> : null}
                             </>
                           ) : null}
                           <span className="mt-1 block border-t border-foreground/10 pt-1 text-[11px] text-muted-foreground">
-                            Hoy {o.listPrice !== null ? formatPrice(o.listPrice) : 'sin precio'}
-                            {o.discountNow ? `, ${pct(o.discountNow)} de descuento` : ''}
-                            {o.marginNow !== null ? `, deja ${pct(o.marginNow)}` : o.cost === null ? ', sin costo' : ''}
+                            <span className="block text-[10px] uppercase tracking-wide">Sin la oferta, hoy</span>
+                            {o.listPrice !== null ? `Precio de lista ${formatPrice(o.listPrice)}` : 'Sin precio de lista'}
+                            {o.discountNow ? `, con ${pct(o.discountNow)} de descuento propio` : ''}
+                            <span className="block">{o.marginNow !== null ? `Deja ${pct(o.marginNow)}${money(o.marginNow, o.cost) ? `, ${money(o.marginNow, o.cost)}` : ''}` : o.cost === null ? 'Sin costo cargado' : ''}</span>
                           </span>
                           {o.excluded ? <span className="mt-0.5 block text-[11px] font-medium">Prohibida{o.excludedWhy ? `: ${o.excludedWhy}` : ''}</span> : null}
                         </label>

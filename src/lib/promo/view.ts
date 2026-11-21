@@ -63,7 +63,8 @@ export type GridOption = {
   excludedWhy: string | null;
 };
 
-export type GridMeasure = { mainId: string; measure: string | null; stock: number | null; options: GridOption[] };
+// title: el título de su publicación principal, para distinguir dos publicaciones distintas de la misma medida.
+export type GridMeasure = { mainId: string; measure: string | null; title: string | null; stock: number | null; options: GridOption[] };
 
 export type ProductGrid = {
   productId: string;
@@ -106,7 +107,7 @@ export async function loadProductGrid(db: Db, accountId: string, productId: stri
   const measures: GridMeasure[] = [];
   for (const o of live) {
     let m = measures.find((x) => x.mainId === o.mainId);
-    if (!m) measures.push((m = { mainId: o.mainId, measure: o.measure, stock: o.stock, options: [] }));
+    if (!m) measures.push((m = { mainId: o.mainId, measure: o.measure, title: live.find((x) => x.publicationId === o.mainId)?.title ?? o.title, stock: o.stock, options: [] }));
     m.options.push({
       publicationId: o.publicationId,
       externalId: o.externalId,

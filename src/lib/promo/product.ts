@@ -17,6 +17,7 @@ type Db = PrismaClient;
 export type PromoOption = {
   publicationId: string;
   externalId: string | null;
+  title: string | null;
   // La publicación principal de su medida.
   mainId: string;
   main: boolean;
@@ -166,6 +167,7 @@ export async function loadProductPromo(db: Db, accountId: string, productId: str
           options.push({
             publicationId: o.id,
             externalId: o.externalId,
+            title: null,
             mainId: m.mainId,
             main: o.main,
             measure: m.measure,
@@ -186,10 +188,13 @@ export async function loadProductPromo(db: Db, accountId: string, productId: str
     }
   }
   const ids = options.map((o) => o.publicationId);
-  const [excluded, rows] = await Promise.all([
+  const [excluded, titles, rows] = await Promise.all([
     db.promotionOption.findMany({ where: { publicationId: { in: ids }, excluded: true }, select: { publicationId: true, why: true } }),
+    db.publication.findMany({ where: { id: { in: ids } }, select: { id: true, title: true } }),
     db.channelPromotionItem.findMany({ where: { publicationId: { in: ids } }, orderBy: [{ start: 'asc' }, { name: 'asc' }] }),
   ]);
+  const titleOf = new Map(titles.map((t) => [t.id, t.title]));
+  for (const o of options) o.title = titleOf.get(o.publicationId) ?? null;
   for (const e of excluded) {
     const o = options.find((x) => x.publicationId === e.publicationId);
     if (o) Object.assign(o, { excluded: true, excludedWhy: e.why });
