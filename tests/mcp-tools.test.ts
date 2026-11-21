@@ -59,6 +59,10 @@ describe('lista de herramientas', () => {
       'list_category_clashes',
       'get_branches',
       'get_insur_sync',
+      'get_promotions',
+      'get_promotion_settings',
+      'review_invitations',
+      'refresh_competitors',
     ]);
     for (const t of tools) {
       expect(t.inputSchema.type).toBe('object');

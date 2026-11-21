@@ -5,7 +5,8 @@ import { usePageHeaderHeight } from '@/components/dashboard/use-page-header-heig
 import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Upload } from 'lucide-react';
+import { Upload, X } from 'lucide-react';
+import { useReadOnly } from '@/components/access/AccessProvider';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { PipelineBadge } from '@/components/stages/StageBadge';
@@ -15,6 +16,7 @@ import type { ToPushRow } from '@/lib/queries/sync';
 import { plural } from '@/lib/format';
 import { cn } from '@/lib/utils/cn';
 import { pushDraftsAction } from '@/app/a/[cuenta]/publicaciones/sync-actions';
+import { cancelCampaignAction } from '@/app/a/[cuenta]/pipeline/price-actions';
 
 // Por subir: todas las publicaciones con cambios de la app que todavía no
 // están en el canal, vengan del pipeline o de un cambio suelto. Se suben de a
@@ -32,6 +34,17 @@ export function ToPushList({ accountSlug, rows }: { accountSlug: string; rows: T
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [outcomes, setOutcomes] = useState<Record<string, Outcome>>({});
   const stop = useRef(false);
+  const [cancelling, setCancelling] = useState<string | null>(null);
+  const readOnly = useReadOnly('subir');
+
+  // Saca el pedido de Por subir sin mandarlo: en el canal no cambia nada.
+  async function cancel(rowId: string, requestId: string) {
+    setCancelling(requestId);
+    const r = await cancelCampaignAction(accountSlug, requestId).catch(() => null);
+    setCancelling(null);
+    if (!r || !r.ok) setOutcomes((prev) => ({ ...prev, [rowId]: { kind: 'error', text: r ? r.error : 'Se cortó la conexión con la app.' } }));
+    else router.refresh();
+  }
   const canPushRow = (r: ToPushRow) => !r.blocked && (r.draft.length > 0 || r.campaigns.length > 0 || r.sku !== null);
   const pushable = rows.filter(canPushRow);
 
@@ -143,8 +156,18 @@ export function ToPushList({ accountSlug, rows }: { accountSlug: string; rows: T
                   {row.choose.length > 0 ? <Badge variant="destructive">Para elegir: {labels(row.choose)}</Badge> : null}
                   {row.sku ? <Badge variant="secondary">SKU de la medida: {row.sku}</Badge> : null}
                   {row.campaigns.map((c) => (
-                    <Badge key={c.text} variant="secondary">
+                    <Badge key={c.id} variant="secondary" className="gap-1">
                       Campaña: {c.text.charAt(0).toLowerCase() + c.text.slice(1)}
+                      {readOnly ? null : <button
+                        type="button"
+                        className="-mr-1 rounded-full p-0.5 hover:bg-foreground/10 disabled:opacity-40"
+                        aria-label={`Sacar de Por subir: ${c.text}`}
+                        title="Sacar de Por subir sin mandarlo"
+                        disabled={progress !== null || cancelling !== null}
+                        onClick={() => cancel(row.id, c.id)}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>}
                     </Badge>
                   ))}
                 </div>
@@ -156,7 +179,7 @@ export function ToPushList({ accountSlug, rows }: { accountSlug: string; rows: T
                 {row.campaigns
                   .filter((c) => c.rejection)
                   .map((c) => (
-                    <p key={c.text} className="text-sm text-destructive">
+                    <p key={c.id} className="text-sm text-destructive">
                       Campaña: {c.rejection}
                     </p>
                   ))}

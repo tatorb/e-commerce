@@ -182,7 +182,7 @@ export type ToPushRow = {
   choose: FaceField[];
   rejected: { field: FaceField; message: string }[];
   // Sumarse a una campaña o salir, pedido desde el Pipeline, y por qué no se pudo la última vez.
-  campaigns: { text: string; rejection: string | null }[];
+  campaigns: { id: string; ref: string; name: string; text: string; rejection: string | null }[];
   // El SKU de su medida para mandar al canal.
   sku: string | null;
   // Por qué no se puede subir desde la app, si no se puede.
@@ -217,7 +217,7 @@ export async function listToPush(accountId: string, db: PrismaClient = prisma): 
       product: { select: { brand: true, partNumber: true, origin: true } },
       store: { select: { name: true, channel: { select: { kind: true, name: true } }, connection: { select: { status: true } } } },
       channelCopy: { select: { fingerprints: true, agreed: true, rejections: true, price: true, installments: true, discount: true, details: true } },
-      campaignRequests: { orderBy: { createdAt: 'asc' }, select: { action: true, name: true, kind: true, price: true, rejection: true } },
+      campaignRequests: { orderBy: { createdAt: 'asc' }, select: { id: true, ref: true, action: true, name: true, kind: true, price: true, rejection: true } },
     },
     orderBy: { updatedAt: 'desc' },
   });
@@ -243,6 +243,9 @@ export async function listToPush(accountId: string, db: PrismaClient = prisma): 
       choose: summary.choose,
       rejected: summary.rejected.map(({ field, message }) => ({ field, message })),
       campaigns: p.campaignRequests.map((c) => ({
+        id: c.id,
+        ref: c.ref,
+        name: c.name,
         text: campaignText({ action: c.action === 'JOIN' ? 'join' : 'leave', name: c.name, kind: c.kind, price: c.price === null ? null : Number(c.price) }),
         rejection: c.rejection,
       })),

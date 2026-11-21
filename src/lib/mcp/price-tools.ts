@@ -25,7 +25,7 @@ import {
 import { campaignOutcomeState, campaignPrice, campaignRevenue, combinedBounds, discountOptions, type CampaignOutcomeState } from '@/domain/promotions';
 import { logActivity } from '@/lib/activity';
 import { readPromotions, type PromotionsResult } from '@/lib/channel-promotions';
-import { CampaignError, campaignText, familyCampaignAction, optionsCampaignAction, type CampaignOutcome } from '@/lib/channel-campaigns';
+import { CampaignError, cancelPendingCampaigns, campaignText, familyCampaignAction, matchesCampaign, optionsCampaignAction, pendingCampaigns, type CampaignOutcome } from '@/lib/channel-campaigns';
 import { familyCampaigns, membersText, splitText } from '@/domain/family-campaigns';
 import { measuresOf } from '@/lib/media';
 import { pushDrafts, PushError } from '@/lib/channel-push';
@@ -725,6 +725,16 @@ const pushPrices = defineTool({
       .max(100)
       .optional()
       .describe('Las publicaciones: su id en la app o su código en el canal, hasta 100. Sin la lista, todas las de la cuenta con precio, cuotas o descuento por subir.'),
+    solo_estas: z
+      .boolean()
+      .optional()
+      .describe('true = sube solo las publicaciones de la lista, cada una por su código, sin sumar las demás medidas de la familia ni las otras opciones de venta. Para subir una forma de cobro sola. Pide la lista en publicaciones.'),
+    campanas: z
+      .array(z.string().min(1).max(500))
+      .min(1)
+      .max(20)
+      .optional()
+      .describe('De las campañas pedidas, manda solo estas, por su nombre o su campana; las demás quedan en Por subir. Sin decirlo, van todas las pedidas de cada publicación.'),
   }),
   readOnly: false,
   destructive: true,
@@ -739,7 +749,7 @@ const pushPrices = defineTool({
       return row ? [...new Set([...row.draft, ...row.choose])].filter(isPriceField) : [];
     };
     // Sumarse o salir de campañas, pedido desde el Pipeline.
-    const campaignsOf = (id: string) => pending.get(id)?.campaigns.length ?? 0;
+    const campaignsOf = (id: string) => (pending.get(id)?.campaigns ?? []).filter((c) => !args.campanas || matchesCampaign(c, args.campanas)).length;
 
     const salteadas: { publicacion: string; motivo: string }[] = [];
     let ids: string[] = [];
@@ -755,8 +765,9 @@ const pushPrices = defineTool({
       }
     } else ids = [...pending.keys()].filter((id) => priceFields(id).length > 0 || campaignsOf(id) > 0);
 
+    if (args.solo_estas && !args.publicaciones) throw new McpToolError('Con solo_estas, pasá en publicaciones cuáles subir.');
     // En una familia van todas sus medidas, cada una después de la anterior: el precio y las campañas son de la familia.
-    const families = await ctx.db.publication.findMany({ where: { id: { in: ids }, familyId: { not: null } }, select: { id: true, familyId: true } });
+    const families = args.solo_estas ? [] : await ctx.db.publication.findMany({ where: { id: { in: ids }, familyId: { not: null } }, select: { id: true, familyId: true } });
     if (families.length > 0) {
       const members = await ctx.db.publication.findMany({
         where: { familyId: { in: families.map((f) => f.familyId!) } },
@@ -771,7 +782,7 @@ const pushPrices = defineTool({
       ids = expanded;
     }
     // Las otras opciones de venta de cada medida van detrás de su principal, cada una con su propio precio.
-    const options = await ctx.db.publication.findMany({ where: { mainOptionId: { in: ids } }, orderBy: { createdAt: 'asc' }, select: { id: true, mainOptionId: true } });
+    const options = args.solo_estas ? [] : await ctx.db.publication.findMany({ where: { mainOptionId: { in: ids } }, orderBy: { createdAt: 'asc' }, select: { id: true, mainOptionId: true } });
     if (options.length > 0) {
       const withOptions: string[] = [];
       for (const id of ids) for (const m of [id, ...options.filter((o) => o.mainOptionId === id).map((o) => o.id)]) if (!withOptions.includes(m)) withOptions.push(m);
@@ -829,7 +840,7 @@ const pushPrices = defineTool({
       const measure = measureOf(p);
       const base = { publicacion: code, ...(measure ? { medida: measure } : {}), titulo: p.title };
       try {
-        const r = await pushDrafts(ctx.db, { accountId: account.id, publicationId: id, fields, campaigns: true, userId: ctx.userId });
+        const r = await pushDrafts(ctx.db, { accountId: account.id, publicationId: id, fields, campaigns: true, onlyCampaigns: args.campanas, userId: ctx.userId });
         const tried = [...r.sent, ...r.rejected.map((x) => x.field)].filter(isPriceField);
         const sent = r.sent.filter(isPriceField);
         const failed = r.rejected.length + r.campaigns.filter((c) => !c.ok).length;
@@ -924,6 +935,43 @@ const pushPrices = defineTool({
   },
 });
 
+const cancelCampaignRequest = defineTool({
+  name: 'cancel_campaign_request',
+  section: ['pipeline', 'subir'],
+  title: 'Sacar de Por subir un pedido de campaña',
+  description:
+    'Saca de Por subir lo pedido con choose_campaign (sumarse a una campaña o salir) que todavía no se mandó al canal, sin mandarlo. No cambia nada en el canal: si la publicación ya está en la campaña, sigue adentro. En publicaciones van las publicaciones por su código, cada forma de cobro con el suyo: no se agranda a la familia. Sin campanas ni todas, no saca nada y devuelve lo que cada una tiene pedido, para elegir. Con campanas, saca esas (por su nombre o su campana); con todas, todo lo pedido de esas publicaciones. Antes de sacar, mostrale a la persona qué pedidos se van y esperá que confirme.',
+  input: z.object({
+    cuenta: accountArg,
+    publicaciones: z.array(z.string().min(1)).min(1).max(100).describe('Las publicaciones: su id en la app, su código en el canal o su link.'),
+    campanas: z.array(z.string().min(1).max(500)).min(1).max(20).optional().describe('Las campañas a sacar, por su nombre o su campana.'),
+    todas: z.boolean().optional().describe('true = sacar todo lo pedido de esas publicaciones.'),
+  }),
+  readOnly: false,
+  destructive: true,
+  run: async (ctx, args) => {
+    const account = await resolveAccount(ctx, args.cuenta);
+    const ids: string[] = [];
+    for (const ref of args.publicaciones) {
+      const id = await findPublication(ctx.db, account.id, ref);
+      if (!ids.includes(id)) ids.push(id);
+    }
+    const codes = new Map((await ctx.db.publication.findMany({ where: { id: { in: ids } }, select: { id: true, externalId: true } })).map((p) => [p.id, p.externalId ?? p.id]));
+    const out = (r: Awaited<ReturnType<typeof pendingCampaigns>>[number]) => ({
+      publicacion: codes.get(r.publicationId),
+      pedido: campaignText(r),
+      campana: r.ref,
+      pedido_el: r.createdAt.toISOString().slice(0, 10),
+      ...(r.rejection ? { el_canal_lo_rechazo: r.rejection } : {}),
+    });
+    if (!args.campanas && !args.todas) {
+      return { sacados: 0, pedidos: (await pendingCampaigns(ctx.db, ids)).map(out), como_sigue: 'No se sacó nada. Para sacar, pasá campanas o todas.' };
+    }
+    const gone = await cancelPendingCampaigns(ctx.db, { accountId: account.id, publicationIds: ids, campaigns: args.todas ? undefined : args.campanas });
+    return { sacados: gone.length, se_sacaron: gone.map(out), siguen_pedidos: (await pendingCampaigns(ctx.db, ids)).map(out) };
+  },
+});
+
 /** Cómo quedó en el canal cada campaña que se mandó bien, por su ref. Si no se puede consultar, quedan como pendientes. */
 async function campaignStates(db: McpContext['db'], accountId: string, publicationId: string, outcomes: CampaignOutcome[]): Promise<Map<string, CampaignOutcomeState>> {
   const states = new Map<string, CampaignOutcomeState>();
@@ -939,4 +987,4 @@ async function campaignStates(db: McpContext['db'], accountId: string, publicati
   return states;
 }
 
-export const PRICE_TOOLS = [getPriceStep, savePrice, getPricingSettings, updatePricingSettings, chooseCampaign, pushPrices];
+export const PRICE_TOOLS = [getPriceStep, savePrice, getPricingSettings, updatePricingSettings, chooseCampaign, cancelCampaignRequest, pushPrices];

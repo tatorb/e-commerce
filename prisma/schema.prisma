@@ -248,6 +248,10 @@ model Account {
   textImages          TextImage[]
   branches            Branch[]
   insurSettings       InsurSettings?
+  promotionSettings   PromotionSettings?
+  promotionEvents     PromotionEvent[]
+  promotionSlots      PromotionSlot[]
+  promotionLogs       PromotionLog[]
   insurLinks          InsurArticleLink[]
   insurRuns           InsurSyncRun[]
 
@@ -404,6 +408,9 @@ model Product {
   stockMoves  StockMovement[]
   costs       ProductCost[]
   insurLinks  InsurArticleLink[]
+  // Las etiquetas de promociones y su almanaque (src/domain/promo).
+  promotion      ProductPromotion?
+  promotionSlots PromotionSlot[]
 
   @@index([accountId])
   @@index([importRunId])
@@ -640,6 +647,11 @@ model Publication {
   buyerQuestions    BuyerQuestion[]
   priceDecisions    PriceDecision[]
   campaignRequests  CampaignRequest[]
+  // Promociones: lo que informa el canal, lo decidido a mano, sus franjas del almanaque y su bitácora.
+  channelPromotions ChannelPromotionItem[]
+  promotionOption   PromotionOption?
+  promotionItems    PromotionSlotItem[]
+  promotionLogs     PromotionLog[]
   clips             PublicationClip[]
   descriptionDraft  DescriptionDraft?
   tasks             TaskPublication[]
@@ -3061,4 +3073,228 @@ model InsurSyncRun {
 
   @@index([accountId, startedAt])
   @@map("insur_sync_runs")
+}
+
+// ───────────────────────────── Promociones ─────────────────────────────
+
+// Los ajustes de promociones de la cuenta: la rentabilidad saludable y el
+// piso, si la app prende y apaga sola según el almanaque, y las reglas y
+// recetas (src/domain/promo/rules.ts). Lo que falta toma el valor de partida.
+model PromotionSettings {
+  accountId        String    @id
+  account          Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  // Rentabilidad sobre el costo, en %.
+  healthyMarginPct Decimal   @default(15) @db.Decimal(6, 2)
+  floorMarginPct   Decimal   @default(10) @db.Decimal(6, 2)
+  // La app prende y apaga las ofertas sola, siguiendo el almanaque.
+  autoApply        Boolean   @default(false)
+  // Las reglas que proponen etiquetas y las recetas del almanaque.
+  rules            Json      @default("{}")
+  // Por dónde va la lectura de las invitaciones del canal, y cuándo terminó la última completa.
+  sweep            Json      @default("{}")
+  sweptAt          DateTime?
+  // Cuándo se reclasificó y se rearmó el almanaque por última vez.
+  classifiedAt     DateTime?
+  updatedById      String?
+  updatedAt        DateTime  @updatedAt
+
+  @@map("promotion_settings")
+}
+
+// Las etiquetas de promociones de un producto, que valen para todas sus
+// publicaciones: ciclo de vida, competencia, control de stock y prioridad.
+// manual: las etiquetas puestas a mano, que la regla no pisa. why: por qué la
+// regla propuso cada una.
+model ProductPromotion {
+  productId    String    @id
+  product      Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  // NEW, GROWING, MATURE o CLEARANCE.
+  lifecycle    String?
+  // PRICE_FIGHT o NO_COMPETITION.
+  competition  String?
+  inCatalog    Boolean   @default(false)
+  // Solo a mano: con poco stock no se abren ofertas nuevas.
+  stockControl Boolean   @default(false)
+  // PUSH o SEASONAL. Solo a mano.
+  priority     String?
+  manual       String[]  @default([])
+  why          Json      @default("{}")
+  // Cuándo se armó su almanaque por última vez.
+  plannedAt    DateTime?
+  updatedById  String?
+  updatedAt    DateTime  @updatedAt
+
+  @@index([lifecycle])
+  @@map("product_promotions")
+}
+
+// Lo decidido a mano para una forma de cobro: que no entre a ninguna oferta.
+model PromotionOption {
+  publicationId String      @id
+  publication   Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  excluded      Boolean     @default(false)
+  why           String?
+  updatedById   String?
+  updatedAt     DateTime    @updatedAt
+
+  @@map("promotion_options")
+}
+
+// El calendario de eventos: los del canal (Hot Sale, Black Friday) y las
+// fechas propias del rubro, cargados con anticipación.
+model PromotionEvent {
+  id        String   @id @default(cuid())
+  accountId String
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  name      String
+  // T1, T2, BOOST (Potencia tus ventas), SHARED (ofertas compartidas) u OWN (fecha propia).
+  tier      String
+  start     DateTime
+  finish    DateTime
+  // Un texto del nombre de la campaña del canal, para reconocerla como de este evento.
+  match     String?
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  slots     PromotionSlot[]
+
+  @@index([accountId, start])
+  @@map("promotion_events")
+}
+
+// La copia de lo que el canal informa de cada campaña para cada publicación:
+// si la invitan, si está anotada o adentro, el precio y el tope. Se refresca
+// sola (src/lib/promo/sweep.ts).
+model ChannelPromotionItem {
+  id                String      @id @default(cuid())
+  publicationId     String
+  publication       Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  // La campaña en el canal: la misma en todas las publicaciones.
+  group             String
+  // Cómo se pide para esta publicación.
+  ref               String
+  // El tipo como lo llama el canal: DEAL, LIGHTNING.
+  type              String
+  name              String?
+  kind              String
+  // invited, scheduled o active.
+  status            String
+  price             Decimal?    @db.Decimal(14, 2)
+  channelPct        Decimal?    @db.Decimal(7, 4)
+  sellerPct         Decimal?    @db.Decimal(7, 4)
+  start             DateTime?
+  finish            DateTime?
+  // Hasta cuándo se puede aceptar la invitación.
+  deadline          DateTime?
+  // price, accept, o null si es solo desde el canal.
+  join              String?
+  minPrice          Decimal?    @db.Decimal(14, 2)
+  maxPrice          Decimal?    @db.Decimal(14, 2)
+  suggestedPrice    Decimal?    @db.Decimal(14, 2)
+  // Las unidades que pide reservar, en una relámpago.
+  stockMin          Int?
+  stockMax          Int?
+  canLeave          Boolean     @default(false)
+  pausesOwnDiscount Boolean     @default(false)
+  listPrice         Decimal?    @db.Decimal(14, 2)
+  seenAt            DateTime    @default(now())
+
+  @@unique([publicationId, group])
+  @@index([group])
+  @@map("channel_promotion_items")
+}
+
+// Una franja del almanaque de un producto: una oferta con su capa, sus fechas
+// y la rentabilidad que busca. Vale para todas las formas de cobro; lo que
+// pasa con cada una está en sus PromotionSlotItem.
+model PromotionSlot {
+  id              String          @id @default(cuid())
+  accountId       String
+  account         Account         @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  productId       String
+  product         Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  // PEAK, EVENT o BASE.
+  layer           String
+  // CAMPAIGN (una del canal), OWN_DISCOUNT (el descuento propio) o VOLUME (por cantidad).
+  kind            String
+  // La campaña del canal, en las que son de una campaña.
+  group           String?
+  name            String
+  eventId         String?
+  event           PromotionEvent? @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  start           DateTime
+  finish          DateTime
+  targetMarginPct Decimal         @db.Decimal(6, 2)
+  // PLAN: la armó el almanaque. MANUAL: la puso o la cambió una persona, y el almanaque no la toca.
+  source          String          @default("PLAN")
+  // CANCELLED: decidido a mano que no va; el almanaque no la vuelve a armar.
+  cancelled       Boolean         @default(false)
+  note            String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  items           PromotionSlotItem[]
+
+  @@index([accountId, start])
+  @@index([productId, start])
+  @@map("promotion_slots")
+}
+
+// Una forma de cobro en una franja: si entra, a qué precio y con qué
+// rentabilidad, o por qué queda afuera, y lo que ya se hizo en el canal.
+model PromotionSlotItem {
+  id            String        @id @default(cuid())
+  slotId        String
+  slot          PromotionSlot @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  publicationId String
+  publication   Publication   @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  // PLANNED (va a entrar), SCHEDULED (anotada en el canal), ON (adentro), ENDED, OUT (afuera) o FAILED.
+  state         String
+  // Entra al tope que pone el canal, con menos rentabilidad que la buscada.
+  capped        Boolean       @default(false)
+  // Por qué queda afuera: NOT_INVITED, BELOW_FLOOR, FORBIDDEN, UNDER_REVIEW, LOW_STOCK, NO_COST, CHANNEL_ONLY, REJECTED, MANUAL.
+  reason        String?
+  reasonText    String?
+  // El precio para el comprador, el descuento sobre el publicado y la rentabilidad que deja.
+  price         Decimal?      @db.Decimal(14, 2)
+  discountPct   Decimal?      @db.Decimal(5, 2)
+  marginPct     Decimal?      @db.Decimal(8, 2)
+  ref           String?
+  // Las unidades reservadas, en una relámpago.
+  stock         Int?
+  appliedAt     DateTime?
+  endedAt       DateTime?
+  attempts      Int           @default(0)
+  lastError     String?
+  nextTryAt     DateTime?
+  // Cuándo toca medir el resultado, y cuándo se midió.
+  measureAt     DateTime?
+  measuredAt    DateTime?
+
+  @@unique([slotId, publicationId])
+  @@index([publicationId])
+  @@index([state, nextTryAt])
+  @@map("promotion_slot_items")
+}
+
+// La bitácora de promociones de cada forma de cobro: cada vez que se prendió
+// o se apagó una oferta, lo que no se pudo y la medición del antes y el después.
+model PromotionLog {
+  id            String      @id @default(cuid())
+  accountId     String
+  account       Account     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  publicationId String
+  publication   Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  slotItemId    String?
+  // ON, OFF, SKIP, ERROR o MEASURE.
+  kind          String
+  text          String
+  data          Json?
+  // Lo hizo la app sola, siguiendo el almanaque.
+  auto          Boolean     @default(false)
+  userId        String?
+  createdAt     DateTime    @default(now())
+
+  @@index([publicationId, createdAt])
+  @@index([accountId, createdAt])
+  @@map("promotion_logs")
 }

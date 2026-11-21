@@ -1089,7 +1089,7 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     const rejection = 'Mercado Libre no aceptó la campaña: The seller reputation is not green Respuesta completa: {"message":"The seller reputation is not green","cause":[]}';
     expect(result.campaigns).toEqual([expect.objectContaining({ name: 'Compartida', action: 'join', ok: false, message: rejection })]);
     const row = (await listToPush(accountId, db)).find((x) => x.id === p.id)!;
-    expect(row.campaigns).toEqual([{ text: 'Sumarse a Compartida (Co-fondeada automática)', rejection }]);
+    expect(row.campaigns).toEqual([{ id: queued.id, ref: queued.ref, name: 'Compartida', text: 'Sumarse a Compartida (Co-fondeada automática)', rejection }]);
     expect(await db.channelSyncChange.findFirst({ where: { publicationId: p.id, field: 'campaign' } })).toMatchObject({ kind: 'REJECTED' });
     await cancelCampaign(db, { accountId, requestId: queued.id });
     expect(await db.campaignRequest.count()).toBe(0);
@@ -1284,6 +1284,50 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     const last = await run('get_price_step', { cuenta: 'prueba', publicacion: p1.id });
     expect(last.pestanas[0].lo_que_acepta_el_canal.campanas.find((c: { nombre: string }) => c.nombre === 'Semana del repuesto')).toMatchObject({ estado_por_medida: 'STD: adentro · 0,50: adentro' });
     expect(last.familia_partida).toEqual(['Compartida vieja: STD adentro, 0,50 no la invitan']);
+  });
+
+  it('push_prices con solo_estas sube una publicación sola y con campanas manda solo esas; cancel_campaign_request saca pedidos sin mandarlos', async () => {
+    process.env.DATABASE_URL ??= url;
+    const { PRICE_TOOLS } = await import('@/lib/mcp/price-tools');
+    const tool = (name: string) => PRICE_TOOLS.find((t) => t.name === name)!;
+    await db.user.create({ data: { id: 'u8', name: 'Persona', email: 'persona8@example.com' } });
+    const ctx: McpContext = { db, userId: 'u8', access: { isAdmin: true, permissions: {}, accountIds: [] }, baseUrl: 'https://app.ejemplo.com' };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const run = async (name: string, args: Record<string, unknown>): Promise<any> => tool(name).run(ctx, tool(name).input.parse(args));
+    const [p1, p2] = await familyWithCampaigns();
+    expect(tool('cancel_campaign_request')).toMatchObject({ readOnly: false, destructive: true });
+
+    const step = await run('get_price_step', { cuenta: 'prueba', publicacion: p1.id });
+    const campaigns = step.pestanas[0].lo_que_acepta_el_canal.campanas;
+    const deal = campaigns.find((c: { nombre: string }) => c.nombre === 'Semana del repuesto');
+    const shared = campaigns.find((c: { nombre: string }) => c.nombre === 'Compartida');
+    await run('choose_campaign', { cuenta: 'prueba', publicacion: p1.id, campana: deal.campana, accion: 'sumarse', precio: 75 });
+    await run('choose_campaign', { cuenta: 'prueba', publicacion: p1.id, campana: shared.campana, accion: 'sumarse', opciones: [{ publicacion: p1.id }] });
+    expect(await db.campaignRequest.count()).toBe(3);
+
+    // Sin decir cuáles, no saca nada: muestra lo pedido.
+    const listed = await run('cancel_campaign_request', { cuenta: 'prueba', publicaciones: [p1.id, p2.id] });
+    expect(listed.sacados).toBe(0);
+    expect(listed.pedidos.map((x: { publicacion: string; pedido: string }) => x.publicacion).sort()).toEqual(['MLA1', 'MLA1', 'MLA2']);
+    expect(await db.campaignRequest.count()).toBe(3);
+
+    // Solo la STD, y de sus dos campañas solo la tradicional: la otra medida y la Compartida quedan pedidas.
+    await expect(run('push_prices', { cuenta: 'prueba', solo_estas: true })).rejects.toThrow('pasá en publicaciones');
+    const pushed = await run('push_prices', { cuenta: 'prueba', publicaciones: [p1.id], solo_estas: true, campanas: ['Semana del repuesto'] });
+    expect(pushed.subidas.map((x: { publicacion: string; resultado: string }) => [x.publicacion, x.resultado])).toEqual([['MLA1', 'subido']]);
+    expect(writes.map((w) => `${w.method} ${w.path}`)).toEqual(['POST /seller-promotions/items/MLA1']);
+    const left = await db.campaignRequest.findMany({ orderBy: { createdAt: 'asc' } });
+    expect(left.map((r) => [r.publicationId, r.name]).sort()).toEqual([[p1.id, 'Compartida'], [p2.id, 'Semana del repuesto']].sort());
+
+    // El pedido que quedó de más se saca por el nombre de la campaña, sin tocar el canal.
+    const gone = await run('cancel_campaign_request', { cuenta: 'prueba', publicaciones: [p1.id, p2.id], campanas: ['compartida'] });
+    expect(gone.sacados).toBe(1);
+    expect(gone.se_sacaron[0]).toMatchObject({ publicacion: 'MLA1' });
+    expect(gone.siguen_pedidos.map((x: { publicacion: string }) => x.publicacion)).toEqual(['MLA2']);
+    const all = await run('cancel_campaign_request', { cuenta: 'prueba', publicaciones: [p2.id], todas: true });
+    expect(all.sacados).toBe(1);
+    expect(await db.campaignRequest.count()).toBe(0);
+    expect(writes).toHaveLength(1);
   });
 
   it('en una familia, mandar ya: si el canal rechaza una medida, la otra queda adentro y la familia queda partida', async () => {

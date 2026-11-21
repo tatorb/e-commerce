@@ -204,7 +204,7 @@ export interface ChannelPublisher {
    * Suma la publicación a una campaña, por su ref. Con price, el precio para el
    * comprador, en las que lo elige la tienda. Lanza PublishError si el canal no lo acepta.
    */
-  joinCampaign?(accessToken: string, externalId: string, ref: string, price: number | null): Promise<void>;
+  joinCampaign?(accessToken: string, externalId: string, ref: string, price: number | null, stock?: number | null): Promise<void>;
   /** Saca la publicación de una campaña. Si ya no estaba, no hace nada. Lanza PublishError si el canal no lo acepta. */
   leaveCampaign?(accessToken: string, externalId: string, ref: string): Promise<void>;
   /**
