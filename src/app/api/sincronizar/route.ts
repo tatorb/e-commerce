@@ -49,6 +49,8 @@ const MAIL_BUDGET_MS = 5_000;
 // Las ventas, con la cantidad nueva de las publicaciones, y lo que quedó distinto del stock.
 const SALES_BUDGET_MS = 8_000;
 const STOCK_BUDGET_MS = 4_000;
+// Flex según el stock de las sucursales: cuando se prende en una sucursal pueden ser cientos de publicaciones.
+const FLEX_BUDGET_MS = 10_000;
 // Después, los descuentos por vencer: cada uno son unos pocos pedidos.
 const RENEW_BUDGET_MS = 6_000;
 // Las alarmas de stock: el aviso del primer día sin reponer. La app nunca pausa por eso.
@@ -97,7 +99,7 @@ export async function GET(request: Request) {
   const started = await startStock(prisma, { budgetMs: budget(STOCK_BUDGET_MS) });
   const stock = await reconcileStock(prisma, { budgetMs: budget(STOCK_BUDGET_MS) });
   // Envíos Flex según el stock de las sucursales con Flex.
-  const flex = await reconcileFlex(prisma, { budgetMs: budget(STOCK_BUDGET_MS) }).catch((e) => {
+  const flex = await reconcileFlex(prisma, { budgetMs: budget(FLEX_BUDGET_MS) }).catch((e) => {
     console.error('No se pudo revisar Flex por el stock de las sucursales.', e);
     return { pending: false };
   });

@@ -6,6 +6,7 @@ import { isManaged } from '@/domain/stock';
 import { applyFlex } from '@/lib/flex';
 import { singleMeasure, SOURCE_SELECT, sourceOf } from '@/lib/stock-plan';
 import { BRANCH_SELECT } from '@/lib/branches';
+import { runInGroups } from '@/lib/pool';
 
 // Envíos Flex según el stock de las sucursales: en una cuenta con sucursales
 // con Flex, cada publicación ofrece Flex solo si una de esas sucursales tiene
@@ -127,7 +128,10 @@ async function failedLately(db: Db, publicationId: string, on: boolean, now: Dat
   return last?.kind === 'STATUS_FAILED' && last.after === on && now.getTime() - last.createdAt.getTime() < RETRY_MS;
 }
 
-export type FlexSyncResult = { changed: { publicationId: string; on: boolean }[]; failed: { publicationId: string; message: string }[]; pending: boolean };
+export type FlexSyncResult = { changed: { publicationId: string; on: boolean }[]; failed: { publicationId: string; message: string }[]; pending: boolean; left?: number };
+
+// Cuántas publicaciones se cambian a la vez en el canal.
+const FLEX_CONCURRENCY = 4;
 
 /**
  * Prende o apaga Flex en el canal en las publicaciones que lo tienen distinto
@@ -141,18 +145,29 @@ export async function syncFlex(db: Db, args: { publicationIds: string[]; userId?
   const todo = [...plans].filter(([, plan]) => plan.follows && plan.on !== plan.current) as [string, Extract<FlexPlan, { follows: true }>][];
   if (todo.length === 0) return result;
   const rows = new Map((await loadRows(db, todo.map(([id]) => id))).map((r) => [r.id, r]));
-  for (const [id, plan] of todo) {
-    if (args.budgetMs !== undefined && Date.now() - started > args.budgetMs) {
-      result.pending = true;
-      break;
-    }
-    if (await failedLately(db, id, plan.on, now)) continue;
-    const row = rows.get(id);
-    if (!row) continue;
-    const r = await applyFlex(db, row, plan.on, { userId: args.userId ?? null, note: `Por el stock de las sucursales: ${plan.reason}` });
-    if (r.ok) result.changed.push({ publicationId: id, on: plan.on });
+  // Primero las que hay que apagar: ofrecer Flex sin stock en la sucursal es lo que más apura.
+  todo.sort((a, b) => Number(a[1].on) - Number(b[1].on));
+  const planOf = new Map(todo);
+  // Varias a la vez: cada una son uno o dos pedidos al canal.
+  const { done, left } = await runInGroups(
+    todo.map(([id]) => id),
+    (id) => id,
+    async (id) => {
+      const plan = planOf.get(id)!;
+      if (await failedLately(db, id, plan.on, now)) return null;
+      const row = rows.get(id);
+      if (!row) return null;
+      return applyFlex(db, row, plan.on, { userId: args.userId ?? null, note: `Por el stock de las sucursales: ${plan.reason}` });
+    },
+    { concurrency: FLEX_CONCURRENCY, budgetMs: Math.max(0, (args.budgetMs ?? Infinity) - (Date.now() - started)) },
+  );
+  for (const [id, r] of done) {
+    if (!r) continue;
+    if (r.ok) result.changed.push({ publicationId: id, on: planOf.get(id)!.on });
     else result.failed.push({ publicationId: id, message: r.message });
   }
+  result.pending = left.length > 0;
+  result.left = left.length;
   return result;
 }
 

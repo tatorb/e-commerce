@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { StockError } from '@/domain/stock';
 import { accountBranches, findBranch, saveBranch } from '@/lib/branches';
-import { afterBranchFlex, flexPlans } from '@/lib/branch-flex';
+import { afterBranchFlex, flexPlans, syncFlex } from '@/lib/branch-flex';
 import { assignSaleBranch, salesWithoutBranch } from '@/lib/sale-branch';
 import { McpToolError, accountArg, defineTool, resolveAccount } from './tool';
 
@@ -150,4 +150,28 @@ const assignSaleBranchTool = defineTool({
   },
 });
 
-export const BRANCH_TOOLS = [getBranchesTool, saveBranchTool, assignSaleBranchTool];
+const syncFlexTool = defineTool({
+  name: 'sync_flex_by_stock',
+  section: 'subir',
+  title: 'Poner Flex al día con el stock de las sucursales',
+  description:
+    'En una cuenta con sucursales con Flex, prende o apaga Envíos Flex en Mercado Libre en las publicaciones que lo tienen distinto de lo que les toca por el stock de las sucursales con Flex (get_branches, distinto_en_el_canal). Es lo mismo que hace sola la pasada de cada hora, pero ahora: sirve después de prender Flex en una sucursal o de cargar mucho stock, cuando quedan muchas por cambiar. Primero apaga las que ofrecen Flex sin stock. Cambia las que entran en una vuelta, unos 25 segundos, y dice cuántas quedan: volvé a llamar hasta que quedan sea 0. No toca las que se cambiaron a mano. Cambia Mercado Libre de verdad: antes, decile a la persona cuántas son y esperá que confirme.',
+  input: z.object({ cuenta: accountArg }),
+  readOnly: false,
+  destructive: true,
+  async run(ctx, args) {
+    const account = await resolveAccount(ctx, args.cuenta);
+    if ((await ctx.db.branch.count({ where: { accountId: account.id, flex: true } })) === 0) throw new McpToolError('Ninguna sucursal de la cuenta tiene Flex prendido: Flex se cambia a mano.');
+    const r = await syncFlex(ctx.db, { publicationIds: await accountPublications(ctx.db, account.id), userId: ctx.userId, budgetMs: FLEX_BUDGET_MS });
+    const titles = r.failed.length ? new Map((await ctx.db.publication.findMany({ where: { id: { in: r.failed.map((f) => f.publicationId) } }, select: { id: true, externalId: true } })).map((p) => [p.id, p.externalId])) : new Map();
+    return {
+      prendido_en: r.changed.filter((c) => c.on).length,
+      apagado_en: r.changed.filter((c) => !c.on).length,
+      quedan: r.left ?? 0,
+      ...(r.failed.length > 0 ? { no_se_pudieron: r.failed.slice(0, 20).map((f) => ({ publicacion: titles.get(f.publicationId) ?? f.publicationId, motivo: f.message })), aviso_de_las_que_fallan: 'Las que el canal rechaza no se vuelven a probar hasta el día siguiente.' } : {}),
+      ...((r.left ?? 0) > 0 ? { aviso: 'Quedan publicaciones: volvé a llamar.' } : {}),
+    };
+  },
+});
+
+export const BRANCH_TOOLS = [getBranchesTool, saveBranchTool, assignSaleBranchTool, syncFlexTool];
