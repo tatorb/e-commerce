@@ -77,7 +77,7 @@ describe('promociones: si una forma de cobro entra a una oferta', () => {
     expect(marginAt(eco({ listPrice: list }), d.price)).toBeCloseTo(d.marginPct, 1);
     // Buscando casi lo mismo que deja el precio publicado, va el 5 %.
     const small = decideOwnDiscount({ eco: eco({ listPrice: list }), targetMarginPct: 29, floorMarginPct: 10 });
-    expect(small).toMatchObject({ in: true, capped: true, discountPct: 5 });
+    expect(small).toMatchObject({ in: true, capped: false, discountPct: 5, note: expect.stringContaining('descuento más chico') });
     // Un precio publicado que ya deja el piso justo no aguanta ni el 5 %.
     const tight = priceForMargin(eco(), 11)!;
     expect(decideOwnDiscount({ eco: eco({ listPrice: tight }), targetMarginPct: 15, floorMarginPct: 10 })).toMatchObject({ in: false, reason: 'BELOW_FLOOR' });
@@ -181,7 +181,7 @@ describe('promociones: el almanaque', () => {
     const mature = { ...NO_TAGS, lifecycle: 'MATURE' as const, competition: 'PRICE_FIGHT' as const };
     const fight = planSlots(input({ tags: mature, competitorMarginPct: 17, events: [] })).filter((s) => s.layer === 'BASE');
     expect(fight.length).toBeGreaterThan(0);
-    expect(fight[0]).toMatchObject({ targetMarginPct: 17, name: 'Base, para igualar a la competencia' });
+    expect(fight[0]).toMatchObject({ targetMarginPct: 17, name: 'Descuento propio, para igualar a la competencia' });
     // Nunca debajo del piso, aunque el competidor esté más abajo.
     expect(planSlots(input({ tags: mature, competitorMarginPct: 4, events: [] })).find((s) => s.layer === 'BASE')!.targetMarginPct).toBe(10);
     // Si ya está más barata que el competidor, no hace falta base.

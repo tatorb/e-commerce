@@ -1703,7 +1703,7 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     const q = await pub('MLA2');
     await db.publication.update({ where: { id: q.id }, data: { pipelineStatus: 'IN_PIPELINE', pipelineStep: 'PRICE' } });
     await db.pipelineMovement.create({ data: { publicationId: q.id, step: 'PRICE' } });
-    expect(await db.$transaction((tx) => advanceStep(tx, { publicationId: q.id, expected: 'PRICE', userId: null }))).toEqual({ step: 'IMAGES' });
+    expect(await db.$transaction((tx) => advanceStep(tx, { publicationId: q.id, expected: 'PRICE', userId: null }))).toEqual({ step: 'PROMOTIONS' });
   });
   it('la garantía: se lee del canal, Claude la carga contando antes, y se sube sin perder los demás términos', async () => {
     process.env.DATABASE_URL ??= url;

@@ -142,12 +142,9 @@ export function decideOwnDiscount(args: { eco: OptionEconomics; targetMarginPct:
   const wanted = priceForMargin(eco, args.targetMarginPct, null, list)!;
   // El descuento más grande que no baja de ese precio: el redondeo queda a favor de la tienda.
   let pct = pctUpToPrice(list, wanted) ?? 0;
-  let capped = false;
-  if (pct < OWN_DISCOUNT_RANGE.min) {
-    // El precio publicado ya deja menos que lo buscado, o casi: va el descuento más chico que acepta el canal.
-    pct = OWN_DISCOUNT_RANGE.min;
-    capped = true;
-  }
+  // El precio publicado ya deja menos que lo buscado, o casi: va el descuento más chico que acepta el canal.
+  const smallest = pct < OWN_DISCOUNT_RANGE.min;
+  if (smallest) pct = OWN_DISCOUNT_RANGE.min;
   if (pct > OWN_DISCOUNT_RANGE.max) pct = OWN_DISCOUNT_RANGE.max;
   const price = dealPrice(list, pct);
   const margin = marginAt(eco, price, null, list)!;
@@ -160,7 +157,8 @@ export function decideOwnDiscount(args: { eco: OptionEconomics; targetMarginPct:
       marginPct: round2(margin),
     };
   }
-  return { in: true, capped, price, discountPct: pct, marginPct: round2(margin), note: capped ? `Va el descuento más chico que acepta el canal: deja ${pctText(margin)}.` : null };
+  // No es un tope del canal: es el descuento mínimo. Entra, y lo dice.
+  return { in: true, capped: false, price, discountPct: pct, marginPct: round2(margin), note: smallest ? `Va el descuento más chico que acepta el canal, ${pctText(pct)}: deja ${pctText(margin)}.` : null };
 }
 
 /**

@@ -41,6 +41,7 @@ export type OverviewRow = {
   objective: Objective | null;
   // Cuántas publicaciones tiene en el canal, una por forma de cobro de cada medida.
   options: number;
+  // Cuántas de sus publicaciones están adentro de alguna oferta, por entrar a alguna, afuera de alguna y con algún error.
   on: number;
   planned: number;
   out: number;
@@ -66,7 +67,7 @@ export async function loadOverview(db: Db, accountId: string, filter: OverviewFi
     },
   });
   const states = await db.$queryRaw<{ productId: string; state: string; n: bigint }[]>`
-    SELECT s."productId", i.state, COUNT(*) AS n
+    SELECT s."productId", CASE WHEN i.state IN ('ON', 'SCHEDULED') THEN 'IN' ELSE i.state END AS state, COUNT(DISTINCT i."publicationId") AS n
     FROM promotion_slot_items i JOIN promotion_slots s ON s.id = i."slotId"
     WHERE s."accountId" = ${accountId} AND s.finish > ${now} AND NOT s.cancelled
     GROUP BY 1, 2`;
@@ -87,7 +88,7 @@ export async function loadOverview(db: Db, accountId: string, filter: OverviewFi
       tags,
       objective: objectiveOf(tags),
       options: p.publications.length,
-      on: (c.ON ?? 0) + (c.SCHEDULED ?? 0),
+      on: c.IN ?? 0,
       planned: c.PLANNED ?? 0,
       out: c.OUT ?? 0,
       failed: c.FAILED ?? 0,

@@ -24,7 +24,10 @@ describe('pasos del pipeline', () => {
     expect(previousStep('QA')).toBe('DESCRIPTION');
     expect(nextStep('QA')).toBe('PRICE');
     expect(previousStep('PRICE')).toBe('QA');
-    expect(nextStep('PRICE')).toBe('IMAGES');
+    // Promociones va después de Precio, separado de él.
+    expect(nextStep('PRICE')).toBe('PROMOTIONS');
+    expect(previousStep('PROMOTIONS')).toBe('PRICE');
+    expect(nextStep('PROMOTIONS')).toBe('IMAGES');
     expect(nextStep('IMAGES')).toBe('TEXT_IMAGES');
     expect(nextStep('MEDIA')).toBe('PUBLISH');
     expect(nextStep('PUBLISH')).toBeNull();

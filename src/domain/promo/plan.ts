@@ -156,7 +156,7 @@ export function planSlots(input: PlanInput): PlannedSlot[] {
       const overEvent = fromRecipe !== null && next ? Math.max(fromRecipe, eventMargin + rules.timing.baseOverEventPct) : fromRecipe;
       const fromFight = fight ? Math.max(t.floorMarginPct, Math.round(input.competitorMarginPct! * 100) / 100) : null;
       const margin = overEvent !== null && fromFight !== null ? Math.min(overEvent, fromFight) : (overEvent ?? fromFight)!;
-      out.push({ layer: 'BASE', kind: 'OWN_DISCOUNT', group: null, name: fromFight !== null && margin === fromFight ? 'Base, para igualar a la competencia' : 'Base', eventId: null, start: cursor, finish, targetMarginPct: margin });
+      out.push({ layer: 'BASE', kind: 'OWN_DISCOUNT', group: null, name: fromFight !== null && margin === fromFight ? 'Descuento propio, para igualar a la competencia' : 'Descuento propio', eventId: null, start: cursor, finish, targetMarginPct: margin });
       cursor = finish;
     }
   }

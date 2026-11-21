@@ -92,6 +92,8 @@ import { loadSaleOptions } from '@/lib/sale-options';
 import { SaleOptionsCard } from '@/components/sale-options/SaleOptionsCard';
 import { OptionTableCard } from '@/components/pipeline/price/OptionTableCard';
 import { PublicationPromotions } from '@/components/publication/PublicationPromotions';
+import { PublicationPromoBlock } from '@/components/promo/PublicationPromoBlock';
+import { loadPromoPanelOf } from '@/lib/promo/panel';
 import { campaignMarginFor, loadPriceStep } from '@/lib/pricing';
 
 export const dynamic = 'force-dynamic';
@@ -230,6 +232,8 @@ export default async function PublicationPage({
         timeZone={tz}
       />
     ) : null;
+  // El bloque Promociones: las etiquetas del producto y el almanaque de esta forma de cobro.
+  const promoPanel = face !== 'historial' && can(user.access, 'promociones', 'read') ? await loadPromoPanelOf(prisma, account.id, p.id).catch(() => null) : null;
   const compat = face !== 'historial' ? await loadCompatibilityView(prisma, account.id, p.id) : null;
   const [others, history, knowledge, qa, tasks, people, stockPlans, factsOf, family, covers, notes, measureChoice] = await Promise.all([
     prisma.publication.findMany({
@@ -657,6 +661,7 @@ export default async function PublicationPage({
         ) : null}
 
         {p.externalId ? <VisitsCard visits={visits} error={visitsError} channelName={channelName} timeZone={tz} /> : null}
+        {promoPanel ? <PublicationPromoBlock accountSlug={account.slug} timeZone={tz} publicationId={p.id} data={promoPanel} /> : null}
         {sales ? <SalesHistoryCard accountSlug={account.slug} history={sales} timeZone={tz} of="esta publicación" search={p.externalId} /> : null}
 
         <SectionCard
