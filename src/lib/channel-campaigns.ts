@@ -115,6 +115,25 @@ export async function cancelCampaign(db: PrismaClient, args: { accountId: string
   if (r.count === 0) throw new CampaignError('Ese pedido ya no está en Por subir.');
 }
 
+const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/** Si el pedido es de alguna de esas campañas, dichas por su ref o por su nombre. */
+export function matchesCampaign(r: Pick<PendingCampaign, 'ref' | 'name'>, wanted: string[]): boolean {
+  return wanted.some((w) => r.ref === w.trim() || same(r.name, w));
+}
+
+/**
+ * Saca de Por subir lo pedido de unas publicaciones, sin mandarlo: con
+ * campaigns, solo esas campañas (por su ref o su nombre); sin decirlo, todo.
+ * Devuelve lo que sacó.
+ */
+export async function cancelPendingCampaigns(db: PrismaClient, args: { accountId: string; publicationIds: string[]; campaigns?: string[] }): Promise<PendingCampaign[]> {
+  const owned = await db.publication.findMany({ where: { id: { in: args.publicationIds }, store: { accountId: args.accountId } }, select: { id: true } });
+  const gone = (await pendingCampaigns(db, owned.map((p) => p.id))).filter((r) => !args.campaigns || matchesCampaign(r, args.campaigns));
+  if (gone.length > 0) await db.campaignRequest.deleteMany({ where: { id: { in: gone.map((r) => r.id) } } });
+  return gone;
+}
+
 /** Lo manda al canal y lo anota en el Registro. Lanza PublishError o ConnectError si no se pudo. */
 async function send(db: PrismaClient, p: Awaited<ReturnType<typeof loadPublication>>, publisher: ChannelPublisher, choice: CampaignChoice, userId: string | null) {
   const record = (kind: 'SENT' | 'REJECTED', message: string | null) =>
@@ -160,8 +179,12 @@ export async function sendCampaignNow(
  * pidió. Lo que sale bien deja de estar pendiente; lo que el canal no acepta
  * queda con su motivo. Una conexión cortada corta el resto.
  */
-export async function sendPendingCampaigns(db: PrismaClient, args: { accountId: string; publicationId: string; userId: string | null }): Promise<CampaignOutcome[]> {
-  const pending = await pendingCampaigns(db, [args.publicationId]);
+export async function sendPendingCampaigns(
+  db: PrismaClient,
+  // only: solo esas campañas, por su ref o su nombre; las demás quedan pedidas.
+  args: { accountId: string; publicationId: string; userId: string | null; only?: string[] },
+): Promise<CampaignOutcome[]> {
+  const pending = (await pendingCampaigns(db, [args.publicationId])).filter((r) => !args.only || matchesCampaign(r, args.only));
   if (pending.length === 0) return [];
   const p = await loadPublication(db, args.accountId, args.publicationId);
   const publisher = checkPublisher(p);

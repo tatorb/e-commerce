@@ -63,7 +63,8 @@ describe('herramientas de escritura en la lista', () => {
     expect(tools.get('set_units_per_sale')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('sync_flex_by_stock')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('set_stock_bulk')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
-    expect(tools.size).toBe(124);
+    expect(tools.get('cancel_campaign_request')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+    expect(tools.size).toBe(125);
   });
 });
 
