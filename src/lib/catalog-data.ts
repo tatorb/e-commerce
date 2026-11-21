@@ -197,6 +197,8 @@ export async function saveCatalogData(
     values: Record<string, string | string[] | null | undefined>;
     // Solo esta medida de la familia: para los campos que cambian con la medida, como el diámetro.
     onlyThis?: boolean;
+    // Desde el formulario, que manda todos los campos: a las demás medidas van solo los que cambiaron acá, así no se pisa lo que cada medida tiene distinto.
+    onlyChanged?: boolean;
   },
 ) {
   // Cualquier categoría del canal: si es un código que la app todavía no tiene, se lee del canal y se guarda.
@@ -242,10 +244,13 @@ export async function saveCatalogData(
       const merged = mergeCatalogAttributes(attributes, category.fields, values);
       await tx.publication.update({ where: { id: pub.id }, data: { attributes: merged } });
       // En cada medida cambian los mismos campos; lo demás de cada una queda como estaba.
-      for (const other of args.onlyThis ? [] : await tx.publication.findMany({ where: { id: { in: members.filter((id) => id !== pub.id) } }, select: { id: true, attributes: true } })) {
+      const before = readCatalogValues(editableFields(category), attributes);
+      const shared = args.onlyChanged ? Object.fromEntries(Object.entries(values).filter(([id, v]) => (before[id] ?? null) !== (v ?? null))) : values;
+      const others = args.onlyThis || Object.keys(shared).length === 0 ? [] : await tx.publication.findMany({ where: { id: { in: members.filter((id) => id !== pub.id) } }, select: { id: true, attributes: true } });
+      for (const other of others) {
         await tx.publication.update({
           where: { id: other.id },
-          data: { attributes: mergeCatalogAttributes(parseNameValueList(other.attributes), category.fields, values) },
+          data: { attributes: mergeCatalogAttributes(parseNameValueList(other.attributes), category.fields, shared) },
         });
       }
       return { category: ref(category), source, values: readCatalogValues(editableFields(category), merged) };

@@ -950,7 +950,7 @@ const saveCatalogTool = defineTool({
       )
       .max(30)
       .optional()
-      .describe('En una familia, los campos que cambian con la medida, como el diámetro externo: el valor de cada medida. Se guarda solo en esa medida; create_in_channel y push_catalog_data mandan el de cada una.'),
+      .describe('En una familia, los campos que cambian con la medida: el valor de cada medida. Sirve para cualquier campo, por ejemplo el diámetro externo o la sobremedida. Se guarda solo en esa medida, en su publicación y en sus opciones de venta, sea o no la principal de la familia; create_in_channel y push_catalog_data mandan a cada una el suyo. Si una medida no es de la familia, no se guarda nada y lo dice.'),
   }),
   readOnly: false,
   destructive: true,
@@ -962,22 +962,31 @@ const saveCatalogTool = defineTool({
     }
     // Las medidas, antes de guardar nada: si alguna no está en la familia, no se guarda.
     const perMeasure: { id: string; values: Record<string, string | string[] | null> }[] = [];
+    const savedIn: { medida: string; publicaciones: string[] }[] = [];
     if (args.por_medida?.length) {
       const family = await familyOf(ctx.db, id);
       if (!family) throw new McpToolError('La publicación no es de una familia: los valores van en valores.');
       const p = await ctx.db.publication.findUniqueOrThrow({ where: { id }, select: { product: { select: { variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } } } } } });
       const measures = measuresOf(p.product.variants);
-      const norm = (x: string) => x.replace(/\s+/g, '').replace(/,/g, '.').toLowerCase();
+      const norm = (x: string) => x.replace(/\s+/g, '').replace(/,/g, '.').replace(/mm$/i, '').toLowerCase();
       for (const m of args.por_medida) {
         const measure = measures.find((x) => norm(x.label) === norm(m.medida));
-        const member = measure ? family.members.find((x) => x.variantKey === measure.key) : undefined;
-        if (!member) throw new McpToolError(`La familia no tiene la medida «${m.medida}». Tiene ${measures.filter((x) => family.members.some((y) => y.variantKey === x.key)).map((x) => x.label).join(', ')}.`);
-        perMeasure.push({ id: member.id, values: m.valores });
+        // Todas las publicaciones de esa medida: la de la medida y sus opciones de venta, primero la de la medida.
+        const own = measure ? family.members.filter((x) => x.variantKey === measure.key).sort((a, b) => Number(a.mainOptionId !== null) - Number(b.mainOptionId !== null)) : [];
+        if (own.length === 0) throw new McpToolError(`La familia no tiene la medida «${m.medida}». Tiene ${measures.filter((x) => family.members.some((y) => y.variantKey === x.key)).map((x) => x.label).join(', ')}. No se guardó nada.`);
+        for (const member of own) perMeasure.push({ id: member.id, values: m.valores });
+        savedIn.push({ medida: measure!.label, publicaciones: own.map((x) => x.externalId ?? x.id) });
       }
     }
     if (args.categoria !== undefined || Object.keys(values).length > 0) await saveCatalogData(ctx.db, { publicationId: id, category: args.categoria, values });
     for (const m of perMeasure) await saveCatalogData(ctx.db, { publicationId: m.id, values: m.values, onlyThis: true });
-    return { listo: true, datos_de_catalogo: catalogForClaude(await loadCatalogData(ctx.db, id)), link_app: appLink(ctx, account, id) };
+    return {
+      listo: true,
+      // En qué publicaciones quedó lo de cada medida: la de la medida y sus opciones de venta.
+      ...(savedIn.length > 0 ? { guardado_por_medida: savedIn } : {}),
+      datos_de_catalogo: catalogForClaude(await loadCatalogData(ctx.db, id)),
+      link_app: appLink(ctx, account, id),
+    };
   },
 });
 

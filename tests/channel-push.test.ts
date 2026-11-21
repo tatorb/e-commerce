@@ -764,6 +764,73 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     expect(after.datos_de_catalogo.campos_distintos_del_canal).not.toContain('CLUTCH_TYPE');
   });
 
+  it('desde Claude: por_medida guarda en cada medida de la familia, sea o no la principal, también en sus opciones de venta, y al subir va a cada una el suyo', async () => {
+    // MLA1 es la STD y la principal; MLA3 es la 0,50; MLA2 es una opción de venta de la 0,50.
+    await db.productVariant.createMany({ data: [{ productId, measure: 'STD', position: 0 }, { productId, measure: '0,50', position: 1 }] });
+    for (const code of ['MLA2', 'MLA3']) Object.assign(items[code], { category_id: 'MLA373460', attributes: [{ id: 'CLUTCH_TYPE', name: 'Tipo de embrague', value_name: 'Monodisco' }], last_updated: '2026-11-21T10:00:00.000Z' });
+    const [std, option, half] = [await pub('MLA1'), await pub('MLA2'), await pub('MLA3')];
+    await db.publication.update({ where: { id: std.id }, data: { variantKey: variantKey({ sku: null, measure: 'STD' }) } });
+    await db.publication.update({ where: { id: half.id }, data: { variantKey: variantKey({ sku: null, measure: '0,50' }) } });
+    await db.publication.update({ where: { id: option.id }, data: { variantKey: variantKey({ sku: null, measure: '0,50' }), mainOptionId: half.id } });
+    await db.listingFamily.create({ data: { storeId, productId, channelFamilyId: 'FAM-M', leadId: std.id, members: { connect: [{ id: std.id }, { id: half.id }, { id: option.id }] } } });
+    for (const x of [option, half]) await readOne(db, { accountId, publicationId: x.id });
+    await db.user.create({ data: { id: 'u-medidas', email: 'medidas@ejemplo.com', name: 'Persona de prueba', isAdmin: true } });
+    const ctx: McpContext = { db, userId: 'u-medidas', access: { isAdmin: true, permissions: {}, accountIds: [] }, baseUrl: 'https://app.ejemplo.com' };
+    const { WRITE_TOOLS } = await import('@/lib/mcp/write-tools');
+    const { READ_TOOLS } = await import('@/lib/mcp/read-tools');
+    const { PUSH_TOOLS } = await import('@/lib/mcp/push-tools');
+    const tools = [...WRITE_TOOLS, ...READ_TOOLS, ...PUSH_TOOLS];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const run = async (name: string, args: Record<string, unknown>): Promise<any> => {
+      const t = tools.find((x) => x.name === name)!;
+      return t.run(ctx, t.input.parse({ cuenta: 'prueba', ...args }));
+    };
+    const saved = async (code: string) => (await pub(code)).attributes as { name: string; value: string }[];
+    const clutch = async (code: string) => (await saved(code)).find((a) => a.name === 'Tipo de embrague')?.value ?? null;
+
+    // Una medida que no es de la familia: lo dice y no guarda nada, tampoco la que sí está.
+    await run('save_catalog_data', { publicacion: half.id, categoria: 'MLA373460' });
+    await expect(
+      run('save_catalog_data', { publicacion: half.id, por_medida: [{ medida: 'STD', valores: { CLUTCH_TYPE: 'Bidisco' } }, { medida: '1,00', valores: { CLUTCH_TYPE: 'Bidisco' } }] }),
+    ).rejects.toThrow('La familia no tiene la medida «1,00». Tiene STD, 0,50. No se guardó nada.');
+    expect(await clutch('MLA1')).toBe('Monodisco');
+
+    // Pedido desde la 0,50, que no es la principal: guarda las dos medidas, cada una con lo suyo.
+    const r = await run('save_catalog_data', {
+      publicacion: half.id,
+      por_medida: [
+        { medida: 'STD', valores: { CLUTCH_TYPE: 'Monodisco', INCLUDES_DISC: 'No' } },
+        { medida: '0,50 mm', valores: { CLUTCH_TYPE: 'Bidisco', INCLUDES_DISC: 'Sí' } },
+      ],
+    });
+    expect(r.guardado_por_medida).toEqual([
+      { medida: 'STD', publicaciones: ['MLA1'] },
+      { medida: '0,50', publicaciones: ['MLA3', 'MLA2'] },
+    ]);
+    expect(r.datos_de_catalogo.por_medida).toEqual([
+      { medida: 'STD', publicacion: 'MLA1', valores: { 'Tipo de embrague': 'Monodisco', 'Incluye disco': 'No' } },
+      { medida: '0,50', publicacion: 'MLA3', valores: { 'Tipo de embrague': 'Bidisco', 'Incluye disco': 'Sí' } },
+    ]);
+    expect([await clutch('MLA1'), await clutch('MLA3'), await clutch('MLA2')]).toEqual(['Monodisco', 'Bidisco', 'Bidisco']);
+    // Se lee igual desde cualquier medida.
+    expect((await run('get_publication', { publicacion: std.id })).datos_de_catalogo.por_medida).toEqual(r.datos_de_catalogo.por_medida);
+
+    // Guardar el formulario de la principal, que manda todos sus campos, no pisa lo que la otra medida tiene distinto.
+    await saveCatalogData(db, { publicationId: std.id, values: { CLUTCH_TYPE: 'Monodisco', INCLUDES_DISC: 'No', SPLINES_NUMBER: '24' }, onlyChanged: true });
+    expect([await clutch('MLA1'), await clutch('MLA3'), await clutch('MLA2')]).toEqual(['Monodisco', 'Bidisco', 'Bidisco']);
+    // El campo que sí cambió va a todas.
+    expect((await saved('MLA3')).some((a) => a.value === '24')).toBe(true);
+
+    // Al subir, a cada publicación le llega el valor de su medida.
+    writes.length = 0;
+    await run('push_catalog_data', { publicaciones: [std.id] });
+    const sent = Object.fromEntries(writes.filter((w) => w.method === 'PUT').map((w) => [w.path, (w.body as { attributes: { id: string; value_name: string }[] }).attributes.find((a) => a.id === 'CLUTCH_TYPE')?.value_name ?? null]));
+    // La STD ya tenía Monodisco en el canal: de ese dato no se le manda nada, solo lo que cambió.
+    expect(sent).toEqual({ '/items/MLA1': null, '/items/MLA3': 'Bidisco', '/items/MLA2': 'Bidisco' });
+    expect((await pub('MLA3')).channelCopy?.attributes).toContainEqual({ name: 'Tipo de embrague', value: 'Bidisco' });
+    expect((await pub('MLA1')).channelCopy?.attributes).toContainEqual({ name: 'Tipo de embrague', value: 'Monodisco' });
+  });
+
   it('lo único distinto es un dato que la app sacó: si el canal cambia otro, sigue para subir y no para elegir', async () => {
     const p = await pub('MLA1');
     await saveCatalogData(db, { publicationId: p.id, category: 'MLA373460', values: { INCLUDES_DISC: null } });
