@@ -271,6 +271,13 @@ describe.skipIf(!url)('promociones: prender y apagar según el almanaque', () =>
     const changed = await classifyAccount(db, { accountId, apply: true, now });
     expect(changed.changed).toEqual([productId]);
     expect(await db.productPromotion.findUniqueOrThrow({ where: { productId } })).toMatchObject({ lifecycle: 'NEW', why: { lifecycle: expect.stringContaining('menos de 60') } });
+    // Con un competidor más barato que el sin cuotas, cargado en el producto o en una publicación: pelea por precio.
+    await db.competitorListing.create({ data: { publicationId: twelve, title: 'Otro vendedor', listPrice: listOf(0) + 50_000, position: 0 } });
+    expect((await classifyAccount(db, { accountId, apply: false, now })).products[0].competition).toMatchObject({ proposed: null, changes: false });
+    await db.competitorListing.create({ data: { productId, title: 'El más barato', listPrice: listOf(0), discountPct: 10, position: 1 } });
+    const fight = await classifyAccount(db, { accountId, apply: true, now });
+    expect(fight.products[0].facts.competitorPrice).toBe(Math.round(listOf(0) * 0.9));
+    expect(await db.productPromotion.findUniqueOrThrow({ where: { productId } })).toMatchObject({ competition: 'PRICE_FIGHT' });
   });
 
   it('a los días mide el antes y el después y lo deja en la bitácora', async () => {

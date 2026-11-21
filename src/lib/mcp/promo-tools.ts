@@ -690,12 +690,24 @@ const refreshCompetitors = defineTool({
       const settings = await loadPromoSettings(ctx.db, account.id);
       const days = settings.rules.classify.competitorDays;
       const overview = await loadOverview(ctx.db, account.id, { limit: 500, ...(args.solo_pelea_por_precio ? { competition: 'PRICE_FIGHT' as const } : {}) });
-      const { competitorOwner, loadCompetitors } = await import('@/lib/competitors');
+      // La competencia de todos en una sola consulta: la guardada en el producto y la guardada en sus publicaciones.
+      const productIds = overview.rows.map((r) => r.productId);
+      const pubs = await ctx.db.publication.findMany({ where: { productId: { in: productIds } }, select: { id: true, productId: true } });
+      const productOf = new Map(pubs.map((p) => [p.id, p.productId]));
+      const all = await ctx.db.competitorListing.findMany({
+        where: { OR: [{ productId: { in: productIds } }, { publicationId: { in: pubs.map((p) => p.id) } }] },
+        orderBy: { position: 'asc' },
+        select: { productId: true, publicationId: true, title: true, sellerName: true, brand: true, url: true, listPrice: true, discountPct: true, installments: true, surveyedAt: true },
+      });
+      const byProduct = new Map<string, typeof all>();
+      for (const c of all) {
+        const owner = c.productId ?? (c.publicationId ? productOf.get(c.publicationId) : undefined);
+        if (owner) byProduct.set(owner, [...(byProduct.get(owner) ?? []), c]);
+      }
       const now = Date.now();
       const rows = [];
       for (const r of overview.rows) {
-        const owner = await competitorOwner(ctx.db, r.publicationId);
-        const listed = owner ? await loadCompetitors(ctx.db, owner, { title: true, sellerName: true, brand: true, url: true, listPrice: true, discountPct: true, installments: true, surveyedAt: true }) : [];
+        const listed = byProduct.get(r.productId) ?? [];
         const oldest = listed.map((c) => c.surveyedAt?.getTime() ?? 0).sort((a, b) => a - b)[0];
         const age = listed.length === 0 ? null : Math.floor((now - (oldest ?? 0)) / 86_400_000);
         if (listed.length > 0 && age !== null && age < days && listed.every((c) => c.listPrice !== null)) continue;

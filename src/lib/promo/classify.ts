@@ -2,7 +2,6 @@ import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { finalPriceOf } from '@/domain/pricing';
 import { proposeCompetition, proposeLifecycle, type ProductFacts } from '@/domain/promo/classify';
 import { COMPETITION_LABEL, LIFECYCLE_LABEL, readTags, type Competition, type Lifecycle, type TagGroup } from '@/domain/promo/tags';
-import { competitorOwner, loadCompetitors } from '@/lib/competitors';
 import { loadPromoSettings } from './settings';
 
 // Clasificar los productos de la cuenta: la regla propone el ciclo de vida y
@@ -76,10 +75,23 @@ export async function classifyAccount(db: Db, args: { accountId: string; product
       WHERE st."accountId" = ${args.accountId} AND s.state <> 'CANCELLED'
       GROUP BY 1`,
   ]);
+  // La competencia de todos, en una sola consulta: la guardada en el producto y la guardada en sus publicaciones.
+  const competitors = await db.competitorListing.findMany({
+    where: { listPrice: { not: null }, OR: [{ productId: { in: products.map((p) => p.id) } }, { publicationId: { in: ids } }] },
+    select: { productId: true, publicationId: true, listPrice: true, discountPct: true },
+  });
+  const productOf = new Map(products.flatMap((p) => p.publications.map((x) => [x.id, p.id] as const)));
+  const cheapest = new Map<string, number>();
+  for (const c of competitors) {
+    const owner = c.productId ?? (c.publicationId ? productOf.get(c.publicationId) : undefined);
+    const price = Math.round(finalPriceOf(Number(c.listPrice), Number(c.discountPct ?? 0)));
+    if (owner && price > 0 && price < (cheapest.get(owner) ?? Infinity)) cheapest.set(owner, price);
+  }
   const visitOf = new Map(firstVisits.map((v) => [v.publicationId, v._min.day]));
   const saleOf = new Map(firstSales.map((s) => [s.productId, s.first]));
   const out: Classified[] = [];
   const changed: string[] = [];
+  const writes: (() => Promise<unknown>)[] = [];
   for (const p of products) {
     // La antigüedad: lo más viejo que se sabe de sus publicaciones, entre cuándo entró a la app, su primera visita y su primera venta.
     // Un producto recreado en otra categoría arranca de nuevo: cuenta solo desde que se recreó.
@@ -96,10 +108,6 @@ export async function classifyAccount(db: Db, args: { accountId: string; product
     const complete = p.publications.every((x) => x.store.saleReader?.historyDoneAt != null);
     // El precio sin cuotas de hoy, para comparar con el competidor.
     const flat = p.publications.find((x) => (x.channelCopy?.installments ?? x.installments) === 0 && x.channelCopy?.price != null);
-    const head = p.publications.find((x) => x.mainOptionId === null) ?? p.publications[0];
-    const owner = await competitorOwner(db, head.id);
-    const listed = owner ? await loadCompetitors(db, owner, { listPrice: true, discountPct: true }) : [];
-    const prices = listed.filter((c) => c.listPrice !== null).map((c) => Math.round(finalPriceOf(Number(c.listPrice), Number(c.discountPct ?? 0)))).filter((n) => n > 0);
     const facts: ProductFacts = {
       ageDays: known.length > 0 ? Math.floor((now.getTime() - Math.min(...known)) / DAY) : null,
       units90: complete ? (u90.get(p.id) ?? 0) : null,
@@ -107,7 +115,7 @@ export async function classifyAccount(db: Db, args: { accountId: string; product
       unitsClearance: complete ? (uClear.get(p.id) ?? 0) : null,
       stock: p.stockSince ? p.stock.reduce((n, s) => n + s.quantity, 0) : null,
       flatPrice: flat ? Math.round(finalPriceOf(Number(flat.channelCopy!.price), Number(flat.channelCopy!.discount ?? 0))) : null,
-      competitorPrice: prices.length > 0 ? Math.min(...prices) : null,
+      competitorPrice: cheapest.get(p.id) ?? null,
     };
     const tags = readTags(p.promotion);
     const manual = new Set((p.promotion?.manual ?? []) as TagGroup[]);
@@ -133,10 +141,10 @@ export async function classifyAccount(db: Db, args: { accountId: string; product
       ...(row.competition?.changes ? { competition: row.competition.proposed } : {}),
       why,
     };
-    if (changes || JSON.stringify(why) !== JSON.stringify(prevWhy)) {
-      await db.productPromotion.upsert({ where: { productId: p.id }, create: { productId: p.id, ...data }, update: data });
-    }
+    if (changes || JSON.stringify(why) !== JSON.stringify(prevWhy)) writes.push(() => db.productPromotion.upsert({ where: { productId: p.id }, create: { productId: p.id, ...data }, update: data }));
   }
+  // Se guarda de a varios a la vez: con cientos de productos, de a uno tarda demasiado.
+  for (let i = 0; i < writes.length; i += 10) await Promise.all(writes.slice(i, i + 10).map((w) => w()));
   if (args.apply && !args.productIds) await db.promotionSettings.upsert({ where: { accountId: args.accountId }, create: { accountId: args.accountId, classifiedAt: now }, update: { classifiedAt: now } });
   return { products: out, changed };
 }
