@@ -172,6 +172,12 @@ function RunLists({ run, accountSlug }: { run: InsurRunView; accountSlug: string
       </SectionCard>
       <SectionCard title="Costos sospechosos" count={s.suspicious.length} description="No se aplicaron: el costo de Insur está vacío, en 0, o es mayor que su precio del proveedor." collapsible>
         <SectionBody>
+          {s.suspicious.length > 0 ? (
+            <p className="text-sm">
+              Contra el costo que ya tiene la app: {s.suspiciousAgainst.near} parecidos, {s.suspiciousAgainst.lower} más de 30 % menores, {s.suspiciousAgainst.higher} más de 30 %
+              mayores y {s.suspiciousAgainst.none} sin costo en la app para comparar.
+            </p>
+          ) : null}
           <Listed rows={s.suspicious.slice(0, SHOWN)} empty="Ningún costo sospechoso." />
           {more(Math.min(s.suspicious.length, SHOWN), s.suspicious.length)}
         </SectionBody>
@@ -181,6 +187,14 @@ function RunLists({ run, accountSlug }: { run: InsurRunView; accountSlug: string
           <Listed rows={s.missing.slice(0, SHOWN)} empty="Todo lo cruzado apareció en la lectura." />
         </SectionBody>
       </SectionCard>
+      {s.listFields.length + s.fichaFields.length > 0 ? (
+        <SectionCard title="Campos que trae Insur" description="Solo los nombres, sin valores: sirve para saber qué datos hay, por ejemplo si un artículo dice en qué moneda está." collapsible>
+          <SectionBody>
+            {s.listFields.length > 0 ? <p className="break-words text-sm"><span className="font-medium">Listado:</span> {s.listFields.join(', ')}</p> : null}
+            {s.fichaFields.length > 0 ? <p className="break-words text-sm"><span className="font-medium">Ficha:</span> {s.fichaFields.join(', ')}</p> : null}
+          </SectionBody>
+        </SectionCard>
+      ) : null}
       {s.skipped.length > 0 ? (
         <SectionCard title="No se cargaron" count={s.skipped.length} collapsible>
           <SectionBody>

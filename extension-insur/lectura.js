@@ -35,9 +35,12 @@ export function stockDe(articulo) {
  */
 export function costoDe(articulo) {
   const costo = typeof articulo?.precioCosto === 'number' && Number.isFinite(articulo.precioCosto) ? articulo.precioCosto : null;
-  if (costo === null || costo <= 0) return { costo: null, sospechoso: true };
+  if (costo === null || costo <= 0) return { costo: null, sospechoso: true, veces: null };
   const proveedor = typeof articulo?.precioProveedor === 'number' && Number.isFinite(articulo.precioProveedor) ? articulo.precioProveedor : null;
-  return { costo, sospechoso: proveedor !== null && costo > proveedor };
+  // Cuántas veces el precio del proveedor es el costo, en tramos anchos: sirve
+  // para ver si están en monedas distintas, sin que se pueda deducir el precio.
+  const veces = proveedor !== null && proveedor > 0 && costo > proveedor ? (costo / proveedor <= 2 ? 'hasta 2' : costo / proveedor <= 100 ? 'entre 2 y 100' : 'más de 100') : null;
+  return { costo, sospechoso: proveedor !== null && costo > proveedor, veces };
 }
 
 const texto = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
@@ -57,8 +60,8 @@ export function paraLaApp(articulo, conCosto) {
     stock_santa_fe: stock.santaFe,
   };
   if (!conCosto) return base;
-  const { costo, sospechoso } = costoDe(articulo);
-  return { ...base, costo, costo_sospechoso: sospechoso };
+  const { costo, sospechoso, veces } = costoDe(articulo);
+  return { ...base, costo, costo_sospechoso: sospechoso, ...(veces ? { costo_veces_proveedor: veces } : {}) };
 }
 
 /**

@@ -169,13 +169,13 @@ async function correr(soloMostrar = false) {
   comprobar('un depósito en negativo va en 0, y el costo mayor que el del proveedor va marcado', sesenta.stock_cordoba === 0 && sesenta.costo_sospechoso === true && std.costo_sospechoso === false, JSON.stringify(sesenta));
   comprobar('la ficha viaja con sus datos permitidos', std.ficha?.precodigo === 'SP-169' && std.ficha.observaciones === 'LE FALTA CRAPODINA' && std.ficha.vehiculos === 'Renault MASTER' && enviados.find((a) => a.codigo === '00269BRG').ficha === undefined, JSON.stringify(std.ficha));
   // De la ficha viajan los nombres de sus campos, nunca sus valores.
-  const todo = JSON.stringify(app.recibido.map((b) => ({ ...b, campos_de_la_ficha: undefined })));
+  const todo = JSON.stringify(app.recibido.map((b) => ({ ...b, campos_de_la_ficha: undefined, campos_del_listado: undefined })));
   comprobar('a la app no viaja el precio del proveedor, el de lista, el final, el factor ni el margen', !/9191|9292|9393|9595|9696|precioProveedor|precioLista|precioFinal|margen|factor/.test(todo));
   comprobar('el costo viaja solo en los artículos cruzados', (todo.match(/8181/g) ?? []).length === 2 && std.costo === 8181);
   const sin = app.recibido.find((b) => b.accion === 'sin_producto');
   comprobar('los sin producto: solo con stock y de una marca de la app, sin costo', sin.total === 3 && sin.articulos.length === 3 && sin.articulos.every((a) => a.costo === undefined && a.stock_cordoba === 2), JSON.stringify(sin).slice(0, 300));
   const cerrar = app.recibido.at(-1);
-  comprobar('al cerrar cuenta los campos de la ficha, solo sus nombres', cerrar.campos_de_la_ficha.includes('precodigo') && cerrar.fichas_pendientes === 0 && typeof cerrar.duracion_ms === 'number', JSON.stringify(cerrar));
+  comprobar('al cerrar cuenta los campos de la ficha, solo sus nombres', cerrar.campos_de_la_ficha.includes('precodigo') && cerrar.campos_del_listado.includes('medidaNombre') && cerrar.fichas_pendientes === 0 && typeof cerrar.duracion_ms === 'number', JSON.stringify(cerrar));
   const guardado = JSON.stringify([await fondoVivo.evaluate(() => chrome.storage.local.get()), await fondoVivo.evaluate(() => chrome.storage.session.get())]);
   comprobar('en Chrome no queda guardado ningún precio', !/8181|9191|9292|9393|9494/.test(guardado), guardado.slice(0, 300));
 }

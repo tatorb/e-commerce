@@ -44,7 +44,7 @@ export async function POST(req: Request) {
         return NextResponse.json({ ok: true }, { headers });
       }
       case 'cerrar': {
-        const r = await closeRun(prisma, { accountId, runId, userId, durationMs: number(body.duracion_ms), pendingFichas: number(body.fichas_pendientes), fichaFields: body.campos_de_la_ficha, errors: body.errores });
+        const r = await closeRun(prisma, { accountId, runId, userId, durationMs: number(body.duracion_ms), pendingFichas: number(body.fichas_pendientes), fichaFields: body.campos_de_la_ficha, listFields: body.campos_del_listado, errors: body.errores });
         return NextResponse.json(
           {
             ok: true,

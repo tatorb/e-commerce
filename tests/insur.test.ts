@@ -193,7 +193,11 @@ describe('el cruce con Insur, sin la base', () => {
     expect(checkCost({ cost: 0, suspicious: false, current: 100 })).toMatchObject({ apply: false });
     expect(checkCost({ cost: -5, suspicious: false, current: 100 })).toMatchObject({ apply: false });
     // Mayor que el precio del proveedor: lo marca la extensión, sin mandar ese precio.
-    expect(checkCost({ cost: 120, suspicious: true, current: 100 })).toEqual({ apply: false, reason: 'El costo de Insur es mayor que su precio del proveedor.' });
+    expect(checkCost({ cost: 120, suspicious: true, current: 100 })).toEqual({ apply: false, reason: 'El costo de Insur es mayor que su precio del proveedor.', against: 'near' });
+    // Contra el costo de la app, sin montos: sirve para ver si el de Insur está en otra moneda.
+    expect(checkCost({ cost: 0.5, suspicious: true, current: 700 })).toMatchObject({ against: 'lower' });
+    expect(checkCost({ cost: 9000, suspicious: true, current: 700 })).toMatchObject({ against: 'higher' });
+    expect(checkCost({ cost: 9000, suspicious: true, current: null })).toMatchObject({ against: 'none' });
     expect(checkCost({ cost: 100, suspicious: false, current: 100 })).toEqual({ apply: true, cost: 100, changed: false, big: false });
     expect(checkCost({ cost: 125.456, suspicious: false, current: 100 })).toEqual({ apply: true, cost: 125.46, changed: true, big: false });
     // Más de 30 %: se aplica igual y queda marcado.
@@ -251,11 +255,14 @@ describe('la extensión, sin Chrome', () => {
   });
 
   it('el costo sospechoso: vacío, 0, negativo o mayor que el precio del proveedor', () => {
-    expect(costoDe(articulo())).toEqual({ costo: 150, sospechoso: false });
-    expect(costoDe(articulo({ precioCosto: 250 }))).toEqual({ costo: 250, sospechoso: true });
-    expect(costoDe(articulo({ precioCosto: 0 }))).toEqual({ costo: null, sospechoso: true });
-    expect(costoDe(articulo({ precioCosto: -3 }))).toEqual({ costo: null, sospechoso: true });
-    expect(costoDe(articulo({ precioCosto: null }))).toEqual({ costo: null, sospechoso: true });
+    expect(costoDe(articulo())).toEqual({ costo: 150, sospechoso: false, veces: null });
+    expect(costoDe(articulo({ precioCosto: 250 }))).toEqual({ costo: 250, sospechoso: true, veces: 'hasta 2' });
+    // Un costo cientos de veces mayor que el precio del proveedor: están en monedas distintas.
+    expect(costoDe(articulo({ precioCosto: 280000 }))).toMatchObject({ sospechoso: true, veces: 'más de 100' });
+    expect(paraLaApp(articulo({ precioCosto: 280000 }), true)).toMatchObject({ costo_veces_proveedor: 'más de 100' });
+    expect(costoDe(articulo({ precioCosto: 0 }))).toEqual({ costo: null, sospechoso: true, veces: null });
+    expect(costoDe(articulo({ precioCosto: -3 }))).toEqual({ costo: null, sospechoso: true, veces: null });
+    expect(costoDe(articulo({ precioCosto: null }))).toEqual({ costo: null, sospechoso: true, veces: null });
   });
 
   it('manda solo lo que tiene cruce, o su número de pieza en la app, o stock y una marca que la app tiene', () => {
@@ -409,7 +416,11 @@ describe.skipIf(!url)('el sistema de Insur en la base', () => {
       ['SP-169 040', 9, 70, true, 'changed'],
       ['SP-169 060', 9, 0, false, null],
     ]);
-    expect(first.summary.suspicious).toEqual([{ code: 'SP-169 060', product: 'Subconjunto SP-169', measure: '0,60', reason: 'El costo de Insur es mayor que su precio del proveedor.' }]);
+    expect(first.summary.suspicious).toEqual([
+      { code: 'SP-169 060', product: 'Subconjunto SP-169', measure: '0,60', reason: 'El costo de Insur es mayor que su precio del proveedor. La app no tiene un costo cargado para comparar.' },
+    ]);
+    expect(first.summary.suspiciousAgainst).toEqual({ near: 0, lower: 0, higher: 0, none: 1 });
+    expect(first.summary.fichaFields).toEqual(['precodigo', 'precioCosto']);
     // Ni el resumen ni los cruces guardan un precio.
     const saved = JSON.stringify([await db.insurSyncRun.findMany(), await db.insurArticleLink.findMany(), await db.insurArticleData.findMany()]);
     expect(saved).not.toMatch(/150|250/);
