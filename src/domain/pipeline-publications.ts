@@ -43,11 +43,12 @@ export async function createPipelinePublication(
     title?: string | null;
     userId: string | null;
   },
-): Promise<{ publicationId: string; productId: string; related: Duplicate[] }> {
+): Promise<{ publicationId: string; productId: string; related: Duplicate[]; usedExisting: { id: string; name: string } | null }> {
   const store = await tx.store.findFirst({ where: { id: args.storeId, accountId: args.accountId }, select: { id: true } });
   if (!store) throw new PipelineError('Elegí una tienda de esta cuenta.');
 
   let productId: string;
+  let usedExisting: { id: string; name: string } | null = null;
   if (args.productId) {
     const product = await tx.product.findFirst({ where: { id: args.productId, accountId: args.accountId }, select: { id: true } });
     if (!product) throw new PipelineError('El producto ya no existe en esta cuenta. Buscalo de nuevo.');
@@ -55,7 +56,10 @@ export async function createPipelinePublication(
   } else if (args.newProduct) {
     const parsed = productInputSchema.safeParse({ ...EMPTY_PRODUCT, ...args.newProduct });
     if (!parsed.success) throw new PipelineError(parsed.error.issues[0]?.message ?? 'Revisá los datos del producto.');
-    productId = (await writeProduct(tx, { accountId: args.accountId, productId: null, data: parsed.data })).id;
+    // Si ya hay un producto con esa marca y ese número de pieza, se usa ese.
+    const saved = await writeProduct(tx, { accountId: args.accountId, productId: null, data: parsed.data });
+    productId = saved.id;
+    usedExisting = saved.existing ?? null;
   } else {
     throw new PipelineError('Elegí un producto o cargá uno nuevo.');
   }
@@ -75,5 +79,5 @@ export async function createPipelinePublication(
     },
   });
   const added = await addToPipeline(tx, { accountId: args.accountId, publicationIds: [id], userId: args.userId });
-  return { publicationId: id, productId, related: added.related };
+  return { publicationId: id, productId, related: added.related, usedExisting };
 }

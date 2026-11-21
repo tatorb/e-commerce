@@ -1,3 +1,4 @@
+import { DuplicateProductError, findSameProduct } from './product-duplicates';
 import { settleProductCompetitors } from '@/lib/competitors';
 import { z } from 'zod';
 import type { Prisma } from '@/generated/prisma/client';
@@ -38,6 +39,9 @@ export async function updateProductInfo(tx: Tx, args: { accountId: string; produ
   const data = await resolveProductOptions(tx, args.accountId, args.data, undefined, current);
   const product = await tx.product.findFirst({ where: { id: productId, accountId: args.accountId }, select: { id: true } });
   if (!product) throw new Error('El producto no existe en esta cuenta.');
+  // No puede quedar igual a otro producto: la misma marca y el mismo número de pieza.
+  const same = await findSameProduct(tx, { accountId: args.accountId, brand: data.brand, partNumber: data.partNumber, exceptId: productId });
+  if (same) throw new DuplicateProductError(same);
   await tx.product.update({
     where: { id: productId },
     data: { productType: data.productType, brand: data.brand, partNumber: data.partNumber, line: data.line, origin: data.origin },

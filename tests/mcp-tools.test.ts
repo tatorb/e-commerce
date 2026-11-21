@@ -59,6 +59,7 @@ describe('lista de herramientas', () => {
       'list_category_clashes',
       'get_branches',
       'get_insur_sync',
+      'list_duplicate_products',
       'get_promotions',
       'get_promotion_settings',
       'review_invitations',

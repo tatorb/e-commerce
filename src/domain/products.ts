@@ -1,3 +1,4 @@
+import { DuplicateProductError, findSameProduct } from './product-duplicates';
 import { settleProductCompetitors } from '@/lib/competitors';
 import { z } from 'zod';
 import { resolveProductOptions } from '@/lib/product-options';
@@ -124,17 +125,20 @@ type SaveArgs = {
   importRunId?: string | null;
 };
 
+/** existing: no se creó uno nuevo, ya había uno con esa marca y ese número de pieza y se usa ese. */
+export type SavedProduct = { id: string; existing?: { id: string; name: string } };
+
 /**
  * Crea o actualiza un producto con todas sus partes. Las medidas,
  * compatibilidades y activos se reemplazan enteros: lo que llega es la
  * versión completa.
  */
-export async function saveProduct(db: PrismaClient, args: SaveArgs): Promise<{ id: string }> {
+export async function saveProduct(db: PrismaClient, args: SaveArgs): Promise<SavedProduct> {
   return db.$transaction((tx) => writeProduct(tx, args));
 }
 
 /** Lo mismo que saveProduct, dentro de una transacción que ya está abierta. */
-export async function writeProduct(tx: Tx, args: SaveArgs): Promise<{ id: string }> {
+export async function writeProduct(tx: Tx, args: SaveArgs): Promise<SavedProduct> {
   const { accountId, productId } = args;
   // El tipo y la marca, siempre de las listas de la cuenta. Lo que ya tenía y no cambia, queda.
   const current = productId ? await tx.product.findFirst({ where: { id: productId, accountId }, select: { productType: true, brand: true } }) : null;
@@ -152,6 +156,12 @@ export async function writeProduct(tx: Tx, args: SaveArgs): Promise<{ id: string
     notes: data.notes,
     specs: data.specs,
   };
+
+  // No puede haber dos productos de la misma marca y número de pieza.
+  const same = await findSameProduct(tx, { accountId, brand: fields.brand, partNumber: fields.partNumber, exceptId: productId });
+  // Al crear, se usa el que ya existe, sin tocarlo. Al cambiar uno, no se deja.
+  if (same && !productId) return { id: same.id, existing: same };
+  if (same) throw new DuplicateProductError(same);
 
   let id: string;
   let before: MeasureRow[] | null = null;
