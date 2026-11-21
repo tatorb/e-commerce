@@ -187,7 +187,7 @@ export function RulesForm({ accountSlug, thresholds, rules }: { accountSlug: str
         <div className="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Hasta dónde se arma el almanaque" suffix="días" value={timing.horizonDays} onChange={(v) => setTiming((t) => ({ ...t, horizonDays: v }))} />
           <Field label="Cada tramo de la base" suffix="días" value={timing.baseDays} onChange={(v) => setTiming((t) => ({ ...t, baseDays: v }))} hint="De 7 a 14: la base no se mueve antes. El canal no deja un descuento propio de más de 14 días." />
-          <Field label="Empujar baja" suffix="puntos" value={timing.pushStepPct} onChange={(v) => setTiming((t) => ({ ...t, pushStepPct: v }))} hint="Cuánto baja la rentabilidad buscada con la prioridad Empujar, sin pasar el piso." />
+          <Field label="Empujar baja en los picos" suffix="puntos" value={timing.pushStepPct} onChange={(v) => setTiming((t) => ({ ...t, pushStepPct: v }))} hint="Con la prioridad Empujar, cuánto menos de rentabilidad busca en las ofertas relámpago y del día, sin pasar el piso." />
           <Field label="La base deja más que el evento" suffix="puntos" value={timing.baseOverEventPct} onChange={(v) => setTiming((t) => ({ ...t, baseOverEventPct: v }))} hint="Así el descuento de la base queda por debajo del descuento del evento." />
           <Field label="Control de stock" suffix="unidades" value={timing.stockMin} onChange={(v) => setTiming((t) => ({ ...t, stockMin: v }))} hint="Con estas unidades o menos, la medida no entra a ofertas nuevas." />
           <Field label="Entrar a una campaña" suffix="días antes" value={timing.joinLeadDays} onChange={(v) => setTiming((t) => ({ ...t, joinLeadDays: v }))} hint="O antes, si la invitación vence primero." />

@@ -59,12 +59,17 @@ export function eventOf(c: ChannelCampaignInfo, events: CalendarEvent[]): Calend
   return events.find((e) => e.tier !== 'OWN' && c.start!.getTime() >= e.start.getTime() - DAY && c.finish!.getTime() <= e.finish.getTime() + DAY) ?? null;
 }
 
-/** La rentabilidad de una capa: la de la receta o la saludable, con "Empujar" un escalón más abajo, nunca debajo del piso. */
-export function targetMargin(recipeMargin: number | null, tags: PromoTags, rules: PromoRules, t: Thresholds): number {
-  const base = recipeMargin ?? t.healthyMarginPct;
-  const pushed = tags.priority === 'PUSH' ? base - rules.timing.pushStepPct : base;
-  return Math.max(t.floorMarginPct, Math.round(pushed * 100) / 100);
+/** La rentabilidad de una capa: la de la receta o la saludable, menos lo que se le baje, nunca debajo del piso. */
+export function targetMargin(recipeMargin: number | null, t: Thresholds, lessPct = 0): number {
+  const base = (recipeMargin ?? t.healthyMarginPct) - lessPct;
+  return Math.max(t.floorMarginPct, Math.round(base * 100) / 100);
 }
+
+// La prioridad comercial dice a qué ofertas del canal se anota el producto, por encima de lo que diga su receta.
+// Estacional: siempre a las campañas que propone el canal para cada fecha (Hot Sale, Black Friday, Navidad).
+// Empujar: además, a los picos (relámpago y oferta del día) cada vez que aparecen, y más a fondo: son los que prioriza.
+const joinsEvents = (tags: PromoTags) => tags.priority === 'SEASONAL' || tags.priority === 'PUSH';
+const joinsPeaks = (tags: PromoTags) => tags.priority === 'PUSH';
 
 /** La rentabilidad de un tramo de la base, según cuántos días faltan para el próximo evento. */
 function baseMargin(recipe: Recipe, daysToEvent: number | null): number | null {
@@ -104,26 +109,29 @@ export function planSlots(input: PlanInput): PlannedSlot[] {
   // Las campañas que ya tienen su franja, o que alguien decidió que no van.
   const taken = new Set(input.existing.filter((s) => s.group && (s.locked || s.cancelled || s.source === 'MANUAL')).map((s) => s.group!));
 
-  const eventsOn = recipe.events === 'always' || (recipe.events === 'with_sales' && input.hasSales);
-  const eventMargin = targetMargin(recipe.eventMarginPct, tags, rules, t);
+  const eventsOn = joinsEvents(tags) || recipe.events === 'always' || (recipe.events === 'with_sales' && input.hasSales);
+  const peaksOn = joinsPeaks(tags) || recipe.peaks;
+  const eventMargin = targetMargin(recipe.eventMarginPct, t);
+  // Empujar va más a fondo en los picos: baja un escalón la rentabilidad que busca, sin pasar el piso.
+  const peakMargin = targetMargin(recipe.peakMarginPct, t, joinsPeaks(tags) ? rules.timing.pushStepPct : 0);
 
   // Eventos, picos y por cantidad: una franja por cada campaña del canal.
   const eventStarts: Date[] = [];
   for (const c of input.campaigns) {
     if (c.finish && c.finish.getTime() <= today.getTime()) continue;
     const { layer, kind } = layerOfType(c.type);
-    const on = layer === 'PEAK' ? recipe.peaks : kind === 'VOLUME' ? recipe.volume : eventsOn;
+    const on = layer === 'PEAK' ? peaksOn : kind === 'VOLUME' ? recipe.volume : eventsOn;
     const event = layer === 'EVENT' ? eventOf(c, input.events) : null;
     const start = c.start ?? event?.start ?? today;
     if (layer === 'EVENT' && on) eventStarts.push(start);
     if (!on || taken.has(c.group)) continue;
-    const margin = layer === 'PEAK' ? targetMargin(recipe.peakMarginPct, tags, rules, t) : kind === 'VOLUME' ? Math.max(t.floorMarginPct, t.healthyMarginPct) : eventMargin;
+    const margin = layer === 'PEAK' ? peakMargin : kind === 'VOLUME' ? Math.max(t.floorMarginPct, t.healthyMarginPct) : eventMargin;
     out.push({ layer, kind, group: c.group, name: c.name, eventId: event?.id ?? null, start, finish: c.finish ?? event?.finish ?? horizon, targetMarginPct: margin });
   }
 
-  // Las fechas propias del rubro, para los estacionales: van con el descuento propio.
+  // Las fechas propias del rubro, para los que llevan eventos: van con el descuento propio.
   const ownTaken = new Set(input.existing.filter((s) => s.eventId && s.kind === 'OWN_DISCOUNT' && (s.locked || s.cancelled || s.source === 'MANUAL')).map((s) => s.eventId!));
-  const ownEvents = tags.priority === 'SEASONAL' ? input.events.filter((e) => e.tier === 'OWN' && e.finish.getTime() > today.getTime() && e.start.getTime() < horizon.getTime()) : [];
+  const ownEvents = eventsOn ? input.events.filter((e) => e.tier === 'OWN' && e.finish.getTime() > today.getTime() && e.start.getTime() < horizon.getTime()) : [];
   for (const e of ownEvents) {
     eventStarts.push(e.start);
     if (ownTaken.has(e.id)) continue;
@@ -151,7 +159,7 @@ export function planSlots(input: PlanInput): PlannedSlot[] {
         finish = clash.start;
       }
       const next = eventStarts.filter((s) => s.getTime() > cursor.getTime()).sort((a, b) => a.getTime() - b.getTime())[0] ?? null;
-      const fromRecipe = recipe.base ? targetMargin(baseMargin(recipe, next ? days(cursor, next) : null), tags, rules, t) : null;
+      const fromRecipe = recipe.base ? targetMargin(baseMargin(recipe, next ? days(cursor, next) : null), t) : null;
       // La base que lleva a un evento deja más rentabilidad que el evento: su descuento queda por debajo.
       const overEvent = fromRecipe !== null && next ? Math.max(fromRecipe, eventMargin + rules.timing.baseOverEventPct) : fromRecipe;
       const fromFight = fight ? Math.max(t.floorMarginPct, Math.round(input.competitorMarginPct! * 100) / 100) : null;

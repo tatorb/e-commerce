@@ -118,7 +118,9 @@ export async function dueActions(
       out.push(actionOf(i, 'OFF'));
     }
   }
-  return out;
+  // Primero los picos: duran horas y son lo que más apura.
+  const rank = (a: DueAction) => (a.layer === 'PEAK' ? 0 : 1);
+  return out.sort((a, b) => rank(a) - rank(b));
 }
 
 async function log(db: Db, args: { accountId: string; publicationId: string; slotItemId: string; kind: 'ON' | 'OFF' | 'SKIP' | 'ERROR'; text: string; auto: boolean; userId: string | null; data?: object }) {

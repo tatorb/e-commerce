@@ -488,7 +488,10 @@ function TagsCard({ accountSlug, grid, busy, run, runWith }: { accountSlug: stri
               </option>
             ))}
           </select>
-          <span className="block text-xs text-muted-foreground">Solo a mano. Empujar baja un escalón la rentabilidad buscada, sin pasar el piso. Estacional suma las fechas propias del rubro.</span>
+          <span className="block text-xs text-muted-foreground">
+            Solo a mano. Estacional: se anota siempre a las campañas que propone el canal para cada fecha, como Hot Sale, Black Friday o Navidad. Empujar: además entra a las ofertas relámpago y del día
+            cada vez que aparecen, y en esas va más a fondo. Sin prioridad, sigue la receta de su ciclo de vida.
+          </span>
         </label>
         <label className="flex items-start gap-2 text-sm">
           <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[hsl(var(--primary))]" checked={stockControl} onChange={(e) => setStockControl(e.target.checked)} />

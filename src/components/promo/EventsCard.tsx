@@ -44,7 +44,7 @@ export function EventsCard({ accountSlug, events }: { accountSlug: string; event
       title="Calendario de eventos"
       icon={<CalendarPlus />}
       count={events.length}
-      description="Los eventos del canal y las fechas propias del rubro. El almanaque reconoce la campaña del canal de cada evento por un texto de su nombre o por las fechas, y hace más fuerte la base al acercarse. Las fechas propias valen para los productos con prioridad Estacional."
+      description="Los eventos del canal y las fechas propias del rubro. El almanaque reconoce la campaña del canal de cada evento por un texto de su nombre o por las fechas, y hace más fuerte la base al acercarse. Las fechas propias valen para los productos que llevan eventos, y van con el descuento propio."
     >
       <ul className="divide-y text-sm">
         {events.length === 0 ? <li className="px-4 py-4 text-muted-foreground">Todavía no hay eventos cargados.</li> : null}

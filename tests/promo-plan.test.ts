@@ -276,11 +276,11 @@ describe.skipIf(!url)('promociones en la base', () => {
     expect(detail).toMatchObject({ producto: 'Subconjunto SP-9', objetivo: 'Sostener madurada', etiquetas: { ciclo_de_vida: 'Madurada', prioridad: 'Empujar' }, puestas_a_mano: ['ciclo_de_vida'] });
     expect(detail.medidas.map((m: { medida: string; formas_de_cobro: unknown[] }) => [m.medida, m.formas_de_cobro.length])).toEqual([['STD', 6], ['0,60 mm', 6]]);
     const slot = detail.franjas.find((f: { oferta: string }) => f.oferta === 'HOT SALE');
-    // Empujar baja un escalón desde lo saludable: 16 menos 2,5.
-    expect(slot).toMatchObject({ capa: 'Evento', origen: 'almanaque', rentabilidad_buscada_pct: 13.5 });
+    // En un evento, Empujar busca lo saludable: va más a fondo solo en los picos.
+    expect(slot).toMatchObject({ capa: 'Evento', origen: 'almanaque', rentabilidad_buscada_pct: 16 });
     const cell = slot.casilleros.find((c: { publicacion: string }) => c.publicacion === 'MLA100');
     expect(cell).toMatchObject({ forma_de_cobro: 'Sin cuotas', medida: 'STD', estado: 'Por entrar' });
-    expect(cell.rentabilidad_pct).toBeGreaterThanOrEqual(13.5);
+    expect(cell.rentabilidad_pct).toBeGreaterThanOrEqual(16);
     expect(slot.casilleros.find((c: { publicacion: string }) => c.publicacion === 'MLA212')).toMatchObject({ estado: 'Afuera: no invitada' });
 
     // Prohibir una forma de cobro: queda afuera con el motivo.

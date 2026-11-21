@@ -81,7 +81,7 @@ const timingSchema = z.object({
   horizonDays: z.number().int().min(14).max(365),
   // Cuánto dura cada tramo de la capa base: no se mueve antes.
   baseDays: z.number().int().min(7).max(14),
-  // Cuántos puntos de rentabilidad baja "Empujar", sin pasar el piso.
+  // Con la prioridad Empujar, cuántos puntos menos de rentabilidad busca en los picos, sin pasar el piso.
   pushStepPct: z.number().min(0).max(50),
   // Cuánto más de rentabilidad tiene que dejar la base que el evento al que lleva.
   baseOverEventPct: z.number().min(0).max(50),

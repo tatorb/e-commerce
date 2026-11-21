@@ -177,9 +177,31 @@ describe('promociones: el almanaque', () => {
     expect(kinds({ tags: { ...NO_TAGS, lifecycle: 'CLEARANCE' } })).toEqual(['BASE:VOLUME', 'PEAK:CAMPAIGN']);
   });
 
-  it('empujar baja un escalón sin pasar el piso; la competencia prende la base y fija cuánto baja', () => {
-    expect(targetMargin(null, { ...NO_TAGS, priority: 'PUSH' }, DEFAULT_RULES, DEFAULT_THRESHOLDS)).toBe(12.5);
-    expect(targetMargin(11, { ...NO_TAGS, priority: 'PUSH' }, DEFAULT_RULES, DEFAULT_THRESHOLDS)).toBe(10);
+  it('la prioridad dice a qué ofertas del canal se anota: estacional, siempre a los eventos; empujar, además a los picos y más a fondo', () => {
+    const volume = { group: 'VOLUME:P3', type: 'VOLUME', name: '3x2', start: day(-5), finish: day(20) };
+    const all = [deal, lightning, volume];
+    const of = (tags: PlanInput['tags'], over: Partial<PlanInput> = {}) => planSlots(input({ campaigns: all, tags, ...over }));
+    const layers = (slots: ReturnType<typeof planSlots>) => [...new Set(slots.filter((s) => s.kind === 'CAMPAIGN').map((s) => s.layer))].sort();
+    // Madurada, por su receta: eventos sí, picos no. A liquidar: picos sí, eventos no. Nueva sin ventas: sin eventos.
+    expect(layers(of({ ...NO_TAGS, lifecycle: 'MATURE' }))).toEqual(['EVENT']);
+    expect(layers(of({ ...NO_TAGS, lifecycle: 'CLEARANCE' }))).toEqual(['PEAK']);
+    // Estacional: siempre a las campañas del canal, diga lo que diga la receta. Los picos siguen a la receta.
+    expect(layers(of({ ...NO_TAGS, lifecycle: 'CLEARANCE', priority: 'SEASONAL' }))).toEqual(['EVENT', 'PEAK']);
+    expect(layers(of({ ...NO_TAGS, lifecycle: 'NEW', priority: 'SEASONAL' }, { hasSales: false }))).toEqual(['EVENT', 'PEAK']);
+    expect(layers(of({ ...NO_TAGS, lifecycle: 'MATURE', priority: 'SEASONAL' }))).toEqual(['EVENT']);
+    // Empujar: a los eventos y además a los picos, aunque la receta no los lleve.
+    const pushed = of({ ...NO_TAGS, lifecycle: 'MATURE', priority: 'PUSH' });
+    expect(layers(pushed)).toEqual(['EVENT', 'PEAK']);
+    // En el pico va más a fondo, un escalón debajo de lo saludable; en el evento, lo de siempre.
+    expect(pushed.find((s) => s.layer === 'PEAK')!.targetMarginPct).toBe(12.5);
+    expect(pushed.find((s) => s.layer === 'EVENT')!.targetMarginPct).toBe(15);
+    // El escalón nunca pasa el piso.
+    expect(targetMargin(null, DEFAULT_THRESHOLDS, 2.5)).toBe(12.5);
+    expect(targetMargin(11, DEFAULT_THRESHOLDS, 2.5)).toBe(10);
+    expect(targetMargin(null, DEFAULT_THRESHOLDS)).toBe(15);
+  });
+
+  it('la competencia prende la base y fija cuánto baja', () => {
     // Madurada no lleva base, salvo que pelee por precio y el competidor esté más barato.
     const mature = { ...NO_TAGS, lifecycle: 'MATURE' as const, competition: 'PRICE_FIGHT' as const };
     const fight = planSlots(input({ tags: mature, competitorMarginPct: 17, events: [] })).filter((s) => s.layer === 'BASE');
@@ -191,10 +213,12 @@ describe('promociones: el almanaque', () => {
     expect(planSlots(input({ tags: mature, competitorMarginPct: 35, events: [] }))).toEqual([]);
   });
 
-  it('las fechas propias del rubro son para los estacionales, con el descuento propio, y cortan la base', () => {
+  it('las fechas propias del rubro son para los que llevan eventos, con el descuento propio, y cortan la base', () => {
     const own: CalendarEvent = { id: 'e2', name: 'Día del mecánico', tier: 'OWN', start: day(5), finish: day(8), match: null };
-    expect(planSlots(input({ events: [own] })).some((s) => s.eventId === 'e2')).toBe(false);
-    const slots = planSlots(input({ events: [own], tags: { ...NO_TAGS, lifecycle: 'GROWING', priority: 'SEASONAL' } }));
+    // A liquidar no lleva eventos por su receta: tampoco las fechas propias, salvo que sea estacional.
+    expect(planSlots(input({ events: [own], tags: { ...NO_TAGS, lifecycle: 'CLEARANCE' } })).some((s) => s.eventId === 'e2')).toBe(false);
+    expect(planSlots(input({ events: [own], tags: { ...NO_TAGS, lifecycle: 'CLEARANCE', priority: 'SEASONAL' } })).some((s) => s.eventId === 'e2')).toBe(true);
+    const slots = planSlots(input({ events: [own] }));
     expect(slots.find((s) => s.eventId === 'e2')).toMatchObject({ layer: 'EVENT', kind: 'OWN_DISCOUNT', targetMarginPct: 15 });
     const base = slots.filter((s) => s.layer === 'BASE');
     expect(base[0]).toMatchObject({ start: today, finish: day(5) });
