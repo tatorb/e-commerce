@@ -86,12 +86,13 @@ export default async function SalesPage({ params, searchParams }: { params: Prom
             tone={s.withCost.profit >= 0 ? 'good' : 'bad'}
             hint={
               s.withCost.count > 0
-                ? `${s.withCost.marginPct !== null ? `${formatPercent(s.withCost.marginPct)} sobre el costo` : ''}${s.withoutCost > 0 ? `. ${plural(s.withoutCost, 'venta', 'ventas')} sin costo cargado` : ''}`
+                ? `${s.withCost.marginPct !== null ? `${formatPercent(s.withCost.marginPct)} sobre el costo` : ''}, en ${plural(s.withCost.count, 'venta', 'ventas')} con costo${s.withoutCost > 0 ? `. ${plural(s.withoutCost, 'venta', 'ventas')} sin costo cargado` : ''}`
                 : 'Cargá el costo de reposición en cada producto'
             }
             delta={{
               change: s.withCost.count > 0 && was.withCost.count > 0 ? amountChange(s.withCost.profit, was.withCost.profit) : null,
-              previous: was.withCost.count > 0 ? money(was.withCost.profit) : 'sin dato',
+              // La ganancia suma solo las ventas con el costo cargado: se dice de cuántas es cada una.
+              previous: was.withCost.count > 0 ? `${money(was.withCost.profit)} en ${plural(was.withCost.count, 'venta', 'ventas')} con costo` : 'sin dato',
             }}
           />
           <Figure
