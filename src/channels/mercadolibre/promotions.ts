@@ -162,3 +162,93 @@ export function withDetail(c: ChannelCampaign, ref: CampaignRef, raw: unknown): 
     listPrice: c.listPrice ?? positive(e.original_price),
   };
 }
+
+// ───────────────────────────── Toda la cuenta ─────────────────────────────
+
+// Las que se suman eligiendo el precio y, la relámpago, reservando unidades:
+// no llevan el código de la campaña, Mercado Libre las reconoce por el tipo.
+export const JOIN_BY_TYPE = new Set(['DOD', 'LIGHTNING']);
+// De estas solo se sale mientras están programadas: una vez activas no se pueden sacar.
+const LEAVE_ONLY_SCHEDULED = new Set(['DOD', 'LIGHTNING', 'SMART_LIGHTNING']);
+
+/** Una promoción de la cuenta (/seller-promotions/users/{id}), con lo que hace falta para leer sus ítems. */
+export type SellerPromotion = {
+  id: string;
+  type: string;
+  name: string | null;
+  status: string | null;
+  start: Date | null;
+  finish: Date | null;
+  // Hasta cuándo se puede aceptar la invitación.
+  deadline: Date | null;
+  channelPct: number | null;
+  sellerPct: number | null;
+};
+
+export function parseSellerPromotions(raw: unknown): SellerPromotion[] {
+  const results = isObj(raw) && Array.isArray(raw.results) ? raw.results.filter(isObj) : [];
+  const out: SellerPromotion[] = [];
+  for (const e of results) {
+    const id = str(e.id);
+    const type = str(e.type);
+    if (!id || !type || type === 'PRICE_DISCOUNT') continue;
+    const benefits = isObj(e.benefits) ? e.benefits : {};
+    out.push({
+      id,
+      type,
+      name: str(e.name),
+      status: str(e.status),
+      start: date(e.start_date),
+      finish: date(e.finish_date) ?? date(e.end_date),
+      deadline: date(e.deadline_date),
+      channelPct: pct(benefits.meli_percent) ?? pct(e.meli_percentage),
+      sellerPct: pct(benefits.seller_percent) ?? pct(e.seller_percentage),
+    });
+  }
+  return out;
+}
+
+/** Una publicación dentro de una promoción de la cuenta, en el formato neutro, con las unidades que pide reservar. */
+export type SweepItem = { externalId: string; type: string; deadline: Date | null; campaign: ChannelCampaign & { ref: string; group: string }; stock: { min: number | null; max: number | null } | null };
+
+/** Los ítems de una promoción (/seller-promotions/promotions/{id}/items) y por dónde seguir. */
+export function parsePromotionItems(promotion: SellerPromotion, raw: unknown): { items: SweepItem[]; next: string | null } {
+  const results = isObj(raw) && Array.isArray(raw.results) ? raw.results.filter(isObj) : [];
+  const paging = isObj(raw) && isObj(raw.paging) ? raw.paging : {};
+  const items: SweepItem[] = [];
+  for (const e of results) {
+    const externalId = str(e.id);
+    const status = CAMPAIGN_STATUS[str(e.status) ?? ''];
+    if (!externalId || !status) continue;
+    const ref: CampaignRef = { type: promotion.type, promotion: promotion.id, offer: str(e.offer_id) ?? str(e.ref_id) };
+    const byType = JOIN_BY_TYPE.has(promotion.type);
+    const base = ways(ref, status);
+    const range = { minPrice: positive(e.min_discounted_price), maxPrice: positive(e.max_discounted_price), suggestedPrice: positive(e.suggested_discounted_price) };
+    const hasRange = range.minPrice !== null || range.maxPrice !== null;
+    const stock = isObj(e.stock) ? { min: positive(e.stock.min), max: positive(e.stock.max) } : null;
+    items.push({
+      externalId,
+      type: promotion.type,
+      deadline: promotion.deadline,
+      stock,
+      campaign: {
+        ref: writeRef(ref),
+        group: `${promotion.type}:${promotion.id}`,
+        name: promotion.name,
+        kind: KIND[promotion.type] ?? 'Otra promoción',
+        status,
+        price: positive(e.total_price_for_boosted_offer) ?? positive(e.price),
+        channelPct: pct(e.meli_percentage) ?? promotion.channelPct,
+        sellerPct: pct(e.seller_percentage) ?? promotion.sellerPct,
+        start: date(e.start_date) ?? promotion.start,
+        finish: date(e.finish_date) ?? date(e.end_date) ?? promotion.finish,
+        join: status === 'invited' && byType ? 'price' : base.join,
+        canLeave: LEAVE_ONLY_SCHEDULED.has(promotion.type) ? status === 'scheduled' : base.canLeave,
+        pausesOwnDiscount: promotion.type === 'DEAL',
+        range: (JOIN_WITH_PRICE.has(promotion.type) || byType) && hasRange ? range : null,
+        listPrice: positive(e.original_price),
+      },
+    });
+  }
+  return { items, next: str(paging.searchAfter) ?? str(paging.search_after) };
+}

@@ -25,6 +25,8 @@ export type CampaignChoice = {
   price: number | null;
   // Si mientras está en la campaña el canal frena el descuento propio: al subir, el descuento no va.
   pausesOwnDiscount?: boolean;
+  // Las unidades reservadas, en una oferta relámpago. Solo al mandar en el momento.
+  stock?: number | null;
 };
 
 export type CampaignOutcome = { ref: string; name: string; kind: string; action: CampaignAction; price: number | null; ok: boolean; message?: string };
@@ -50,7 +52,8 @@ function cleanChoice(c: CampaignChoice): CampaignChoice {
   const price = c.action === 'join' && c.price !== null && c.price !== undefined ? campaignPrice(Number(c.price)) : null;
   if (price !== null && !(price > 0)) throw new CampaignError('El precio para el comprador tiene que ser mayor que cero.');
   const text = (v: unknown, fallback: string) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 200) : fallback);
-  return { action: c.action, ref, name: text(c.name, 'Campaña'), kind: text(c.kind, 'Campaña'), price, pausesOwnDiscount: c.action === 'join' && c.pausesOwnDiscount === true };
+  const stock = c.action === 'join' && typeof c.stock === 'number' && c.stock > 0 ? Math.floor(c.stock) : null;
+  return { action: c.action, ref, name: text(c.name, 'Campaña'), kind: text(c.kind, 'Campaña'), price, pausesOwnDiscount: c.action === 'join' && c.pausesOwnDiscount === true, stock };
 }
 
 async function loadPublication(db: PrismaClient, accountId: string, publicationId: string) {
@@ -140,7 +143,7 @@ async function send(db: PrismaClient, p: Awaited<ReturnType<typeof loadPublicati
     db.channelSyncChange.create({ data: { publicationId: p.id, field: 'campaign', kind, before: undefined, after: campaignText(choice), message, userId } });
   try {
     await withAccessToken(db, p.store.id, (token) =>
-      choice.action === 'join' ? publisher.joinCampaign!(token, p.externalId, choice.ref, choice.price) : publisher.leaveCampaign!(token, p.externalId, choice.ref),
+      choice.action === 'join' ? publisher.joinCampaign!(token, p.externalId, choice.ref, choice.price, choice.stock ?? null) : publisher.leaveCampaign!(token, p.externalId, choice.ref),
     );
   } catch (e) {
     if (e instanceof PublishError || e instanceof ConnectError) await record('REJECTED', e.message);

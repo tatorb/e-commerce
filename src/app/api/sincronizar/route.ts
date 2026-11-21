@@ -21,12 +21,14 @@ import { importSoldListings } from '@/lib/sold-listings';
 import { dailySummaryPass, notifyNewSales, notifyPendingQuestions } from '@/lib/notification-events';
 import { pruneNotifications } from '@/lib/notifications';
 import { taskNoticePass } from '@/lib/task-mail';
+import { promotionsPass } from '@/lib/promo/run';
 
 // La tarea programada: lee las preguntas de los compradores y las
 // publicaciones de las tiendas conectadas, responde las preguntas de las
 // publicaciones en que Claude responde solo, manda los mails de las tareas,
 // descuenta las ventas del stock de los productos y sube la cantidad nueva, y
-// renueva los descuentos que subió la app antes de que venzan, avisa otra vez
+// renueva los descuentos que subió la app antes de que venzan, corre la pasada
+// de promociones (invitaciones, almanaque y ofertas del día), avisa otra vez
 // de las alarmas de stock sin reponer, y suma a sus
 // publicaciones las fotos de Registro de productos que quedaron listas, y al
 // final trae las ventas para la sección Ventas, con su envío y su pago, abre
@@ -53,6 +55,8 @@ const STOCK_BUDGET_MS = 4_000;
 const FLEX_BUDGET_MS = 10_000;
 // Después, los descuentos por vencer: cada uno son unos pocos pedidos.
 const RENEW_BUDGET_MS = 6_000;
+// Promociones: leer las invitaciones del canal, rearmar el almanaque y prender y apagar las ofertas del día.
+const PROMOTIONS_BUDGET_MS = 9_000;
 // Las alarmas de stock: el aviso del primer día sin reponer. La app nunca pausa por eso.
 const ALARMS_BUDGET_MS = 3_000;
 // Las fotos de Registro de productos que quedaron listas sin sumarse a sus publicaciones.
@@ -94,6 +98,11 @@ export async function GET(request: Request) {
   // Con las ventas al día: el aviso de las alarmas de stock sin reponer.
   const alarms = await stockAlarmPass(prisma, { budgetMs: budget(ALARMS_BUDGET_MS) });
   const renewals = await renewDiscounts(prisma, { budgetMs: budget(RENEW_BUDGET_MS) });
+  // Promociones, después de renovar los descuentos: solo en las cuentas que las usan. Nada de esto frena la tarea.
+  const promotions = await promotionsPass(prisma, { budgetMs: budget(PROMOTIONS_BUDGET_MS) }).catch((e) => {
+    console.error('No se pudo correr la pasada de promociones.', e instanceof Error ? e.message : e);
+    return { pending: false, applied: 0, failed: 0, planned: 0, measured: 0 };
+  });
   const result = await syncAllStores(prisma, { budgetMs: Math.max(0, BUDGET_MS - (Date.now() - begun)) });
   // Con lo recién leído: el stock de partida de los productos nuevos y lo que quedó distinto del stock.
   const started = await startStock(prisma, { budgetMs: budget(STOCK_BUDGET_MS) });
@@ -136,6 +145,7 @@ export async function GET(request: Request) {
       texts.pending ||
       ledger.pending ||
       visits.pending ||
+      promotions.pending ||
       sold.pending,
     stores: result.stores.map((s) => ({ status: s.status, read: s.position, total: s.total })),
     renewed: renewals.renewed,
@@ -154,6 +164,10 @@ export async function GET(request: Request) {
     soldListingsImported: sold.imported.length,
     notifications: notices,
     closedPending: closings.closed,
+    promotionsApplied: promotions.applied,
+    promotionsFailed: promotions.failed,
+    promotionsPlanned: promotions.planned,
+    promotionsMeasured: promotions.measured,
   });
 }
 

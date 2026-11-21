@@ -22,6 +22,11 @@ export const SECTIONS = {
     hint: 'Sacar y subir las fotos y los videos de cada producto desde el celular, siguiendo un protocolo. Con "Ve" solo mira lo que se registró.',
   },
   publicaciones: { label: 'Publicaciones', levels: ['read', 'write'], hint: 'La lista y la página de cada publicación.' },
+  promociones: {
+    label: 'Promociones',
+    levels: ['read', 'write'],
+    hint: 'Las etiquetas, el almanaque de ofertas de cada producto, el calendario de eventos y las reglas. Con "Cambia" además prende y apaga ofertas en el canal.',
+  },
   ventas: {
     label: 'Ventas',
     levels: ['read'],
@@ -161,6 +166,7 @@ export const SECTION_PATH: Record<Section, string> = {
   productos: 'productos',
   captura: 'registro-productos',
   publicaciones: 'publicaciones',
+  promociones: 'promociones',
   ventas: 'ventas',
   subir: 'publicaciones',
   preguntas: 'preguntas',

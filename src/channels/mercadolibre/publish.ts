@@ -4,7 +4,7 @@ import { measureText, variantKey, type VariantLike } from '@/domain/media';
 import { formatPrice } from '@/domain/money';
 import { isInstallmentPlan, LOW_INTEREST_PLAN } from '@/domain/pricing';
 import { campaignPrice, dealPrice } from '@/domain/promotions';
-import { JOIN_WITH_PRICE, needsDetail, NEEDS_OFFER, parsePromotions, readRef, withDetail } from './promotions';
+import { JOIN_BY_TYPE, JOIN_WITH_PRICE, needsDetail, NEEDS_OFFER, parsePromotions, readRef, withDetail } from './promotions';
 import { MAX_QUANTITY, quantityKey } from '@/domain/quantities';
 import { warrantyTerms, withWarranty } from './warranty';
 import {
@@ -730,17 +730,21 @@ export const mercadolibrePublisher: ChannelPublisher = {
     }
   },
 
-  async joinCampaign(accessToken, externalId, ref, price) {
+  async joinCampaign(accessToken, externalId, ref, price, stock) {
     const campaign = readRef(ref);
     if (!campaign) throw new PublishError('No se reconoce la campaña: volvé a consultar las promociones.');
-    const withPrice = JOIN_WITH_PRICE.has(campaign.type);
+    // La oferta del día y la relámpago van por su tipo, sin el código de la campaña; la relámpago, con las unidades reservadas.
+    const byType = JOIN_BY_TYPE.has(campaign.type);
+    if (campaign.type === 'LIGHTNING' && !(stock && stock > 0)) throw new PublishError('Faltan las unidades reservadas para la oferta relámpago.');
+    const withPrice = JOIN_WITH_PRICE.has(campaign.type) || byType;
     if (withPrice && !(price !== null && price > 0)) throw new PublishError('Falta el precio para el comprador en la campaña.');
     const id = encodeURIComponent(externalId);
     try {
       const response = await mlSend('POST', `/seller-promotions/items/${id}?app_version=v2`, accessToken, {
-        promotion_id: campaign.promotion,
+        ...(byType ? {} : { promotion_id: campaign.promotion }),
         promotion_type: campaign.type,
         ...(withPrice ? { deal_price: campaignPrice(price!) } : {}),
+        ...(campaign.type === 'LIGHTNING' ? { stock } : {}),
         ...(campaign.offer && NEEDS_OFFER.has(campaign.type) ? { offer_id: campaign.offer } : {}),
       });
       // Lo que respondió al aceptar, por si después no la muestra: solo el código, nunca datos de la cuenta.
@@ -757,7 +761,7 @@ export const mercadolibrePublisher: ChannelPublisher = {
     if (!campaign) throw new PublishError('No se reconoce la campaña: volvé a consultar las promociones.');
     const query = new URLSearchParams({
       promotion_type: campaign.type,
-      promotion_id: campaign.promotion,
+      ...(JOIN_BY_TYPE.has(campaign.type) ? {} : { promotion_id: campaign.promotion }),
       ...(campaign.offer && NEEDS_OFFER.has(campaign.type) ? { offer_id: campaign.offer } : {}),
       app_version: 'v2',
     });
