@@ -68,7 +68,8 @@ describe.skipIf(!url)('promociones: prender y apagar según el almanaque', () =>
     };
     flat = await pub('MLA1', 0, null);
     twelve = await pub('MLA2', 12, flat);
-    await db.productPromotion.create({ data: { productId, lifecycle: 'GROWING', manual: ['lifecycle'] } });
+    // El almanaque lo arman las reglas: el producto está en Automático.
+    await db.productPromotion.create({ data: { productId, mode: 'AUTO', lifecycle: 'GROWING', manual: ['lifecycle'] } });
   });
 
   // Una invitación a una campaña tradicional que empieza en 10 días, con un tope que deja 16 % en cada forma de cobro.
@@ -244,19 +245,19 @@ describe.skipIf(!url)('promociones: prender y apagar según el almanaque', () =>
     expect(sent).toEqual([{ what: 'join', publicationId: flat, value: { price: priceForMargin(eco(0, listOf(0)), 15), stock: 2 } }]);
   });
 
-  it('la pasada de cada hora: arma el almanaque que falta y, solo con la ejecución automática prendida, manda lo que toca', async () => {
+  it('la pasada de cada hora: arma el almanaque que falta y, salvo con el freno de emergencia puesto, manda lo que toca', async () => {
     const { promotionsPass } = await import('@/lib/promo/run');
     const { classifyAccount } = await import('@/lib/promo/classify');
     // Una cuenta que no usa Promociones no se toca.
     expect(await promotionsPass(db, { budgetMs: 60_000, now })).toMatchObject({ accounts: 0, planned: 0, applied: 0 });
-    // Con las invitaciones y la clasificación al día, y la ejecución automática apagada: arma el almanaque y no manda nada.
-    await db.promotionSettings.create({ data: { accountId, sweptAt: now, classifiedAt: now } });
+    // Con las invitaciones y la clasificación al día, y el freno de emergencia puesto: arma el almanaque y no manda nada.
+    await db.promotionSettings.create({ data: { accountId, sweptAt: now, classifiedAt: now, paused: true } });
     const off = await promotionsPass(db, { budgetMs: 60_000, now });
     expect(off).toMatchObject({ accounts: 1, planned: 1, applied: 0, pending: false });
     expect(sent).toEqual([]);
     expect(await db.promotionSlotItem.count({ where: { state: 'PLANNED' } })).toBeGreaterThan(0);
-    // Prendida: manda la base que empieza hoy, una vez.
-    await db.promotionSettings.update({ where: { accountId }, data: { autoApply: true } });
+    // Con el freno suelto: manda la base que empieza hoy, una vez.
+    await db.promotionSettings.update({ where: { accountId }, data: { paused: false } });
     const on = await promotionsPass(db, { budgetMs: 60_000, now });
     expect(on).toMatchObject({ planned: 0, applied: 2, failed: 0 });
     expect(sent.map((x) => x.what)).toEqual(['discount', 'discount']);
@@ -278,6 +279,79 @@ describe.skipIf(!url)('promociones: prender y apagar según el almanaque', () =>
     const fight = await classifyAccount(db, { accountId, apply: true, now });
     expect(fight.products[0].facts.competitorPrice).toBe(Math.round(listOf(0) * 0.9));
     expect(await db.productPromotion.findUniqueOrThrow({ where: { productId } })).toMatchObject({ competition: 'PRICE_FIGHT' });
+  });
+
+  it('un producto nace en Manual con lo que ya tiene inscripto; pasa a Automático preguntando por lo que las reglas no incluirían, y vuelve a Manual con sus franjas', async () => {
+    const { adoptExisting, clearManualPlan, modeConflicts, setMode } = await import('@/lib/promo/mode');
+    const { generatePlan } = await import('@/lib/promo/plan');
+    const { applyDue } = await import('@/lib/promo/apply');
+    const { loadProductGrid } = await import('@/lib/promo/view');
+    const { hasNoEnd } = await import('@/domain/promo/plan');
+    // Sin haber tocado nada, está en Manual. En el canal ya tiene un descuento propio en sin cuotas y está adentro de una campaña en 12 cuotas.
+    await db.productPromotion.deleteMany();
+    await db.publication.update({ where: { id: flat }, data: { discount: 10 } });
+    await db.channelCopy.update({ where: { publicationId: flat }, data: { discount: 10 } });
+    await invite(twelve, 12, { status: 'active', join: null, canLeave: true, price: priceForMargin(eco(12, listOf(12)), 12), start: day(-2), finish: day(20) });
+    expect((await loadProductGrid(db, accountId, productId, now))!.mode).toBe('MANUAL');
+    // En Manual las reglas no arman nada.
+    expect(await generatePlan(db, { accountId, productId, now })).toMatchObject({ skipped: expect.stringContaining('Está en Manual'), created: 0 });
+    expect(await db.promotionSlot.count()).toBe(0);
+
+    // Nace con lo que el canal ya muestra: el descuento propio como franja sin fin y la campaña, cada una solo con su publicación.
+    expect(await adoptExisting(db, { accountId, productId, now })).toEqual({ adopted: 2 });
+    expect(await adoptExisting(db, { accountId, productId, now })).toEqual({ adopted: 0 });
+    const born = await db.promotionSlot.findMany({ orderBy: { kind: 'asc' }, include: { items: true } });
+    expect(born.map((s) => [s.kind, s.source, s.items.map((i) => [i.publicationId, i.state, i.fixed])])).toEqual([
+      ['CAMPAIGN', 'MANUAL', [[twelve, 'ON', true]]],
+      ['OWN_DISCOUNT', 'MANUAL', [[flat, 'ON', true]]],
+    ]);
+    const own = born.find((s) => s.kind === 'OWN_DISCOUNT')!;
+    const campaign = born.find((s) => s.kind === 'CAMPAIGN')!;
+    expect(hasNoEnd(own.finish)).toBe(true);
+    expect(Number(own.items[0].discountPct)).toBe(10);
+    // Nada de esto tocó el canal, y no hay nada para ejecutar.
+    expect(sent).toEqual([]);
+    expect((await applyDue(db, { accountId, auto: true, userId: null, budgetMs: 60_000, now })).done).toEqual([]);
+
+    // Antes de pasar a Automático: recién publicado, la regla lo pone como nuevo, que lleva base y no eventos sin ventas.
+    // El descuento propio sigue con la base; de la campaña hay que decidir.
+    const conflicts = await modeConflicts(db, { accountId, productId, now });
+    expect(conflicts.map((c) => [c.slotId, c.name, c.publications.map((p) => p.externalId)])).toEqual([[campaign.id, 'HOT SALE', ['MLA2']]]);
+    // Se pasa sacando la campaña del canal.
+    const toAuto = await setMode(db, { accountId, productId, mode: 'AUTO', takeOut: [campaign.id], userId: null, now });
+    expect(toAuto).toMatchObject({ mode: 'AUTO', kept: 1 });
+    expect(toAuto.takenOut.map((t) => [t.externalId, t.ok])).toEqual([['MLA2', true]]);
+    expect(sent).toEqual([{ what: 'leave', publicationId: twelve, value: priceForMargin(eco(12, listOf(12)), 12) }]);
+    expect(await db.productPromotion.findUniqueOrThrow({ where: { productId } })).toMatchObject({ mode: 'AUTO', lifecycle: 'NEW' });
+    // Las reglas armaron su base, aunque siga la franja sin fin.
+    const base = await db.promotionSlot.findMany({ where: { source: 'PLAN', layer: 'BASE' }, orderBy: { start: 'asc' } });
+    expect(base.length).toBeGreaterThan(2);
+    // Al prenderse la base, reemplaza al descuento que tenía: la franja sin fin queda terminada.
+    sent.length = 0;
+    const applied = await applyDue(db, { accountId, auto: true, userId: null, budgetMs: 60_000, now });
+    expect(applied.done.map((d) => [d.externalId, d.action, d.ok])).toEqual([
+      ['MLA1', 'ON', true],
+      ['MLA2', 'ON', true],
+    ]);
+    expect(await db.promotionSlotItem.findFirstOrThrow({ where: { slotId: own.id } })).toMatchObject({ state: 'ENDED' });
+
+    // De vuelta a Manual: las franjas de las reglas quedan para editarlas, con sus precios.
+    const toManual = await setMode(db, { accountId, productId, mode: 'MANUAL', userId: null, now });
+    expect(toManual).toMatchObject({ mode: 'MANUAL', removed: 0, kept: base.length });
+    expect(await db.promotionSlot.count({ where: { source: 'PLAN' } })).toBe(0);
+    expect(await db.promotionSlotItem.count({ where: { slotId: base[1].id, fixed: true } })).toBe(2);
+    // En Manual, lo que estaba por entrar sigue en el plan y la app lo ejecuta en su fecha.
+    sent.length = 0;
+    const later = await applyDue(db, { accountId, auto: true, userId: null, budgetMs: 60_000, now: day(14) });
+    expect(later.done.every((d) => d.ok && d.action === 'ON')).toBe(true);
+    expect(sent.map((x) => x.what)).toEqual(['discount', 'discount']);
+    // Borrar lo planeado saca solo lo que no empezó.
+    const removed = await clearManualPlan(db, { accountId, productId, now: day(14) });
+    expect(removed).toBe(base.length - 2);
+    expect(await db.promotionSlot.count({ where: { layer: 'BASE', finish: { gt: day(14) }, id: { not: own.id } } })).toBe(1);
+    // En Automático no se borra a mano.
+    await setMode(db, { accountId, productId, mode: 'AUTO', userId: null, now: day(14) });
+    await expect(clearManualPlan(db, { accountId, productId, now: day(14) })).rejects.toThrow('primero pasalo a Manual');
   });
 
   it('a los días mide el antes y el después y lo deja en la bitácora', async () => {

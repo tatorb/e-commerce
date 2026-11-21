@@ -26,7 +26,7 @@ type Tab = (typeof TABS)[number];
 const TAB_LABEL: Record<Tab, string> = { productos: 'Productos', calendario: 'Calendario', reglas: 'Reglas' };
 const SELECT = 'h-9 rounded-md border border-input bg-card px-2 text-sm shadow-sm';
 
-type Search = { tab?: string; ciclo?: string; competencia?: string; prioridad?: string; stock?: string; marca?: string; estado?: string; q?: string; pagina?: string };
+type Search = { tab?: string; modo?: string; ciclo?: string; competencia?: string; prioridad?: string; stock?: string; marca?: string; estado?: string; q?: string; pagina?: string };
 
 export async function generateMetadata({ params }: { params: Promise<{ cuenta: string }> }) {
   const { cuenta } = await params;
@@ -44,6 +44,7 @@ export default async function PromotionsPage({ params, searchParams }: { params:
   const now = new Date();
   const page = Math.max(1, Number(search.pagina) || 1);
   const filter: OverviewFilter = {
+    mode: search.modo === 'auto' ? 'AUTO' : search.modo === 'manual' ? 'MANUAL' : undefined,
     lifecycle: search.ciclo === 'none' ? 'none' : (oneOf(LIFECYCLES, search.ciclo) as Lifecycle | undefined),
     competition: oneOf(COMPETITIONS, search.competencia) as Competition | undefined,
     priority: oneOf(PRIORITIES, search.prioridad) as Priority | undefined,
@@ -85,8 +86,8 @@ export default async function PromotionsPage({ params, searchParams }: { params:
         <div className="space-y-1">
           <h1 className="text-2xl font-bold tracking-tight">Promociones</h1>
           <p className="max-w-3xl text-sm text-muted-foreground">
-            El almanaque de ofertas de <strong>{account.name}</strong>. Cada producto lleva etiquetas; con ellas, el calendario de eventos y las invitaciones del canal se arman sus franjas, y cada
-            forma de cobro entra o queda afuera según la rentabilidad que deja. Saludable {pct(settings.thresholds.healthyMarginPct)}, piso {pct(settings.thresholds.floorMarginPct)}.
+            El almanaque de ofertas de <strong>{account.name}</strong>. Cada producto está en Manual, donde lo armás vos, o en Automático, donde lo arman las reglas con sus etiquetas. En los dos
+            casos la app lo ejecuta sola en cada fecha. Saludable {pct(settings.thresholds.healthyMarginPct)}, piso {pct(settings.thresholds.floorMarginPct)}.
           </p>
         </div>
         <TabLinks label="Partes de Promociones" items={TABS.map((key) => ({ key, href: key === 'productos' ? base : `${base}?tab=${key}`, label: TAB_LABEL[key], active: tab === key }))} />
@@ -95,11 +96,11 @@ export default async function PromotionsPage({ params, searchParams }: { params:
         <div className="space-y-4">
           {tab === 'productos' ? (
             <>
-              <AccountBar key={`barra:${query({})}`} filter={filter} filtered={hasFilter ? overview.total : null} accountSlug={account.slug} autoApply={settings.autoApply} sweptAt={settings.sweptAt ? dateTime(settings.sweptAt, account.timezone) : 'todavía no'} classifiedAt={settings.classifiedAt ? dateTime(settings.classifiedAt, account.timezone) : 'todavía no'} />
+              <AccountBar key={`barra:${query({})}`} filter={filter} filtered={hasFilter ? overview.total : null} accountSlug={account.slug} paused={settings.paused} sweptAt={settings.sweptAt ? dateTime(settings.sweptAt, account.timezone) : 'todavía no'} classifiedAt={settings.classifiedAt ? dateTime(settings.classifiedAt, account.timezone) : 'todavía no'} />
               <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
                 {[
                   ['Productos', t.products],
-                  ['Con ciclo de vida', t.tagged],
+                  ['En Automático', t.auto],
                   ['Formas de cobro adentro', t.on],
                   ['Por entrar', t.planned],
                   ['Afuera', t.out],
@@ -113,6 +114,11 @@ export default async function PromotionsPage({ params, searchParams }: { params:
               </dl>
               <form action={base} className="flex flex-wrap items-end gap-2 text-sm">
                 <input type="search" name="q" defaultValue={search.q ?? ''} placeholder="Producto o código MLA" className="h-9 w-56 rounded-md border border-input bg-card px-3 shadow-sm" />
+                <select name="modo" defaultValue={search.modo ?? ''} className={SELECT} aria-label="Modo">
+                  <option value="">Modo</option>
+                  <option value="manual">Manual</option>
+                  <option value="auto">Automático</option>
+                </select>
                 <select name="ciclo" defaultValue={search.ciclo ?? ''} className={SELECT} aria-label="Ciclo de vida">
                   <option value="">Ciclo de vida</option>
                   {LIFECYCLES.map((l) => (
@@ -181,7 +187,7 @@ export default async function PromotionsPage({ params, searchParams }: { params:
             </>
           ) : null}
           {tab === 'calendario' ? <EventsCard accountSlug={account.slug} events={events} /> : null}
-          {tab === 'reglas' ? <RulesForm accountSlug={account.slug} thresholds={settings.thresholds} rules={settings.rules} /> : null}
+          {tab === 'reglas' ? <RulesForm accountSlug={account.slug} thresholds={settings.thresholds} rules={settings.rules} paused={settings.paused} /> : null}
         </div>
       </PageBody>
     </>

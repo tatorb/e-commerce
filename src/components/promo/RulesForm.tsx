@@ -2,13 +2,13 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Percent, SlidersHorizontal, Timer, WandSparkles } from 'lucide-react';
+import { OctagonPause, Percent, SlidersHorizontal, Timer, WandSparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { SectionCard } from '@/components/ui/section-card';
 import type { PromoRules, Recipe, Thresholds } from '@/domain/promo/rules';
 import { LIFECYCLES, LIFECYCLE_LABEL, type Lifecycle } from '@/domain/promo/tags';
-import { saveRulesAction, saveThresholdsAction } from '@/app/a/[cuenta]/promociones/actions';
+import { saveRulesAction, saveThresholdsAction, setPausedAction } from '@/app/a/[cuenta]/promociones/actions';
 
 // Las reglas de Promociones: la rentabilidad saludable y el piso, la receta
 // del almanaque de cada ciclo de vida, los números con los que la regla
@@ -33,7 +33,7 @@ function Field({ label, hint, value, onChange, suffix }: { label: string; hint?:
   );
 }
 
-export function RulesForm({ accountSlug, thresholds, rules }: { accountSlug: string; thresholds: Thresholds; rules: PromoRules }) {
+export function RulesForm({ accountSlug, thresholds, rules, paused }: { accountSlug: string; thresholds: Thresholds; rules: PromoRules; paused: boolean }) {
   const router = useRouter();
   const [busy, start] = useTransition();
   const [notice, setNotice] = useState<Notice>(null);
@@ -85,6 +85,30 @@ export function RulesForm({ accountSlug, thresholds, rules }: { accountSlug: str
       {notice ? <p className={`rounded-lg border px-3 py-2 text-sm ${notice.kind === 'error' ? 'border-alert/40 bg-alert/10' : 'border-primary/30 bg-primary/5'}`}>{notice.text}</p> : null}
 
       <SectionCard
+        title="Freno de emergencia"
+        icon={<OctagonPause />}
+        description="Pausa toda la ejecución de la cuenta: mientras está puesto, la app no prende ni apaga nada en el canal, en ningún producto. No borra nada ni saca nada de donde está. Al soltarlo, sigue desde donde estaba."
+        action={
+          <Button
+            size="sm"
+            variant={paused ? 'default' : 'outline'}
+            disabled={busy}
+            onClick={() => {
+              const text = paused
+                ? 'Se suelta el freno: la app vuelve a prender y apagar sola lo que marca el almanaque de cada producto, con la lectura de cada hora. ¿Lo soltás?'
+                : 'Se pone el freno: la app deja de prender y apagar en el canal, en todos los productos. Lo que ya está prendido sigue como está. ¿Lo ponés?';
+              if (!window.confirm(text)) return;
+              start(async () => done(await setPausedAction(accountSlug, !paused).catch(() => null), paused ? 'Freno suelto: la app vuelve a ejecutar los almanaques.' : 'Freno puesto: la app no manda nada al canal.'));
+            }}
+          >
+            {paused ? 'Soltar el freno' : 'Poner el freno'}
+          </Button>
+        }
+      >
+        <p className="px-4 py-3 text-sm">{paused ? 'Está puesto. La app no manda nada al canal.' : 'Está suelto. La app ejecuta el almanaque de cada producto.'}</p>
+      </SectionCard>
+
+      <SectionCard
         title="Rentabilidad"
         icon={<Percent />}
         description="Sobre el costo, por forma de cobro, con el costo de sus cuotas. El descuento se mide por lo que deja, no por el % que muestra el canal."
@@ -103,7 +127,7 @@ export function RulesForm({ accountSlug, thresholds, rules }: { accountSlug: str
       <SectionCard
         title="Recetas del almanaque"
         icon={<WandSparkles />}
-        description="Qué capas lleva cada ciclo de vida y qué rentabilidad busca cada una. Una rentabilidad vacía es la saludable."
+        description="Para los productos en Automático: qué capas lleva cada ciclo de vida y qué rentabilidad busca cada una. Una rentabilidad vacía es la saludable."
         action={
           <Button size="sm" disabled={busy} pending={busy} onClick={saveRules}>
             Guardar reglas
@@ -161,13 +185,6 @@ export function RulesForm({ accountSlug, thresholds, rules }: { accountSlug: str
           <Field label="Nueva a posicionar" suffix="días" value={classify.newDays} onChange={(v) => setClassify((c) => ({ ...c, newDays: v }))} hint="Publicada hace menos de estos días." />
           <Field label="Madurada" suffix="unidades en 90 días" value={classify.matureUnits90} onChange={(v) => setClassify((c) => ({ ...c, matureUnits90: v }))} hint="Con estas ventas o más y ventas parejas." />
           <Field label="Ventas parejas" suffix="%" value={classify.matureGrowthPct} onChange={(v) => setClassify((c) => ({ ...c, matureGrowthPct: v }))} hint="Lo del último mes no pasa por más de este % al promedio mensual de los 90 días." />
-          <Field
-            label="En crecimiento"
-            suffix="unidades en 90 días, como mínimo"
-            value={classify.growingMinUnits90}
-            onChange={(v) => setClassify((c) => ({ ...c, growingMinUnits90: v }))}
-            hint="Con menos ventas que estas, la regla no le pone ciclo de vida: queda sin almanaque hasta ponérselo a mano. Con 0, todos llevan."
-          />
           <div className="space-y-2 text-sm">
             <label className="flex items-start gap-2">
               <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[hsl(var(--primary))]" checked={clearanceAuto} onChange={(e) => setClearanceAuto(e.target.checked)} />

@@ -2,7 +2,7 @@ import type { ChannelStatus } from '@/generated/prisma/enums';
 import type { PrismaClient } from '@/generated/prisma/client';
 import { finalPriceOf, type InstallmentPlan } from '@/domain/pricing';
 import { marginAt, type Invite, type OptionEconomics } from '@/domain/promo/entry';
-import { readTags, TAG_GROUPS, type PromoTags, type TagGroup } from '@/domain/promo/tags';
+import { readMode, readTags, TAG_GROUPS, type Mode, type PromoTags, type TagGroup } from '@/domain/promo/tags';
 import { competitorOwner, loadCompetitors } from '@/lib/competitors';
 import { loadOptionTable } from '@/lib/option-table';
 
@@ -62,6 +62,8 @@ export type ProductPromo = {
   name: string;
   brand: string | null;
   channelName: string;
+  // Quién arma su almanaque.
+  mode: Mode;
   tags: PromoTags;
   // Las etiquetas puestas a mano y por qué la regla propuso las demás.
   manual: TagGroup[];
@@ -216,6 +218,7 @@ export async function loadProductPromo(db: Db, accountId: string, productId: str
     name: product.name,
     brand: product.brand,
     channelName,
+    mode: readMode(product.promotion?.mode),
     tags: readTags(product.promotion),
     // Solo los grupos que existen: puede quedar guardado uno de una etiqueta que se sacó.
     manual: (product.promotion?.manual ?? []).filter((g): g is TagGroup => (TAG_GROUPS as readonly string[]).includes(g)),

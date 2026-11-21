@@ -65,11 +65,11 @@ describe('herramientas de escritura en la lista', () => {
     expect(tools.get('set_stock_bulk')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('cancel_campaign_request')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     // Promociones: lo que cambia etiquetas, reglas o el canal pide confirmación.
-    for (const name of ['update_promotion_settings', 'set_promotion_tags', 'exclude_from_promotions', 'apply_promotion_changes', 'set_promotion_slot', 'manage_event_calendar']) {
+    for (const name of ['update_promotion_settings', 'set_promotion_mode', 'set_promotion_tags', 'exclude_from_promotions', 'apply_promotion_changes', 'set_promotion_slot', 'manage_event_calendar']) {
       expect(tools.get(name)).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     }
     for (const name of ['classify_promotions', 'generate_promotion_plan', 'measure_promotion_result']) expect(tools.get(name)).toMatchObject({ readOnlyHint: false, destructiveHint: false });
-    expect(tools.size).toBe(140);
+    expect(tools.size).toBe(141);
   });
 });
 

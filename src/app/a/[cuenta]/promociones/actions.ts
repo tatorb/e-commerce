@@ -5,12 +5,13 @@ import { prisma } from '@/lib/db';
 import { act } from '@/lib/auth/guard';
 import type { EventTier } from '@/domain/promo/plan';
 import type { RulesPatch } from '@/domain/promo/rules';
-import type { Competition, Lifecycle, Priority, TagGroup } from '@/domain/promo/tags';
+import type { Competition, Lifecycle, Mode, Priority, TagGroup } from '@/domain/promo/tags';
 import { applyDue, dueActions, putBack, takeOut } from '@/lib/promo/apply';
 import { classifyAccount } from '@/lib/promo/classify';
 import { cancelSlot, deleteEvent, saveEvent, saveManualSlot } from '@/lib/promo/manual';
 import { overviewProductIds, type OverviewFilter } from '@/lib/promo/overview';
 import { generatePlan } from '@/lib/promo/plan';
+import { clearManualPlan, modeConflicts, setMode } from '@/lib/promo/mode';
 import { loadPromoSettings, PromoError, savePromoSettings } from '@/lib/promo/settings';
 import { refreshPublications, sweepInvitations } from '@/lib/promo/sweep';
 import { setOptionsExcluded, setPromoTags } from '@/lib/promo/tags';
@@ -36,13 +37,73 @@ async function guarded<T extends object>(work: () => Promise<T>): Promise<Ok<T>>
 
 const refresh = (slug: string) => revalidatePath(`/a/${slug}`, 'layout');
 
-export async function saveThresholdsAction(accountSlug: string, input: { healthyMarginPct?: number; floorMarginPct?: number; autoApply?: boolean }) {
-  const does = input.autoApply === undefined ? 'Cambió la rentabilidad de las promociones' : input.autoApply ? 'Prendió la ejecución automática de promociones' : 'Apagó la ejecución automática de promociones';
-  return act(accountSlug, { section: 'promociones', does }, async ({ account, user }) =>
+export async function saveThresholdsAction(accountSlug: string, input: { healthyMarginPct?: number; floorMarginPct?: number }) {
+  return act(accountSlug, { section: 'promociones', does: 'Cambió la rentabilidad de las promociones' }, async ({ account, user }) =>
     guarded(async () => {
-      await savePromoSettings(prisma, { accountId: account.id, userId: user.id, healthyMarginPct: input.healthyMarginPct, floorMarginPct: input.floorMarginPct, autoApply: input.autoApply });
+      await savePromoSettings(prisma, { accountId: account.id, userId: user.id, healthyMarginPct: input.healthyMarginPct, floorMarginPct: input.floorMarginPct });
       refresh(account.slug);
       return {};
+    }),
+  );
+}
+
+/** El freno de emergencia: mientras está puesto, la app no prende ni apaga nada en el canal. No borra nada. */
+export async function setPausedAction(accountSlug: string, paused: boolean) {
+  return act(accountSlug, { section: 'promociones', does: paused ? 'Puso el freno de emergencia de promociones' : 'Soltó el freno de emergencia de promociones' }, async ({ account, user }) =>
+    guarded(async () => {
+      await savePromoSettings(prisma, { accountId: account.id, userId: user.id, paused });
+      refresh(account.slug);
+      return {};
+    }),
+  );
+}
+
+/** Lo que está en el canal y las reglas no incluirían, para preguntar qué hacer antes de pasar un producto a Automático. */
+export async function modeConflictsAction(accountSlug: string, productId: string) {
+  return act(accountSlug, { section: 'promociones', level: 'read' }, async ({ account }) => guarded(async () => ({ conflicts: await modeConflicts(prisma, { accountId: account.id, productId: String(productId) }) })));
+}
+
+/** Cambia quién arma el almanaque de un producto: una persona (Manual) o las reglas (Automático). */
+export async function setModeAction(accountSlug: string, productId: string, mode: Mode, opts: { takeOut?: string[]; clear?: boolean } = {}) {
+  // Sacar algo del canal al cambiar pide además el permiso de subir.
+  const section = opts.takeOut?.length ? (['subir'] as const) : 'promociones';
+  return act(accountSlug, { section, does: mode === 'AUTO' ? 'Pasó un producto a promociones en Automático' : 'Pasó un producto a promociones en Manual', productId }, async ({ account, user }) =>
+    guarded(async () => {
+      const r = await setMode(prisma, { accountId: account.id, productId: String(productId), mode: mode === 'AUTO' ? 'AUTO' : 'MANUAL', takeOut: opts.takeOut?.map(String), clear: opts.clear === true, userId: user.id });
+      refresh(account.slug);
+      return { removed: r.removed, kept: r.kept, takenOut: r.takenOut.filter((t) => t.ok).length, failed: r.takenOut.filter((t) => !t.ok).map((t) => `${t.externalId ?? ''} ${t.message ?? ''}`.trim()) };
+    }),
+  );
+}
+
+/** Pasa varios productos de modo. Lo que ya está en el canal sigue hasta que termine: nada se saca en lote. */
+export async function setModesAction(accountSlug: string, productIds: string[], mode: Mode) {
+  return act(accountSlug, { section: 'promociones', does: mode === 'AUTO' ? 'Pasó productos a promociones en Automático' : 'Pasó productos a promociones en Manual' }, async ({ account, user }) =>
+    guarded(async () => {
+      const started = Date.now();
+      const left: string[] = [];
+      let done = 0;
+      for (const productId of productIds.map(String)) {
+        if (Date.now() - started > BUDGET_MS) {
+          left.push(productId);
+          continue;
+        }
+        await setMode(prisma, { accountId: account.id, productId, mode: mode === 'AUTO' ? 'AUTO' : 'MANUAL', userId: user.id });
+        done++;
+      }
+      refresh(account.slug);
+      return { done, left };
+    }),
+  );
+}
+
+/** En Manual: borra las franjas que todavía no empezaron. */
+export async function clearPlanAction(accountSlug: string, productId: string) {
+  return act(accountSlug, { section: 'promociones', does: 'Borró el almanaque de un producto', productId }, async ({ account }) =>
+    guarded(async () => {
+      const removed = await clearManualPlan(prisma, { accountId: account.id, productId: String(productId) });
+      refresh(account.slug);
+      return { removed };
     }),
   );
 }

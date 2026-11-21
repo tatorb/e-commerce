@@ -10,21 +10,25 @@ import { SectionCard } from '@/components/ui/section-card';
 import { CHANNEL_STATUS_LABEL } from '@/domain/channel-status';
 import { formatPrice } from '@/domain/money';
 import { INSTALLMENT_PLANS, planLabel } from '@/domain/pricing';
-import { LAYER_LABEL } from '@/domain/promo/plan';
-import { COMPETITIONS, COMPETITION_LABEL, LIFECYCLES, LIFECYCLE_LABEL, OBJECTIVE_LABEL, PRIORITIES, PRIORITY_LABEL, type Competition, type Lifecycle, type Priority } from '@/domain/promo/tags';
+import { hasNoEnd, LAYER_LABEL } from '@/domain/promo/plan';
+import { COMPETITIONS, COMPETITION_LABEL, LIFECYCLES, LIFECYCLE_LABEL, MODE_LABEL, OBJECTIVE_LABEL, PRIORITIES, PRIORITY_LABEL, type Competition, type Lifecycle, type Mode, type Priority } from '@/domain/promo/tags';
 import type { AppliedAction, DueAction } from '@/lib/promo/apply';
+import type { ModeConflict } from '@/lib/promo/mode';
 import type { GridCell, GridColumn, ProductGrid } from '@/lib/promo/view';
 import { cn } from '@/lib/utils/cn';
 import {
   applyAction,
   cancelSlotAction,
   classifyProductAction,
+  clearPlanAction,
+  modeConflictsAction,
   excludeAction,
   generatePlansAction,
   previewApplyAction,
   putBackAction,
   refreshProductAction,
   saveSlotAction,
+  setModeAction,
   setTagsAction,
   takeOutAction,
 } from '@/app/a/[cuenta]/promociones/actions';
@@ -50,6 +54,34 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [preview, setPreview] = useState<{ actions: DueAction[]; scope: { productIds?: string[]; itemIds?: string[]; force?: boolean } } | null>(null);
   const [results, setResults] = useState<AppliedAction[] | null>(null);
+  // El cambio de modo que se está confirmando: a Automático, con lo que hay que decidir; a Manual, con si se borra lo planeado.
+  const [modeAsk, setModeAsk] = useState<{ to: 'AUTO'; conflicts: ModeConflict[]; takeOut: Set<string> } | { to: 'MANUAL'; clear: boolean } | null>(null);
+  const manual = grid.mode === 'MANUAL';
+
+  const askMode = (to: Mode) => {
+    if (to === grid.mode) return;
+    setNotice(null);
+    if (to === 'MANUAL') return setModeAsk({ to, clear: false });
+    start(async () => {
+      const r = await modeConflictsAction(accountSlug, grid.productId).catch(() => null);
+      if (!r || !r.ok) return setNotice({ kind: 'error', text: r ? r.error : 'Se cortó la conexión con la app.' });
+      setModeAsk({ to: 'AUTO', conflicts: r.conflicts, takeOut: new Set() });
+    });
+  };
+
+  const confirmMode = () =>
+    start(async () => {
+      if (!modeAsk) return;
+      const r = await setModeAction(accountSlug, grid.productId, modeAsk.to, modeAsk.to === 'AUTO' ? { takeOut: [...modeAsk.takeOut] } : { clear: modeAsk.clear }).catch(() => null);
+      setModeAsk(null);
+      if (!r || !r.ok) return setNotice({ kind: 'error', text: r ? r.error : 'Se cortó la conexión con la app.' });
+      setNotice({
+        kind: r.failed.length > 0 ? 'error' : 'ok',
+        text: `Quedó en ${MODE_LABEL[modeAsk.to]}.${r.takenOut > 0 ? ` Se sacaron ${r.takenOut} del canal.` : ''}${r.failed.length > 0 ? ` No se pudieron sacar: ${r.failed.join(' ')}` : ''}`,
+      });
+      setSelected(new Set());
+      router.refresh();
+    });
 
   // La franja que se mira en la grilla: la elegida, o la primera que está vigente.
   const columns = grid.columns;
@@ -120,17 +152,101 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
         </p>
       ) : null}
 
-      {/* Con la clave, al cambiar las etiquetas la tarjeta toma las nuevas. */}
-      <TagsCard key={JSON.stringify([grid.tags, grid.manual])} accountSlug={accountSlug} grid={grid} busy={busy} run={run} runWith={runWith} />
+      <div className="rounded-2xl border bg-card p-4 shadow-card">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <div role="group" aria-label="Quién arma el almanaque" className="inline-flex rounded-lg border p-0.5">
+            {(['MANUAL', 'AUTO'] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                aria-pressed={grid.mode === m}
+                disabled={busy}
+                onClick={() => askMode(m)}
+                className={cn('rounded-md px-3 py-1.5 text-sm font-medium transition-colors', grid.mode === m ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}
+              >
+                {MODE_LABEL[m]}
+              </button>
+            ))}
+          </div>
+          <p className="min-w-0 flex-1 text-sm text-muted-foreground">
+            {manual
+              ? 'El almanaque lo armás vos. Nace con las promociones en las que ya está inscripto. La app lo ejecuta sola en cada fecha.'
+              : 'El almanaque lo arman las reglas con las etiquetas de este producto, y la app lo ejecuta sola. Para tocarlo a mano, pasalo a Manual.'}
+          </p>
+        </div>
+        {grid.paused ? (
+          <p className="mt-3 rounded-lg border border-alert/40 bg-alert/10 px-3 py-2 text-sm">
+            <strong>Freno de emergencia puesto.</strong> La app no prende ni apaga nada en {grid.channelName} hasta que se suelte, en Promociones, pestaña Reglas. No se borra nada.
+          </p>
+        ) : null}
+        {modeAsk ? (
+          <div className="mt-3 rounded-lg border border-foreground/20 p-3 text-sm">
+            {modeAsk.to === 'AUTO' ? (
+              <>
+                <p className="font-medium">Pasar a Automático</p>
+                <p className="text-muted-foreground">La regla le pone las etiquetas ahora, y las franjas que armaste y todavía no empezaron se reemplazan por las de las reglas.</p>
+                {modeAsk.conflicts.length > 0 ? (
+                  <>
+                    <p className="mt-2">Esto ya está en {grid.channelName} y las reglas no lo incluirían. Lo que no marques sigue hasta que termine:</p>
+                    <ul className="mt-1 space-y-1">
+                      {modeAsk.conflicts.map((c) => (
+                        <li key={c.slotId}>
+                          <label className="flex items-start gap-2">
+                            <input
+                              type="checkbox"
+                              className="mt-0.5 h-4 w-4 accent-[hsl(var(--primary))]"
+                              checked={modeAsk.takeOut.has(c.slotId)}
+                              onChange={(e) => {
+                                const next = new Set(modeAsk.takeOut);
+                                if (e.target.checked) next.add(c.slotId);
+                                else next.delete(c.slotId);
+                                setModeAsk({ ...modeAsk, takeOut: next });
+                              }}
+                            />
+                            <span>
+                              Sacar ahora <strong>{c.name}</strong>, {c.finish ? `que va hasta el ${shortDate(c.finish, timeZone)}` : 'que no tiene fecha de fin'}, de {c.publications.length}{' '}
+                              {c.publications.length === 1 ? 'publicación' : 'publicaciones'}
+                            </span>
+                          </label>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <p className="font-medium">Pasar a Manual</p>
+                <p className="text-muted-foreground">Las franjas que armaron las reglas quedan para que las edites. Lo que ya está en {grid.channelName} no cambia.</p>
+                <label className="mt-2 flex items-start gap-2">
+                  <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[hsl(var(--primary))]" checked={modeAsk.clear} onChange={(e) => setModeAsk({ ...modeAsk, clear: e.target.checked })} />
+                  <span>Borrar las franjas que todavía no empezaron y arrancar solo con lo que ya está inscripto</span>
+                </label>
+              </>
+            )}
+            <div className="mt-3 flex gap-2">
+              <Button size="sm" access={modeAsk.to === 'AUTO' && modeAsk.takeOut.size > 0 ? 'subir' : 'promociones'} disabled={busy} pending={busy} onClick={confirmMode}>
+                Pasar a {MODE_LABEL[modeAsk.to]}
+              </Button>
+              <Button size="sm" variant="ghost" access="view" disabled={busy} onClick={() => setModeAsk(null)}>
+                Cancelar
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      {/* Las etiquetas son del modo Automático. Con la clave, al cambiarlas la tarjeta toma las nuevas. */}
+      {manual ? null : <TagsCard key={JSON.stringify([grid.tags, grid.manual])} accountSlug={accountSlug} grid={grid} busy={busy} run={run} runWith={runWith} />}
 
       <SectionCard
         title="Almanaque"
         icon={<CalendarDays />}
         count={columns.length}
         description={
-          grid.tags.lifecycle === null
-            ? 'Sin ciclo de vida todavía no tiene almanaque: abajo se ven las campañas a las que el canal lo invita.'
-            : `Las franjas de hoy en adelante. Armado ${grid.plannedAt ? dateTime(grid.plannedAt, timeZone) : 'todavía no'}. Invitaciones del canal leídas ${grid.invitationsAt ? dateTime(grid.invitationsAt, timeZone) : 'todavía no'}.`
+          manual
+            ? `Las promociones en las que está inscripto y las que armaste, de hoy en adelante. Invitaciones del canal leídas ${grid.invitationsAt ? dateTime(grid.invitationsAt, timeZone) : 'todavía no'}.`
+            : `Las franjas que armaron las reglas, de hoy en adelante. Armado ${grid.plannedAt ? dateTime(grid.plannedAt, timeZone) : 'todavía no'}. Invitaciones del canal leídas ${grid.invitationsAt ? dateTime(grid.invitationsAt, timeZone) : 'todavía no'}.`
         }
         action={
           <div className="flex flex-wrap gap-2">
@@ -138,10 +254,25 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
               <RefreshCw />
               Leer invitaciones
             </Button>
-            <Button access="promociones" size="sm" variant="outline" disabled={busy || grid.tags.lifecycle === null} onClick={() => run(() => generatePlansAction(accountSlug, [grid.productId]), 'Se rearmó el almanaque.')}>
-              <Wand2 />
-              Rearmar
-            </Button>
+            {manual ? (
+              <Button
+                access="promociones"
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => {
+                  if (!window.confirm('Se borran las franjas que todavía no empezaron. Lo que ya está en el canal queda como está.')) return;
+                  run(() => clearPlanAction(accountSlug, grid.productId), 'Se borró lo que todavía no había empezado.');
+                }}
+              >
+                Borrar lo planeado
+              </Button>
+            ) : (
+              <Button access="promociones" size="sm" variant="outline" disabled={busy || grid.tags.lifecycle === null} onClick={() => run(() => generatePlansAction(accountSlug, [grid.productId]), 'Se rearmó el almanaque.')}>
+                <Wand2 />
+                Rearmar
+              </Button>
+            )}
             <Button size="sm" access="subir" disabled={busy} onClick={() => askPreview({ productIds: [grid.productId] })}>
               Ver qué toca hoy
             </Button>
@@ -155,7 +286,7 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
         ) : (
           <ul className="divide-y">
             {columns.map((c) => (
-              <SlotRow key={columnKey(c)} accountSlug={accountSlug} timeZone={timeZone} productId={grid.productId} column={c} active={current !== null && columnKey(c) === columnKey(current)} busy={busy} floor={grid.thresholds.floorMarginPct} onPick={() => { setPicked(columnKey(c)); setSelected(new Set()); }} run={run} />
+              <SlotRow key={columnKey(c)} accountSlug={accountSlug} timeZone={timeZone} productId={grid.productId} column={c} editable={manual} active={current !== null && columnKey(c) === columnKey(current)} busy={busy} floor={grid.thresholds.floorMarginPct} onPick={() => { setPicked(columnKey(c)); setSelected(new Set()); }} run={run} />
             ))}
           </ul>
         )}
@@ -187,7 +318,7 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
         icon={<Grid3x3 />}
         description={
           current
-            ? `${LAYER_LABEL[current.layer]}, del ${shortDate(current.start, timeZone)} al ${shortDate(current.finish, timeZone)}. Busca ${pct(current.targetMarginPct)} de rentabilidad; el piso es ${pct(grid.thresholds.floorMarginPct)}. Cada casillero es una publicación con su código: arriba, lo que pasa en esta oferta; abajo, lo que tiene hoy.`
+            ? `${LAYER_LABEL[current.layer]}, ${current.finish && hasNoEnd(current.finish) ? `desde el ${shortDate(current.start, timeZone)}, sin fecha de fin` : `del ${shortDate(current.start, timeZone)} al ${shortDate(current.finish, timeZone)}`}. ${manual ? '' : `Busca ${pct(current.targetMarginPct)} de rentabilidad. `}El piso es ${pct(grid.thresholds.floorMarginPct)}. Cada casillero es una publicación con su código: arriba, lo que pasa en esta oferta; abajo, lo que tiene hoy.`
             : 'Cada forma de cobro de cada medida, con su precio y lo que deja hoy.'
         }
         action={
@@ -205,7 +336,7 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
               >
                 {columns.map((c) => (
                   <option key={columnKey(c)} value={columnKey(c)}>
-                    {c.name}, {shortDate(c.start, timeZone)} a {shortDate(c.finish, timeZone)}
+                    {c.name}, {c.finish && hasNoEnd(c.finish) ? 'sin fin' : `${shortDate(c.start, timeZone)} a ${shortDate(c.finish, timeZone)}`}
                   </option>
                 ))}
               </select>
@@ -309,7 +440,7 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
             </tbody>
           </table>
         </div>
-        {current && !compact ? (
+        {current && !compact && manual ? (
           <div className="flex flex-wrap items-center gap-2 border-t px-4 py-3 text-sm">
             <span className="text-muted-foreground">
               {selected.size > 0
@@ -508,6 +639,7 @@ function SlotRow({
   timeZone,
   productId,
   column: c,
+  editable,
   active,
   busy,
   floor,
@@ -518,6 +650,8 @@ function SlotRow({
   timeZone: string;
   productId: string;
   column: GridColumn;
+  // En Manual se puede sumar, cambiar o sacar una franja; en Automático el almanaque es de las reglas.
+  editable: boolean;
   active: boolean;
   busy: boolean;
   floor: number;
@@ -536,14 +670,14 @@ function SlotRow({
           <Badge variant={c.layer === 'BASE' ? 'secondary' : c.layer === 'PEAK' ? 'outline' : 'default'}>{LAYER_LABEL[c.layer]}</Badge>
           <span className="font-medium">{c.name}</span>
           <span className="text-muted-foreground">
-            {shortDate(c.start, timeZone)} a {shortDate(c.finish, timeZone)} · busca {pct(c.targetMarginPct)} · {source}
+            {c.finish && hasNoEnd(c.finish) ? `desde el ${shortDate(c.start, timeZone)}, sin fin` : `${shortDate(c.start, timeZone)} a ${shortDate(c.finish, timeZone)}`}{c.kind === 'OWN_DISCOUNT' && c.source === 'MANUAL' ? '' : ` · busca ${pct(c.targetMarginPct)}`} · {source}
             {c.cancelled ? ' · no va' : ''}
           </span>
         </button>
         <span className="text-xs text-muted-foreground">
           {c.counts.in} adentro o por entrar{c.counts.capped > 0 ? `, ${c.counts.capped} al tope` : ''} · {c.counts.out} afuera{c.counts.failed > 0 ? ` · ${c.counts.failed} no se pudo` : ''}
         </span>
-        <div className="flex gap-1.5">
+        <div className={cn('flex gap-1.5', !editable && 'hidden')}>
           {c.source === 'CHANNEL' ? (
             <Button access="promociones" size="sm" variant="outline" disabled={busy} onClick={() => run(() => saveSlotAction(accountSlug, productId, { group: c.group }), 'La campaña quedó en el almanaque, a mano.')}>
               Sumar al almanaque

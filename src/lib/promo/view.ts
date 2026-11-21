@@ -2,7 +2,7 @@ import type { PrismaClient } from '@/generated/prisma/client';
 import { planLabel } from '@/domain/pricing';
 import { OUT_REASON_LABEL, type OutReason } from '@/domain/promo/entry';
 import { layerOfType, type Layer, type SlotKind } from '@/domain/promo/plan';
-import { objectiveOf, type Objective, type PromoTags, type TagGroup } from '@/domain/promo/tags';
+import { objectiveOf, type Mode, type Objective, type PromoTags, type TagGroup } from '@/domain/promo/tags';
 import { decideItem, ITEM_STATE_LABEL, type ItemState } from './plan';
 import { loadProductPromo, type ProductPromo } from './product';
 import { loadPromoSettings, type PromoSettings } from './settings';
@@ -78,7 +78,9 @@ export type ProductGrid = {
   plannedAt: Date | null;
   competitor: ProductPromo['competitor'];
   thresholds: PromoSettings['thresholds'];
-  autoApply: boolean;
+  // Quién arma su almanaque, y si la cuenta tiene puesto el freno de emergencia.
+  mode: Mode;
+  paused: boolean;
   // Cuándo se leyeron del canal las invitaciones de este producto: lo más viejo.
   invitationsAt: Date | null;
   measures: GridMeasure[];
@@ -195,7 +197,8 @@ export async function loadProductGrid(db: Db, accountId: string, productId: stri
     plannedAt: promo.plannedAt,
     competitor: promo.competitor,
     thresholds: settings.thresholds,
-    autoApply: settings.autoApply,
+    mode: promo.mode,
+    paused: settings.paused,
     invitationsAt: seenAt.length > 0 ? new Date(Math.min(...seenAt)) : settings.sweptAt,
     measures,
     columns,

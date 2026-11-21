@@ -3087,8 +3087,10 @@ model PromotionSettings {
   // Rentabilidad sobre el costo, en %.
   healthyMarginPct Decimal   @default(15) @db.Decimal(6, 2)
   floorMarginPct   Decimal   @default(10) @db.Decimal(6, 2)
-  // La app prende y apaga las ofertas sola, siguiendo el almanaque.
+  // Ya no se usa: era el interruptor de la cuenta. Ahora el modo es de cada producto y la cuenta solo tiene el freno.
   autoApply        Boolean   @default(false)
+  // El freno de emergencia: mientras está puesto, la app no prende ni apaga nada en el canal. No borra nada.
+  paused           Boolean   @default(false)
   // Las reglas que proponen etiquetas y las recetas del almanaque.
   rules            Json      @default("{}")
   // Por dónde va la lectura de las invitaciones del canal, y cuándo terminó la última completa.
@@ -3109,6 +3111,8 @@ model PromotionSettings {
 model ProductPromotion {
   productId    String    @id
   product      Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  // Quién arma su almanaque: MANUAL, una persona; AUTO, las reglas con sus etiquetas. En los dos casos lo ejecuta la app.
+  mode         String    @default("MANUAL")
   // NEW, GROWING, MATURE o CLEARANCE.
   lifecycle    String?
   // PRICE_FIGHT o NO_COMPETITION.
@@ -3263,6 +3267,11 @@ model PromotionSlotItem {
   ref           String?
   // Las unidades reservadas, en una relámpago.
   stock         Int?
+  // El precio lo puso una persona: no se vuelve a calcular con las reglas.
+  fixed         Boolean       @default(false)
+  // Con qué se cargó el precio a mano (MARGIN, PRICE o PCT) y su valor, para calcularlo cuando llegue la invitación de una reserva.
+  priceBy       String?
+  priceValue    Decimal?      @db.Decimal(14, 2)
   appliedAt     DateTime?
   endedAt       DateTime?
   attempts      Int           @default(0)

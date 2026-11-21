@@ -10,7 +10,7 @@ import { COMPETITIONS, COMPETITION_LABEL, LIFECYCLES, LIFECYCLE_LABEL, OBJECTIVE
 import type { AppliedAction, DueAction } from '@/lib/promo/apply';
 import type { OverviewFilter, OverviewRow } from '@/lib/promo/overview';
 import { cn } from '@/lib/utils/cn';
-import { applyAction, filteredProductsAction, generatePlansAction, previewApplyAction, setTagsAction, type TagInput } from '@/app/a/[cuenta]/promociones/actions';
+import { applyAction, filteredProductsAction, generatePlansAction, previewApplyAction, setModesAction, setTagsAction, type TagInput } from '@/app/a/[cuenta]/promociones/actions';
 import { pct, shortDate } from './format';
 
 // La lista de Promociones: cada producto con sus etiquetas y cómo están sus
@@ -54,6 +54,29 @@ export function PromoList({ accountSlug, timeZone, rows, total, filter }: { acco
       setNotice({ kind: 'ok', text: `Almanaque rearmado en ${done} ${done === 1 ? 'producto' : 'productos'}.${skipped.length > 0 ? ` Sin armar: ${skipped.slice(0, 5).join(' ')}${skipped.length > 5 ? ` y ${skipped.length - 5} más.` : ''}` : ''}` });
       router.refresh();
     });
+
+  // Pasa los elegidos de modo, de a tandas. Lo que ya está en el canal sigue hasta que termine.
+  const toMode = (mode: 'MANUAL' | 'AUTO') => {
+    const text =
+      mode === 'AUTO'
+        ? `Se pasan ${ids.length} a Automático: la regla les pone las etiquetas y arma su almanaque, y lo que habías armado a mano y no empezó se reemplaza. Lo que ya está en el canal sigue hasta que termine. Para decidir qué sacar, hacelo entrando a cada producto.`
+        : `Se pasan ${ids.length} a Manual: las franjas que armaron las reglas quedan para editarlas.`;
+    if (!window.confirm(text)) return;
+    start(async () => {
+      let left = ids;
+      let done = 0;
+      while (left.length > 0) {
+        const r = await setModesAction(accountSlug, left, mode).catch(() => null);
+        if (!r || !r.ok) return fail(r?.error);
+        done += r.done;
+        left = r.left;
+        setNotice({ kind: 'ok', text: `Pasando de modo: ${done} de ${ids.length}.` });
+      }
+      setNotice({ kind: 'ok', text: `${done} ${done === 1 ? 'producto quedó' : 'productos quedaron'} en ${mode === 'AUTO' ? 'Automático' : 'Manual'}.` });
+      setSelected(new Set());
+      router.refresh();
+    });
+  };
 
   const askPreview = () =>
     start(async () => {
@@ -108,6 +131,11 @@ export function PromoList({ accountSlug, timeZone, rows, total, filter }: { acco
         ) : null}
         {ids.length > 0 ? (
           <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+            <select className={SELECT} value="" disabled={busy} aria-label="Pasar de modo" onChange={(e) => e.target.value && toMode(e.target.value as 'MANUAL' | 'AUTO')}>
+              <option value="">Pasar a…</option>
+              <option value="AUTO">Automático</option>
+              <option value="MANUAL">Manual</option>
+            </select>
             <select className={SELECT} value="" disabled={busy} aria-label="Poner ciclo de vida" onChange={(e) => e.target.value && tag({ lifecycle: e.target.value as (typeof LIFECYCLES)[number] }, 'Ciclo de vida puesto')}>
               <option value="">Ciclo de vida…</option>
               {LIFECYCLES.map((l) => (
@@ -218,19 +246,24 @@ export function PromoList({ accountSlug, timeZone, rows, total, filter }: { acco
                   </span>
                 </div>
                 <div className="flex flex-wrap gap-1.5 text-xs">
-                  {tagsText(r.tags).map((t) => (
-                    <Badge key={t} variant="secondary">
-                      {t}
-                    </Badge>
-                  ))}
-                  {r.tags.lifecycle === null ? <Badge variant="outline">Sin ciclo de vida</Badge> : null}
-                  {r.objective ? <span className="self-center text-muted-foreground">Objetivo: {OBJECTIVE_LABEL[r.objective]}</span> : null}
+                  <Badge variant={r.mode === 'AUTO' ? 'default' : 'outline'}>{r.mode === 'AUTO' ? 'Automático' : 'Manual'}</Badge>
+                  {/* Las etiquetas son del modo Automático. */}
+                  {r.mode === 'AUTO' ? (
+                    <>
+                      {tagsText(r.tags).map((t) => (
+                        <Badge key={t} variant="secondary">
+                          {t}
+                        </Badge>
+                      ))}
+                      {r.objective ? <span className="self-center text-muted-foreground">Objetivo: {OBJECTIVE_LABEL[r.objective]}</span> : null}
+                    </>
+                  ) : null}
                 </div>
                 <p className="text-xs text-muted-foreground">
                   {r.on} adentro · {r.planned} por entrar · {r.out} afuera
                   {r.failed > 0 ? <span className="font-medium text-destructive"> · {r.failed} no se pudo</span> : null}
                   {r.next ? ` · Sigue: ${r.next.name}, ${shortDate(r.next.start, timeZone)}` : ''}
-                  {r.tags.lifecycle !== null && r.plannedAt === null ? ' · Todavía sin almanaque' : ''}
+
                 </p>
               </div>
             </li>
