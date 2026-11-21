@@ -169,12 +169,34 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
       ) : null}
 
       <SectionCard
-        title="Medidas por formas de cobro"
+        title={current ? `Medidas por formas de cobro en «${current.name}»` : 'Medidas por formas de cobro'}
         icon={<Grid3x3 />}
         description={
           current
-            ? `${LAYER_LABEL[current.layer]}: ${current.name}. Busca ${pct(current.targetMarginPct)} de rentabilidad; el piso es ${pct(grid.thresholds.floorMarginPct)}. Cada casillero es una publicación con su código.`
+            ? `${LAYER_LABEL[current.layer]}, del ${shortDate(current.start, timeZone)} al ${shortDate(current.finish, timeZone)}. Busca ${pct(current.targetMarginPct)} de rentabilidad; el piso es ${pct(grid.thresholds.floorMarginPct)}. Cada casillero es una publicación con su código: arriba, lo que pasa en esta oferta; abajo, lo que tiene hoy.`
             : 'Cada forma de cobro de cada medida, con su precio y lo que deja hoy.'
+        }
+        action={
+          columns.length > 1 && current ? (
+            // La oferta que muestra la grilla: la misma que se elige tocando una franja de arriba.
+            <label className="flex items-center gap-2 text-sm">
+              <span className="text-muted-foreground">Ver</span>
+              <select
+                className={cn(SELECT, 'max-w-[18rem]')}
+                value={columnKey(current)}
+                onChange={(e) => {
+                  setPicked(e.target.value);
+                  setSelected(new Set());
+                }}
+              >
+                {columns.map((c) => (
+                  <option key={columnKey(c)} value={columnKey(c)}>
+                    {c.name}, {shortDate(c.start, timeZone)} a {shortDate(c.finish, timeZone)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : undefined
         }
       >
         <div className="overflow-x-auto">
@@ -193,7 +215,8 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
               {grid.measures.map((m) => (
                 <tr key={m.mainId}>
                   <td className="px-1 align-top">
-                    <p className="font-medium">{m.measure ?? 'Única'}</p>
+                    {/* Sin medida: la única del producto, o una publicación de la que la app no sabe qué medida vende. */}
+                    <p className="font-medium">{m.measure ?? (grid.measures.length > 1 ? 'Medida sin identificar' : 'Única')}</p>
                     {m.stock !== null ? <p className="text-muted-foreground">Stock {m.stock}</p> : null}
                   </td>
                   {plans.map((plan) => (
@@ -254,7 +277,13 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
         </div>
         {current && !compact ? (
           <div className="flex flex-wrap items-center gap-2 border-t px-4 py-3 text-sm">
-            <span className="text-muted-foreground">{selected.size > 0 ? `${selected.size} elegidas` : 'Elegí casilleros para prenderlos o sacarlos a mano.'}</span>
+            <span className="text-muted-foreground">
+              {selected.size > 0
+                ? `${selected.size} elegidas`
+                : current.source === 'CHANNEL'
+                  ? 'Esta campaña todavía no está en el almanaque: para elegir casilleros, primero tocá «Sumar al almanaque» en su franja.'
+                  : 'Elegí casilleros para prenderlos o sacarlos a mano.'}
+            </span>
             <div className="flex flex-wrap gap-2 sm:ml-auto">
               <Button size="sm" access="subir" disabled={busy || toEnter.length === 0} onClick={() => askPreview({ itemIds: toEnter.map((c) => c.itemId!), force: true })}>
                 Prender ahora{toEnter.length > 0 ? ` (${toEnter.length})` : ''}
