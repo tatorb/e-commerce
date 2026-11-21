@@ -204,10 +204,17 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
         }
       >
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] border-separate border-spacing-1.5 p-2 text-xs">
+          {/* Todas las columnas del mismo ancho y todos los casilleros del mismo alto. */}
+          <table className="w-full min-w-[1080px] table-fixed border-separate border-spacing-1.5 p-2 text-xs">
+            <colgroup>
+              <col className="w-36" />
+              {plans.map((plan) => (
+                <col key={String(plan)} />
+              ))}
+            </colgroup>
             <thead>
               <tr>
-                <th className="w-24 px-1 text-left font-medium text-muted-foreground">Medida</th>
+                <th className="px-1 text-left font-medium text-muted-foreground">Medida</th>
                 {plans.map((plan) => (
                   <th key={String(plan)} className="px-1 text-left font-medium text-muted-foreground">
                     {plan === null ? 'Otra forma de cobro' : planLabel(plan)}
@@ -228,11 +235,12 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
                   </td>
                   {plans.map((plan) => (
                     <td key={String(plan)} className="space-y-1.5 align-top">
+                      {m.options.every((o) => o.plan !== plan) ? <div className="flex h-[208px] items-center justify-center rounded-lg border border-dashed text-[11px] text-muted-foreground">Sin publicación</div> : null}
                       {m.options.filter((o) => o.plan === plan).map((o) => {
                     const cell = cellOf.get(o.publicationId) ?? null;
                     const canPick = cell?.itemId != null;
                     return (
-                        <label key={o.publicationId} className={cn('block rounded-lg border p-2', cell ? stateClass(cell.state, cell.capped) : 'border-border bg-background', canPick && 'cursor-pointer')} title={cell?.text ?? undefined}>
+                        <label key={o.publicationId} className={cn('flex h-[208px] flex-col overflow-hidden rounded-lg border p-2', cell ? stateClass(cell.state, cell.capped) : 'border-border bg-background', canPick && 'cursor-pointer', o.status !== 'ACTIVE' && 'opacity-50')} title={[cell?.text, cell?.lastError].filter(Boolean).join(' ') || undefined}>
                           <span className="flex items-center justify-between gap-1">
                             <span className="font-mono text-[11px]">{o.externalId ?? 'Sin publicar'}</span>
                             {canPick ? (
@@ -269,17 +277,18 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
                                   {money(cell.marginPct, o.cost) ? `, ${money(cell.marginPct, o.cost)}` : ''}
                                 </span>
                               ) : null}
-                              {cell.text ? <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">{cell.text}</span> : null}
-                              {cell.lastError && cell.state !== 'FAILED' ? <span className="mt-0.5 block text-[11px] leading-snug text-destructive">{cell.lastError}</span> : null}
+                              {/* El motivo, en dos renglones como mucho: entero se lee dejando el cursor encima. */}
+                              {cell.text ? <span className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-muted-foreground">{cell.text}</span> : null}
+                              {cell.lastError && cell.state !== 'FAILED' ? <span className="mt-0.5 line-clamp-1 text-[11px] leading-snug text-destructive">{cell.lastError}</span> : null}
                             </>
                           ) : null}
-                          <span className="mt-1 block border-t border-foreground/10 pt-1 text-[11px] text-muted-foreground">
+                          <span className="mt-auto block border-t border-foreground/10 pt-1 text-[11px] text-muted-foreground">
                             <span className="block text-[10px] uppercase tracking-wide">Sin la oferta, hoy</span>
                             {o.listPrice !== null ? `Precio de lista ${formatPrice(o.listPrice)}` : 'Sin precio de lista'}
                             {o.discountNow ? `, con ${pct(o.discountNow)} de descuento propio` : ''}
                             <span className="block">{o.marginNow !== null ? `Deja ${pct(o.marginNow)}${money(o.marginNow, o.cost) ? `, ${money(o.marginNow, o.cost)}` : ''}` : o.cost === null ? 'Sin costo cargado' : ''}</span>
                           </span>
-                          {o.excluded ? <span className="mt-0.5 block text-[11px] font-medium">Prohibida{o.excludedWhy ? `: ${o.excludedWhy}` : ''}</span> : null}
+                          {o.excluded ? <span className="block truncate text-[11px] font-medium">Prohibida{o.excludedWhy ? `: ${o.excludedWhy}` : ''}</span> : null}
                         </label>
                     );
                   })}
