@@ -4,6 +4,9 @@ import { decideCampaign, decideOwnDiscount, decideVolume, marginAt, priceForMarg
 import { diffSlots, eventOf, layerOfType, planSlots, targetMargin, type CalendarEvent, type ExistingSlot, type PlanInput } from '@/domain/promo/plan';
 import { DEFAULT_RULES, DEFAULT_THRESHOLDS, patchRules, readRules, thresholdsProblem } from '@/domain/promo/rules';
 import { NO_TAGS, objectiveOf, readTags, tagsText } from '@/domain/promo/tags';
+import { parsePromotionItems, parseSellerPromotions } from '@/channels/mercadolibre/promotions';
+import { proposeCompetition, proposeLifecycle, type ProductFacts } from '@/domain/promo/classify';
+import { priceRiskText } from '@/lib/promo/price-risk';
 
 const params = { ...PRICING_DEFAULTS, shipping: 0 };
 const eco = (over: Partial<OptionEconomics> = {}): OptionEconomics => ({ cost: 10_000, params, plan: 0, listPrice: null, ...over });
@@ -213,5 +216,109 @@ describe('promociones: el almanaque', () => {
     expect(diff.update.map((u) => u.id)).toEqual(['s3']);
     expect(diff.remove).toEqual(['s4']);
     expect(diff.create.some((s) => s.group === 'LIGHTNING:P2')).toBe(true);
+  });
+});
+
+describe('promociones: lo que informa Mercado Libre de toda la cuenta', () => {
+  // Con la forma de las respuestas de la documentación de Mercado Libre.
+  const sellerBody = {
+    results: [
+      { id: 'P-MLA1', type: 'DEAL', status: 'pending', start_date: '2027-05-10T03:00:00Z', finish_date: '2027-05-17T03:00:00Z', deadline_date: '2027-05-09T03:00:00Z', name: 'Hot Sale' },
+      { id: 'P-MLA2', type: 'VOLUME', status: 'started', start_date: '2026-11-01T03:00:00Z', finish_date: '2026-12-31T03:00:00Z', name: '3x2', benefits: { type: 'VOLUME', meli_percent: 9.9999, seller_percent: 23.3331 } },
+      { id: 'P-MLA3', type: 'LIGHTNING', status: 'started', name: 'Relámpago' },
+      { id: 'P-MLA4', type: 'PRICE_DISCOUNT', status: 'started' },
+      { type: 'DEAL' },
+    ],
+    paging: { total: 5 },
+  };
+
+  it('la lista de promociones del vendedor, sin el descuento propio', () => {
+    const list = parseSellerPromotions(sellerBody);
+    expect(list.map((p) => [p.id, p.type])).toEqual([
+      ['P-MLA1', 'DEAL'],
+      ['P-MLA2', 'VOLUME'],
+      ['P-MLA3', 'LIGHTNING'],
+    ]);
+    expect(list[0].deadline).toEqual(new Date('2027-05-09T03:00:00Z'));
+    expect(list[1]).toMatchObject({ channelPct: 9.9999, sellerPct: 23.3331 });
+    expect(parseSellerPromotions(null)).toEqual([]);
+  });
+
+  it('las publicaciones de una campaña tradicional: invitada con su tope, y adentro con su precio', () => {
+    const [deal] = parseSellerPromotions(sellerBody);
+    const page = parsePromotionItems(deal, {
+      results: [
+        { id: 'MLA100', status: 'candidate', price: 0, original_price: 1000, min_discounted_price: 400, max_discounted_price: 900, suggested_discounted_price: 850 },
+        { id: 'MLA200', status: 'started', price: 800, original_price: 1000 },
+        { id: 'MLA300', status: 'finished', price: 800 },
+      ],
+      paging: { searchAfter: 'abc' },
+    });
+    expect(page.next).toBe('abc');
+    expect(page.items.map((i) => i.externalId)).toEqual(['MLA100', 'MLA200']);
+    expect(page.items[0].campaign).toMatchObject({ group: 'DEAL:P-MLA1', name: 'Hot Sale', status: 'invited', join: 'price', pausesOwnDiscount: true, listPrice: 1000, range: { minPrice: 400, maxPrice: 900, suggestedPrice: 850 } });
+    expect(page.items[0].deadline).toEqual(new Date('2027-05-09T03:00:00Z'));
+    expect(page.items[1].campaign).toMatchObject({ status: 'active', join: null, canLeave: true, price: 800 });
+    // La última página no trae por dónde seguir.
+    expect(parsePromotionItems(deal, { results: [], paging: {} }).next).toBeNull();
+  });
+
+  it('una relámpago se pide con precio y unidades, y una vez activa no se puede sacar', () => {
+    const lightning = parseSellerPromotions(sellerBody)[2];
+    const page = parsePromotionItems(lightning, {
+      results: [
+        { id: 'MLA100', status: 'candidate', price: 4000, original_price: 5000, max_discounted_price: 4950, min_discounted_price: 1500, start_date: '2026-12-02T15:00:00Z', finish_date: '2026-12-02T23:00:00Z', stock: { min: 2, max: 5 } },
+        { id: 'MLA200', status: 'pending', price: 4000 },
+        { id: 'MLA300', status: 'started', price: 4000 },
+      ],
+    });
+    expect(page.items[0]).toMatchObject({ type: 'LIGHTNING', stock: { min: 2, max: 5 } });
+    expect(page.items[0].campaign).toMatchObject({ status: 'invited', join: 'price', kind: 'Oferta relámpago', range: { minPrice: 1500, maxPrice: 4950 }, start: new Date('2026-12-02T15:00:00Z') });
+    expect(page.items[1].campaign).toMatchObject({ status: 'scheduled', canLeave: true });
+    expect(page.items[2].campaign).toMatchObject({ status: 'active', canLeave: false });
+  });
+
+  it('en una por cantidad, cada publicación lleva lo que pone el canal y lo que pone la tienda', () => {
+    const volume = parseSellerPromotions(sellerBody)[1];
+    const page = parsePromotionItems(volume, { results: [{ id: 'MLA100', status: 'started', price: 0, original_price: 1000, offer_id: 'OFFER-1' }] });
+    expect(page.items[0].campaign).toMatchObject({ group: 'VOLUME:P-MLA2', status: 'active', channelPct: 9.9999, sellerPct: 23.3331, canLeave: false, join: null });
+    expect(JSON.parse(page.items[0].campaign.ref)).toEqual(['VOLUME', 'P-MLA2', 'OFFER-1']);
+  });
+});
+
+describe('promociones: la regla que propone etiquetas y el aviso al subir el precio', () => {
+  const rules = DEFAULT_RULES.classify;
+  const facts = (over: Partial<ProductFacts>): ProductFacts => ({ ageDays: 400, units90: 10, units30: 3, unitsClearance: 10, stock: 20, flatPrice: 1000, competitorPrice: null, ...over });
+
+  it('el ciclo de vida sale de la antigüedad y las ventas', () => {
+    expect(proposeLifecycle(facts({ ageDays: 20 }), rules)).toMatchObject({ value: 'NEW' });
+    expect(proposeLifecycle(facts({ units90: 0, units30: 0, unitsClearance: 0 }), rules)).toMatchObject({ value: 'CLEARANCE' });
+    // Sin stock no hay qué liquidar.
+    expect(proposeLifecycle(facts({ units90: 0, units30: 0, unitsClearance: 0, stock: 0 }), rules)).toMatchObject({ value: 'GROWING' });
+    expect(proposeLifecycle(facts({ units90: 60, units30: 20 }), rules)).toMatchObject({ value: 'MATURE' });
+    expect(proposeLifecycle(facts({ units90: 60, units30: 40 }), rules)).toMatchObject({ value: 'GROWING' });
+    expect(proposeLifecycle(facts({ units90: 5 }), rules)).toMatchObject({ value: 'GROWING' });
+    // Sin las ventas completas de la tienda no propone nada.
+    expect(proposeLifecycle(facts({ units90: null, units30: null, unitsClearance: null }), rules)).toBeNull();
+    expect(proposeLifecycle(facts({ ageDays: 20 }), rules)!.why).toContain('20 días');
+  });
+
+  it('pelea por precio si el competidor más barato está cerca o por debajo del sin cuotas', () => {
+    expect(proposeCompetition(facts({}), rules)).toBeNull();
+    expect(proposeCompetition(facts({ competitorPrice: 900 }), rules)).toMatchObject({ value: 'PRICE_FIGHT' });
+    expect(proposeCompetition(facts({ competitorPrice: 1080 }), rules)).toMatchObject({ value: 'PRICE_FIGHT' });
+    expect(proposeCompetition(facts({ competitorPrice: 1300 }), rules)).toMatchObject({ value: null });
+  });
+
+  it('el aviso de las campañas que se pierden al subir el precio', () => {
+    expect(priceRiskText([], 'Mercado Libre')).toBeNull();
+    const risks = [
+      { publicationId: 'a', externalId: 'MLA1', campaigns: ['Compartida'], rising: false },
+      { publicationId: 'b', externalId: 'MLA2', campaigns: ['Compartida', '3x2'], rising: true },
+    ];
+    expect(priceRiskText(risks, 'Mercado Libre')).toContain('2 publicaciones están en Compartida, 3x2 (MLA1, MLA2)');
+    // Al guardar un precio, solo las que ya tienen un precio más alto por subir.
+    expect(priceRiskText(risks, 'Mercado Libre', true)).toContain('Una publicación está en Compartida, 3x2 (MLA2)');
+    expect(priceRiskText([risks[0]], 'Mercado Libre', true)).toBeNull();
   });
 });

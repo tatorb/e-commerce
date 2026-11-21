@@ -31,6 +31,7 @@ import { measuresOf } from '@/lib/media';
 import { pushDrafts, PushError } from '@/lib/channel-push';
 import { loadPricingSettings, loadPriceStep, PricingError, saveFlatPrice, saveOptionPrice, savePriceDecision, savePricingSettings, type PriceGroupData } from '@/lib/pricing';
 import { listToPush } from '@/lib/queries/sync';
+import { priceRiseRisks, priceRiskText } from '@/lib/promo/price-risk';
 import { McpToolError, accountArg, defineTool, findPublication, publicationArg, resolveAccount, resolvePublication, type McpContext } from './tool';
 
 // El precio desde Claude: lo mismo que el paso Precio y Ajustes > Precios, con
@@ -383,13 +384,7 @@ function tableForClaude(table: OptionTable, anchorId: string, campaignMargin?: n
   };
 }
 
-const savePrice = defineTool({
-  name: 'save_price',
-  section: 'pipeline',
-  title: 'Guardar el precio',
-  description:
-    'Guarda el precio de una pestaña del paso Precio, como el botón Guardar precio: el precio publicado (con IVA), el descuento y las cuotas van a todas las publicaciones de la pestaña y quedan en Por subir; para mandarlos al canal, push_prices. Con precio_sin_cuotas, en lugar de precio_publicado, guarda como la tabla de precios por modo de compra (tabla_por_modo_de_compra de get_price_step): la principal y cada otra opción de venta de la medida quedan con el precio que deja la misma ganancia que ese precio sin cuotas, cada una con su forma de cobro y su descuento propio, que no cambian; las finalizadas y las que frenó el canal no se tocan. Devuelve el precio de cada una. Pasá en publicacion la de publicacion_para_guardar de get_price_step, o cualquiera de esa pestaña. El costo sale de Costo y Stock del producto (set_product_cost). Con costos_propios_del_producto se cambian los costos que valen solo para este producto: los que no se mandan quedan como están y null vuelve al de la cuenta. Si el margen queda debajo del mínimo, no guarda: decíselo a la persona y, si confirma, volvé a llamar con confirmar_debajo_del_minimo. Antes de guardar, mostrale a la persona qué vas a cambiar y esperá que confirme.',
-  input: z.object({
+const savePriceInput = z.object({
     cuenta: accountArg,
     publicacion: publicationArg,
     precio_publicado: z.number().positive().max(999_999_999).optional().describe('El precio publicado, con IVA, en pesos. Mandá este o precio_sin_cuotas.'),
@@ -411,10 +406,30 @@ const savePrice = defineTool({
       .boolean()
       .default(false)
       .describe('Con precio_sin_cuotas: también las formas de cobro personalizadas vuelven a tomar el precio de la tabla.'),
-  }),
+  });
+
+const savePrice = defineTool({
+  name: 'save_price',
+  section: 'pipeline',
+  title: 'Guardar el precio',
+  description:
+    'Guarda el precio de una pestaña del paso Precio, como el botón Guardar precio: el precio publicado (con IVA), el descuento y las cuotas van a todas las publicaciones de la pestaña y quedan en Por subir; para mandarlos al canal, push_prices. Con precio_sin_cuotas, en lugar de precio_publicado, guarda como la tabla de precios por modo de compra (tabla_por_modo_de_compra de get_price_step): la principal y cada otra opción de venta de la medida quedan con el precio que deja la misma ganancia que ese precio sin cuotas, cada una con su forma de cobro y su descuento propio, que no cambian; las finalizadas y las que frenó el canal no se tocan. Devuelve el precio de cada una. Pasá en publicacion la de publicacion_para_guardar de get_price_step, o cualquiera de esa pestaña. El costo sale de Costo y Stock del producto (set_product_cost). Con costos_propios_del_producto se cambian los costos que valen solo para este producto: los que no se mandan quedan como están y null vuelve al de la cuenta. Si el margen queda debajo del mínimo, no guarda: decíselo a la persona y, si confirma, volvé a llamar con confirmar_debajo_del_minimo. Antes de guardar, mostrale a la persona qué vas a cambiar y esperá que confirme.',
+  input: savePriceInput,
   readOnly: false,
   destructive: true,
-  run: async (ctx, args) => {
+  run: async (ctx, args) => withPriceRisk(ctx, args, await savePriceRun(ctx, args)),
+});
+
+/** Suma el aviso de las campañas que se pierden si el precio guardado, más alto que el del canal, se sube. */
+async function withPriceRisk(ctx: McpContext, a: { cuenta?: string; publicacion: string }, result: unknown): Promise<unknown> {
+  const account = await resolveAccount(ctx, a.cuenta);
+  const id = await findPublication(ctx.db, account.id, a.publicacion).catch(() => null);
+  const text = id ? priceRiskText(await priceRiseRisks(ctx.db, account.id, id), 'el canal', true) : null;
+  return text && result && typeof result === 'object' ? { ...result, aviso_campanas: text } : result;
+}
+
+async function savePriceRun(ctx: McpContext, args: z.output<typeof savePriceInput>): Promise<unknown> {
+  {
     const account = await resolveAccount(ctx, args.cuenta);
     const id = await resolvePublication(ctx, account.id, args.publicacion);
     if (args.solo_esta_forma_de_cobro) {
@@ -520,8 +535,8 @@ const savePrice = defineTool({
       if (e instanceof PricingError) throw new McpToolError(e.message);
       throw e;
     }
-  },
-});
+  }
+}
 
 const getPricingSettings = defineTool({
   name: 'get_pricing_settings',

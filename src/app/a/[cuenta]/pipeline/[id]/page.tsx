@@ -29,6 +29,7 @@ import { SaleOptionsCard } from '@/components/sale-options/SaleOptionsCard';
 import { PriceWorkspace } from '@/components/pipeline/price/PriceWorkspace';
 import { ProductPromoPanel } from '@/components/promo/ProductPromoPanel';
 import { loadPromoPanel } from '@/lib/promo/panel';
+import { priceRiseRisks, priceRiskText } from '@/lib/promo/price-risk';
 import { familyMeasuresText, loadPublicationFacts } from '@/lib/publication-facts';
 import { firstPhoto, productCovers } from '@/lib/queries/products';
 import { PipelineHistory } from '@/components/pipeline/PipelineHistory';
@@ -164,6 +165,8 @@ export default async function PipelineStepPage({
   const canTask = can(user.access, 'tareas', 'write');
   // En Publicación, los clips del producto que falta subir al canal.
   const pendingClips = viewing === 'PUBLISH' ? await pendingClipUploads(prisma, account.id, pub.productId) : [];
+  // En Precio: las campañas que se pierden si se sube el precio.
+  const priceRisk = viewing === 'PRICE' ? priceRiskText(await priceRiseRisks(prisma, account.id, pub.id).catch(() => []), pub.channelName) : null;
   // En Promociones, las etiquetas del producto, su almanaque y la grilla por forma de cobro.
   const promo = viewing === 'PROMOTIONS' && can(user.access, 'promociones', 'read') ? await loadPromoPanel(prisma, account.id, pub.productId) : null;
   const [ctx, info, images, channel, faces, media, create, videos, description, qa, price, decision, tasks, people, stockPlans, factsOf, family, cover, textImage, notes] = await Promise.all([
@@ -584,6 +587,11 @@ export default async function PipelineStepPage({
           )
         ) : price && viewing === 'PRICE' ? (
           <>
+          {priceRisk ? (
+            <p role="note" className="rounded-2xl border border-alert/40 bg-alert/10 px-4 py-3 text-sm">
+              <strong>Antes de subir un precio más alto:</strong> {priceRisk}
+            </p>
+          ) : null}
           <PriceWorkspace
             accountSlug={account.slug}
             data={price}
