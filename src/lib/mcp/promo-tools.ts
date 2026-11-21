@@ -7,6 +7,7 @@ import { classifiedText, classifyAccount } from '@/lib/promo/classify';
 import { cancelSlot, deleteEvent, listEvents, saveEvent, saveManualSlot } from '@/lib/promo/manual';
 import { loadLog, measureDue } from '@/lib/promo/measure';
 import { loadOverview, OVERVIEW_STATES, overviewProductIds, type OverviewFilter } from '@/lib/promo/overview';
+import { modeConflicts, setMode } from '@/lib/promo/mode';
 import { generatePlan } from '@/lib/promo/plan';
 import { productOfPublication } from '@/lib/promo/product';
 import { loadPromoSettings, PromoError, savePromoSettings } from '@/lib/promo/settings';
@@ -43,6 +44,7 @@ async function run<T>(work: () => Promise<T>): Promise<T> {
 
 const filterArg = z
   .object({
+    modo: z.enum(['manual', 'automatico']).optional(),
     ciclo_de_vida: z.enum(['nueva', 'en_crecimiento', 'madurada', 'a_liquidar', 'sin_etiqueta']).optional(),
     competencia: z.enum(['pelea_por_precio', 'sin_competencia']).optional(),
     prioridad: z.enum(['empujar', 'estacional']).optional(),
@@ -54,6 +56,7 @@ const filterArg = z
   .describe('Qué productos: los que cumplen todo lo que se pide.');
 
 const toFilter = (f: z.infer<typeof filterArg> | undefined): OverviewFilter => ({
+  mode: f?.modo === 'automatico' ? 'AUTO' : f?.modo === 'manual' ? 'MANUAL' : undefined,
   lifecycle: f?.ciclo_de_vida === 'sin_etiqueta' ? 'none' : f?.ciclo_de_vida ? LIFECYCLE_IN[f.ciclo_de_vida] : undefined,
   competition: f?.competencia ? COMPETITION_IN[f.competencia] : undefined,
   priority: f?.prioridad ? PRIORITY_IN[f.prioridad] : undefined,
@@ -153,15 +156,16 @@ const getPromotions = defineTool({
         return {
           cuenta: account.slug,
           rentabilidad: { saludable_pct: settings.thresholds.healthyMarginPct, piso_pct: settings.thresholds.floorMarginPct },
-          ejecucion_automatica: settings.autoApply,
+          freno_de_emergencia: settings.paused,
           invitaciones_leidas: when(settings.sweptAt, account),
-          totales: { productos: o.totals.products, con_ciclo_de_vida: o.totals.tagged, formas_de_cobro_adentro: o.totals.on, por_entrar: o.totals.planned, afuera: o.totals.out, no_se_pudo: o.totals.failed },
+          totales: { productos: o.totals.products, en_automatico: o.totals.auto, con_ciclo_de_vida: o.totals.tagged, formas_de_cobro_adentro: o.totals.on, por_entrar: o.totals.planned, afuera: o.totals.out, no_se_pudo: o.totals.failed },
           encontrados: o.total,
           marcas: o.brands,
           productos: o.rows.map((r) => ({
             producto: r.name,
             marca: r.brand,
             publicacion: r.publicationId,
+            modo: r.mode === 'AUTO' ? 'automatico' : 'manual',
             etiquetas: tagsText(r.tags),
             objetivo: r.objective ? OBJECTIVE_LABEL[r.objective] : null,
             formas_de_cobro: r.options,
@@ -187,7 +191,8 @@ const getPromotions = defineTool({
         por_que: grid.why,
         objetivo: grid.objective ? OBJECTIVE_LABEL[grid.objective] : 'Sin ciclo de vida: todavía no tiene almanaque.',
         rentabilidad: { saludable_pct: grid.thresholds.healthyMarginPct, piso_pct: grid.thresholds.floorMarginPct },
-        ejecucion_automatica: grid.autoApply,
+        modo: grid.mode === 'AUTO' ? 'automatico' : 'manual',
+        freno_de_emergencia: grid.paused,
         almanaque_armado: when(grid.plannedAt, account),
         invitaciones_leidas: when(grid.invitationsAt, account),
         competidor_mas_barato: grid.competitor ? { precio: grid.competitor.price, de: grid.competitor.seller, relevado: grid.competitor.surveyedAt?.toISOString().slice(0, 10) ?? null } : null,
@@ -217,7 +222,7 @@ const getSettings = defineTool({
   section: 'promociones',
   title: 'Ver los ajustes de promociones',
   description:
-    'Los ajustes de promociones de la cuenta: la rentabilidad saludable y el piso (sobre el costo, en %), si la app prende y apaga las ofertas sola siguiendo el almanaque (ejecucion_automatica), las reglas (la receta del almanaque de cada ciclo de vida, los números con los que la regla propone las etiquetas y los tiempos) y el calendario de eventos.',
+    'Los ajustes de promociones de la cuenta: la rentabilidad saludable y el piso (sobre el costo, en %), si está puesto el freno de emergencia (freno_de_emergencia: mientras está puesto la app no prende ni apaga nada en el canal, y no borra nada), las reglas (la receta del almanaque de cada ciclo de vida, los números con los que la regla propone las etiquetas y los tiempos) y el calendario de eventos.',
   input: z.object({ cuenta: accountArg }),
   readOnly: true,
   run: (ctx, args) =>
@@ -228,7 +233,7 @@ const getSettings = defineTool({
       return {
         cuenta: account.slug,
         rentabilidad: { saludable_pct: s.thresholds.healthyMarginPct, piso_pct: s.thresholds.floorMarginPct },
-        ejecucion_automatica: s.autoApply,
+        freno_de_emergencia: s.paused,
         reglas: s.rules,
         como_leer_las_reglas:
           'recipes: la receta de cada ciclo de vida (NEW nueva, GROWING en crecimiento, MATURE madurada, CLEARANCE a liquidar): base (descuento propio), baseMarginPct, baseSteps (a tantos días o menos del próximo evento, esa rentabilidad), events (always, with_sales, never), eventMarginPct, peaks (relámpago y oferta del día), peakMarginPct, volume (por cantidad). Una rentabilidad en null es la saludable. classify: los números de la regla que propone etiquetas (newDays, matureUnits90, matureGrowthPct, growingMinUnits90: con menos ventas que esas en 90 días queda sin ciclo de vida; clearanceAuto: si la regla propone a liquidar; clearanceDays, priceFightPct, competitorDays). timing: horizonDays, baseDays, pushStepPct, baseOverEventPct, stockMin, joinLeadDays, measureDays, reclassifyDays.',
@@ -243,12 +248,12 @@ const updateSettings = defineTool({
   name: 'update_promotion_settings',
   section: 'promociones',
   title: 'Cambiar los ajustes de promociones',
-  description: `Cambia los ajustes de promociones de la cuenta: solo lo que viene. saludable_pct y piso_pct son la rentabilidad sobre el costo: ninguna oferta entra si deja menos que el piso. ejecucion_automatica: true = la app prende y apaga sola las ofertas del almanaque con la lectura de cada hora; false = no hace nada sola y se aplica con apply_promotion_changes. reglas: solo las partes a cambiar, con la misma forma que devuelve get_promotion_settings. Los cambios valen desde el próximo armado del almanaque (generate_promotion_plan): lo que ya está prendido no se toca. ${CONFIRM}`,
+  description: `Cambia los ajustes de promociones de la cuenta: solo lo que viene. saludable_pct y piso_pct son la rentabilidad sobre el costo: ninguna oferta entra si deja menos que el piso. freno_de_emergencia: true = pausa toda la ejecución de la cuenta: la app no prende ni apaga nada en el canal, en ningún producto, y no borra ni saca nada; false = lo suelta y sigue desde donde estaba. reglas: solo las partes a cambiar, con la misma forma que devuelve get_promotion_settings. Los cambios valen desde el próximo armado del almanaque (generate_promotion_plan): lo que ya está prendido no se toca. ${CONFIRM}`,
   input: z.object({
     cuenta: accountArg,
     saludable_pct: z.number().min(0).max(500).optional(),
     piso_pct: z.number().min(0).max(500).optional(),
-    ejecucion_automatica: z.boolean().optional(),
+    freno_de_emergencia: z.boolean().optional(),
     reglas: rulesPatchSchema.optional(),
   }),
   readOnly: false,
@@ -256,8 +261,8 @@ const updateSettings = defineTool({
   run: (ctx, args) =>
     run(async () => {
       const account = await resolveAccount(ctx, args.cuenta);
-      const s = await savePromoSettings(ctx.db, { accountId: account.id, userId: ctx.userId, healthyMarginPct: args.saludable_pct, floorMarginPct: args.piso_pct, autoApply: args.ejecucion_automatica, rules: args.reglas });
-      return { guardado: true, rentabilidad: { saludable_pct: s.thresholds.healthyMarginPct, piso_pct: s.thresholds.floorMarginPct }, ejecucion_automatica: s.autoApply, reglas: s.rules };
+      const s = await savePromoSettings(ctx.db, { accountId: account.id, userId: ctx.userId, healthyMarginPct: args.saludable_pct, floorMarginPct: args.piso_pct, paused: args.freno_de_emergencia, rules: args.reglas });
+      return { guardado: true, rentabilidad: { saludable_pct: s.thresholds.healthyMarginPct, piso_pct: s.thresholds.floorMarginPct }, freno_de_emergencia: s.paused, reglas: s.rules };
     }),
 });
 
@@ -265,7 +270,7 @@ const setTags = defineTool({
   name: 'set_promotion_tags',
   section: 'promociones',
   title: 'Poner las etiquetas de promociones',
-  description: `Pone o corrige a mano las etiquetas de promociones de unos productos: ciclo de vida (nueva, en_crecimiento, madurada, a_liquidar), competencia (pelea_por_precio, sin_competencia), control_de_stock y prioridad (empujar, estacional). Estacional: el producto se anota siempre a las campañas que propone el canal para cada fecha (Hot Sale, Black Friday, Navidad), diga lo que diga la receta de su ciclo de vida. Empujar: además entra a las ofertas relámpago y del día cada vez que aparecen, y en esas busca menos rentabilidad, sin pasar el piso: prioriza lo agresivo sobre lo pasivo. Sin prioridad, sigue su receta. null saca la etiqueta. Solo cambia lo que viene. Control de stock y prioridad son solo a mano. Lo puesto a mano en ciclo de vida y competencia no lo pisa la regla; con soltar, esos grupos vuelven a quedar a cargo de la regla. Las etiquetas son del producto: valen para todas sus medidas y formas de cobro. Con control de stock, la medida que tiene poco stock no entra a ofertas nuevas, y no sale de las que ya está. Cambiar una etiqueta no cambia el almanaque hasta rearmarlo con generate_promotion_plan (con rearmar: true se rearma en la misma llamada). ${CONFIRM}`,
+  description: `Pone o corrige a mano las etiquetas de promociones de unos productos: ciclo de vida (nueva, en_crecimiento, madurada, a_liquidar), competencia (pelea_por_precio, sin_competencia), control_de_stock y prioridad (empujar, estacional). Estacional: el producto se anota siempre a las campañas que propone el canal para cada fecha (Hot Sale, Black Friday, Navidad), diga lo que diga la receta de su ciclo de vida. Empujar: además entra a las ofertas relámpago y del día cada vez que aparecen, y en esas busca menos rentabilidad, sin pasar el piso: prioriza lo agresivo sobre lo pasivo. Sin prioridad, sigue su receta. null saca la etiqueta. Solo cambia lo que viene. Control de stock y prioridad son solo a mano. Lo puesto a mano en ciclo de vida y competencia no lo pisa la regla; con soltar, esos grupos vuelven a quedar a cargo de la regla. Las etiquetas son del producto: valen para todas sus medidas y formas de cobro. Con control de stock, la medida que tiene poco stock no entra a ofertas nuevas, y no sale de las que ya está. Las etiquetas se usan en los productos en Automático. Cambiar una etiqueta no cambia el almanaque hasta rearmarlo con generate_promotion_plan (con rearmar: true se rearma en la misma llamada). ${CONFIRM}`,
   input: z.object({
     cuenta: accountArg,
     ...productsArg,
@@ -340,6 +345,74 @@ const exclude = defineTool({
     }),
 });
 
+const actionOut = (a: DueAction | AppliedAction) => ({
+  casillero: a.itemId,
+  producto: a.productName,
+  publicacion: a.externalId ?? a.publicationId,
+  que: a.action === 'ON' ? 'prender' : 'apagar',
+  oferta: a.kind === 'OWN_DISCOUNT' ? `Descuento propio${a.action === 'ON' && a.discountPct !== null ? ` de ${a.discountPct} %` : ''}` : a.name,
+  capa: LAYER_LABEL[a.layer as keyof typeof LAYER_LABEL] ?? a.layer,
+  ...(a.action === 'ON' && a.price !== null ? { precio_para_el_comprador: a.price } : {}),
+  ...(a.action === 'ON' && a.marginPct !== null ? { rentabilidad_pct: a.marginPct } : {}),
+  ...(a.action === 'ON' && a.capped ? { al_tope: true } : {}),
+  ...(a.stock ? { unidades_reservadas: a.stock } : {}),
+  ...('ok' in a ? { resultado: a.ok ? 'hecho' : 'no_se_pudo', ...(a.message ? { motivo: a.message } : {}) } : {}),
+});
+
+const setModeTool = defineTool({
+  name: 'set_promotion_mode',
+  section: ['promociones', 'subir'],
+  title: 'Pasar un producto a Manual o a Automático',
+  description: `Cambia quién arma el almanaque de promociones de unos productos. En los dos modos lo ejecuta la app, sola, en cada fecha. manual (así nacen todos): el almanaque lo arma una persona; nace con las promociones en las que el producto ya está inscripto en el canal y con su descuento propio como una franja sin fin; las etiquetas no se usan. automatico: la regla le pone las etiquetas en ese momento (se pueden cambiar con set_promotion_tags, y al cambiarlas el almanaque se rehace) y las reglas arman el almanaque; el almanaque no se toca a mano. Al pasar a automatico, las franjas armadas a mano que no empezaron se reemplazan por las de las reglas; de lo que ya está prendido o anotado en el canal y las reglas no incluirían hay que preguntarle a la persona: con solo_mostrar devuelve esa lista (hay_que_decidir) sin cambiar nada; después, en sacar_del_canal van las franjas que se sacan ahora, y las demás siguen hasta que terminen. Al pasar a manual, las franjas de las reglas quedan para editarlas; con borrar_lo_planeado se borran las que no empezaron. Nunca saca nada del canal por su cuenta. ${CONFIRM}`,
+  input: z.object({
+    cuenta: accountArg,
+    ...productsArg,
+    modo: z.enum(['manual', 'automatico']),
+    solo_mostrar: z.boolean().optional().describe('Al pasar a automatico: true = no cambia nada y devuelve lo que está en el canal y las reglas no incluirían, para preguntarle a la persona.'),
+    sacar_del_canal: z.array(z.string().min(1)).max(50).optional().describe('Al pasar a automatico, con un solo producto: las franja de hay_que_decidir que se sacan del canal ahora.'),
+    borrar_lo_planeado: z.boolean().optional().describe('Al pasar a manual: true = borra las franjas que todavía no empezaron.'),
+  }),
+  readOnly: false,
+  destructive: true,
+  run: (ctx, args) =>
+    run(async () => {
+      const account = await resolveAccount(ctx, args.cuenta);
+      const productIds = await resolveProducts(ctx, account, args);
+      if (productIds.length === 0) throw new McpToolError('Ningún producto cumple lo pedido.');
+      if (args.sacar_del_canal?.length && productIds.length > 1) throw new McpToolError('Para sacar franjas del canal al cambiar de modo, hacelo de a un producto.');
+      const mode = args.modo === 'automatico' ? 'AUTO' : 'MANUAL';
+      const names = new Map((await ctx.db.product.findMany({ where: { id: { in: productIds } }, select: { id: true, name: true } })).map((p) => [p.id, p.name]));
+      if (args.solo_mostrar) {
+        const out = [];
+        for (const productId of productIds.slice(0, 30)) {
+          const conflicts = mode === 'AUTO' ? await modeConflicts(ctx.db, { accountId: account.id, productId }) : [];
+          out.push({
+            producto: names.get(productId),
+            hay_que_decidir: conflicts.map((c) => ({ franja: c.slotId, oferta: c.name, hasta: c.finish ? when(c.finish, account) : 'sin fin', publicaciones: c.publications.map((x) => x.externalId) })),
+          });
+        }
+        return { vista_previa: true, modo: args.modo, productos: out, como_sigue: 'Mostrale a la persona lo que hay que decidir. Lo que no vaya en sacar_del_canal sigue en el canal hasta que termine.' };
+      }
+      const started = Date.now();
+      const done = [];
+      let left = 0;
+      for (const productId of productIds) {
+        if (Date.now() - started > BUDGET_MS) {
+          left++;
+          continue;
+        }
+        const r = await setMode(ctx.db, { accountId: account.id, productId, mode, takeOut: args.sacar_del_canal, clear: args.borrar_lo_planeado, userId: ctx.userId });
+        done.push({
+          producto: names.get(productId),
+          franjas_que_se_fueron: r.removed,
+          franjas_que_quedaron: r.kept,
+          ...(r.takenOut.length > 0 ? { sacadas_del_canal: r.takenOut.map(actionOut) } : {}),
+        });
+      }
+      return { modo: args.modo, productos: done, ...(left > 0 ? { quedan: left, aviso: 'No entraron todos en esta vuelta: volvé a llamar con el mismo pedido.' } : {}) };
+    }),
+});
+
 const classify = defineTool({
   name: 'classify_promotions',
   section: 'promociones',
@@ -389,7 +462,7 @@ const generate = defineTool({
   name: 'generate_promotion_plan',
   section: 'promociones',
   title: 'Armar el almanaque de promociones',
-  description: `Arma o rearma el almanaque de unos productos, de hoy en adelante: las franjas que les tocan por sus etiquetas (la receta de su ciclo de vida), el calendario de eventos y las campañas a las que el canal los invita, y decide para cada forma de cobro de cada medida si entra, a qué precio y con qué rentabilidad, o por qué queda afuera. Las seis formas de cobro siguen el mismo almanaque; la que no puede entrar a una campaña queda afuera de esa, con el motivo. Lo que ya empezó, lo que ya se mandó al canal y lo decidido a mano no se toca. No sube nada al canal: lo que toca prender se ve y se manda con apply_promotion_changes, o lo hace la app sola si la cuenta tiene la ejecución automática. Con solo_mostrar, cuenta lo que cambiaría sin guardar. Un producto sin ciclo de vida no lleva almanaque.`,
+  description: `Arma o rearma el almanaque de unos productos, de hoy en adelante: las franjas que les tocan por sus etiquetas (la receta de su ciclo de vida), el calendario de eventos y las campañas a las que el canal los invita, y decide para cada forma de cobro de cada medida si entra, a qué precio y con qué rentabilidad, o por qué queda afuera. Las seis formas de cobro siguen el mismo almanaque; la que no puede entrar a una campaña queda afuera de esa, con el motivo. Lo que ya empezó, lo que ya se mandó al canal y lo decidido a mano no se toca. Solo para productos en Automático (set_promotion_mode): en Manual el almanaque lo arma una persona y esto no lo toca. No sube nada al canal en el momento: la app lo ejecuta sola en cada fecha, salvo con el freno de emergencia puesto, y con apply_promotion_changes se manda ahora. Con solo_mostrar, cuenta lo que cambiaría sin guardar. Un producto sin ciclo de vida no lleva almanaque.`,
   input: z.object({ cuenta: accountArg, ...productsArg, solo_mostrar: z.boolean().optional() }),
   readOnly: false,
   destructive: false,
@@ -471,19 +544,6 @@ const review = defineTool({
     }),
 });
 
-const actionOut = (a: DueAction | AppliedAction) => ({
-  casillero: a.itemId,
-  producto: a.productName,
-  publicacion: a.externalId ?? a.publicationId,
-  que: a.action === 'ON' ? 'prender' : 'apagar',
-  oferta: a.kind === 'OWN_DISCOUNT' ? `Descuento propio${a.action === 'ON' && a.discountPct !== null ? ` de ${a.discountPct} %` : ''}` : a.name,
-  capa: LAYER_LABEL[a.layer as keyof typeof LAYER_LABEL] ?? a.layer,
-  ...(a.action === 'ON' && a.price !== null ? { precio_para_el_comprador: a.price } : {}),
-  ...(a.action === 'ON' && a.marginPct !== null ? { rentabilidad_pct: a.marginPct } : {}),
-  ...(a.action === 'ON' && a.capped ? { al_tope: true } : {}),
-  ...(a.stock ? { unidades_reservadas: a.stock } : {}),
-  ...('ok' in a ? { resultado: a.ok ? 'hecho' : 'no_se_pudo', ...(a.message ? { motivo: a.message } : {}) } : {}),
-});
 
 const applyChanges = defineTool({
   name: 'apply_promotion_changes',
@@ -724,4 +784,4 @@ const refreshCompetitors = defineTool({
     }),
 });
 
-export const PROMO_TOOLS = [getPromotions, getSettings, updateSettings, setTags, exclude, classify, generate, review, applyChanges, setSlot, measure, calendar, refreshCompetitors];
+export const PROMO_TOOLS = [getPromotions, getSettings, updateSettings, setModeTool, setTags, exclude, classify, generate, review, applyChanges, setSlot, measure, calendar, refreshCompetitors];

@@ -39,13 +39,18 @@ async function unitsSince(db: Db, accountId: string, from: Date): Promise<Map<st
  * apply: además lo guarda en los que no están puestos a mano. Devuelve los
  * productos a los que les cambió alguna etiqueta.
  */
-export async function classifyAccount(db: Db, args: { accountId: string; productIds?: string[]; apply: boolean; now?: Date }): Promise<{ products: Classified[]; changed: string[] }> {
+export async function classifyAccount(
+  db: Db,
+  // includeManual: también los que están en Manual, para ponerles las etiquetas al pasarlos a Automático.
+  args: { accountId: string; productIds?: string[]; apply: boolean; includeManual?: boolean; now?: Date },
+): Promise<{ products: Classified[]; changed: string[] }> {
   const now = args.now ?? new Date();
   const settings = await loadPromoSettings(db, args.accountId);
   const rules = settings.rules.classify;
   const live: Prisma.PublicationWhereInput = { externalId: { not: null }, channelStatus: { notIn: ['CLOSED', 'DELETED'] }, channelCopy: { is: { missingSince: null } } };
   const products = await db.product.findMany({
-    where: { accountId: args.accountId, publications: { some: live }, ...(args.productIds ? { id: { in: args.productIds } } : {}) },
+    // Las etiquetas son de los productos en Automático: en Manual el almanaque lo arma una persona y no las usa.
+    where: { accountId: args.accountId, publications: { some: live }, ...(args.productIds ? { id: { in: args.productIds } } : {}), ...(args.includeManual ? {} : { promotion: { is: { mode: 'AUTO' } } }) },
     orderBy: { name: 'asc' },
     select: {
       id: true,

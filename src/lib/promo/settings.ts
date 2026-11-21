@@ -11,8 +11,8 @@ export class PromoError extends Error {}
 
 export type PromoSettings = {
   thresholds: Thresholds;
-  // La app prende y apaga las ofertas sola, siguiendo el almanaque.
-  autoApply: boolean;
+  // El freno de emergencia: mientras está puesto, la app no prende ni apaga nada en el canal. No borra nada.
+  paused: boolean;
   rules: PromoRules;
   // Cuándo terminó la última lectura completa de las invitaciones del canal, y la última reclasificación.
   sweptAt: Date | null;
@@ -24,7 +24,7 @@ export async function loadPromoSettings(db: Db, accountId: string): Promise<Prom
   const row = await db.promotionSettings.findUnique({ where: { accountId } });
   return {
     thresholds: row ? { healthyMarginPct: Number(row.healthyMarginPct), floorMarginPct: Number(row.floorMarginPct) } : DEFAULT_THRESHOLDS,
-    autoApply: row?.autoApply ?? false,
+    paused: row?.paused ?? false,
     rules: readRules(row?.rules),
     sweptAt: row?.sweptAt ?? null,
     classifiedAt: row?.classifiedAt ?? null,
@@ -32,10 +32,10 @@ export async function loadPromoSettings(db: Db, accountId: string): Promise<Prom
   };
 }
 
-/** Cambia lo que viene: la rentabilidad saludable, el piso, la ejecución automática o parte de las reglas. */
+/** Cambia lo que viene: la rentabilidad saludable, el piso, el freno de emergencia o parte de las reglas. */
 export async function savePromoSettings(
   db: Db,
-  args: { accountId: string; userId: string | null; healthyMarginPct?: number; floorMarginPct?: number; autoApply?: boolean; rules?: RulesPatch },
+  args: { accountId: string; userId: string | null; healthyMarginPct?: number; floorMarginPct?: number; paused?: boolean; rules?: RulesPatch },
 ): Promise<PromoSettings> {
   const current = await loadPromoSettings(db, args.accountId);
   const thresholds: Thresholds = {
@@ -53,7 +53,7 @@ export async function savePromoSettings(
   const data = {
     healthyMarginPct: thresholds.healthyMarginPct,
     floorMarginPct: thresholds.floorMarginPct,
-    autoApply: args.autoApply ?? current.autoApply,
+    paused: args.paused ?? current.paused,
     rules: rules as unknown as Prisma.InputJsonValue,
     updatedById: args.userId,
   };

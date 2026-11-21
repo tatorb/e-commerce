@@ -46,6 +46,9 @@ export type ExistingSlot = { id: string; layer: Layer; kind: SlotKind; group: st
 export type PlannedSlot = { layer: Layer; kind: SlotKind; group: string | null; name: string; eventId: string | null; start: Date; finish: Date; targetMarginPct: number };
 
 const DAY = 86_400_000;
+// Una franja sin fin: el descuento propio que el producto ya tenía, hasta que alguien le ponga fecha.
+export const NO_END = new Date('2099-12-31T00:00:00.000Z');
+export const hasNoEnd = (d: Date | string) => new Date(d).getTime() >= NO_END.getTime() - 366 * DAY;
 const days = (from: Date, to: Date) => Math.floor((to.getTime() - from.getTime()) / DAY);
 const norm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
 
@@ -144,7 +147,8 @@ export function planSlots(input: PlanInput): PlannedSlot[] {
   const fight = tags.competition === 'PRICE_FIGHT' && input.competitorMarginPct !== null && (input.listMarginPct === null || input.competitorMarginPct < input.listMarginPct);
   if (recipe.base || fight) {
     // Sigue desde donde termina el tramo de base en curso, para no moverla antes de tiempo.
-    const running = input.existing.filter((s) => s.layer === 'BASE' && s.kind === 'OWN_DISCOUNT' && !s.cancelled && (s.locked || s.source === 'MANUAL') && s.finish.getTime() > today.getTime());
+    // El descuento propio sin fin que ya tenía no cuenta: la base de las reglas lo reemplaza al prenderse.
+    const running = input.existing.filter((s) => s.layer === 'BASE' && s.kind === 'OWN_DISCOUNT' && !s.cancelled && !hasNoEnd(s.finish) && (s.locked || s.source === 'MANUAL') && s.finish.getTime() > today.getTime());
     let cursor = running.reduce((latest, s) => (s.finish.getTime() > latest.getTime() ? s.finish : latest), today);
     const ownBusy = [...out.filter((s) => s.kind === 'OWN_DISCOUNT'), ...input.existing.filter((s) => s.kind === 'OWN_DISCOUNT' && s.layer === 'EVENT' && !s.cancelled && (s.locked || s.source === 'MANUAL'))];
     while (cursor.getTime() < horizon.getTime()) {

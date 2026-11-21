@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
-import { objectiveOf, readTags, type Competition, type Lifecycle, type Objective, type Priority, type PromoTags } from '@/domain/promo/tags';
+import { objectiveOf, readMode, readTags, type Competition, type Lifecycle, type Mode, type Objective, type Priority, type PromoTags } from '@/domain/promo/tags';
 
 // La lista de promociones de la cuenta: cada producto con publicaciones en el
 // canal, sus etiquetas y cómo están sus ofertas (cuántas formas de cobro
@@ -19,6 +19,7 @@ export const OVERVIEW_STATE_LABEL: Record<OverviewState, string> = {
 };
 
 export type OverviewFilter = {
+  mode?: Mode;
   lifecycle?: Lifecycle | 'none';
   competition?: Competition;
   priority?: Priority;
@@ -37,6 +38,7 @@ export type OverviewRow = {
   brand: string | null;
   // Una publicación del producto, para abrirlo.
   publicationId: string;
+  mode: Mode;
   tags: PromoTags;
   objective: Objective | null;
   // Cuántas publicaciones tiene en el canal, una por forma de cobro de cada medida.
@@ -51,7 +53,7 @@ export type OverviewRow = {
   plannedAt: Date | null;
 };
 
-export type Overview = { total: number; rows: OverviewRow[]; brands: string[]; totals: { products: number; tagged: number; on: number; planned: number; out: number; failed: number } };
+export type Overview = { total: number; rows: OverviewRow[]; brands: string[]; totals: { products: number; auto: number; tagged: number; on: number; planned: number; out: number; failed: number } };
 
 export async function loadOverview(db: Db, accountId: string, filter: OverviewFilter = {}, now = new Date()): Promise<Overview> {
   const live: Prisma.PublicationWhereInput = { externalId: { not: null }, channelStatus: { notIn: ['CLOSED', 'DELETED'] }, channelCopy: { is: { missingSince: null } } };
@@ -85,6 +87,7 @@ export async function loadOverview(db: Db, accountId: string, filter: OverviewFi
       name: p.name,
       brand: p.brand,
       publicationId: (p.publications.find((x) => x.mainOptionId === null) ?? p.publications[0]).id,
+      mode: readMode(p.promotion?.mode),
       tags,
       objective: objectiveOf(tags),
       options: p.publications.length,
@@ -99,6 +102,7 @@ export async function loadOverview(db: Db, accountId: string, filter: OverviewFi
   const q = filter.query?.trim().toLowerCase();
   const codes = q ? new Set(products.filter((p) => p.publications.some((x) => x.externalId?.toLowerCase() === q)).map((p) => p.id)) : null;
   const rows = all.filter((r) => {
+    if (filter.mode && r.mode !== filter.mode) return false;
     if (filter.lifecycle === 'none' ? r.tags.lifecycle !== null : filter.lifecycle && r.tags.lifecycle !== filter.lifecycle) return false;
     if (filter.competition && r.tags.competition !== filter.competition) return false;
     if (filter.priority && r.tags.priority !== filter.priority) return false;
@@ -129,7 +133,7 @@ export async function loadOverview(db: Db, accountId: string, filter: OverviewFi
     total: rows.length,
     rows: rows.slice(offset, offset + limit),
     brands: [...new Set(all.map((r) => r.brand?.trim()).filter((b): b is string => !!b))].sort((a, b) => a.localeCompare(b, 'es')),
-    totals: { products: all.length, tagged: all.filter((r) => r.tags.lifecycle !== null).length, on: sum((r) => r.on), planned: sum((r) => r.planned), out: sum((r) => r.out), failed: sum((r) => r.failed) },
+    totals: { products: all.length, auto: all.filter((r) => r.mode === 'AUTO').length, tagged: all.filter((r) => r.tags.lifecycle !== null).length, on: sum((r) => r.on), planned: sum((r) => r.planned), out: sum((r) => r.out), failed: sum((r) => r.failed) },
   };
 }
 

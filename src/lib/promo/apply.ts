@@ -227,6 +227,10 @@ export async function applyDue(
         where: { id: item.id },
         data: act.action === 'ON' ? { state, appliedAt: now, attempts: item.attempts + 1, lastError: null, nextTryAt: null, measureAt: new Date(from.getTime() + settings.rules.timing.measureDays * DAY) } : { state, endedAt: now, lastError: null, nextTryAt: null },
       });
+      // Un descuento propio nuevo reemplaza al que tenía esa publicación: el anterior queda terminado sin tocar el canal.
+      if (act.action === 'ON' && act.kind === 'OWN_DISCOUNT') {
+        await db.promotionSlotItem.updateMany({ where: { publicationId: act.publicationId, id: { not: item.id }, state: 'ON', slot: { kind: 'OWN_DISCOUNT' } }, data: { state: 'ENDED', endedAt: now } });
+      }
       const detail = act.action === 'ON' ? `${act.price !== null ? `, el comprador paga ${formatPrice(act.price)}` : ''}${act.marginPct !== null ? `, deja ${pctText(act.marginPct)}` : ''}${act.capped ? ', al tope del canal' : ''}` : '';
       await log(db, { ...ctx, publicationId: act.publicationId, slotItemId: item.id, kind: act.action, text: `${act.action === 'ON' ? 'Se prendió' : 'Se apagó'} ${what}${detail}.`, auto: args.auto, data: { price: act.price, discountPct: act.discountPct, marginPct: act.marginPct, capped: act.capped } });
       result.done.push({ ...act, ok: true, message: null, state });

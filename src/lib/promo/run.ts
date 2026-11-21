@@ -54,7 +54,7 @@ export async function promotionsPass(db: Db, args: { budgetMs: number; now?: Dat
       await classifyAccount(db, { accountId: a.accountId, apply: true, now }).catch((e) => console.error('Promociones: no se pudo reclasificar.', e instanceof Error ? e.message : e));
     }
     const stale = await db.productPromotion.findMany({
-      where: { lifecycle: { not: null }, product: { accountId: a.accountId }, OR: [{ plannedAt: null }, { plannedAt: { lt: new Date(now.getTime() - every) } }] },
+      where: { mode: 'AUTO', lifecycle: { not: null }, product: { accountId: a.accountId }, OR: [{ plannedAt: null }, { plannedAt: { lt: new Date(now.getTime() - every) } }] },
       orderBy: { plannedAt: { sort: 'asc', nulls: 'first' } },
       select: { productId: true },
       take: 200,
@@ -67,8 +67,8 @@ export async function promotionsPass(db: Db, args: { budgetMs: number; now?: Dat
       await generatePlan(db, { accountId: a.accountId, productId: p.productId, now }).catch((e) => console.error('Promociones: no se pudo armar el almanaque.', e instanceof Error ? e.message : e));
       out.planned++;
     }
-    // 3. Prender y apagar lo que toca, si la cuenta lo tiene prendido.
-    if (settings.autoApply && left() > 0) {
+    // 3. Prender y apagar lo que toca, en Manual y en Automático, salvo con el freno de emergencia puesto.
+    if (!settings.paused && left() > 0) {
       const r = await applyDue(db, { accountId: a.accountId, auto: true, userId: null, budgetMs: left(), now });
       out.applied += r.done.filter((d) => d.ok).length;
       out.failed += r.done.filter((d) => !d.ok).length;

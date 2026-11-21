@@ -2,25 +2,27 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Power, RefreshCw, Sparkles } from 'lucide-react';
+import { RefreshCw, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { OverviewFilter } from '@/lib/promo/overview';
 import { cn } from '@/lib/utils/cn';
-import { classifyAction, generatePlansAction, saveThresholdsAction, sweepAction } from '@/app/a/[cuenta]/promociones/actions';
+import { classifyAction, generatePlansAction, sweepAction } from '@/app/a/[cuenta]/promociones/actions';
 
-// Lo de toda la cuenta: leer las invitaciones del canal, que la regla
-// proponga las etiquetas, y prender o apagar la ejecución automática.
+// Lo de toda la cuenta: leer las invitaciones del canal y que la regla
+// proponga las etiquetas de los productos en Automático. Si el freno de
+// emergencia está puesto, lo avisa.
 
 export function AccountBar({
   accountSlug,
-  autoApply,
+  paused,
   sweptAt,
   classifiedAt,
   filter,
   filtered,
 }: {
   accountSlug: string;
-  autoApply: boolean;
+  // El freno de emergencia de la cuenta está puesto.
+  paused: boolean;
   sweptAt: string;
   classifiedAt: string;
   // El filtro de la lista: "Proponer etiquetas" mira solo los productos que lo pasan.
@@ -57,7 +59,7 @@ export function AccountBar({
     start(async () => {
       const r = await classifyAction(accountSlug, false, scope).catch(() => null);
       if (!r || !r.ok) return fail(r?.error);
-      if (r.changed === 0) return setNotice({ kind: 'ok', text: `La regla miró ${r.products} ${r.products === 1 ? 'producto' : 'productos'}${filtered === null ? '' : ', los filtrados,'} y no cambia ninguna etiqueta.` });
+      if (r.changed === 0) return setNotice({ kind: 'ok', text: r.products === 0 ? 'No hay productos en Automático para etiquetar: la regla mira solo esos.' : `La regla miró ${r.products} ${r.products === 1 ? 'producto' : 'productos'} en Automático${filtered === null ? '' : ', de los filtrados,'} y no cambia ninguna etiqueta.` });
       setNotice(null);
       setProposal(r);
     });
@@ -77,32 +79,19 @@ export function AccountBar({
       router.refresh();
     });
 
-  const toggle = () => {
-    const next = !autoApply;
-    const text = next
-      ? 'Con la ejecución automática, la app prende y apaga sola en el canal las ofertas del almanaque, con la lectura de cada hora, sin pedir confirmación cada vez. ¿La prendés?'
-      : 'Se apaga la ejecución automática: la app deja de prender y apagar sola. Lo que ya está prendido sigue como está. ¿La apagás?';
-    if (!window.confirm(text)) return;
-    start(async () => {
-      const r = await saveThresholdsAction(accountSlug, { autoApply: next }).catch(() => null);
-      if (!r || !r.ok) return fail(r?.error);
-      setNotice({ kind: 'ok', text: next ? 'Ejecución automática prendida.' : 'Ejecución automática apagada.' });
-      router.refresh();
-    });
-  };
-
   return (
     <div className="space-y-2">
+      {paused ? (
+        <p className="rounded-lg border border-alert/40 bg-alert/10 px-3 py-2 text-sm">
+          <strong>Freno de emergencia puesto.</strong> La app no prende ni apaga nada en el canal, en ningún producto, hasta que se suelte en la pestaña Reglas. No se borra nada.
+        </p>
+      ) : null}
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" variant={autoApply ? 'default' : 'outline'} access="subir" disabled={busy} onClick={toggle}>
-          <Power />
-          Ejecución automática: {autoApply ? 'prendida' : 'apagada'}
-        </Button>
         <Button size="sm" variant="outline" access="view" disabled={busy} pending={busy} onClick={sweep}>
           <RefreshCw />
           Leer invitaciones del canal
         </Button>
-        <Button size="sm" variant="outline" disabled={busy || filtered === 0} onClick={propose}>
+        <Button size="sm" variant="outline" disabled={busy || filtered === 0} title="La regla mira solo los productos en Automático: en Manual el almanaque lo armás vos y no usa etiquetas." onClick={propose}>
           <Sparkles />
           Proponer etiquetas{where}
         </Button>

@@ -36,9 +36,6 @@ export function proposeLifecycle(f: ProductFacts, rules: ClassifyRules): Proposa
     if (f.units30 <= steady) return { value: 'MATURE', why: `Vendió ${f.units90} en 90 días y ${f.units30} en los últimos 30: se vende parejo.` };
     return { value: 'GROWING', why: `Vendió ${f.units90} en 90 días y ${f.units30} en los últimos 30: viene creciendo.` };
   }
-  if (f.units90 < rules.growingMinUnits90) {
-    return { value: null, why: `Vendió ${f.units90} en 90 días, menos de ${rules.growingMinUnits90}: queda sin ciclo de vida y sin almanaque hasta ponérselo a mano.` };
-  }
   return { value: 'GROWING', why: `Vendió ${f.units90} en 90 días, menos de las ${rules.matureUnits90} de una madurada.` };
 }
 

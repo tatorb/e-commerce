@@ -59,8 +59,6 @@ const classifySchema = z.object({
   matureUnits90: z.number().int().min(1).max(100_000),
   // Parejas: las de los últimos 30 días no son más de este % arriba de un tercio de las de 90.
   matureGrowthPct: z.number().min(0).max(1000),
-  // Con menos unidades que estas en 90 días, la regla no le pone ciclo de vida: queda sin almanaque hasta ponérselo a mano. 0: todos llevan.
-  growingMinUnits90: z.number().int().min(0).max(100_000),
   // Si la regla propone "a liquidar". Apagado, se pone solo a mano.
   clearanceAuto: z.boolean(),
   // Sin ventas en tantos días y con stock: a liquidar.
@@ -73,8 +71,8 @@ const classifySchema = z.object({
 export type ClassifyRules = z.infer<typeof classifySchema>;
 
 // Calibrado con las ventas de una tienda de repuestos, donde vender pocas unidades es lo normal: madurada desde 3 en 90 días,
-// "a liquidar" solo a mano, y lo que no vendió nada queda sin ciclo de vida hasta elegirlo.
-const CLASSIFY: ClassifyRules = { newDays: 60, matureUnits90: 3, matureGrowthPct: 30, growingMinUnits90: 1, clearanceAuto: false, clearanceDays: 120, priceFightPct: 10, competitorDays: 14 };
+// y "a liquidar" solo a mano. Lo que no vendió nada arranca como en crecimiento: un producto pasa a Automático porque alguien lo decide.
+const CLASSIFY: ClassifyRules = { newDays: 60, matureUnits90: 3, matureGrowthPct: 30, clearanceAuto: false, clearanceDays: 120, priceFightPct: 10, competitorDays: 14 };
 
 const timingSchema = z.object({
   // Hasta cuántos días adelante se arma el almanaque.

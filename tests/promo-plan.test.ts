@@ -68,6 +68,8 @@ describe.skipIf(!url)('promociones en la base', () => {
     }
     const family = await db.listingFamily.create({ data: { storeId, productId, leadId: mains[0] } });
     await db.publication.updateMany({ where: { id: { in: mains } }, data: { familyId: family.id } });
+    // Estas pruebas son del almanaque que arman las reglas: el producto está en Automático.
+    await db.productPromotion.create({ data: { productId, mode: 'AUTO' } });
   });
 
   // Una campaña tradicional que invita a todas menos a 12 cuotas de la 0,60, con un tope que en 9 y 12 cuotas queda bajo el piso.
@@ -132,7 +134,7 @@ describe.skipIf(!url)('promociones en la base', () => {
     const saved = await savePromoSettings(db, { accountId, userId: null, healthyMarginPct: 18, floorMarginPct: 12, rules: { timing: { baseDays: 10 } } });
     expect(saved.thresholds).toEqual({ healthyMarginPct: 18, floorMarginPct: 12 });
     expect(saved.rules.timing.baseDays).toBe(10);
-    expect(saved.autoApply).toBe(false);
+    expect(saved.paused).toBe(false);
     await expect(savePromoSettings(db, { accountId, userId: null, floorMarginPct: 20 })).rejects.toThrow('El piso no puede ser más alto');
   });
 
@@ -194,7 +196,7 @@ describe.skipIf(!url)('promociones en la base', () => {
     expect(await generatePlan(db, { accountId, productId, now })).toMatchObject({ skipped: expect.stringContaining('ciclo de vida'), slots: 0 });
     expect(await setPromoTags(db, { accountId, productIds: [productId], change: { lifecycle: 'GROWING', stockControl: true }, userId: null })).toBe(1);
     const tagged = await db.productPromotion.findUniqueOrThrow({ where: { productId } });
-    expect(tagged).toMatchObject({ lifecycle: 'GROWING', stockControl: true, manual: ['lifecycle'] });
+    expect(tagged).toMatchObject({ lifecycle: 'GROWING', stockControl: true, manual: ['lifecycle'], mode: 'AUTO' });
 
     const preview = await generatePlan(db, { accountId, productId, now, preview: true });
     expect(preview.created).toBeGreaterThan(3);
@@ -254,7 +256,7 @@ describe.skipIf(!url)('promociones en la base', () => {
 
     // El piso y lo saludable se configuran a mano.
     const settings = await run('update_promotion_settings', { cuenta: 'prueba', saludable_pct: 16, piso_pct: 11, reglas: { timing: { baseDays: 10 } } });
-    expect(settings).toMatchObject({ rentabilidad: { saludable_pct: 16, piso_pct: 11 }, ejecucion_automatica: false });
+    expect(settings).toMatchObject({ rentabilidad: { saludable_pct: 16, piso_pct: 11 }, freno_de_emergencia: false });
     await expect(run('update_promotion_settings', { cuenta: 'prueba', piso_pct: 30 })).rejects.toThrow('El piso no puede ser más alto');
     expect((await run('get_promotion_settings', { cuenta: 'prueba' })).reglas.timing.baseDays).toBe(10);
 

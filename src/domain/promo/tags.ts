@@ -1,6 +1,13 @@
 // Las etiquetas de promociones de un producto, que valen para todas sus
 // publicaciones, y el objetivo que sale de ellas. Sin la base de datos.
 
+// Quién arma el almanaque de un producto: una persona (Manual) o las reglas con sus etiquetas (Automático).
+// En los dos casos lo ejecuta la app. Todos nacen en Manual.
+export const MODES = ['MANUAL', 'AUTO'] as const;
+export type Mode = (typeof MODES)[number];
+export const MODE_LABEL: Record<Mode, string> = { MANUAL: 'Manual', AUTO: 'Automático' };
+export const readMode = (v: unknown): Mode => (v === 'AUTO' ? 'AUTO' : 'MANUAL');
+
 export const LIFECYCLES = ['NEW', 'GROWING', 'MATURE', 'CLEARANCE'] as const;
 export type Lifecycle = (typeof LIFECYCLES)[number];
 export const LIFECYCLE_LABEL: Record<Lifecycle, string> = {

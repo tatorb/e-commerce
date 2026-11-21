@@ -146,8 +146,29 @@ export function decideItem(args: {
 }
 
 /** Guarda lo decidido para cada forma de cobro de una franja. Lo que ya se hizo en el canal o se sacó a mano no se pisa. */
-export async function evaluateSlot(db: Db, args: { slot: SlotRow; promo: ProductPromo; settings: PromoSettings; now: Date }): Promise<void> {
+export async function evaluateSlot(db: Db, args: { slot: SlotRow; promo: ProductPromo; settings: PromoSettings; now: Date; redecide?: boolean }): Promise<void> {
   const { slot, promo, settings, now } = args;
+  // Una franja armada a mano lleva las publicaciones y los precios que eligió la persona: no se vuelve a decidir
+  // con las reglas. Solo se mira si el canal ya la muestra adentro o anotada.
+  if (!(args.redecide ?? slot.source !== 'MANUAL')) {
+    for (const item of slot.items) {
+      if (!slot.group || item.state === 'ENDED' || item.state === 'OUT') continue;
+      const invite = promo.campaigns.find((c) => c.group === slot.group && c.publicationId === item.publicationId);
+      if (!invite) continue;
+      const state: ItemState | null = invite.status === 'active' ? 'ON' : invite.status === 'scheduled' ? 'SCHEDULED' : null;
+      if (state === null) {
+        // Sigue invitada: se guarda cómo pedirla, que puede haber cambiado.
+        if (item.ref !== invite.ref) await db.promotionSlotItem.update({ where: { id: item.id }, data: { ref: invite.ref } });
+        continue;
+      }
+      if (item.state === state && item.ref === invite.ref) continue;
+      await db.promotionSlotItem.update({
+        where: { id: item.id },
+        data: { state, ref: invite.ref, lastError: null, nextTryAt: null, ...(item.appliedAt ? {} : { appliedAt: now, measureAt: new Date(now.getTime() + settings.rules.timing.measureDays * DAY) }) },
+      });
+    }
+    return;
+  }
   for (const o of promo.options) {
     // Una finalizada o eliminada no lleva casillero.
     if (o.status === 'CLOSED' || o.status === 'DELETED') continue;
@@ -206,7 +227,8 @@ export async function generatePlan(db: Db, args: { accountId: string; productId:
   const rows = await db.promotionSlot.findMany({ where: { productId: promo.productId, finish: { gt: now } }, include: { items: true } });
   const existing = rows.map((s) => existingOf(s, now));
   let planned: PlannedSlot[] = [];
-  if (promo.tags.lifecycle === null) result.skipped = 'Todavía no tiene ciclo de vida: sin esa etiqueta no se arma el almanaque.';
+  if (promo.mode !== 'AUTO') result.skipped = 'Está en Manual: su almanaque lo arma una persona. Para que lo armen las reglas, pasalo a Automático.';
+  else if (promo.tags.lifecycle === null) result.skipped = 'Todavía no tiene ciclo de vida: sin esa etiqueta no se arma el almanaque.';
   else if (promo.options.length === 0) result.skipped = 'No tiene publicaciones en el canal.';
   else {
     const sold = await unitsLast90(db, promo.options.map((o) => o.publicationId), now);
@@ -222,6 +244,8 @@ export async function generatePlan(db: Db, args: { accountId: string; productId:
       existing,
     });
   }
+  // En Manual el almanaque es de la persona: rearmar no crea ni saca nada.
+  if (promo.mode !== 'AUTO') return result;
   const diff = diffSlots(existing, planned);
   result.created = diff.create.length;
   result.removed = diff.remove.length;
