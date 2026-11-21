@@ -375,6 +375,127 @@ describe.skipIf(!url)('promociones: prender y apagar según el almanaque', () =>
     expect(sent).toEqual([]);
   });
 
+  it('en Manual se arma el almanaque a mano: descuento propio con fechas, una campaña del canal, lo que se pisa y una reserva', async () => {
+    const { enrollManual, quoteEnroll, repriceManual } = await import('@/lib/promo/enroll');
+    const { applyDue, dueActions } = await import('@/lib/promo/apply');
+    const { adoptExisting } = await import('@/lib/promo/mode');
+    const { hasNoEnd } = await import('@/domain/promo/plan');
+    const both = (by: 'MARGIN' | 'PRICE' | 'PCT', value: number) => [flat, twelve].map((publicationId) => ({ publicationId, by, value }));
+    // En Automático no se arma a mano.
+    await expect(enrollManual(db, { accountId, input: { productId, kind: 'OWN_DISCOUNT', rows: both('MARGIN', 20) }, now })).rejects.toThrow('primero pasalo a Manual');
+    await db.productPromotion.update({ where: { productId }, data: { mode: 'MANUAL' } });
+
+    // Lo que quedaría, sin guardar: cada una con su precio, con el costo de sus cuotas. Debajo del piso avisa y deja seguir.
+    const low = await quoteEnroll(db, { accountId, input: { productId, kind: 'OWN_DISCOUNT', rows: both('MARGIN', 6) }, now });
+    expect(low.rows.map((r) => [r.problem, r.warning?.includes('menos que el piso de 10 %')])).toEqual([[null, true], [null, true]]);
+    // Lo que el canal no va a aceptar no entra: un descuento propio de menos de 5 %.
+    const tiny = await quoteEnroll(db, { accountId, input: { productId, kind: 'OWN_DISCOUNT', rows: both('PCT', 3) }, now });
+    expect(tiny.rows.every((r) => r.problem?.includes('menos de 5 %'))).toBe(true);
+    await expect(enrollManual(db, { accountId, input: { productId, kind: 'OWN_DISCOUNT', rows: both('PCT', 3) }, now })).rejects.toThrow('No se pudo inscribir ninguna');
+    expect(await db.promotionSlot.count()).toBe(0);
+
+    // Descuento propio desde hoy, sin fin, buscando 20 % en cada una.
+    const own = await enrollManual(db, { accountId, input: { productId, kind: 'OWN_DISCOUNT', rows: both('MARGIN', 20) }, now });
+    if (!own.saved) throw new Error('no guardó');
+    expect(own).toMatchObject({ enrolled: 2, skipped: [], cut: 0 });
+    const ownSlot = await db.promotionSlot.findUniqueOrThrow({ where: { id: own.slotId }, include: { items: true } });
+    expect(ownSlot).toMatchObject({ source: 'MANUAL', kind: 'OWN_DISCOUNT', layer: 'BASE' });
+    expect(hasNoEnd(ownSlot.finish)).toBe(true);
+    for (const i of ownSlot.items) {
+      expect(i).toMatchObject({ state: 'PLANNED', fixed: true, priceBy: 'MARGIN' });
+      expect(Number(i.marginPct)).toBeGreaterThanOrEqual(20);
+      expect(Number(i.discountPct)).toBeGreaterThanOrEqual(5);
+    }
+    // Nada se mandó al guardar. La app lo ejecuta en su fecha.
+    expect(sent).toEqual([]);
+    const first = await applyDue(db, { accountId, auto: true, userId: null, budgetMs: 60_000, now });
+    expect(first.done.map((d) => [d.externalId, d.action, d.ok])).toEqual([
+      ['MLA1', 'ON', true],
+      ['MLA2', 'ON', true],
+    ]);
+    expect(sent.map((x) => x.what)).toEqual(['discount', 'discount']);
+    // Las reglas no la vuelven a decidir: sigue con el precio que se cargó, aunque cambie el costo.
+    await db.product.update({ where: { id: productId }, data: { replacementCost: COST * 1.3 } });
+    await adoptExisting(db, { accountId, productId, now });
+    expect((await db.promotionSlotItem.findMany({ where: { slotId: own.slotId } })).every((i) => i.state === 'ON')).toBe(true);
+    await db.product.update({ where: { id: productId }, data: { replacementCost: COST } });
+
+    // Una campaña del canal, del día 10 al 17. Fuera de lo que acepta el canal, no entra.
+    await invite(flat, 0);
+    await invite(twelve, 12);
+    const tooHigh = await quoteEnroll(db, { accountId, input: { productId, kind: 'CAMPAIGN', group: 'DEAL:P-1', rows: [{ publicationId: flat, by: 'PRICE', value: listOf(0) - 10 }] }, now });
+    expect(tooHigh.rows[0].problem).toContain('o menos en esta campaña');
+    // Se pisa con el descuento propio: sin decir qué hacer, no guarda y dice con qué.
+    const asked = await enrollManual(db, { accountId, input: { productId, kind: 'CAMPAIGN', group: 'DEAL:P-1', rows: both('MARGIN', 15) }, now });
+    expect(asked.saved).toBe(false);
+    expect(asked.quote.overlaps.map((o) => [o.externalId, o.name, o.canCut])).toEqual([
+      ['MLA1', 'Descuento propio', true],
+      ['MLA2', 'Descuento propio', true],
+    ]);
+    expect(await db.promotionSlot.count()).toBe(1);
+    // Cortando la anterior: el descuento propio termina cuando empieza la campaña.
+    const cut = await enrollManual(db, { accountId, input: { productId, kind: 'CAMPAIGN', group: 'DEAL:P-1', rows: both('MARGIN', 15), overlap: 'cut' }, now });
+    if (!cut.saved) throw new Error('no guardó');
+    expect(cut).toMatchObject({ enrolled: 2, cut: 2 });
+    expect((await db.promotionSlot.findUniqueOrThrow({ where: { id: own.slotId } })).finish).toEqual(day(10));
+    const campaign = await db.promotionSlot.findUniqueOrThrow({ where: { id: cut.slotId }, include: { items: true } });
+    expect(campaign).toMatchObject({ kind: 'CAMPAIGN', layer: 'EVENT', group: 'DEAL:P-1', name: 'HOT SALE', start: day(10), finish: day(17) });
+    expect(Number(campaign.items.find((i) => i.publicationId === flat)!.price)).toBe(priceForMargin(eco(0, listOf(0)), 15));
+    // Antes de que entre se le puede cambiar el precio a una; ya adentro, no.
+    const item = campaign.items.find((i) => i.publicationId === twelve)!;
+    const repriced = await repriceManual(db, { accountId, itemId: item.id, by: 'MARGIN', value: 16 });
+    expect(repriced.marginPct).toBeGreaterThanOrEqual(16);
+    const on = await db.promotionSlotItem.findFirstOrThrow({ where: { slotId: own.slotId } });
+    await expect(repriceManual(db, { accountId, itemId: on.id, by: 'PCT', value: 12 })).rejects.toThrow('Ya está en el canal');
+
+    // Una reserva para un evento que todavía no tiene invitación: no hay nada para mandar hasta que llegue.
+    const event = await db.promotionEvent.create({ data: { accountId, name: 'Cyber Monday', tier: 'T1', start: day(40), finish: day(47), match: 'cyber' } });
+    const reserve = await enrollManual(db, { accountId, input: { productId, kind: 'RESERVE', eventId: event.id, rows: both('MARGIN', 14) }, now });
+    if (!reserve.saved) throw new Error('no guardó');
+    const waiting = await db.promotionSlot.findUniqueOrThrow({ where: { id: reserve.slotId }, include: { items: true } });
+    expect(waiting).toMatchObject({ kind: 'CAMPAIGN', group: null, eventId: event.id, name: 'Cyber Monday', start: day(40) });
+    expect(waiting.items.every((i) => i.state === 'PLANNED' && i.price === null && Number(i.priceValue) === 14)).toBe(true);
+    expect((await dueActions(db, { accountId, joinLeadDays: 3, now: day(39) })).filter((d) => d.slotId === reserve.slotId)).toEqual([]);
+    // Llega la invitación del canal, solo para la sin cuotas: la reserva pasa a ser de esa campaña, con el precio que se había cargado.
+    const cyberList = listOf(0);
+    await db.channelPromotionItem.create({
+      data: { publicationId: flat, group: 'DEAL:P-7', ref: JSON.stringify(['DEAL', 'P-7', null]), type: 'DEAL', name: 'CYBER MONDAY 2027', kind: 'Campaña tradicional', status: 'invited', join: 'price', start: day(41), finish: day(46), maxPrice: cyberList - 1, listPrice: cyberList, seenAt: now },
+    });
+    await adoptExisting(db, { accountId, productId, now });
+    const bound = await db.promotionSlot.findUniqueOrThrow({ where: { id: reserve.slotId }, include: { items: true } });
+    expect(bound).toMatchObject({ group: 'DEAL:P-7', name: 'CYBER MONDAY 2027', start: day(41), finish: day(46) });
+    expect(bound.items.find((i) => i.publicationId === flat)).toMatchObject({ state: 'PLANNED', ref: JSON.stringify(['DEAL', 'P-7', null]) });
+    expect(Number(bound.items.find((i) => i.publicationId === flat)!.price)).toBe(priceForMargin(eco(0, cyberList), 14));
+    expect(bound.items.find((i) => i.publicationId === twelve)).toMatchObject({ state: 'OUT', reason: 'NOT_INVITED' });
+  });
+
+  it('en Manual, en una campaña del canal se puede entrar más tarde y salir antes: la app lo hace sola esos días', async () => {
+    const { enrollManual } = await import('@/lib/promo/enroll');
+    const { applyDue, dueActions } = await import('@/lib/promo/apply');
+    await db.productPromotion.update({ where: { productId }, data: { mode: 'MANUAL' } });
+    await invite(flat, 0);
+    // La campaña va del día 10 al 17: se entra el 12 y se sale el 14.
+    const r = await enrollManual(db, { accountId, input: { productId, kind: 'CAMPAIGN', group: 'DEAL:P-1', start: day(12), finish: day(14), rows: [{ publicationId: flat, by: 'MARGIN', value: 15 }] }, now });
+    if (!r.saved) throw new Error('no guardó');
+    expect(await db.promotionSlot.findUniqueOrThrow({ where: { id: r.slotId } })).toMatchObject({ start: day(12), finish: day(14) });
+    // Fuera de la ventana del canal no se puede: queda en las fechas de la campaña.
+    const wide = await enrollManual(db, { accountId, input: { productId, kind: 'CAMPAIGN', group: 'DEAL:P-1', start: day(1), finish: day(60), rows: [{ publicationId: flat, by: 'MARGIN', value: 15 }], overlap: 'keep' }, now });
+    if (!wide.saved) throw new Error('no guardó');
+    expect(await db.promotionSlot.findUniqueOrThrow({ where: { id: wide.slotId } })).toMatchObject({ start: day(10), finish: day(17) });
+    await db.promotionSlot.delete({ where: { id: wide.slotId } });
+    // No entra antes del 12, aunque la campaña ya empezó.
+    expect(await dueActions(db, { accountId, joinLeadDays: 3, now: day(11) })).toEqual([]);
+    const joined = await applyDue(db, { accountId, auto: true, userId: null, budgetMs: 60_000, now: day(12) });
+    expect(joined.done.map((d) => [d.externalId, d.action, d.ok, d.state])).toEqual([['MLA1', 'ON', true, 'ON']]);
+    // El canal la muestra adentro, y la campaña sigue hasta el 17: el 14 la app la saca.
+    await db.channelPromotionItem.updateMany({ where: { publicationId: flat }, data: { status: 'active', canLeave: true } });
+    sent.length = 0;
+    expect((await applyDue(db, { accountId, auto: true, userId: null, budgetMs: 60_000, now: day(13) })).done).toEqual([]);
+    const left = await applyDue(db, { accountId, auto: true, userId: null, budgetMs: 60_000, now: day(14) });
+    expect(left.done.map((d) => [d.externalId, d.action, d.ok, d.state])).toEqual([['MLA1', 'OFF', true, 'ENDED']]);
+    expect(sent.map((x) => x.what)).toEqual(['leave']);
+  });
+
   it('a los días mide el antes y el después y lo deja en la bitácora', async () => {
     const { generatePlan } = await import('@/lib/promo/plan');
     const { applyDue } = await import('@/lib/promo/apply');

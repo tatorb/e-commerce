@@ -11,6 +11,8 @@ import { classifyAccount } from '@/lib/promo/classify';
 import { cancelSlot, deleteEvent, saveEvent, saveManualSlot } from '@/lib/promo/manual';
 import { overviewProductIds, type OverviewFilter } from '@/lib/promo/overview';
 import { generatePlan } from '@/lib/promo/plan';
+import type { PriceBy } from '@/domain/promo/quote';
+import { enrollManual, repriceManual, type EnrollKind } from '@/lib/promo/enroll';
 import { clearManualPlan, modeConflicts, setMode } from '@/lib/promo/mode';
 import { loadPromoSettings, PromoError, savePromoSettings } from '@/lib/promo/settings';
 import { refreshPublications, sweepInvitations } from '@/lib/promo/sweep';
@@ -299,6 +301,54 @@ export async function excludeAction(accountSlug: string, productId: string, publ
   );
 }
 
+// El último día va entero: se guarda hasta el primer momento del día siguiente.
+const throughDay = (d: Date | null) => (d ? new Date(d.getTime() + 86_400_000) : null);
+
+export type EnrollForm = {
+  kind: EnrollKind;
+  group?: string | null;
+  eventId?: string | null;
+  // Los días, como 2026-12-01, en la hora de la cuenta. Sin hasta: sin fin en el descuento propio, o hasta que termine la campaña.
+  start?: string;
+  finish?: string;
+  rows: { publicationId: string; by: PriceBy; value: number; stock?: number | null }[];
+  overlap?: 'keep' | 'cut';
+};
+
+/**
+ * En Manual: inscribe unas publicaciones a una promoción, con sus fechas y
+ * sus precios. No toca el canal: la app lo ejecuta en su fecha. Si se pisa
+ * con otra promoción y no se dijo qué hacer, no guarda y devuelve con qué.
+ */
+export async function enrollAction(accountSlug: string, productId: string, form: EnrollForm) {
+  return act(accountSlug, { section: 'promociones', does: 'Inscribió publicaciones a una promoción en el almanaque', productId }, async ({ account }) =>
+    guarded(async () => {
+      const start = zoned(form.start, account.timezone);
+      const finish = throughDay(zoned(form.finish, account.timezone));
+      if ((form.start && !start) || (form.finish && !finish)) throw new PromoError('Revisá las fechas.');
+      const r = await enrollManual(prisma, {
+        accountId: account.id,
+        input: { productId: String(productId), kind: form.kind, group: form.group ?? null, eventId: form.eventId ?? null, start, finish, rows: form.rows.map((x) => ({ publicationId: String(x.publicationId), by: x.by, value: Number(x.value), stock: x.stock ?? null })), overlap: form.overlap },
+      });
+      const overlaps = r.quote.overlaps.map((o) => ({ publicationId: o.publicationId, externalId: o.externalId, name: o.name, start: o.start, finish: o.finish, canCut: o.canCut }));
+      if (!r.saved) return { saved: false as const, overlaps, enrolled: 0, cut: 0, skipped: [] as string[] };
+      refresh(account.slug);
+      return { saved: true as const, overlaps, enrolled: r.enrolled, cut: r.cut, skipped: r.skipped.map((x) => `${x.externalId ?? ''}: ${x.problem}`) };
+    }),
+  );
+}
+
+/** En Manual: cambia el precio de una publicación que está por entrar a una promoción. */
+export async function repriceAction(accountSlug: string, itemId: string, by: PriceBy, value: number) {
+  return act(accountSlug, { section: 'promociones', does: 'Cambió el precio de una promoción del almanaque' }, async ({ account }) =>
+    guarded(async () => {
+      const r = await repriceManual(prisma, { accountId: account.id, itemId: String(itemId), by, value: Number(value) });
+      refresh(account.slug);
+      return { warning: r.warning };
+    }),
+  );
+}
+
 const zoned = (value: string | undefined, timeZone: string) => (value ? fromZonedInput(value.includes('T') ? value : `${value}T00:00`, timeZone) : null);
 
 export type SlotInput = { slotId?: string; group?: string | null; start?: string; finish?: string; targetMarginPct?: number; name?: string; note?: string };
@@ -308,7 +358,7 @@ export async function saveSlotAction(accountSlug: string, productId: string, inp
   return act(accountSlug, { section: 'promociones', does: input.slotId ? 'Cambió una franja del almanaque' : 'Puso una franja en el almanaque', productId }, async ({ account }) =>
     guarded(async () => {
       const start = zoned(input.start, account.timezone);
-      const finish = zoned(input.finish, account.timezone);
+      const finish = throughDay(zoned(input.finish, account.timezone));
       if ((input.start && !start) || (input.finish && !finish)) throw new PromoError('Revisá las fechas.');
       await saveManualSlot(prisma, { accountId: account.id, input: { productId: String(productId), slotId: input.slotId, group: input.group ?? null, start: start ?? undefined, finish: finish ?? undefined, targetMarginPct: input.targetMarginPct, name: input.name, note: input.note } });
       refresh(account.slug);

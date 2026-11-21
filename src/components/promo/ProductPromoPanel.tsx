@@ -10,6 +10,7 @@ import { SectionCard } from '@/components/ui/section-card';
 import { formatPrice } from '@/domain/money';
 import { hasNoEnd, LAYER_LABEL } from '@/domain/promo/plan';
 import { COMPETITIONS, COMPETITION_LABEL, LIFECYCLES, LIFECYCLE_LABEL, MODE_LABEL, OBJECTIVE_LABEL, PRIORITIES, PRIORITY_LABEL, type Competition, type Lifecycle, type Mode, type Priority } from '@/domain/promo/tags';
+import type { PriceBy } from '@/domain/promo/quote';
 import type { AppliedAction, DueAction } from '@/lib/promo/apply';
 import type { ModeConflict } from '@/lib/promo/mode';
 import type { ProductGrid } from '@/lib/promo/view';
@@ -23,12 +24,14 @@ import {
   previewApplyAction,
   putBackAction,
   refreshProductAction,
+  repriceAction,
   saveSlotAction,
   setModeAction,
   setTagsAction,
   takeOutAction,
 } from '@/app/a/[cuenta]/promociones/actions';
-import { dateTime, pct, shortDate } from './format';
+import { EnrollPanel } from './EnrollPanel';
+import { dateTime, lastDay, pct, shortDate } from './format';
 import { PromoTimeline, TIMELINE_DAYS, type PillKey } from './PromoTimeline';
 
 // Las promociones de un producto. Arriba, quién arma su almanaque: Manual o
@@ -50,6 +53,20 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
   // La pastilla que se está mirando en la línea de tiempo.
   const [pick, setPick] = useState<PillKey | null>(null);
   const [until, setUntil] = useState('');
+  // En Manual: las filas elegidas para inscribirlas a una promoción, y si se está inscribiendo.
+  const [rows, setRows] = useState<Set<string>>(new Set());
+  const [enrolling, setEnrolling] = useState(false);
+  // El precio nuevo de la pastilla elegida, si se lo está cambiando.
+  const [newPrice, setNewPrice] = useState<{ by: PriceBy; text: string }>({ by: 'MARGIN', text: '' });
+  const selectRows = (ids: string[], on: boolean) =>
+    setRows((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) {
+        if (on) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
   const [preview, setPreview] = useState<{ actions: DueAction[]; scope: { productIds?: string[]; itemIds?: string[]; force?: boolean } } | null>(null);
   const [results, setResults] = useState<AppliedAction[] | null>(null);
   // El cambio de modo que se está confirmando: a Automático, con lo que hay que decidir; a Manual, con si se borra lo planeado.
@@ -273,9 +290,36 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
         {grid.measures.length === 0 ? (
           <p className="px-4 py-6 text-sm text-muted-foreground">Este producto no tiene publicaciones activas en {grid.channelName}.</p>
         ) : (
-          <PromoTimeline grid={grid} timeZone={timeZone} picked={pick} onPick={setPick} />
+          <>
+            <PromoTimeline grid={grid} timeZone={timeZone} picked={pick} onPick={setPick} selectable={manual && !compact} selected={rows} onSelect={selectRows} />
+            {manual && !compact ? (
+              <div className="flex flex-wrap items-center gap-3 border-t px-4 py-3 text-sm">
+                <span className="text-muted-foreground">
+                  {rows.size > 0 ? `${rows.size} ${rows.size === 1 ? 'publicación elegida' : 'publicaciones elegidas'}` : 'Elegí una fila, varias o todas para inscribirlas a una promoción.'}
+                </span>
+                <Button className="ml-auto" size="sm" access="promociones" disabled={busy || rows.size === 0} onClick={() => setEnrolling(true)}>
+                  Inscribir a una promoción
+                </Button>
+              </div>
+            ) : null}
+          </>
         )}
       </SectionCard>
+
+      {enrolling && manual && rows.size > 0 ? (
+        <EnrollPanel
+          accountSlug={accountSlug}
+          timeZone={timeZone}
+          grid={grid}
+          publicationIds={[...rows]}
+          onClose={() => setEnrolling(false)}
+          onDone={(text) => {
+            setEnrolling(false);
+            setRows(new Set());
+            setNotice({ kind: 'ok', text });
+          }}
+        />
+      ) : null}
 
       {preview ? (
         <div className="rounded-2xl border border-foreground/20 bg-card p-4 shadow-card">
@@ -305,7 +349,7 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
         <SectionCard
           title={pickedColumn.name}
           icon={<Tags />}
-          description={`${LAYER_LABEL[pickedColumn.layer]}, ${pickedColumn.finish && hasNoEnd(pickedColumn.finish) ? `desde el ${shortDate(pickedColumn.start, timeZone)}, sin fecha de fin` : `del ${shortDate(pickedColumn.start, timeZone)} al ${shortDate(pickedColumn.finish, timeZone)}`}. ${pickedOption.planLabel}${pickedMeasure?.measure ? `, medida ${pickedMeasure.measure}` : ''}, ${pickedOption.externalId ?? 'sin publicar'}.`}
+          description={`${LAYER_LABEL[pickedColumn.layer]}, ${pickedColumn.finish && hasNoEnd(pickedColumn.finish) ? `desde el ${shortDate(pickedColumn.start, timeZone)}, sin fecha de fin` : `del ${shortDate(pickedColumn.start, timeZone)} al ${lastDay(pickedColumn.finish, timeZone)}`}. ${pickedOption.planLabel}${pickedMeasure?.measure ? `, medida ${pickedMeasure.measure}` : ''}, ${pickedOption.externalId ?? 'sin publicar'}.`}
           action={
             <Button size="sm" variant="ghost" access="view" onClick={() => setPick(null)}>
               Cerrar
@@ -350,6 +394,33 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
                 <Button size="sm" access="subir" disabled={busy} onClick={() => askPreview({ itemIds: [pickedCell.itemId!], force: true })}>
                   Prender ahora
                 </Button>
+              ) : null}
+              {pickedCell.state === 'PLANNED' && pickedCell.itemId ? (
+                <label className="space-y-1">
+                  <span className="block text-xs text-muted-foreground">Cambiarle el precio a esta publicación</span>
+                  <span className="flex gap-2">
+                    <select className={SELECT} value={newPrice.by} onChange={(e) => setNewPrice({ ...newPrice, by: e.target.value as PriceBy })}>
+                      <option value="MARGIN">Rentabilidad, en %</option>
+                      <option value="PCT">Descuento, en %</option>
+                      <option value="PRICE">Precio</option>
+                    </select>
+                    <Input className="w-24" inputMode="decimal" value={newPrice.text} onChange={(e) => setNewPrice({ ...newPrice, text: e.target.value })} />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      access="promociones"
+                      disabled={busy || !newPrice.text.trim()}
+                      onClick={() =>
+                        runWith(
+                          () => repriceAction(accountSlug, pickedCell.itemId!, newPrice.by, Number(newPrice.text.replace(/\./g, '').replace(',', '.'))),
+                          (r) => `Se cambió el precio.${r.warning ? ` ${r.warning}` : ''}`,
+                        )
+                      }
+                    >
+                      Guardar
+                    </Button>
+                  </span>
+                </label>
               ) : null}
               {pickedCell.itemId && (pickedCell.state === 'PLANNED' || pickedCell.state === 'ON' || pickedCell.state === 'SCHEDULED') ? (
                 <Button
@@ -422,7 +493,7 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
                   <span className="font-medium">{c.name}</span>
                   <span className="text-muted-foreground">
                     {' '}
-                    · {c.campaignKind ?? 'Campaña del canal'} · {shortDate(c.start, timeZone)} a {shortDate(c.finish, timeZone)} · con la rentabilidad saludable entrarían {c.counts.in} de {c.cells.length}
+                    · {c.campaignKind ?? 'Campaña del canal'} · {shortDate(c.start, timeZone)} a {lastDay(c.finish, timeZone)} · con la rentabilidad saludable entrarían {c.counts.in} de {c.cells.length}
                     {c.counts.capped > 0 ? `, ${c.counts.capped} al tope` : ''}
                   </span>
                 </span>

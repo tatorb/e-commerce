@@ -28,3 +28,8 @@ export function stateClass(state: ItemState, capped: boolean): string {
   if (state === 'ENDED') return 'border-border bg-muted/40 text-muted-foreground';
   return 'border-dashed border-border bg-background text-muted-foreground';
 }
+
+/** El último día de una promoción, para mostrarlo: termina en el primer momento del día siguiente. */
+export function lastDay(finish: Date | string | null, timeZone: string): string {
+  return finish ? shortDate(new Date(new Date(finish).getTime() - 1), timeZone) : '—';
+}

@@ -1,12 +1,13 @@
 import { z } from 'zod';
 import { planLabel } from '@/domain/pricing';
-import { EVENT_TIERS, EVENT_TIER_LABEL, LAYER_LABEL } from '@/domain/promo/plan';
+import { EVENT_TIERS, EVENT_TIER_LABEL, hasNoEnd, LAYER_LABEL } from '@/domain/promo/plan';
 import { COMPETITION_LABEL, LIFECYCLE_LABEL, OBJECTIVE_LABEL, PRIORITY_LABEL, tagsText, type Competition, type Lifecycle, type Priority, type PromoTags, type TagGroup } from '@/domain/promo/tags';
 import { applyDue, dueActions, putBack, takeOut, type AppliedAction, type DueAction } from '@/lib/promo/apply';
 import { classifiedText, classifyAccount } from '@/lib/promo/classify';
 import { cancelSlot, deleteEvent, listEvents, saveEvent, saveManualSlot } from '@/lib/promo/manual';
 import { loadLog, measureDue } from '@/lib/promo/measure';
 import { loadOverview, OVERVIEW_STATES, overviewProductIds, type OverviewFilter } from '@/lib/promo/overview';
+import { enrollManual, quoteEnroll, repriceManual } from '@/lib/promo/enroll';
 import { modeConflicts, setMode } from '@/lib/promo/mode';
 import { generatePlan } from '@/lib/promo/plan';
 import { productOfPublication } from '@/lib/promo/product';
@@ -413,6 +414,95 @@ const setModeTool = defineTool({
     }),
 });
 
+const BY_IN = { rentabilidad: 'MARGIN', precio: 'PRICE', descuento: 'PCT' } as const;
+
+const enrollTool = defineTool({
+  name: 'enroll_in_promotion',
+  section: 'promociones',
+  title: 'Inscribir publicaciones a una promoción, a mano',
+  description: `En un producto en Manual, arma el almanaque: inscribe unas publicaciones (cada forma de cobro por su código) a una promoción, desde una fecha hasta otra, con el precio que se diga. No manda nada al canal: queda en el almanaque y la app lo ejecuta sola en su fecha. tipo descuento_propio: las fechas se eligen; sin hasta, queda sin fin. tipo campana: una campaña a la que el canal invita (campana, de get_promotions); las fechas las pone el canal y solo se puede entrar más tarde o salir antes. tipo reserva: un evento del calendario (evento, de manage_event_calendar) que todavía no tiene invitación; cuando llegue, la app inscribe las publicaciones invitadas con el precio cargado. El precio se carga por rentabilidad sobre el costo, por precio para el comprador o por descuento en % sobre el de lista: uno para todas (precio_por y valor) o uno por publicación (en cada una de publicaciones). En las campañas donde el precio lo pone el canal, no se elige. Debajo del piso avisa y deja seguir. Lo que el canal no va a aceptar (no invitada, fuera del rango, descuento propio menor a 5 %) no entra y vuelve con el motivo. Si se pisa con otra promoción de la misma publicación, no guarda y devuelve con qué se pisa: preguntale a la persona y volvé a llamar con si_se_pisa convivir (las dos quedan, y el canal muestra el descuento más grande) o cortar (la anterior termina cuando empieza esta). Con solo_mostrar no guarda: devuelve cada publicación con su precio, su descuento y lo que deja. Para cambiar el precio de una ya inscripta que todavía no entró, pasá su casillero. ${CONFIRM}`,
+  input: z.object({
+    cuenta: accountArg,
+    publicaciones: z
+      .array(
+        z.union([
+          z.string().min(1),
+          z.object({ publicacion: z.string().min(1), precio_por: z.enum(['rentabilidad', 'precio', 'descuento']).optional(), valor: z.number().positive().optional(), unidades: z.number().int().positive().optional().describe('En una oferta relámpago: las unidades reservadas.') }),
+        ]),
+      )
+      .min(1)
+      .max(60)
+      .optional()
+      .describe('Las publicaciones del mismo producto: su código o su id, o un objeto con su propio precio.'),
+    tipo: z.enum(['descuento_propio', 'campana', 'reserva']).optional(),
+    campana: z.string().max(200).optional(),
+    evento: z.string().max(60).optional(),
+    desde: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('El primer día, como 2026-12-01, en la hora de la cuenta.'),
+    hasta: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('El último día, incluido.'),
+    precio_por: z.enum(['rentabilidad', 'precio', 'descuento']).optional().describe('Para todas las que no traen el suyo.'),
+    valor: z.number().positive().optional().describe('La rentabilidad en %, el precio en pesos o el descuento en %.'),
+    si_se_pisa: z.enum(['convivir', 'cortar']).optional(),
+    solo_mostrar: z.boolean().optional(),
+    casillero: z.string().optional().describe('Para cambiar el precio de una ya inscripta que todavía no entró: su casillero de get_promotions. Con precio_por y valor.'),
+  }),
+  readOnly: false,
+  destructive: true,
+  run: (ctx, args) =>
+    run(async () => {
+      const account = await resolveAccount(ctx, args.cuenta);
+      if (args.casillero) {
+        if (!args.precio_por || args.valor === undefined) throw new McpToolError('Para cambiar el precio, pasá precio_por y valor.');
+        const r = await repriceManual(ctx.db, { accountId: account.id, itemId: args.casillero, by: BY_IN[args.precio_por], value: args.valor });
+        return { cambiado: true, precio_para_el_comprador: r.price, descuento_pct: r.discountPct, rentabilidad_pct: r.marginPct, ...(r.warning ? { aviso: r.warning } : {}) };
+      }
+      if (!args.publicaciones || !args.tipo) throw new McpToolError('Pasá las publicaciones y el tipo de promoción.');
+      const rows = [];
+      let productId: string | null = null;
+      for (const p of args.publicaciones) {
+        const ref = typeof p === 'string' ? p : p.publicacion;
+        const publicationId = await findPublication(ctx.db, account.id, ref);
+        const product = await productOfPublication(ctx.db, account.id, publicationId);
+        if (productId && product !== productId) throw new McpToolError('Las publicaciones tienen que ser del mismo producto: inscribí cada producto por separado.');
+        productId = product;
+        const by = (typeof p === 'object' && p.precio_por) || args.precio_por;
+        const value = (typeof p === 'object' && p.valor) || args.valor;
+        if (!by || value === undefined) throw new McpToolError(`Falta el precio de ${ref}: pasá precio_por y valor.`);
+        rows.push({ publicationId, by: BY_IN[by], value, stock: typeof p === 'object' ? (p.unidades ?? null) : null });
+      }
+      const day = (v: string | undefined, through: boolean) => {
+        if (!v) return null;
+        const d = fromZonedInput(`${v}T00:00`, account.timezone);
+        if (!d) throw new McpToolError(`No se entiende la fecha ${v}.`);
+        return through ? new Date(d.getTime() + 86_400_000) : d;
+      };
+      const input = {
+        productId: productId!,
+        kind: args.tipo === 'campana' ? ('CAMPAIGN' as const) : args.tipo === 'reserva' ? ('RESERVE' as const) : ('OWN_DISCOUNT' as const),
+        group: args.campana ?? null,
+        eventId: args.evento ?? null,
+        start: day(args.desde, false),
+        finish: day(args.hasta, true),
+        rows,
+        overlap: args.si_se_pisa === 'cortar' ? ('cut' as const) : args.si_se_pisa === 'convivir' ? ('keep' as const) : undefined,
+      };
+      const rowOut = (r: { externalId: string | null; publicationId: string; problem: string | null; warning: string | null; price: number | null; discountPct: number | null; marginPct: number | null; stock: number | null }) => ({
+        publicacion: r.externalId ?? r.publicationId,
+        ...(r.problem ? { no_entra: r.problem } : { precio_para_el_comprador: r.price, descuento_pct: r.discountPct, rentabilidad_pct: r.marginPct, ...(r.stock ? { unidades_reservadas: r.stock } : {}), ...(r.warning ? { aviso: r.warning } : {}) }),
+      });
+      const overlapOut = (o: { externalId: string | null; name: string; start: Date; finish: Date; canCut: boolean }) => ({ publicacion: o.externalId, con: o.name, desde: when(o.start, account), hasta: hasNoEnd(o.finish) ? 'sin fin' : when(o.finish, account), se_puede_cortar: o.canCut });
+      if (args.solo_mostrar) {
+        const q = await quoteEnroll(ctx.db, { accountId: account.id, input });
+        return { vista_previa: true, promocion: q.name, desde: when(q.start, account), hasta: hasNoEnd(q.finish) ? 'sin fin' : when(q.finish, account), publicaciones: q.rows.map(rowOut), se_pisa_con: q.overlaps.map(overlapOut) };
+      }
+      const r = await enrollManual(ctx.db, { accountId: account.id, input });
+      const q = r.quote;
+      if (!r.saved) {
+        return { guardado: false, promocion: q.name, se_pisa_con: q.overlaps.map(overlapOut), como_sigue: 'No se guardó nada. Preguntale a la persona si conviven o si la anterior se corta, y volvé a llamar con si_se_pisa.' };
+      }
+      return { guardado: true, franja: r.slotId, promocion: q.name, desde: when(q.start, account), hasta: hasNoEnd(q.finish) ? 'sin fin' : when(q.finish, account), inscriptas: r.enrolled, publicaciones: q.rows.map(rowOut), ...(r.cut > 0 ? { promociones_cortadas: r.cut } : {}), como_sigue: 'La app lo ejecuta sola en su fecha. Para mandarlo ahora, apply_promotion_changes.' };
+    }),
+});
+
 const classify = defineTool({
   name: 'classify_promotions',
   section: 'promociones',
@@ -784,4 +874,4 @@ const refreshCompetitors = defineTool({
     }),
 });
 
-export const PROMO_TOOLS = [getPromotions, getSettings, updateSettings, setModeTool, setTags, exclude, classify, generate, review, applyChanges, setSlot, measure, calendar, refreshCompetitors];
+export const PROMO_TOOLS = [getPromotions, getSettings, updateSettings, setModeTool, enrollTool, setTags, exclude, classify, generate, review, applyChanges, setSlot, measure, calendar, refreshCompetitors];

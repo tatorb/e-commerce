@@ -58,6 +58,7 @@ export type StoredCampaign = Invite & {
 };
 
 export type ProductPromo = {
+  accountId: string;
   productId: string;
   name: string;
   brand: string | null;
@@ -214,6 +215,7 @@ export async function loadProductPromo(db: Db, accountId: string, productId: str
   }
   const why = product.promotion?.why && typeof product.promotion.why === 'object' && !Array.isArray(product.promotion.why) ? (product.promotion.why as Partial<Record<TagGroup, string>>) : {};
   return {
+    accountId,
     productId: product.id,
     name: product.name,
     brand: product.brand,

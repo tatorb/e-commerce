@@ -3,6 +3,8 @@ import { planLabel } from '@/domain/pricing';
 import { marginAt, OUT_REASON_LABEL, type OptionEconomics, type OutReason } from '@/domain/promo/entry';
 import { layerOfType, type Layer, type SlotKind } from '@/domain/promo/plan';
 import { objectiveOf, type Mode, type Objective, type PromoTags, type TagGroup } from '@/domain/promo/tags';
+import type { Calc } from '@/domain/promo/quote';
+import { calcOf } from './enroll';
 import { decideItem, ITEM_STATE_LABEL, type ItemState } from './plan';
 import { loadProductPromo, type ProductPromo } from './product';
 import { loadPromoSettings, type PromoSettings } from './settings';
@@ -68,6 +70,15 @@ export type GridOption = {
 // title: el título de su publicación principal, para distinguir dos publicaciones distintas de la misma medida.
 export type GridMeasure = { mainId: string; measure: string | null; title: string | null; stock: number | null; options: GridOption[] };
 
+export type EnrollInvite = { status: string; join: string | null; fixedPrice: boolean; price: number | null; minPrice: number | null; maxPrice: number | null; channelPct: number | null; sellerPct: number | null; listPrice: number | null; stockMin: number | null; stockMax: number | null };
+export type EnrollCampaign = { group: string; name: string; kindLabel: string; type: string; layer: Layer; start: Date | null; finish: Date | null; invites: Record<string, EnrollInvite> };
+export type EnrollData = {
+  calc: Record<string, Calc & { stock: number | null }>;
+  campaigns: EnrollCampaign[];
+  // Los eventos del calendario que todavía no terminaron, para dejar una reserva.
+  events: { id: string; name: string; start: Date; finish: Date }[];
+};
+
 export type ProductGrid = {
   productId: string;
   name: string;
@@ -87,6 +98,8 @@ export type ProductGrid = {
   invitationsAt: Date | null;
   // Cuándo se armó esta vista: la línea de tiempo arranca ahí.
   now: Date;
+  // Lo que hace falta para inscribir a mano: las cuentas de cada publicación, las campañas a las que el canal invita y los eventos del calendario.
+  enroll: EnrollData;
   measures: GridMeasure[];
   columns: GridColumn[];
 };
@@ -194,6 +207,16 @@ export async function loadProductGrid(db: Db, accountId: string, productId: stri
       counts: counts(cells),
     });
   }
+  const campaigns: EnrollCampaign[] = [];
+  for (const c of promo.campaigns) {
+    if (c.finish && c.finish.getTime() <= now.getTime()) continue;
+    let row = campaigns.find((x) => x.group === c.group);
+    if (!row) campaigns.push((row = { group: c.group, name: c.name, kindLabel: c.kind, type: c.type, layer: layerOfType(c.type).layer, start: c.start, finish: c.finish, invites: {} }));
+    if (c.start && (!row.start || c.start < row.start)) row.start = c.start;
+    if (c.finish && (!row.finish || c.finish > row.finish)) row.finish = c.finish;
+    row.invites[c.publicationId] = { status: c.status, join: c.join, fixedPrice: c.type === 'VOLUME' || c.join === 'accept', price: c.price, minPrice: c.minPrice, maxPrice: c.maxPrice, channelPct: c.channelPct, sellerPct: c.sellerPct, listPrice: c.listPrice, stockMin: c.stockMin, stockMax: c.stockMax };
+  }
+  const events = promo.mode === 'MANUAL' ? await db.promotionEvent.findMany({ where: { accountId, finish: { gt: now } }, orderBy: { start: 'asc' }, select: { id: true, name: true, start: true, finish: true } }) : [];
   const seenAt = promo.campaigns.map((c) => c.seenAt.getTime());
   return {
     productId: promo.productId,
@@ -211,6 +234,7 @@ export async function loadProductGrid(db: Db, accountId: string, productId: stri
     paused: settings.paused,
     invitationsAt: seenAt.length > 0 ? new Date(Math.min(...seenAt)) : settings.sweptAt,
     now,
+    enroll: { calc: Object.fromEntries(live.map((o) => [o.publicationId, { ...calcOf(o), stock: o.stock }])), campaigns, events },
     measures,
     columns,
   };

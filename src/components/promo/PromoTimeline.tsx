@@ -6,7 +6,7 @@ import { formatPrice } from '@/domain/money';
 import { hasNoEnd, LAYER_LABEL, type Layer } from '@/domain/promo/plan';
 import type { GridCell, GridColumn, GridOption, ProductGrid } from '@/lib/promo/view';
 import { cn } from '@/lib/utils/cn';
-import { pct, shortDate } from './format';
+import { lastDay, pct, shortDate } from './format';
 
 // La línea de tiempo de un producto: una fila por publicación, agrupadas por
 // medida, y los próximos 90 días a lo ancho. Cada promoción en la que la
@@ -154,7 +154,7 @@ export function PromoTimeline({
                         const { column: c, cell } = p;
                         const isPicked = picked?.slotId === c.slotId && picked.publicationId === o.publicationId;
                         const text = `${c.name}${cell.price !== null && cell.state !== 'OUT' ? ` · ${formatPrice(cell.price)}` : ''}${cell.marginPct !== null ? ` · deja ${pct(cell.marginPct)}` : ''}`;
-                        const when = hasNoEnd(c.finish!) ? `desde el ${shortDate(c.start, timeZone)}, sin fin` : `${shortDate(c.start, timeZone)} a ${shortDate(c.finish, timeZone)}`;
+                        const when = hasNoEnd(c.finish!) ? `desde el ${shortDate(c.start, timeZone)}, sin fin` : `${shortDate(c.start, timeZone)} a ${lastDay(c.finish, timeZone)}`;
                         return (
                           <button
                             key={c.slotId}

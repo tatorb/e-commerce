@@ -267,6 +267,9 @@ export async function generatePlan(db: Db, args: { accountId: string; productId:
 
 /** Vuelve a decidir cada forma de cobro en las franjas vigentes de un producto, con el costo y las invitaciones de ahora. */
 export async function evaluateProduct(db: Db, args: { promo: ProductPromo; settings: PromoSettings; now: Date }): Promise<void> {
+  // Las reservas que ya tienen su campaña en el canal pasan a ser de esa campaña.
+  const { bindReservations } = await import('./enroll');
+  await bindReservations(db, { accountId: args.promo.accountId, promo: args.promo, now: args.now });
   const slots = await db.promotionSlot.findMany({ where: { productId: args.promo.productId, cancelled: false, finish: { gt: args.now } }, include: { items: true } });
   for (const slot of slots) await evaluateSlot(db, { slot, ...args });
 }

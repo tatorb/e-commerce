@@ -6,7 +6,7 @@ import type { Mode } from '@/domain/promo/tags';
 import { unitsLast90 } from '@/lib/sales/units';
 import { takeOut, type AppliedAction } from './apply';
 import { classifyAccount } from './classify';
-import { campaignInfos, competitorMargins, generatePlan, loadEvents, startOfDay } from './plan';
+import { campaignInfos, competitorMargins, evaluateProduct, generatePlan, loadEvents, startOfDay } from './plan';
 import { loadProductPromo, type ProductPromo } from './product';
 import { loadPromoSettings, PromoError } from './settings';
 
@@ -43,7 +43,9 @@ export async function adoptExisting(db: Db, args: { accountId: string; productId
       await db.promotionSlot.delete({ where: { id: s.id } });
     }
   }
-  const live = slots.filter((s) => s.source === 'MANUAL' && !s.cancelled);
+  // Las reservas que ya tienen su campaña en el canal, y lo que el canal ya muestra de las franjas armadas a mano.
+  await evaluateProduct(db, { promo, settings, now });
+  const live = (await db.promotionSlot.findMany({ where: { productId: promo.productId, finish: { gt: now } }, include: { items: true } })).filter((s) => s.source === 'MANUAL' && !s.cancelled);
   const measureAt = new Date(now.getTime() + settings.rules.timing.measureDays * DAY);
   // Las campañas del canal en las que ya está o está anotado.
   const inside = promo.campaigns.filter((c) => c.status !== 'invited' && (!c.finish || c.finish > now));

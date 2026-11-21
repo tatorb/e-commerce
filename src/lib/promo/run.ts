@@ -2,7 +2,8 @@ import type { PrismaClient } from '@/generated/prisma/client';
 import { applyDue } from './apply';
 import { classifyAccount } from './classify';
 import { measureDue } from './measure';
-import { generatePlan } from './plan';
+import { evaluateProduct, generatePlan } from './plan';
+import { loadProductPromo } from './product';
 import { loadPromoSettings } from './settings';
 import { sweepInvitations } from './sweep';
 
@@ -66,6 +67,13 @@ export async function promotionsPass(db: Db, args: { budgetMs: number; now?: Dat
       }
       await generatePlan(db, { accountId: a.accountId, productId: p.productId, now }).catch((e) => console.error('Promociones: no se pudo armar el almanaque.', e instanceof Error ? e.message : e));
       out.planned++;
+    }
+    // Las reservas que esperan la invitación del canal: se miran con las invitaciones recién leídas.
+    const reserved = await db.promotionSlot.findMany({ where: { accountId: a.accountId, kind: 'CAMPAIGN', group: null, eventId: { not: null }, cancelled: false, finish: { gt: now } }, distinct: ['productId'], select: { productId: true }, take: 50 });
+    for (const r of reserved) {
+      if (left() <= 0) break;
+      const promo = await loadProductPromo(db, a.accountId, r.productId);
+      if (promo) await evaluateProduct(db, { promo, settings, now }).catch((e) => console.error('Promociones: no se pudo mirar una reserva.', e instanceof Error ? e.message : e));
     }
     // 3. Prender y apagar lo que toca, en Manual y en Automático, salvo con el freno de emergencia puesto.
     if (!settings.paused && left() > 0) {

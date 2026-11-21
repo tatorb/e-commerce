@@ -91,10 +91,15 @@ export async function dueActions(
   const now = args.now ?? new Date();
   const items = await loadItems(db, args);
   const deadlines = new Map<string, Date>();
+  // Cuándo empieza cada campaña en el canal: si la franja empieza después, es que se quiso entrar más tarde.
+  const campaignStart = new Map<string, Date>();
   const groups = [...new Set(items.filter((i) => i.slot.group && i.state === 'PLANNED').map((i) => i.slot.group!))];
   if (groups.length > 0) {
-    const rows = await db.channelPromotionItem.findMany({ where: { group: { in: groups }, publicationId: { in: items.map((i) => i.publicationId) }, deadline: { not: null } }, select: { publicationId: true, group: true, deadline: true } });
-    for (const r of rows) deadlines.set(`${r.publicationId}:${r.group}`, r.deadline!);
+    const rows = await db.channelPromotionItem.findMany({ where: { group: { in: groups }, publicationId: { in: items.map((i) => i.publicationId) } }, select: { publicationId: true, group: true, deadline: true, start: true } });
+    for (const r of rows) {
+      if (r.deadline) deadlines.set(`${r.publicationId}:${r.group}`, r.deadline);
+      if (r.start) campaignStart.set(`${r.publicationId}:${r.group}`, r.start);
+    }
   }
   // Las campañas del canal que siguen corriendo después de que termina la franja: de esas hay que salir.
   const ended = items.filter((i) => i.slot.kind === 'CAMPAIGN' && i.slot.group && (i.state === 'ON' || i.state === 'SCHEDULED') && i.slot.finish <= now);
@@ -114,8 +119,13 @@ export async function dueActions(
     if (i.state === 'PLANNED') {
       if (s.cancelled || s.finish <= now) continue;
       if (i.nextTryAt && i.nextTryAt > now && !args.force) continue;
+      // Una reserva espera la invitación del canal: todavía no hay a qué entrar.
+      if (s.kind !== 'OWN_DISCOUNT' && !s.group) continue;
       let from = s.start;
-      if (s.kind !== 'OWN_DISCOUNT') {
+      const begins = s.group ? campaignStart.get(`${i.publicationId}:${s.group}`) : undefined;
+      // Si la franja empieza después que la campaña, se entra ese día y no antes.
+      const late = begins !== undefined && s.start.getTime() > begins.getTime() + DAY / 2;
+      if (s.kind !== 'OWN_DISCOUNT' && !late) {
         // A una campaña se entra unos días antes de que empiece, o antes de que venza la invitación.
         from = new Date(s.start.getTime() - args.joinLeadDays * DAY);
         const deadline = s.group ? deadlines.get(`${i.publicationId}:${s.group}`) : undefined;
