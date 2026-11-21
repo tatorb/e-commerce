@@ -287,6 +287,7 @@ const createPublicationTool = defineTool({
       ...(await stateOf(ctx, account, r.publicationId)),
       ...(titleWarnings.length > 0 ? { avisos_del_titulo: titleWarnings } : {}),
       ...(r.measures > 0 ? { familia: `El producto tiene varias medidas: se creó una publicación por medida, ${r.measures + 1} en total, juntas en su familia.` } : {}),
+      ...(r.usedExisting ? { producto_que_ya_existia: `Ya había un producto con esa marca y ese número de pieza, «${r.usedExisting.name}»: no se creó otro, la publicación quedó en ese.` } : {}),
       ...(r.related.length > 0
         ? { aviso: `El producto ya tiene ${r.related.length === 1 ? 'otra publicación' : `${r.related.length} publicaciones`} en el pipeline.` }
         : {}),

@@ -69,7 +69,7 @@ describe('herramientas de escritura en la lista', () => {
       expect(tools.get(name)).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     }
     for (const name of ['classify_promotions', 'generate_promotion_plan', 'measure_promotion_result']) expect(tools.get(name)).toMatchObject({ readOnlyHint: false, destructiveHint: false });
-    expect(tools.size).toBe(138);
+    expect(tools.size).toBe(140);
   });
 });
 
