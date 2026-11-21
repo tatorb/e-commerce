@@ -316,7 +316,9 @@ describe.skipIf(!url)('herramientas para Claude', () => {
       ficha_tecnica: [{ name: 'Diámetro', value: '200 mm' }],
       variantes: [{ medida: 'STD', sku: 'SKU-1' }],
     });
-    expect(data.atributos_en_el_canal).toEqual([{ name: 'Marca', value: 'Marca Uno' }]);
+    // Lo guardado en la app va aparte de lo leído del canal: esta publicación todavía no se leyó.
+    expect(data.atributos_en_la_app).toEqual([{ name: 'Marca', value: 'Marca Uno' }]);
+    expect(data.atributos_en_el_canal).toBe('Sin leer del canal');
     expect(data.ultima_medicion.metricas).toMatchObject({ 'Visitas (90 días)': '120', 'Ventas (90 días)': '3' });
     expect(data.pipeline.historial.map((m: { paso: string }) => m.paso)).toEqual(['Información', 'Título']);
     expect(data.competencia).toMatchObject([{ titulo: 'Kit Embrague Modelo X Original', vendidos: 50, link: null, precio_de_lista: null }]);

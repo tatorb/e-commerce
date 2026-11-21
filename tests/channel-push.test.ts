@@ -727,6 +727,43 @@ describe.skipIf(!url)('subir al canal en la base', () => {
     expect(again.rejected).toEqual([{ field: 'attributes', message: expect.stringContaining('no borró «Tipo de embrague»: sigue «Monodisco»') }]);
   });
 
+  it('desde Claude: lo guardado en la app no pisa lo leído del canal, y cada campo dice si es distinto, hasta que se sube', async () => {
+    const p = await pub('MLA1');
+    await db.user.create({ data: { id: 'u-catalogo', email: 'catalogo@ejemplo.com', name: 'Persona de prueba', isAdmin: true } });
+    const ctx: McpContext = { db, userId: 'u-catalogo', access: { isAdmin: true, permissions: {}, accountIds: [] }, baseUrl: 'https://app.ejemplo.com' };
+    const { WRITE_TOOLS } = await import('@/lib/mcp/write-tools');
+    const { READ_TOOLS } = await import('@/lib/mcp/read-tools');
+    const { PUSH_TOOLS } = await import('@/lib/mcp/push-tools');
+    const tools = [...WRITE_TOOLS, ...READ_TOOLS, ...PUSH_TOOLS];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const run = async (name: string, args: Record<string, unknown>): Promise<any> => {
+      const t = tools.find((x) => x.name === name)!;
+      return t.run(ctx, t.input.parse({ cuenta: 'prueba', ...args }));
+    };
+    const value = (list: { name: string; value: string }[]) => list.find((a) => a.name === 'Tipo de embrague')?.value;
+    const field = (got: { datos_de_catalogo: { campos: { campo: string }[] } }) => got.datos_de_catalogo.campos.find((c) => c.campo === 'CLUTCH_TYPE');
+
+    // Se guarda en la app, sin subir.
+    await run('save_catalog_data', { publicacion: p.id, categoria: 'MLA373460', valores: { CLUTCH_TYPE: 'Bidisco' } });
+    const saved = await run('get_publication', { publicacion: p.id });
+    // En el canal sigue lo de antes, con la fecha en que se leyó.
+    expect(value(saved.atributos_en_el_canal)).toBe('Monodisco');
+    expect(saved.atributos_en_el_canal_leidos).toBeTruthy();
+    expect(value(saved.atributos_en_la_app)).toBe('Bidisco');
+    expect(field(saved)).toMatchObject({ valor: 'Bidisco', valor_en_el_canal: 'Monodisco', distinto_del_canal: true });
+    expect(saved.datos_de_catalogo.campos_distintos_del_canal).toContain('CLUTCH_TYPE');
+    expect(saved.datos_de_catalogo.leido_del_canal).toBeTruthy();
+
+    // Al subirlo, el canal pasa a tener lo de la app y ya no es distinto.
+    const pushed = await run('push_catalog_data', { publicaciones: [p.id] });
+    expect(JSON.stringify(pushed)).toContain('confirmado_en_el_canal');
+    const after = await run('get_publication', { publicacion: p.id });
+    expect(value(after.atributos_en_el_canal)).toBe('Bidisco');
+    expect(field(after)).toMatchObject({ valor: 'Bidisco', valor_en_el_canal: 'Bidisco' });
+    expect(field(after)).not.toHaveProperty('distinto_del_canal');
+    expect(after.datos_de_catalogo.campos_distintos_del_canal).not.toContain('CLUTCH_TYPE');
+  });
+
   it('lo único distinto es un dato que la app sacó: si el canal cambia otro, sigue para subir y no para elegir', async () => {
     const p = await pub('MLA1');
     await saveCatalogData(db, { publicationId: p.id, category: 'MLA373460', values: { INCLUDES_DISC: null } });

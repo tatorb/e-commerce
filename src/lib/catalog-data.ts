@@ -35,7 +35,7 @@ async function load(db: Db, publicationId: string) {
       attributes: true,
       channelCategory: true,
       productId: true,
-      channelCopy: { select: { categoryId: true, details: true, missingSince: true } },
+      channelCopy: { select: { categoryId: true, details: true, missingSince: true, attributes: true, readAt: true } },
       store: { select: { channel: { select: { kind: true, name: true } } } },
       product: { select: { productType: true, brand: true, partNumber: true, origin: true, specs: true } },
     },
@@ -56,6 +56,9 @@ async function load(db: Db, publicationId: string) {
 const ref = (c: CategoryRef | null): CategoryRef | null => (c ? { id: c.id, name: c.name } : null);
 
 export type CatalogData = {
+  // Los valores de los mismos campos como se leyeron del canal la última vez, y cuándo. Null: todavía no se leyó.
+  channelValues: Record<string, string> | null;
+  channelReadAt: Date | null;
   // En una familia, los campos que cambian con la medida, como el diámetro: el valor de cada medida.
   byMeasure: { id: string; externalId: string | null; label: string; values: Record<string, string> }[];
   channelName: string;
@@ -122,6 +125,8 @@ export async function loadCatalogData(db: Db, publicationId: string): Promise<Ca
   const { category, source, familyCategory } = resolveCatalog(catalog, family, pub.channelCategory);
   const fields = category ? editableFields(category) : [];
   const values = readCatalogValues(fields, parseNameValueList(pub.attributes));
+  // Lo último que se leyó del canal de esos mismos campos: lo que se guarda en la app no lo cambia.
+  const channelValues = copy ? readCatalogValues(fields, parseNameValueList(copy.attributes)) : null;
   const fromStore = await storeValues(db, pub.storeId, fields.filter((f) => f.sameInStore && !values[f.id]));
   return {
     byMeasure: await measureValues(db, pub.id, fields),
@@ -136,6 +141,8 @@ export async function loadCatalogData(db: Db, publicationId: string): Promise<Ca
       .filter((f) => f.fromProduct)
       .map((field) => ({ field, value: pub.product[field.fromProduct!]?.trim() || null })),
     values,
+    channelValues,
+    channelReadAt: copy?.readAt ?? null,
     fromStore,
     fromSpecs: proposeFromSpecs(fields, values, parseNameValueList(pub.product.specs)),
     inChannel,

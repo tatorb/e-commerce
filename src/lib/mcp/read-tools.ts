@@ -538,7 +538,7 @@ const getPublication = defineTool({
             take: LOG_SHOWN,
             select: { createdAt: true, field: true, kind: true, message: true, user: { select: { name: true } } },
           },
-          channelCopy: { select: { readAt: true, photos: true, price: true, discount: true, installments: true, warranty: true, missingSince: true, flex: true } },
+          channelCopy: { select: { readAt: true, photos: true, price: true, discount: true, installments: true, warranty: true, missingSince: true, flex: true, attributes: true } },
           warranty: true,
           price: true,
           discount: true,
@@ -678,7 +678,11 @@ const getPublication = defineTool({
         : {}),
       titulo: pub.title,
       descripcion: pub.description,
-      atributos_en_el_canal: safeList(parseNameValueList(pub.attributes)),
+      // Lo último que se leyó del canal, con su fecha. Guardar datos de catálogo en la app no lo cambia: cambia cuando se suben y se vuelve a leer.
+      atributos_en_el_canal: pub.channelCopy && !pub.channelCopy.missingSince ? safeList(parseNameValueList(pub.channelCopy.attributes)) : 'Sin leer del canal',
+      atributos_en_el_canal_leidos: pub.channelCopy && !pub.channelCopy.missingSince ? when(pub.channelCopy.readAt, account) : null,
+      // Lo que tiene guardado la app, se haya subido o no.
+      atributos_en_la_app: safeList(parseNameValueList(pub.attributes)),
       datos_de_catalogo: catalogForClaude(catalog),
       // Si ofrece Envíos Flex, como lo leyó la app del canal. Se cambia con set_publication_flex.
       envios_flex: pub.channelCopy ? flexLabel(pub.channelCopy.flex) : 'Sin leer del canal',
