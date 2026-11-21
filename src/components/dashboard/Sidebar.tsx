@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { cookies } from 'next/headers';
-import { AlignLeft, BellRing, Calculator, Camera, CarFront, ClipboardList, DollarSign, History, Image as ImageIcon, KanbanSquare, ListChecks, ListTodo, MessageCircleQuestion, MessageSquareText, Package, PlugZap, Receipt, RefreshCw, Shapes, ShieldCheck, SlidersHorizontal, TrendingUp, Type, Upload, Users } from 'lucide-react';
+import { AlignLeft, BellRing, Calculator, Camera, CarFront, ClipboardList, DollarSign, History, Image as ImageIcon, KanbanSquare, ListChecks, ListTodo, MessageCircleQuestion, MessageSquareText, Package, PlugZap, Receipt, RefreshCw, Shapes, ShieldCheck, SlidersHorizontal, TrendingUp, Type, Upload, Users, DatabaseZap } from 'lucide-react';
 import { NavLink } from '@/components/dashboard/NavLink';
 import { SidebarShell } from '@/components/dashboard/SidebarShell';
 import { SidebarToggle } from '@/components/dashboard/SidebarToggle';
@@ -205,6 +205,11 @@ export async function Sidebar({
           {sees('protocolos') ? (
             <NavLink href={`${accountHome}/protocolos`} label="Protocolos de fotos">
               <ClipboardList className="h-4 w-4" />
+            </NavLink>
+          ) : null}
+          {account?.slug === 'insur' && sees('productos') ? (
+            <NavLink href={`${accountHome}/sistema-insur`} label="Sistema de Insur">
+              <DatabaseZap className="h-4 w-4" />
             </NavLink>
           ) : null}
           {sees('conexion') ? (

@@ -1,3 +1,4 @@
+import { insurDataForClaude } from './insur-tools';
 import { flexLabel } from '@/domain/flex';
 import { branchStockText } from '@/lib/branches';
 import { flexPlans } from '@/lib/branch-flex';
@@ -609,6 +610,8 @@ const getPublication = defineTool({
       branchStockText(ctx.db, product.id, stockSlots(product.variants)),
       flexPlans(ctx.db, [id]).then((m) => m.get(id) ?? null),
     ]);
+    // Lo que dice el sistema de Insur de este producto, solo de referencia.
+    const insurData = await insurDataForClaude(ctx.db, { accountId: account.id, productId: product.id });
     const plan = plans.get(id) ?? null;
     const planRow = pub.unitsPerSale > 1 ? await ctx.db.publication.findUnique({ where: { id }, select: PLAN_SELECT }) : null;
     const r = research.research;
@@ -763,6 +766,7 @@ const getPublication = defineTool({
           ? stockText(stockSlots(product.variants).map((s) => ({ label: s.label, quantity: stock.stock.find((x) => x.key === s.key)?.quantity ?? 0 })))
           : 'La app todavía no lleva el stock de este producto.',
         ...(byBranch && stock.stockSince ? { stock_por_sucursal: byBranch } : {}),
+        ...(insurData ? { datos_de_insur: insurData } : {}),
         // El costo de reposición sin IVA, el de cada medida si tiene: la base del paso Precio.
         costo_de_reposicion_sin_iva: costsForClaude(costLines(stock).lines),
         // Con la opción, los canales muestran 6 con 5 o menos, también en 0, y cada medida tiene su alarma.

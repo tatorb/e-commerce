@@ -213,7 +213,8 @@ export async function reconcileStock(db: Db, opts: { budgetMs: number }): Promis
 export async function setProductStock(
   db: Db,
   // sync false: no sube nada ahora; quien llama lo sube después, todo junto.
-  args: { accountId: string; productId: string; userId: string; stock: unknown; now?: Date; branchId?: string | null; sync?: boolean },
+  // note: de dónde viene el cambio, para el historial.
+  args: { accountId: string; productId: string; userId: string; stock: unknown; now?: Date; branchId?: string | null; sync?: boolean; note?: string },
 ): Promise<{ changed: number; sync: SyncResult }> {
   const product = await db.product.findFirst({
     where: { id: args.productId, accountId: args.accountId },
@@ -257,7 +258,7 @@ export async function setProductStock(
           delta: next - (before ?? 0),
           after: next,
           userId: args.userId,
-          note: starting ? `Cargado a mano${branch ? ` en ${branch.name}` : ''}.` : branch ? `En ${branch.name}.` : null,
+          note: args.note ? `${args.note}${branch ? `, en ${branch.name}` : ''}.` : starting ? `Cargado a mano${branch ? ` en ${branch.name}` : ''}.` : branch ? `En ${branch.name}.` : null,
           ...(moved !== 0 ? { branches: { [branch!.id]: moved } } : {}),
         },
       });

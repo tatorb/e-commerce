@@ -74,6 +74,7 @@ import { AuditCompatibilitiesButton, LoadedCompatibilities } from '@/components/
 import { CompatibilityPushList } from '@/components/sync/CompatibilityPushList';
 import { AI_NOT_CONFIGURED, isAiConfigured } from '@/ai/claude';
 import { InfoStep } from '@/components/pipeline/info/InfoStep';
+import { insurProductData } from '@/lib/insur';
 import { TitleStep } from '@/components/pipeline/title/TitleStep';
 import { ImagesStep } from '@/components/pipeline/images/ImagesStep';
 import { openPhotoIds } from '@/components/pipeline/images/open-photos';
@@ -172,6 +173,8 @@ export default async function PipelineStepPage({
           driveEmail(prisma),
           productPricing(prisma, account.id, pub.productId),
           loadProductOptions(prisma, account.id),
+          // Lo que dice el sistema de Insur del producto, solo de referencia.
+          insurProductData(prisma, { accountId: account.id, productId: pub.productId }),
         ])
       : null,
     viewing === 'IMAGES'
@@ -455,6 +458,7 @@ export default async function PipelineStepPage({
               driveReady={info[3] !== null}
               shippingCost={info[4].shipping}
               options={info[5]}
+              insur={info[6]}
             />
             <StockFollowCard
               accountSlug={account.slug}

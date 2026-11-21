@@ -9,6 +9,8 @@ import type { TitleContext } from '@/lib/queries/title-step';
 import { BuyerPainsCard } from './BuyerPainsCard';
 import { CapturedMaterial } from './CapturedMaterial';
 import { CatalogCard } from './CatalogCard';
+import { InsurDataCard } from '@/components/insur/InsurDataCard';
+import type { InsurProductRow } from '@/lib/insur';
 import { ClarificationsCard } from './ClarificationsCard';
 import { CompetitorsCard } from './CompetitorsCard';
 import type { CompetitorRow } from './CompetitorsForm';
@@ -55,6 +57,7 @@ export function InfoStep({
   driveReady,
   shippingCost,
   options,
+  insur,
 }: {
   accountSlug: string;
   timeZone: string;
@@ -67,6 +70,8 @@ export function InfoStep({
   driveReady: boolean;
   // El envío de los parámetros de precio, para el precio efectivo de la competencia.
   shippingCost: number;
+  // Los datos del sistema de Insur del producto. Null si la cuenta no lo usa.
+  insur: { rows: InsurProductRow[]; warnings: string[] } | null;
 }) {
   const s = (v: string | null | undefined) => v ?? '';
   const p = ctx.product;
@@ -109,6 +114,13 @@ export function InfoStep({
           />
         </SectionBody>
       </SectionCard>
+      {insur ? (
+        <InsurDataCard
+          data={insur}
+          timeZone={timeZone}
+          compatibilities={p.compatibilities.map((c) => [c.vehicleBrand, c.model, c.engine, c.displacement, c.fuel].filter(Boolean).join(' '))}
+        />
+      ) : null}
       {combo?.kind === 'COMBO' ? (
         <ComboItemsCard accountSlug={accountSlug} comboId={ctx.publication.productId} initial={combo.items} />
       ) : combo ? (

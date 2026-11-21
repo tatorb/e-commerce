@@ -58,6 +58,7 @@ describe('lista de herramientas', () => {
       'list_sync_choices',
       'list_category_clashes',
       'get_branches',
+      'get_insur_sync',
     ]);
     for (const t of tools) {
       expect(t.inputSchema.type).toBe('object');

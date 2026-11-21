@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <title>Insur → E-commerce</title>
+    <style>
+      body { font: 14px/1.4 system-ui, sans-serif; width: 320px; margin: 0; padding: 14px; color: #111827; }
+      h1 { font-size: 15px; margin: 0 0 10px; }
+      p { margin: 6px 0; }
+      label { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+      input[type='time'] { font: inherit; padding: 3px 6px; }
+      button { font: inherit; padding: 7px 12px; border-radius: 6px; border: 0; background: #111827; color: #fff; cursor: pointer; width: 100%; margin-top: 6px; }
+      button:disabled { opacity: 0.5; cursor: default; }
+      .nota { color: #6b7280; font-size: 12px; }
+      .mal { color: #b91c1c; }
+      .bien { color: #047857; }
+      hr { border: 0; border-top: 1px solid #e5e7eb; margin: 10px 0; }
+    </style>
+  </head>
+  <body>
+    <h1>Insur → E-commerce</h1>
+    <p id="como">…</p>
+    <label>Todos los días a las <input type="time" id="hora" /></label>
+    <label><input type="checkbox" id="solo" /> Solo mostrar, sin cambiar nada</label>
+    <button id="ahora">Actualizar ahora</button>
+    <hr />
+    <p id="ultimo" class="nota"></p>
+    <p class="nota">Hace falta Chrome abierto, con la sesión de Insur y la de la app iniciadas. Lee una página por vez, con pausas. No guarda precios.</p>
+    <script src="ventana.js"></script>
+  </body>
+</html>

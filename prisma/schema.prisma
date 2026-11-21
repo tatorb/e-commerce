@@ -247,6 +247,9 @@ model Account {
   productOptions      ProductOption[]
   textImages          TextImage[]
   branches            Branch[]
+  insurSettings       InsurSettings?
+  insurLinks          InsurArticleLink[]
+  insurRuns           InsurSyncRun[]
 
   @@map("accounts")
 }
@@ -400,6 +403,7 @@ model Product {
   branchStock BranchStock[]
   stockMoves  StockMovement[]
   costs       ProductCost[]
+  insurLinks  InsurArticleLink[]
 
   @@index([accountId])
   @@index([importRunId])
@@ -2928,4 +2932,133 @@ model ClipUploader {
   auto    Boolean  @default(false)
 
   @@map("clip_uploaders")
+}
+
+// ───────────────────────────── Sistema de Insur ─────────────────────────────
+// La extensión de Chrome "Insur → E-commerce" lee el stock, el costo y la ficha
+// de cada artículo del sistema de Insur y se los manda a la app, que corrige
+// el stock y el costo de las medidas cruzadas (src/lib/insur.ts).
+
+// Los ajustes de la cuenta para el sistema de Insur.
+model InsurSettings {
+  accountId      String    @id
+  account        Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  // La fecha de corte: el stock de la app es el de Insur menos las ventas de
+  // los canales desde esta fecha, porque Insur no las registra.
+  cutoffAt       DateTime
+  // Cuándo se aprobó la primera corrida. Null: modo prueba, nada se corrige.
+  approvedAt     DateTime?
+  approvedById   String?
+  // Cada cuántos días se vuelve a leer la ficha de cada artículo.
+  fichaEveryDays Int       @default(7)
+  updatedAt      DateTime  @updatedAt
+
+  @@map("insur_settings")
+}
+
+enum InsurLinkStatus {
+  // Número de pieza y medida coinciden con una sola medida de la app, y la ficha de Insur lo confirma.
+  AUTO
+  // Lo confirmó una persona.
+  CONFIRMED
+  // Coincide, pero falta leer la ficha de Insur para confirmarlo.
+  PENDING
+  // No se puede asegurar a qué medida va: lo decide una persona.
+  DOUBTFUL
+  // Una persona dijo que no va con ninguna medida.
+  IGNORED
+}
+
+// El cruce de un artículo de Insur con una medida de un producto de la app.
+model InsurArticleLink {
+  id           String           @id @default(cuid())
+  accountId    String
+  account      Account          @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  // El id y el código del artículo en Insur, y lo que trae el listado. Sin precios.
+  insurId      Int
+  code         String
+  measureName  String?
+  brand        String?
+  category     String?
+  detail       String?
+  bocas        String?
+  // El producto y la medida (la clave del stock). En un dudoso, el producto es
+  // el candidato si hay uno solo, y la medida queda sin elegir.
+  productId    String?
+  product      Product?         @relation(fields: [productId], references: [id], onDelete: SetNull)
+  key          String?
+  status       InsurLinkStatus
+  // Por qué es dudoso, y las medidas entre las que elegir: [{ productId, key }].
+  reason       String?
+  candidates   Json             @default("[]")
+  // El stock de cada depósito en la última lectura.
+  stockCordoba Int?
+  stockSantaFe Int?
+  // La última lectura en que apareció, y desde cuándo no aparece.
+  seenAt       DateTime?
+  missingSince DateTime?
+  decidedById  String?
+  decidedAt    DateTime?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  data         InsurArticleData?
+
+  @@unique([accountId, insurId])
+  @@index([accountId, status])
+  @@index([productId])
+  @@map("insur_article_links")
+}
+
+// Los datos de la ficha de Insur de un artículo cruzado: solo referencia, no
+// pisan nada de la ficha de la app ni van a ningún canal. Sin precios.
+model InsurArticleData {
+  linkId        String           @id
+  link          InsurArticleLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  // El código sin la medida, y lo que agrupa las medidas del mismo producto.
+  precode       String?
+  detailGroupId String?
+  detail        String?
+  bocas         String?
+  observations  String?
+  line          String?
+  vehicles      String?
+  measures      String?
+  readAt        DateTime
+  // Lo que cambió contra la lectura anterior: [{ field, before, after }].
+  changes       Json?
+  changedAt     DateTime?
+
+  @@index([detailGroupId])
+  @@map("insur_article_data")
+}
+
+// Cada corrida de la extensión, con su resumen. Solo cantidades y códigos.
+model InsurSyncRun {
+  id           String    @id @default(cuid())
+  accountId    String
+  account      Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  userId       String?
+  // boton o diaria.
+  origin       String
+  // Solo mostrar: no cambió nada.
+  preview      Boolean
+  // OPEN, DONE o FAILED.
+  status       String    @default("OPEN")
+  startedAt    DateTime  @default(now())
+  finishedAt   DateTime?
+  // Lo que tardó la extensión en leer Insur.
+  durationMs   Int?
+  // Artículos leídos en Insur, recibidos por la app y cruzados.
+  read         Int       @default(0)
+  received     Int       @default(0)
+  linked       Int       @default(0)
+  stockChanges Int       @default(0)
+  costChanges  Int       @default(0)
+  suspicious   Int       @default(0)
+  errors       Json      @default("[]")
+  // Las listas de la corrida (src/lib/insur.ts).
+  summary      Json      @default("{}")
+
+  @@index([accountId, startedAt])
+  @@map("insur_sync_runs")
 }
