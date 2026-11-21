@@ -3113,6 +3113,7 @@ model ProductPromotion {
   lifecycle    String?
   // PRICE_FIGHT o NO_COMPETITION.
   competition  String?
+  // Ya no se usa: era la etiqueta "en catálogo", que se sacó. La columna queda porque las migraciones solo agregan.
   inCatalog    Boolean   @default(false)
   // Solo a mano: con poco stock no se abren ofertas nuevas.
   stockControl Boolean   @default(false)

@@ -2,7 +2,7 @@ import type { ChannelStatus } from '@/generated/prisma/enums';
 import type { PrismaClient } from '@/generated/prisma/client';
 import { finalPriceOf, type InstallmentPlan } from '@/domain/pricing';
 import { marginAt, type Invite, type OptionEconomics } from '@/domain/promo/entry';
-import { readTags, type PromoTags, type TagGroup } from '@/domain/promo/tags';
+import { readTags, TAG_GROUPS, type PromoTags, type TagGroup } from '@/domain/promo/tags';
 import { competitorOwner, loadCompetitors } from '@/lib/competitors';
 import { loadOptionTable } from '@/lib/option-table';
 
@@ -217,7 +217,8 @@ export async function loadProductPromo(db: Db, accountId: string, productId: str
     brand: product.brand,
     channelName,
     tags: readTags(product.promotion),
-    manual: (product.promotion?.manual ?? []) as TagGroup[],
+    // Solo los grupos que existen: puede quedar guardado uno de una etiqueta que se sacó.
+    manual: (product.promotion?.manual ?? []).filter((g): g is TagGroup => (TAG_GROUPS as readonly string[]).includes(g)),
     why,
     plannedAt: product.promotion?.plannedAt ?? null,
     options,

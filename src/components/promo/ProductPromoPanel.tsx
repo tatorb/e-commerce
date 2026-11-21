@@ -407,11 +407,10 @@ function TagsCard({ accountSlug, grid, busy, run, runWith }: { accountSlug: stri
   const [lifecycle, setLifecycle] = useState<Lifecycle | ''>(grid.tags.lifecycle ?? '');
   const [competition, setCompetition] = useState<Competition | ''>(grid.tags.competition ?? '');
   const [priority, setPriority] = useState<Priority | ''>(grid.tags.priority ?? '');
-  const [inCatalog, setInCatalog] = useState(grid.tags.inCatalog);
   const [stockControl, setStockControl] = useState(grid.tags.stockControl);
   const changed =
-    lifecycle !== (grid.tags.lifecycle ?? '') || competition !== (grid.tags.competition ?? '') || priority !== (grid.tags.priority ?? '') || inCatalog !== grid.tags.inCatalog || stockControl !== grid.tags.stockControl;
-  const origin = (group: 'lifecycle' | 'competition' | 'inCatalog') =>
+    lifecycle !== (grid.tags.lifecycle ?? '') || competition !== (grid.tags.competition ?? '') || priority !== (grid.tags.priority ?? '') || stockControl !== grid.tags.stockControl;
+  const origin = (group: 'lifecycle' | 'competition') =>
     grid.manual.includes(group) ? 'Puesta a mano: la regla no la cambia.' : grid.why[group] ? `La propuso la regla. ${grid.why[group]}` : 'Sin etiqueta.';
   const ruleNow = () => runWith(() => classifyProductAction(accountSlug, grid.productId), (r) => `Etiquetas puestas según la regla. ${r.lines.join(' ')}`);
   const save = () =>
@@ -421,7 +420,6 @@ function TagsCard({ accountSlug, grid, busy, run, runWith }: { accountSlug: stri
           ...(lifecycle !== (grid.tags.lifecycle ?? '') ? { lifecycle: lifecycle || null } : {}),
           ...(competition !== (grid.tags.competition ?? '') ? { competition: competition || null } : {}),
           ...(priority !== (grid.tags.priority ?? '') ? { priority: priority || null } : {}),
-          ...(inCatalog !== grid.tags.inCatalog ? { inCatalog } : {}),
           ...(stockControl !== grid.tags.stockControl ? { stockControl } : {}),
         }),
       'Se guardaron las etiquetas y se rearmó el almanaque.',
@@ -498,13 +496,6 @@ function TagsCard({ accountSlug, grid, busy, run, runWith }: { accountSlug: stri
           <span>
             <span className="font-medium">Control de stock</span>
             <span className="block text-xs text-muted-foreground">Solo a mano. La medida que tiene poco stock no entra a ofertas nuevas. No sale de las que ya está.</span>
-          </span>
-        </label>
-        <label className="flex items-start gap-2 text-sm">
-          <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[hsl(var(--primary))]" checked={inCatalog} onChange={(e) => setInCatalog(e.target.checked)} />
-          <span>
-            <span className="font-medium">En catálogo</span>
-            <span className="block text-xs text-muted-foreground">Compite dentro de una ficha de catálogo del canal.</span>
           </span>
         </label>
       </div>

@@ -28,7 +28,7 @@ const CONFIRM = 'Antes, mostrale a la persona exactamente qué vas a hacer y esp
 const LIFECYCLE_IN = { nueva: 'NEW', en_crecimiento: 'GROWING', madurada: 'MATURE', a_liquidar: 'CLEARANCE' } as const;
 const COMPETITION_IN = { pelea_por_precio: 'PRICE_FIGHT', sin_competencia: 'NO_COMPETITION' } as const;
 const PRIORITY_IN = { empujar: 'PUSH', estacional: 'SEASONAL' } as const;
-const GROUP_IN = { ciclo_de_vida: 'lifecycle', competencia: 'competition', en_catalogo: 'inCatalog' } as const;
+const GROUP_IN = { ciclo_de_vida: 'lifecycle', competencia: 'competition' } as const;
 const TIER_IN = { t1: 'T1', t2: 'T2', potencia_tus_ventas: 'BOOST', ofertas_compartidas: 'SHARED', fecha_propia: 'OWN' } as const;
 const keyOf = <T extends Record<string, string>>(map: T, value: string | null) => (Object.entries(map).find(([, v]) => v === value)?.[0] ?? null) as keyof T | null;
 
@@ -86,7 +86,6 @@ async function resolveProducts(ctx: McpContext, account: AccountRef, args: { pub
 const tagsOut = (t: PromoTags) => ({
   ciclo_de_vida: t.lifecycle ? LIFECYCLE_LABEL[t.lifecycle] : null,
   competencia: t.competition ? COMPETITION_LABEL[t.competition] : null,
-  en_catalogo: t.inCatalog,
   control_de_stock: t.stockControl,
   prioridad: t.priority ? PRIORITY_LABEL[t.priority] : null,
 });
@@ -266,16 +265,15 @@ const setTags = defineTool({
   name: 'set_promotion_tags',
   section: 'promociones',
   title: 'Poner las etiquetas de promociones',
-  description: `Pone o corrige a mano las etiquetas de promociones de unos productos: ciclo de vida (nueva, en_crecimiento, madurada, a_liquidar), competencia (pelea_por_precio, sin_competencia), en_catalogo, control_de_stock y prioridad (empujar, estacional). Estacional: el producto se anota siempre a las campañas que propone el canal para cada fecha (Hot Sale, Black Friday, Navidad), diga lo que diga la receta de su ciclo de vida. Empujar: además entra a las ofertas relámpago y del día cada vez que aparecen, y en esas busca menos rentabilidad, sin pasar el piso: prioriza lo agresivo sobre lo pasivo. Sin prioridad, sigue su receta. null saca la etiqueta. Solo cambia lo que viene. Control de stock y prioridad son solo a mano. Lo puesto a mano en ciclo de vida, competencia y en catálogo no lo pisa la regla; con soltar, esos grupos vuelven a quedar a cargo de la regla. Las etiquetas son del producto: valen para todas sus medidas y formas de cobro. Con control de stock, la medida que tiene poco stock no entra a ofertas nuevas, y no sale de las que ya está. Cambiar una etiqueta no cambia el almanaque hasta rearmarlo con generate_promotion_plan (con rearmar: true se rearma en la misma llamada). ${CONFIRM}`,
+  description: `Pone o corrige a mano las etiquetas de promociones de unos productos: ciclo de vida (nueva, en_crecimiento, madurada, a_liquidar), competencia (pelea_por_precio, sin_competencia), control_de_stock y prioridad (empujar, estacional). Estacional: el producto se anota siempre a las campañas que propone el canal para cada fecha (Hot Sale, Black Friday, Navidad), diga lo que diga la receta de su ciclo de vida. Empujar: además entra a las ofertas relámpago y del día cada vez que aparecen, y en esas busca menos rentabilidad, sin pasar el piso: prioriza lo agresivo sobre lo pasivo. Sin prioridad, sigue su receta. null saca la etiqueta. Solo cambia lo que viene. Control de stock y prioridad son solo a mano. Lo puesto a mano en ciclo de vida y competencia no lo pisa la regla; con soltar, esos grupos vuelven a quedar a cargo de la regla. Las etiquetas son del producto: valen para todas sus medidas y formas de cobro. Con control de stock, la medida que tiene poco stock no entra a ofertas nuevas, y no sale de las que ya está. Cambiar una etiqueta no cambia el almanaque hasta rearmarlo con generate_promotion_plan (con rearmar: true se rearma en la misma llamada). ${CONFIRM}`,
   input: z.object({
     cuenta: accountArg,
     ...productsArg,
     ciclo_de_vida: z.enum(['nueva', 'en_crecimiento', 'madurada', 'a_liquidar']).nullable().optional(),
     competencia: z.enum(['pelea_por_precio', 'sin_competencia']).nullable().optional(),
-    en_catalogo: z.boolean().optional(),
     control_de_stock: z.boolean().optional(),
     prioridad: z.enum(['empujar', 'estacional']).nullable().optional(),
-    soltar: z.array(z.enum(['ciclo_de_vida', 'competencia', 'en_catalogo'])).max(3).optional().describe('Estos grupos vuelven a quedar a cargo de la regla.'),
+    soltar: z.array(z.enum(['ciclo_de_vida', 'competencia'])).max(2).optional().describe('Estos grupos vuelven a quedar a cargo de la regla.'),
     rearmar: z.boolean().optional().describe('true = después rearma el almanaque de esos productos, de hoy en adelante.'),
   }),
   readOnly: false,
@@ -292,7 +290,6 @@ const setTags = defineTool({
         change: {
           ...(args.ciclo_de_vida !== undefined ? { lifecycle: args.ciclo_de_vida === null ? null : (LIFECYCLE_IN[args.ciclo_de_vida] as Lifecycle) } : {}),
           ...(args.competencia !== undefined ? { competition: args.competencia === null ? null : (COMPETITION_IN[args.competencia] as Competition) } : {}),
-          ...(args.en_catalogo !== undefined ? { inCatalog: args.en_catalogo } : {}),
           ...(args.control_de_stock !== undefined ? { stockControl: args.control_de_stock } : {}),
           ...(args.prioridad !== undefined ? { priority: args.prioridad === null ? null : (PRIORITY_IN[args.prioridad] as Priority) } : {}),
           ...(args.soltar ? { release: args.soltar.map((g) => GROUP_IN[g] as TagGroup) } : {}),

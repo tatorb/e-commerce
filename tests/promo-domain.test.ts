@@ -102,8 +102,8 @@ describe('promociones: etiquetas y reglas', () => {
     expect(objectiveOf({ ...NO_TAGS, lifecycle: 'GROWING', competition: 'PRICE_FIGHT' })).toBe('PRICE');
     expect(objectiveOf({ ...NO_TAGS, lifecycle: 'CLEARANCE', competition: 'PRICE_FIGHT' })).toBe('CLEAR');
     expect(objectiveOf({ ...NO_TAGS, lifecycle: 'MATURE' })).toBe('HOLD');
-    expect(readTags({ lifecycle: 'otra', competition: 'PRICE_FIGHT', priority: 'PUSH', stockControl: true })).toEqual({ lifecycle: null, competition: 'PRICE_FIGHT', inCatalog: false, stockControl: true, priority: 'PUSH' });
-    expect(tagsText({ lifecycle: 'MATURE', competition: null, inCatalog: true, stockControl: true, priority: 'PUSH' })).toEqual(['Madurada', 'En catálogo', 'Control de stock', 'Empujar']);
+    expect(readTags({ lifecycle: 'otra', competition: 'PRICE_FIGHT', priority: 'PUSH', stockControl: true })).toEqual({ lifecycle: null, competition: 'PRICE_FIGHT', stockControl: true, priority: 'PUSH' });
+    expect(tagsText({ lifecycle: 'MATURE', competition: null, stockControl: true, priority: 'PUSH' })).toEqual(['Madurada', 'Control de stock', 'Empujar']);
   });
 
   it('las reglas guardadas toman del valor de partida lo que falta o no vale', () => {

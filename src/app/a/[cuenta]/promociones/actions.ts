@@ -57,7 +57,7 @@ export async function saveRulesAction(accountSlug: string, rules: RulesPatch) {
   );
 }
 
-export type TagInput = { lifecycle?: Lifecycle | null; competition?: Competition | null; inCatalog?: boolean; stockControl?: boolean; priority?: Priority | null; release?: TagGroup[] };
+export type TagInput = { lifecycle?: Lifecycle | null; competition?: Competition | null; stockControl?: boolean; priority?: Priority | null; release?: TagGroup[] };
 
 /** Pone etiquetas en unos productos y rearma su almanaque. */
 export async function setTagsAction(accountSlug: string, productIds: string[], change: TagInput) {
@@ -132,7 +132,7 @@ export async function classifyAction(accountSlug: string, apply: boolean, filter
 
 /**
  * Pone las etiquetas de un producto según la regla, ahora: lo que estaba
- * puesto a mano en ciclo de vida, competencia y en catálogo vuelve a quedar a
+ * puesto a mano en ciclo de vida y competencia vuelve a quedar a
  * cargo de la regla, y se rearma su almanaque. Devuelve lo que decidió la
  * regla y por qué.
  */
@@ -142,7 +142,7 @@ export async function classifyProductAction(accountSlug: string, productId: stri
       const { classifiedText } = await import('@/lib/promo/classify');
       const id = String(productId);
       const current = await prisma.productPromotion.findFirst({ where: { productId: id, product: { accountId: account.id } }, select: { manual: true } });
-      const manual = (current?.manual ?? []).filter((g): g is TagGroup => g === 'lifecycle' || g === 'competition' || g === 'inCatalog');
+      const manual = (current?.manual ?? []).filter((g): g is TagGroup => g === 'lifecycle' || g === 'competition');
       if (manual.length > 0) await setPromoTags(prisma, { accountId: account.id, productIds: [id], change: { release: manual }, userId: user.id });
       const r = await classifyAccount(prisma, { accountId: account.id, productIds: [id], apply: true });
       if (r.products.length === 0) throw new PromoError('El producto no tiene publicaciones activas en el canal.');

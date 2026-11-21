@@ -13,7 +13,6 @@ export type TagChange = {
   // null: sin etiqueta.
   lifecycle?: Lifecycle | null;
   competition?: Competition | null;
-  inCatalog?: boolean;
   stockControl?: boolean;
   priority?: Priority | null;
   // Estos grupos vuelven a quedar a cargo de la regla.
@@ -31,8 +30,8 @@ export async function setPromoTags(db: Db, args: { accountId: string; productIds
   check(COMPETITIONS, c.competition, 'la competencia');
   check(PRIORITIES, c.priority, 'la prioridad');
   const release = c.release ?? [];
-  for (const g of release) if (!RULE_GROUPS.includes(g)) throw new PromoError('Solo el ciclo de vida, la competencia y "en catálogo" los propone una regla.');
-  const groups = (['lifecycle', 'competition', 'inCatalog', 'stockControl', 'priority'] as const).filter((g) => c[g] !== undefined);
+  for (const g of release) if (!RULE_GROUPS.includes(g)) throw new PromoError('Solo el ciclo de vida y la competencia los propone una regla.');
+  const groups = (['lifecycle', 'competition', 'stockControl', 'priority'] as const).filter((g) => c[g] !== undefined);
   if (groups.length === 0 && release.length === 0) throw new PromoError('Decí qué etiqueta poner.');
   const products = await db.product.findMany({ where: { id: { in: [...new Set(args.productIds)] }, accountId: args.accountId }, select: { id: true, promotion: { select: { manual: true } } } });
   for (const p of products) {
@@ -43,7 +42,6 @@ export async function setPromoTags(db: Db, args: { accountId: string; productIds
     const data = {
       ...(c.lifecycle !== undefined ? { lifecycle: c.lifecycle } : {}),
       ...(c.competition !== undefined ? { competition: c.competition } : {}),
-      ...(c.inCatalog !== undefined ? { inCatalog: c.inCatalog } : {}),
       ...(c.stockControl !== undefined ? { stockControl: c.stockControl } : {}),
       ...(c.priority !== undefined ? { priority: c.priority } : {}),
       manual: [...manual],
