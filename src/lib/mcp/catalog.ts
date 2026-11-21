@@ -1,4 +1,4 @@
-import { BOOLEAN_OPTIONS, type CatalogFieldType } from '@/domain/catalog-data';
+import { BOOLEAN_OPTIONS, differsFromChannel, type CatalogFieldType } from '@/domain/catalog-data';
 import type { CatalogData } from '@/lib/catalog-data';
 
 // Los datos de catálogo como los ve Claude: la categoría, lo que sale de la
@@ -49,6 +49,13 @@ export function catalogForClaude(data: CatalogData | null) {
     ...(data.category
       ? {}
       : { categorias_para_elegir: data.categories.map(name), otra_categoria: `Sirve cualquier categoría de ${data.channelName}: pasá su código en save_catalog_data.` }),
+    // Cuántos campos tienen en la app un valor distinto del leído del canal: lo que falta subir.
+    ...(data.channelValues
+      ? {
+          leido_del_canal: data.channelReadAt ? data.channelReadAt.toISOString() : null,
+          campos_distintos_del_canal: data.fields.filter((f) => differsFromChannel(data.values[f.id], data.channelValues![f.id])).map((f) => f.id),
+        }
+      : { leido_del_canal: null }),
     de_la_ficha: data.fromProduct.map(({ field, value }) => ({ nombre: field.label, valor: value })),
     campos: data.fields.map((f) => ({
       campo: f.id,
@@ -63,6 +70,13 @@ export function catalogForClaude(data: CatalogData | null) {
       // El canal lo acepta aunque su formulario no lo muestre de entrada.
       ...(f.extra ? { fuera_del_formulario_del_canal: true } : {}),
       valor: data.values[f.id] ?? null,
+      // Lo último leído del canal de este campo. distinto_del_canal: lo de la app todavía no está allá, falta subirlo con push_catalog_data.
+      ...(data.channelValues
+        ? {
+            valor_en_el_canal: data.channelValues[f.id] ?? null,
+            ...(differsFromChannel(data.values[f.id], data.channelValues[f.id]) ? { distinto_del_canal: true } : {}),
+          }
+        : {}),
       // La ficha técnica del producto tiene el dato: no está guardado, se guarda con save_catalog_data.
       ...(data.fromSpecs[f.id] ? { propuesto_de_la_ficha_tecnica: data.fromSpecs[f.id].value, sale_del_dato: data.fromSpecs[f.id].spec } : {}),
     })),

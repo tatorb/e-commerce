@@ -269,6 +269,12 @@ export function readCatalogValues(fields: CatalogField[], attributes: NameValue[
   return out;
 }
 
+/** Si el valor de un campo en la app es distinto del leído del canal. Sin importar mayúsculas, acentos ni espacios de más; vacío de los dos lados es igual. */
+export function differsFromChannel(app: string | null | undefined, channel: string | null | undefined): boolean {
+  const plain = (v: string | null | undefined) => normalizeText((v ?? '').replace(/\s+/g, ' ').trim());
+  return plain(app) !== plain(channel);
+}
+
 /**
  * Pone en los atributos los campos que llegan, en el orden del formulario. Un
  * campo con null se borra. Los campos que no llegan y los atributos que no son

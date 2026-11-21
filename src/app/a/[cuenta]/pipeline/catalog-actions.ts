@@ -47,7 +47,7 @@ export async function saveCatalogAction(
 ): Promise<Result> {
   return act(accountSlug, { section: ['pipeline', 'publicaciones'], does: 'Guardó los datos de catálogo', publicationId }, async () => {
     return guard(accountSlug, publicationId, async () => {
-      await saveCatalogData(prisma, { publicationId, expectedCategoryId: categoryId, values });
+      await saveCatalogData(prisma, { publicationId, expectedCategoryId: categoryId, values, onlyChanged: true });
       return 'Guardado.';
     });
   });
