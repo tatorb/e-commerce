@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils/cn';
 import {
   applyAction,
   cancelSlotAction,
+  classifyProductAction,
   excludeAction,
   generatePlansAction,
   previewApplyAction,
@@ -72,6 +73,14 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
       }
     });
 
+  const runWith: RunWith = (work, done) =>
+    start(async () => {
+      setNotice(null);
+      const r = await work().catch(() => ({ ok: false as const, error: 'Se cortó la conexión con la app.' }));
+      setNotice(r.ok ? { kind: 'ok', text: done(r) } : { kind: 'error', text: r.error });
+      if (r.ok) router.refresh();
+    });
+
   const askPreview = (scope: { productIds?: string[]; itemIds?: string[]; force?: boolean }) =>
     start(async () => {
       setNotice(null);
@@ -111,7 +120,8 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
         </p>
       ) : null}
 
-      <TagsCard accountSlug={accountSlug} grid={grid} busy={busy} run={run} />
+      {/* Con la clave, al cambiar las etiquetas la tarjeta toma las nuevas. */}
+      <TagsCard key={JSON.stringify([grid.tags, grid.manual])} accountSlug={accountSlug} grid={grid} busy={busy} run={run} runWith={runWith} />
 
       <SectionCard
         title="Almanaque"
@@ -390,8 +400,10 @@ function ActionList({ actions }: { actions: (DueAction | AppliedAction)[] }) {
 }
 
 type Run = (work: () => Promise<{ ok: true } | { ok: false; error: string }>, done: string) => void;
+// Como Run, con el aviso armado con lo que devolvió la acción.
+type RunWith = <T extends object>(work: () => Promise<({ ok: true } & T) | { ok: false; error: string }>, done: (r: T) => string) => void;
 
-function TagsCard({ accountSlug, grid, busy, run }: { accountSlug: string; grid: ProductGrid; busy: boolean; run: Run }) {
+function TagsCard({ accountSlug, grid, busy, run, runWith }: { accountSlug: string; grid: ProductGrid; busy: boolean; run: Run; runWith: RunWith }) {
   const [lifecycle, setLifecycle] = useState<Lifecycle | ''>(grid.tags.lifecycle ?? '');
   const [competition, setCompetition] = useState<Competition | ''>(grid.tags.competition ?? '');
   const [priority, setPriority] = useState<Priority | ''>(grid.tags.priority ?? '');
@@ -401,6 +413,7 @@ function TagsCard({ accountSlug, grid, busy, run }: { accountSlug: string; grid:
     lifecycle !== (grid.tags.lifecycle ?? '') || competition !== (grid.tags.competition ?? '') || priority !== (grid.tags.priority ?? '') || inCatalog !== grid.tags.inCatalog || stockControl !== grid.tags.stockControl;
   const origin = (group: 'lifecycle' | 'competition' | 'inCatalog') =>
     grid.manual.includes(group) ? 'Puesta a mano: la regla no la cambia.' : grid.why[group] ? `La propuso la regla. ${grid.why[group]}` : 'Sin etiqueta.';
+  const ruleNow = () => runWith(() => classifyProductAction(accountSlug, grid.productId), (r) => `Etiquetas puestas según la regla. ${r.lines.join(' ')}`);
   const save = () =>
     run(
       () =>
@@ -420,11 +433,17 @@ function TagsCard({ accountSlug, grid, busy, run }: { accountSlug: string; grid:
       description={`Valen para todas las medidas y formas de cobro del producto. Objetivo: ${grid.objective ? OBJECTIVE_LABEL[grid.objective] : 'sin definir, falta el ciclo de vida'}.`}
       action={
         <div className="flex gap-2">
-          {grid.manual.length > 0 ? (
-            <Button access="promociones" size="sm" variant="ghost" disabled={busy} onClick={() => run(() => setTagsAction(accountSlug, [grid.productId], { release: grid.manual }), 'Las etiquetas vuelven a quedar a cargo de la regla.')}>
-              Dejar a la regla
-            </Button>
-          ) : null}
+          <Button
+            access="promociones"
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            title="La regla mira las ventas, la antigüedad y la competencia de este producto y le pone el ciclo de vida y la competencia. Lo que estaba puesto a mano en esas dos pasa a cargo de la regla. Control de stock y prioridad no cambian."
+            onClick={() => ruleNow()}
+          >
+            <Wand2 />
+            Poner según la regla
+          </Button>
           <Button access="promociones" size="sm" disabled={busy || !changed} pending={busy} onClick={save}>
             Guardar
           </Button>

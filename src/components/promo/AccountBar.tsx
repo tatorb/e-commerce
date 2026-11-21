@@ -4,18 +4,38 @@ import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Power, RefreshCw, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import type { OverviewFilter } from '@/lib/promo/overview';
 import { cn } from '@/lib/utils/cn';
 import { classifyAction, generatePlansAction, saveThresholdsAction, sweepAction } from '@/app/a/[cuenta]/promociones/actions';
 
 // Lo de toda la cuenta: leer las invitaciones del canal, que la regla
 // proponga las etiquetas, y prender o apagar la ejecución automática.
 
-export function AccountBar({ accountSlug, autoApply, sweptAt, classifiedAt }: { accountSlug: string; autoApply: boolean; sweptAt: string; classifiedAt: string }) {
+export function AccountBar({
+  accountSlug,
+  autoApply,
+  sweptAt,
+  classifiedAt,
+  filter,
+  filtered,
+}: {
+  accountSlug: string;
+  autoApply: boolean;
+  sweptAt: string;
+  classifiedAt: string;
+  // El filtro de la lista: "Proponer etiquetas" mira solo los productos que lo pasan.
+  filter: OverviewFilter;
+  // Cuántos pasan el filtro, si hay alguno puesto. Null: sin filtro, toda la cuenta.
+  filtered: number | null;
+}) {
   const router = useRouter();
   const [busy, start] = useTransition();
   const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [proposal, setProposal] = useState<{ changed: number; products: number; rows: { name: string; lines: string[] }[] } | null>(null);
   const fail = (text?: string) => setNotice({ kind: 'error', text: text ?? 'Se cortó la conexión con la app.' });
+  // Con un filtro puesto en la lista, la regla mira solo esos productos.
+  const scope = filtered === null ? undefined : filter;
+  const where = filtered === null ? '' : filtered === 1 ? ' del producto filtrado' : ` de los ${filtered} productos filtrados`;
 
   // Lee de a vueltas hasta terminar: cada vuelta sigue donde quedó la anterior.
   const sweep = () =>
@@ -35,9 +55,9 @@ export function AccountBar({ accountSlug, autoApply, sweptAt, classifiedAt }: { 
 
   const propose = () =>
     start(async () => {
-      const r = await classifyAction(accountSlug, false).catch(() => null);
+      const r = await classifyAction(accountSlug, false, scope).catch(() => null);
       if (!r || !r.ok) return fail(r?.error);
-      if (r.changed === 0) return setNotice({ kind: 'ok', text: `La regla miró ${r.products} productos y no cambia ninguna etiqueta.` });
+      if (r.changed === 0) return setNotice({ kind: 'ok', text: `La regla miró ${r.products} ${r.products === 1 ? 'producto' : 'productos'}${filtered === null ? '' : ', los filtrados,'} y no cambia ninguna etiqueta.` });
       setNotice(null);
       setProposal(r);
     });
@@ -45,7 +65,7 @@ export function AccountBar({ accountSlug, autoApply, sweptAt, classifiedAt }: { 
   const saveProposal = () =>
     start(async () => {
       setProposal(null);
-      const r = await classifyAction(accountSlug, true).catch(() => null);
+      const r = await classifyAction(accountSlug, true, scope).catch(() => null);
       if (!r || !r.ok) return fail(r?.error);
       let left = r.left;
       while (left.length > 0) {
@@ -82,9 +102,9 @@ export function AccountBar({ accountSlug, autoApply, sweptAt, classifiedAt }: { 
           <RefreshCw />
           Leer invitaciones del canal
         </Button>
-        <Button size="sm" variant="outline" disabled={busy} onClick={propose}>
+        <Button size="sm" variant="outline" disabled={busy || filtered === 0} onClick={propose}>
           <Sparkles />
-          Proponer etiquetas
+          Proponer etiquetas{where}
         </Button>
         <span className="text-xs text-muted-foreground">
           Invitaciones leídas {sweptAt}. Última clasificación {classifiedAt}.
@@ -94,7 +114,7 @@ export function AccountBar({ accountSlug, autoApply, sweptAt, classifiedAt }: { 
       {proposal ? (
         <div className="rounded-2xl border bg-card p-4 shadow-card">
           <p className="font-medium">
-            La regla cambiaría etiquetas en {proposal.changed} de {proposal.products} productos
+            La regla cambiaría etiquetas en {proposal.changed} de {proposal.products} productos{filtered === null ? '' : ' filtrados'}
           </p>
           <p className="text-sm text-muted-foreground">Lo puesto a mano no se toca. Al guardar, se rearma el almanaque de los que cambian, de hoy en adelante.</p>
           <ul className="mt-2 max-h-80 divide-y overflow-y-auto rounded-lg border text-sm">

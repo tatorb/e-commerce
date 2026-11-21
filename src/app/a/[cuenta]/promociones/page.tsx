@@ -74,6 +74,8 @@ export default async function PromotionsPage({ params, searchParams }: { params:
           past: e.finish <= now,
         }))
       : [];
+  // Si hay algún filtro puesto: las acciones de arriba valen solo para lo filtrado.
+  const hasFilter = Object.values(filter).some((v) => v !== undefined);
   const t = overview.totals;
   const pages = Math.max(1, Math.ceil(overview.total / PAGE));
 
@@ -93,7 +95,7 @@ export default async function PromotionsPage({ params, searchParams }: { params:
         <div className="space-y-4">
           {tab === 'productos' ? (
             <>
-              <AccountBar accountSlug={account.slug} autoApply={settings.autoApply} sweptAt={settings.sweptAt ? dateTime(settings.sweptAt, account.timezone) : 'todavía no'} classifiedAt={settings.classifiedAt ? dateTime(settings.classifiedAt, account.timezone) : 'todavía no'} />
+              <AccountBar key={`barra:${query({})}`} filter={filter} filtered={hasFilter ? overview.total : null} accountSlug={account.slug} autoApply={settings.autoApply} sweptAt={settings.sweptAt ? dateTime(settings.sweptAt, account.timezone) : 'todavía no'} classifiedAt={settings.classifiedAt ? dateTime(settings.classifiedAt, account.timezone) : 'todavía no'} />
               <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
                 {[
                   ['Productos', t.products],

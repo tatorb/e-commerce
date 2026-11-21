@@ -105,12 +105,17 @@ export async function generatePlansAction(accountSlug: string, productIds: strin
   );
 }
 
-/** La regla propone las etiquetas de toda la cuenta: apply las guarda y rearma el almanaque de los que cambiaron. */
-export async function classifyAction(accountSlug: string, apply: boolean) {
+/**
+ * La regla propone las etiquetas: apply las guarda y rearma el almanaque de
+ * los que cambiaron. Con filter, solo de los productos que pasan ese filtro
+ * de la lista; sin él, de toda la cuenta.
+ */
+export async function classifyAction(accountSlug: string, apply: boolean, filter?: OverviewFilter) {
   return act(accountSlug, { section: 'promociones', level: apply ? 'write' : 'read', does: apply ? 'Reclasificó las promociones con la regla' : undefined }, async ({ account }) =>
     guarded(async () => {
       const { classifiedText } = await import('@/lib/promo/classify');
-      const r = await classifyAccount(prisma, { accountId: account.id, apply });
+      const productIds = filter ? await overviewProductIds(prisma, account.id, filter) : undefined;
+      const r = await classifyAccount(prisma, { accountId: account.id, apply, productIds });
       const left: string[] = [];
       if (apply) {
         const started = Date.now();
@@ -121,6 +126,30 @@ export async function classifyAction(accountSlug: string, apply: boolean) {
         refresh(account.slug);
       }
       return { products: r.products.length, changed: r.changed.length, left, rows: r.products.filter((p) => r.changed.includes(p.productId)).slice(0, 200).map((p) => ({ name: p.name, lines: classifiedText(p) })) };
+    }),
+  );
+}
+
+/**
+ * Pone las etiquetas de un producto según la regla, ahora: lo que estaba
+ * puesto a mano en ciclo de vida, competencia y en catálogo vuelve a quedar a
+ * cargo de la regla, y se rearma su almanaque. Devuelve lo que decidió la
+ * regla y por qué.
+ */
+export async function classifyProductAction(accountSlug: string, productId: string) {
+  return act(accountSlug, { section: 'promociones', does: 'Puso las etiquetas de un producto según la regla', productId }, async ({ account, user }) =>
+    guarded(async () => {
+      const { classifiedText } = await import('@/lib/promo/classify');
+      const id = String(productId);
+      const current = await prisma.productPromotion.findFirst({ where: { productId: id, product: { accountId: account.id } }, select: { manual: true } });
+      const manual = (current?.manual ?? []).filter((g): g is TagGroup => g === 'lifecycle' || g === 'competition' || g === 'inCatalog');
+      if (manual.length > 0) await setPromoTags(prisma, { accountId: account.id, productIds: [id], change: { release: manual }, userId: user.id });
+      const r = await classifyAccount(prisma, { accountId: account.id, productIds: [id], apply: true });
+      if (r.products.length === 0) throw new PromoError('El producto no tiene publicaciones activas en el canal.');
+      await generatePlan(prisma, { accountId: account.id, productId: id });
+      refresh(account.slug);
+      const lines = classifiedText(r.products[0]);
+      return { lines: lines.length > 0 ? lines : ['La regla no tiene con qué decidir: faltan las ventas de la tienda o los precios de la competencia. Las etiquetas quedan como están.'] };
     }),
   );
 }
