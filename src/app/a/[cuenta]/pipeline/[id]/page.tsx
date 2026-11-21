@@ -27,6 +27,9 @@ import { familyLeadId, familyOf } from '@/lib/families';
 import { loadSaleOptions } from '@/lib/sale-options';
 import { SaleOptionsCard } from '@/components/sale-options/SaleOptionsCard';
 import { PriceWorkspace } from '@/components/pipeline/price/PriceWorkspace';
+import { ProductPromoPanel } from '@/components/promo/ProductPromoPanel';
+import { loadPromoPanel } from '@/lib/promo/panel';
+import { priceRiseRisks, priceRiskText } from '@/lib/promo/price-risk';
 import { familyMeasuresText, loadPublicationFacts } from '@/lib/publication-facts';
 import { firstPhoto, productCovers } from '@/lib/queries/products';
 import { PipelineHistory } from '@/components/pipeline/PipelineHistory';
@@ -162,6 +165,10 @@ export default async function PipelineStepPage({
   const canTask = can(user.access, 'tareas', 'write');
   // En Publicación, los clips del producto que falta subir al canal.
   const pendingClips = viewing === 'PUBLISH' ? await pendingClipUploads(prisma, account.id, pub.productId) : [];
+  // En Precio: las campañas que se pierden si se sube el precio.
+  const priceRisk = viewing === 'PRICE' ? priceRiskText(await priceRiseRisks(prisma, account.id, pub.id).catch(() => []), pub.channelName) : null;
+  // En Promociones, las etiquetas del producto, su almanaque y la grilla por forma de cobro.
+  const promo = viewing === 'PROMOTIONS' && can(user.access, 'promociones', 'read') ? await loadPromoPanel(prisma, account.id, pub.productId) : null;
   const [ctx, info, images, channel, faces, media, create, videos, description, qa, price, decision, tasks, people, stockPlans, factsOf, family, cover, textImage, notes] = await Promise.all([
     // Información y Título usan la ficha, la competencia y lo leído del buscador.
     viewing === 'INFO' || viewing === 'TITLE' ? loadTitleContext(prisma, account.id, pub.id) : null,
@@ -563,8 +570,28 @@ export default async function PipelineStepPage({
             timeZone={account.timezone}
             knowledgeHref={`${pageHref}?paso=${PIPELINE_STEP_SLUG.INFO}`}
           />
+        ) : viewing === 'PROMOTIONS' ? (
+          promo ? (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Las promociones son del producto: valen para todas sus medidas y formas de cobro. Que la publicación esté en el pipeline no la saca de ninguna oferta. El precio de lista se decide en
+                el paso Precio; acá, qué ofertas lleva y con qué rentabilidad.{' '}
+                <Link href={`/a/${account.slug}/promociones`} className="underline">
+                  Ver todas las promociones
+                </Link>
+              </p>
+              <ProductPromoPanel accountSlug={account.slug} timeZone={account.timezone} grid={promo.grid} log={promo.log} />
+            </>
+          ) : (
+            <p className="rounded-2xl border bg-card p-4 text-sm text-muted-foreground shadow-card">Tu usuario no puede ver Promociones. Pedile el permiso a un administrador, o seguí con el paso siguiente.</p>
+          )
         ) : price && viewing === 'PRICE' ? (
           <>
+          {priceRisk ? (
+            <p role="note" className="rounded-2xl border border-alert/40 bg-alert/10 px-4 py-3 text-sm">
+              <strong>Antes de subir un precio más alto:</strong> {priceRisk}
+            </p>
+          ) : null}
           <PriceWorkspace
             accountSlug={account.slug}
             data={price}

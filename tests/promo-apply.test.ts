@@ -244,6 +244,42 @@ describe.skipIf(!url)('promociones: prender y apagar según el almanaque', () =>
     expect(sent).toEqual([{ what: 'join', publicationId: flat, value: { price: priceForMargin(eco(0, listOf(0)), 15), stock: 2 } }]);
   });
 
+  it('la pasada de cada hora: arma el almanaque que falta y, solo con la ejecución automática prendida, manda lo que toca', async () => {
+    const { promotionsPass } = await import('@/lib/promo/run');
+    const { classifyAccount } = await import('@/lib/promo/classify');
+    // Una cuenta que no usa Promociones no se toca.
+    expect(await promotionsPass(db, { budgetMs: 60_000, now })).toMatchObject({ accounts: 0, planned: 0, applied: 0 });
+    // Con las invitaciones y la clasificación al día, y la ejecución automática apagada: arma el almanaque y no manda nada.
+    await db.promotionSettings.create({ data: { accountId, sweptAt: now, classifiedAt: now } });
+    const off = await promotionsPass(db, { budgetMs: 60_000, now });
+    expect(off).toMatchObject({ accounts: 1, planned: 1, applied: 0, pending: false });
+    expect(sent).toEqual([]);
+    expect(await db.promotionSlotItem.count({ where: { state: 'PLANNED' } })).toBeGreaterThan(0);
+    // Prendida: manda la base que empieza hoy, una vez.
+    await db.promotionSettings.update({ where: { accountId }, data: { autoApply: true } });
+    const on = await promotionsPass(db, { budgetMs: 60_000, now });
+    expect(on).toMatchObject({ planned: 0, applied: 2, failed: 0 });
+    expect(sent.map((x) => x.what)).toEqual(['discount', 'discount']);
+    expect((await promotionsPass(db, { budgetMs: 60_000, now })).applied).toBe(0);
+    expect(await db.promotionLog.count({ where: { auto: true, kind: 'ON' } })).toBe(2);
+
+    // La regla: recién publicado es nuevo a posicionar, pero lo puesto a mano no se pisa.
+    const kept = await classifyAccount(db, { accountId, apply: true, now });
+    expect(kept.changed).toEqual([]);
+    expect(kept.products[0].lifecycle).toMatchObject({ now: 'GROWING', proposed: 'NEW', manual: true, changes: false });
+    await db.productPromotion.update({ where: { productId }, data: { manual: [] } });
+    const changed = await classifyAccount(db, { accountId, apply: true, now });
+    expect(changed.changed).toEqual([productId]);
+    expect(await db.productPromotion.findUniqueOrThrow({ where: { productId } })).toMatchObject({ lifecycle: 'NEW', why: { lifecycle: expect.stringContaining('menos de 60') } });
+    // Con un competidor más barato que el sin cuotas, cargado en el producto o en una publicación: pelea por precio.
+    await db.competitorListing.create({ data: { publicationId: twelve, title: 'Otro vendedor', listPrice: listOf(0) + 50_000, position: 0 } });
+    expect((await classifyAccount(db, { accountId, apply: false, now })).products[0].competition).toMatchObject({ proposed: null, changes: false });
+    await db.competitorListing.create({ data: { productId, title: 'El más barato', listPrice: listOf(0), discountPct: 10, position: 1 } });
+    const fight = await classifyAccount(db, { accountId, apply: true, now });
+    expect(fight.products[0].facts.competitorPrice).toBe(Math.round(listOf(0) * 0.9));
+    expect(await db.productPromotion.findUniqueOrThrow({ where: { productId } })).toMatchObject({ competition: 'PRICE_FIGHT' });
+  });
+
   it('a los días mide el antes y el después y lo deja en la bitácora', async () => {
     const { generatePlan } = await import('@/lib/promo/plan');
     const { applyDue } = await import('@/lib/promo/apply');

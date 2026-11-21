@@ -45,7 +45,7 @@ const VERSION_B: PieceContent = {
 };
 
 describe('el pipeline con el paso nuevo', () => {
-  it('tiene los 11 pasos en el orden nuevo, e Imágenes se muestra como Fotos', () => {
+  it('tiene los 12 pasos en el orden nuevo, e Imágenes se muestra como Fotos', () => {
     expect(PIPELINE_STEPS.map((s) => PIPELINE_STEP_LABEL[s])).toEqual([
       'Información',
       'Título',
@@ -53,6 +53,7 @@ describe('el pipeline con el paso nuevo', () => {
       'Descripción',
       'Preguntas y respuestas',
       'Precio',
+      'Promociones',
       'Fotos',
       'Imágenes con texto',
       'Videos',

@@ -952,6 +952,7 @@ enum PipelineStep {
   DESCRIPTION
   QA
   PRICE
+  PROMOTIONS
   PUBLISH
 }
 

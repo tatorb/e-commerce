@@ -37,7 +37,8 @@ export async function promotionsPass(db: Db, args: { budgetMs: number; now?: Dat
     // 1. Las invitaciones del canal: una lectura a medias sigue; una completa se repite cada tantas horas.
     const midway = !!a.sweep && typeof a.sweep === 'object' && !Array.isArray(a.sweep) && 'promotions' in a.sweep;
     if (midway || !a.sweptAt || now.getTime() - a.sweptAt.getTime() > SWEEP_EVERY_MS) {
-      const r = await sweepInvitations(db, { accountId: a.accountId, budgetMs: Math.min(left(), args.budgetMs / 2), now: () => now }).catch((e) => {
+      // Una lectura a medias usa todo el tiempo: el canal vence el "seguir desde acá" a los pocos minutos.
+      const r = await sweepInvitations(db, { accountId: a.accountId, budgetMs: midway ? left() : Math.min(left(), args.budgetMs / 2), now: () => now }).catch((e) => {
         console.error('Promociones: no se pudieron leer las invitaciones.', e instanceof Error ? e.message : e);
         return null;
       });
@@ -50,7 +51,7 @@ export async function promotionsPass(db: Db, args: { budgetMs: number; now?: Dat
     // 2. Reclasificar y rearmar el almanaque, cada tantos días: de a los productos que entran en el tiempo.
     const every = settings.rules.timing.reclassifyDays * DAY;
     if (left() > 0 && (!settings.classifiedAt || now.getTime() - settings.classifiedAt.getTime() > every)) {
-      await classifyAccount(db, { accountId: a.accountId, apply: true, now });
+      await classifyAccount(db, { accountId: a.accountId, apply: true, now }).catch((e) => console.error('Promociones: no se pudo reclasificar.', e instanceof Error ? e.message : e));
     }
     const stale = await db.productPromotion.findMany({
       where: { lifecycle: { not: null }, product: { accountId: a.accountId }, OR: [{ plannedAt: null }, { plannedAt: { lt: new Date(now.getTime() - every) } }] },

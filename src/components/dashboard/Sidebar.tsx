@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { cookies } from 'next/headers';
-import { AlignLeft, BellRing, Calculator, Camera, CarFront, ClipboardList, DollarSign, History, Image as ImageIcon, KanbanSquare, ListChecks, ListTodo, MessageCircleQuestion, MessageSquareText, Package, PlugZap, Receipt, RefreshCw, Shapes, ShieldCheck, SlidersHorizontal, TrendingUp, Type, Upload, Users, DatabaseZap } from 'lucide-react';
+import { AlignLeft, BellRing, Calculator, Camera, CarFront, ClipboardList, DollarSign, History, Image as ImageIcon, KanbanSquare, ListChecks, ListTodo, MessageCircleQuestion, MessageSquareText, Package, PlugZap, Receipt, RefreshCw, Shapes, ShieldCheck, SlidersHorizontal, TrendingUp, Type, Upload, Users, DatabaseZap,
+  BadgePercent,
+} from 'lucide-react';
 import { NavLink } from '@/components/dashboard/NavLink';
 import { SidebarShell } from '@/components/dashboard/SidebarShell';
 import { SidebarToggle } from '@/components/dashboard/SidebarToggle';
@@ -105,6 +107,11 @@ export async function Sidebar({
           {sees('publicaciones') ? (
             <NavLink href={`${accountHome}/rendimiento`} label="Rendimiento">
               <TrendingUp className="h-4 w-4" />
+            </NavLink>
+          ) : null}
+          {sees('promociones') ? (
+            <NavLink href={`${accountHome}/promociones`} label="Promociones">
+              <BadgePercent className="h-4 w-4" />
             </NavLink>
           ) : null}
           {sees('ventas') ? (
