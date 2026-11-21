@@ -1,28 +1,24 @@
 'use client';
 
-import { useMemo, useState, useTransition } from 'react';
+import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { CalendarDays, Grid3x3, History, RefreshCw, Tags, Wand2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { SectionCard } from '@/components/ui/section-card';
-import { CHANNEL_STATUS_LABEL } from '@/domain/channel-status';
 import { formatPrice } from '@/domain/money';
-import { INSTALLMENT_PLANS, planLabel } from '@/domain/pricing';
 import { hasNoEnd, LAYER_LABEL } from '@/domain/promo/plan';
 import { COMPETITIONS, COMPETITION_LABEL, LIFECYCLES, LIFECYCLE_LABEL, MODE_LABEL, OBJECTIVE_LABEL, PRIORITIES, PRIORITY_LABEL, type Competition, type Lifecycle, type Mode, type Priority } from '@/domain/promo/tags';
 import type { AppliedAction, DueAction } from '@/lib/promo/apply';
 import type { ModeConflict } from '@/lib/promo/mode';
-import type { GridCell, GridColumn, ProductGrid } from '@/lib/promo/view';
+import type { ProductGrid } from '@/lib/promo/view';
 import { cn } from '@/lib/utils/cn';
 import {
   applyAction,
-  cancelSlotAction,
   classifyProductAction,
   clearPlanAction,
   modeConflictsAction,
-  excludeAction,
   generatePlansAction,
   previewApplyAction,
   putBackAction,
@@ -32,13 +28,14 @@ import {
   setTagsAction,
   takeOutAction,
 } from '@/app/a/[cuenta]/promociones/actions';
-import { dateTime, inputDay, pct, shortDate, stateClass } from './format';
+import { dateTime, pct, shortDate } from './format';
+import { PromoTimeline, TIMELINE_DAYS, type PillKey } from './PromoTimeline';
 
-// Las promociones de un producto: sus etiquetas, las franjas de su almanaque
-// y la grilla de medidas por formas de cobro, donde cada casillero dice si la
-// forma de cobro está adentro, al tope o afuera y por qué. Desde acá se
-// corrigen las etiquetas, se decide a mano qué va y qué no, y se prende o se
-// saca en el canal, siempre con la vista previa antes.
+// Las promociones de un producto. Arriba, quién arma su almanaque: Manual o
+// Automático. Abajo, la línea de tiempo: una fila por publicación y sus
+// promociones como pastillas. En Automático se ven además las etiquetas, que
+// son las que usan las reglas. En Manual se puede sacar una promoción o
+// cambiarle hasta cuándo va.
 
 export type LogRow = { id: string; at: Date; code: string | null; text: string; auto: boolean; kind: string };
 
@@ -50,8 +47,9 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
   const router = useRouter();
   const [busy, start] = useTransition();
   const [notice, setNotice] = useState<Notice>(null);
-  const [picked, setPicked] = useState<string | null>(null);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  // La pastilla que se está mirando en la línea de tiempo.
+  const [pick, setPick] = useState<PillKey | null>(null);
+  const [until, setUntil] = useState('');
   const [preview, setPreview] = useState<{ actions: DueAction[]; scope: { productIds?: string[]; itemIds?: string[]; force?: boolean } } | null>(null);
   const [results, setResults] = useState<AppliedAction[] | null>(null);
   // El cambio de modo que se está confirmando: a Automático, con lo que hay que decidir; a Manual, con si se borra lo planeado.
@@ -79,20 +77,21 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
         kind: r.failed.length > 0 ? 'error' : 'ok',
         text: `Quedó en ${MODE_LABEL[modeAsk.to]}.${r.takenOut > 0 ? ` Se sacaron ${r.takenOut} del canal.` : ''}${r.failed.length > 0 ? ` No se pudieron sacar: ${r.failed.join(' ')}` : ''}`,
       });
-      setSelected(new Set());
       router.refresh();
     });
 
   // La franja que se mira en la grilla: la elegida, o la primera que está vigente.
-  const columns = grid.columns;
-  const columnKey = (c: GridColumn) => c.slotId ?? `canal:${c.group}`;
-  const current = columns.find((c) => columnKey(c) === picked) ?? columns.find((c) => !c.cancelled) ?? columns[0] ?? null;
-  const severalTitles = new Set(grid.measures.map((m) => m.title ?? '')).size > 1;
   // Lo que deja en pesos: la rentabilidad es sobre el costo.
   const money = (marginPct: number | null, cost: number | null) => (marginPct === null || cost === null ? null : formatPrice(Math.round((cost * marginPct) / 100)));
-  const cellOf = useMemo(() => new Map((current?.cells ?? []).map((c) => [c.publicationId, c])), [current]);
-  // Una columna por forma de cobro, y una más si alguna publicación tiene una que la app no conoce.
-  const plans: (number | null)[] = [...INSTALLMENT_PLANS, ...(grid.measures.some((m) => m.options.some((o) => o.plan === null)) ? [null] : [])];
+  // La pastilla elegida, con su promoción, su casillero y su publicación.
+  const pickedColumn = pick ? (grid.columns.find((c) => c.slotId === pick.slotId) ?? null) : null;
+  const pickedCell = pickedColumn && pick ? (pickedColumn.cells.find((c) => c.publicationId === pick.publicationId) ?? null) : null;
+  const pickedMeasure = pick ? (grid.measures.find((m) => m.options.some((o) => o.publicationId === pick.publicationId)) ?? null) : null;
+  const pickedOption = pickedMeasure && pick ? (pickedMeasure.options.find((o) => o.publicationId === pick.publicationId) ?? null) : null;
+  // Las publicaciones de esa promoción que están adentro o por entrar.
+  const pickedActive = (pickedColumn?.cells ?? []).filter((c) => c.itemId && (c.state === 'PLANNED' || c.state === 'ON' || c.state === 'SCHEDULED')).map((c) => c.itemId!);
+  // Lo que el canal ofrece y todavía no está en el almanaque.
+  const offers = grid.columns.filter((c) => c.source === 'CHANNEL');
 
   const run = (work: () => Promise<{ ok: true } | { ok: false; error: string }>, done: string) =>
     start(async () => {
@@ -100,7 +99,6 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
       const r = await work().catch(() => ({ ok: false as const, error: 'Se cortó la conexión con la app.' }));
       setNotice(r.ok ? { kind: 'ok', text: done } : { kind: 'error', text: r.error });
       if (r.ok) {
-        setSelected(new Set());
         router.refresh();
       }
     });
@@ -135,14 +133,8 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
         kind: failed > 0 ? 'error' : 'ok',
         text: `${r.done.length - failed} hechos${failed > 0 ? `, ${failed} no se pudieron` : ''}${r.skipped.length > 0 ? `, ${r.skipped.length} no entraron: ${r.skipped.map((s) => `${s.externalId ?? ''} ${s.why}`).join(' ')}` : ''}${r.pending > 0 ? `. Faltan ${r.pending}: volvé a aplicar.` : '.'}`,
       });
-      setSelected(new Set());
       router.refresh();
     });
-
-  const selectedItems = [...selected].map((id) => cellOf.get(id)).filter((c): c is GridCell => !!c && c.itemId !== null);
-  const toEnter = selectedItems.filter((c) => c.state === 'PLANNED');
-  const inside = selectedItems.filter((c) => c.state === 'ON' || c.state === 'SCHEDULED' || c.state === 'PLANNED');
-  const undoable = selectedItems.filter((c) => c.state === 'FAILED' || (c.state === 'OUT' && (c.reason === 'MANUAL' || c.reason === 'REJECTED')));
 
   return (
     <div className="space-y-4">
@@ -242,11 +234,10 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
       <SectionCard
         title="Almanaque"
         icon={<CalendarDays />}
-        count={columns.length}
         description={
           manual
-            ? `Las promociones en las que está inscripto y las que armaste, de hoy en adelante. Invitaciones del canal leídas ${grid.invitationsAt ? dateTime(grid.invitationsAt, timeZone) : 'todavía no'}.`
-            : `Las franjas que armaron las reglas, de hoy en adelante. Armado ${grid.plannedAt ? dateTime(grid.plannedAt, timeZone) : 'todavía no'}. Invitaciones del canal leídas ${grid.invitationsAt ? dateTime(grid.invitationsAt, timeZone) : 'todavía no'}.`
+            ? `Cada fila es una publicación en los próximos ${TIMELINE_DAYS} días, con las promociones en las que está inscripta y las que armaste. Invitaciones del canal leídas ${grid.invitationsAt ? dateTime(grid.invitationsAt, timeZone) : 'todavía no'}.`
+            : `Cada fila es una publicación en los próximos ${TIMELINE_DAYS} días, con las promociones que le armaron las reglas. Armado ${grid.plannedAt ? dateTime(grid.plannedAt, timeZone) : 'todavía no'}. Invitaciones del canal leídas ${grid.invitationsAt ? dateTime(grid.invitationsAt, timeZone) : 'todavía no'}.`
         }
         action={
           <div className="flex flex-wrap gap-2">
@@ -261,7 +252,7 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
                 variant="outline"
                 disabled={busy}
                 onClick={() => {
-                  if (!window.confirm('Se borran las franjas que todavía no empezaron. Lo que ya está en el canal queda como está.')) return;
+                  if (!window.confirm('Se borran las promociones que todavía no empezaron. Lo que ya está en el canal queda como está.')) return;
                   run(() => clearPlanAction(accountSlug, grid.productId), 'Se borró lo que todavía no había empezado.');
                 }}
               >
@@ -273,28 +264,24 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
                 Rearmar
               </Button>
             )}
-            <Button size="sm" access="subir" disabled={busy} onClick={() => askPreview({ productIds: [grid.productId] })}>
-              Ver qué toca hoy
+            <Button size="sm" access="subir" disabled={busy} title="La app lo hace sola con la lectura de cada hora. Con este botón se manda ahora, con la vista previa antes." onClick={() => askPreview({ productIds: [grid.productId] })}>
+              Mandar ahora lo de hoy
             </Button>
           </div>
         }
       >
-        {columns.length === 0 ? (
-          <p className="px-4 py-6 text-sm text-muted-foreground">
-            No tiene franjas ni invitaciones del canal. Las publicaciones nuevas o recreadas no reciben invitaciones a los eventos: si esperabas alguna, hay que decidirlo a mano.
-          </p>
+        {grid.measures.length === 0 ? (
+          <p className="px-4 py-6 text-sm text-muted-foreground">Este producto no tiene publicaciones activas en {grid.channelName}.</p>
         ) : (
-          <ul className="divide-y">
-            {columns.map((c) => (
-              <SlotRow key={columnKey(c)} accountSlug={accountSlug} timeZone={timeZone} productId={grid.productId} column={c} editable={manual} active={current !== null && columnKey(c) === columnKey(current)} busy={busy} floor={grid.thresholds.floorMarginPct} onPick={() => { setPicked(columnKey(c)); setSelected(new Set()); }} run={run} />
-            ))}
-          </ul>
+          <PromoTimeline grid={grid} timeZone={timeZone} picked={pick} onPick={setPick} />
         )}
       </SectionCard>
 
       {preview ? (
         <div className="rounded-2xl border border-foreground/20 bg-card p-4 shadow-card">
-          <p className="font-medium">Vista previa: {preview.actions.length} {preview.actions.length === 1 ? 'cambio' : 'cambios'} en {grid.channelName}</p>
+          <p className="font-medium">
+            Vista previa: {preview.actions.length} {preview.actions.length === 1 ? 'cambio' : 'cambios'} en {grid.channelName}
+          </p>
           <ActionList actions={preview.actions} />
           <div className="mt-3 flex gap-2">
             <Button size="sm" access="subir" pending={busy} disabled={busy} onClick={confirmApply}>
@@ -313,181 +300,142 @@ export function ProductPromoPanel({ accountSlug, timeZone, grid, log, compact = 
         </div>
       ) : null}
 
-      <SectionCard
-        title={current ? `Medidas por formas de cobro en «${current.name}»` : 'Medidas por formas de cobro'}
-        icon={<Grid3x3 />}
-        description={
-          current
-            ? `${LAYER_LABEL[current.layer]}, ${current.finish && hasNoEnd(current.finish) ? `desde el ${shortDate(current.start, timeZone)}, sin fecha de fin` : `del ${shortDate(current.start, timeZone)} al ${shortDate(current.finish, timeZone)}`}. ${manual ? '' : `Busca ${pct(current.targetMarginPct)} de rentabilidad. `}El piso es ${pct(grid.thresholds.floorMarginPct)}. Cada casillero es una publicación con su código: arriba, lo que pasa en esta oferta; abajo, lo que tiene hoy.`
-            : 'Cada forma de cobro de cada medida, con su precio y lo que deja hoy.'
-        }
-        action={
-          columns.length > 1 && current ? (
-            // La oferta que muestra la grilla: la misma que se elige tocando una franja de arriba.
-            <label className="flex items-center gap-2 text-sm">
-              <span className="text-muted-foreground">Ver</span>
-              <select
-                className={cn(SELECT, 'max-w-[18rem]')}
-                value={columnKey(current)}
-                onChange={(e) => {
-                  setPicked(e.target.value);
-                  setSelected(new Set());
-                }}
-              >
-                {columns.map((c) => (
-                  <option key={columnKey(c)} value={columnKey(c)}>
-                    {c.name}, {c.finish && hasNoEnd(c.finish) ? 'sin fin' : `${shortDate(c.start, timeZone)} a ${shortDate(c.finish, timeZone)}`}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : undefined
-        }
-      >
-        <div className="overflow-x-auto">
-          {/* Todas las columnas del mismo ancho y todos los casilleros del mismo alto. */}
-          <table className="w-full min-w-[1080px] table-fixed border-separate border-spacing-1.5 p-2 text-xs">
-            <colgroup>
-              <col className="w-36" />
-              {plans.map((plan) => (
-                <col key={String(plan)} />
-              ))}
-            </colgroup>
-            <thead>
-              <tr>
-                <th className="px-1 text-left font-medium text-muted-foreground">Medida</th>
-                {plans.map((plan) => (
-                  <th key={String(plan)} className="px-1 text-left font-medium text-muted-foreground">
-                    {plan === null ? 'Otra forma de cobro' : planLabel(plan)}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {grid.measures.map((m) => (
-                <tr key={m.mainId}>
-                  <td className="px-1 align-top">
-                    {/* Sin medida: la única del producto, o una publicación de la que la app no sabe qué medida vende. */}
-                    <p className="font-medium">{m.measure ?? (grid.measures.length > 1 ? 'Medida sin identificar' : 'Única')}</p>
-                    {/* Con más de una publicación distinta del mismo producto, el título dice cuál es cada fila. */}
-                    {severalTitles && m.title ? <p className="mt-0.5 leading-snug text-muted-foreground">{m.title}</p> : null}
-                    {m.measure === null && grid.measures.length > 1 ? <p className="mt-0.5 leading-snug text-muted-foreground">La app no sabe qué medida vende: sin eso tampoco sabe su stock.</p> : null}
-                    {m.stock !== null ? <p className="text-muted-foreground">Stock {m.stock}</p> : null}
-                  </td>
-                  {plans.map((plan) => (
-                    <td key={String(plan)} className="space-y-1.5 align-top">
-                      {m.options.every((o) => o.plan !== plan) ? <div className="flex h-[208px] items-center justify-center rounded-lg border border-dashed text-[11px] text-muted-foreground">Sin publicación</div> : null}
-                      {m.options.filter((o) => o.plan === plan).map((o) => {
-                    const cell = cellOf.get(o.publicationId) ?? null;
-                    const canPick = cell?.itemId != null;
-                    return (
-                        <label key={o.publicationId} className={cn('flex h-[208px] flex-col overflow-hidden rounded-lg border p-2', cell ? stateClass(cell.state, cell.capped) : 'border-border bg-background', canPick && 'cursor-pointer', o.status !== 'ACTIVE' && 'opacity-50')} title={[cell?.text, cell?.lastError].filter(Boolean).join(' ') || undefined}>
-                          <span className="flex items-center justify-between gap-1">
-                            <span className="font-mono text-[11px]">{o.externalId ?? 'Sin publicar'}</span>
-                            {canPick ? (
-                              <input
-                                type="checkbox"
-                                className="h-3.5 w-3.5 accent-[hsl(var(--primary))]"
-                                aria-label={`Elegir ${o.externalId ?? o.planLabel}`}
-                                checked={selected.has(o.publicationId)}
-                                onChange={(e) =>
-                                  setSelected((prev) => {
-                                    const next = new Set(prev);
-                                    if (e.target.checked) next.add(o.publicationId);
-                                    else next.delete(o.publicationId);
-                                    return next;
-                                  })
-                                }
-                              />
-                            ) : null}
-                          </span>
-                          {o.status !== 'ACTIVE' ? <span className="mt-0.5 block text-[11px] font-medium">{CHANNEL_STATUS_LABEL[o.status as keyof typeof CHANNEL_STATUS_LABEL] ?? o.status} en {grid.channelName}</span> : null}
-                          {cell ? (
-                            <>
-                              <span className="mt-1 block text-[10px] uppercase tracking-wide text-muted-foreground">En esta oferta</span>
-                              <span className="block font-semibold">{cell.label}</span>
-                              {cell.price !== null && cell.state !== 'OUT' ? (
-                                <span className="block">
-                                  El comprador paga {formatPrice(cell.price)}
-                                  {cell.discountPct !== null ? ` (${pct(cell.discountPct)} de descuento)` : ''}
-                                </span>
-                              ) : null}
-                              {cell.marginPct !== null ? (
-                                <span className="block">
-                                  Deja {pct(cell.marginPct)}
-                                  {money(cell.marginPct, o.cost) ? `, ${money(cell.marginPct, o.cost)}` : ''}
-                                </span>
-                              ) : null}
-                              {/* El motivo, en dos renglones como mucho: entero se lee dejando el cursor encima. */}
-                              {cell.text ? <span className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-muted-foreground">{cell.text}</span> : null}
-                              {cell.lastError && cell.state !== 'FAILED' ? <span className="mt-0.5 line-clamp-1 text-[11px] leading-snug text-destructive">{cell.lastError}</span> : null}
-                            </>
-                          ) : null}
-                          <span className="mt-auto block border-t border-foreground/10 pt-1 text-[11px] text-muted-foreground">
-                            <span className="block text-[10px] uppercase tracking-wide">Sin la oferta, hoy</span>
-                            {o.listPrice !== null ? `Precio de lista ${formatPrice(o.listPrice)}` : 'Sin precio de lista'}
-                            {o.discountNow ? `, con ${pct(o.discountNow)} de descuento propio` : ''}
-                            <span className="block">{o.marginNow !== null ? `Deja ${pct(o.marginNow)}${money(o.marginNow, o.cost) ? `, ${money(o.marginNow, o.cost)}` : ''}` : o.cost === null ? 'Sin costo cargado' : ''}</span>
-                          </span>
-                          {o.excluded ? <span className="block truncate text-[11px] font-medium">Prohibida{o.excludedWhy ? `: ${o.excludedWhy}` : ''}</span> : null}
-                        </label>
-                    );
-                  })}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {current && !compact && manual ? (
-          <div className="flex flex-wrap items-center gap-2 border-t px-4 py-3 text-sm">
-            <span className="text-muted-foreground">
-              {selected.size > 0
-                ? `${selected.size} elegidas`
-                : current.source === 'CHANNEL'
-                  ? 'Esta campaña todavía no está en el almanaque: para elegir casilleros, primero tocá «Sumar al almanaque» en su franja.'
-                  : 'Elegí casilleros para prenderlos o sacarlos a mano.'}
-            </span>
-            <div className="flex flex-wrap gap-2 sm:ml-auto">
-              <Button size="sm" access="subir" disabled={busy || toEnter.length === 0} onClick={() => askPreview({ itemIds: toEnter.map((c) => c.itemId!), force: true })}>
-                Prender ahora{toEnter.length > 0 ? ` (${toEnter.length})` : ''}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                access="subir"
-                disabled={busy || inside.length === 0}
-                onClick={() => {
-                  const why = window.prompt(`Se sacan ${inside.length} de «${current.name}». Las que ya están en ${grid.channelName} salen de ahí y el almanaque no las vuelve a meter. ¿Por qué? (opcional)`);
-                  if (why === null) return;
-                  run(() => takeOutAction(accountSlug, inside.map((c) => c.itemId!), why), 'Se sacaron a mano.');
-                }}
-              >
-                Sacar a mano{inside.length > 0 ? ` (${inside.length})` : ''}
-              </Button>
-              <Button access="promociones" size="sm" variant="outline" disabled={busy || undoable.length === 0} onClick={() => run(() => putBackAction(accountSlug, undoable.map((c) => c.itemId!)), 'Se volvieron a decidir con las reglas.')}>
-                Volver a decidir{undoable.length > 0 ? ` (${undoable.length})` : ''}
-              </Button>
-              <Button access="promociones"
-                size="sm"
-                variant="ghost"
-                disabled={busy || selected.size === 0}
-                onClick={() => {
-                  const ids = [...selected];
-                  const all = grid.measures.flatMap((m) => m.options);
-                  const lift = ids.every((id) => all.find((o) => o.publicationId === id)?.excluded);
-                  const why = lift ? '' : window.prompt('Estas formas de cobro no van a entrar a ninguna oferta. No salen de las que ya están. ¿Por qué? (opcional)');
-                  if (why === null) return;
-                  run(() => excludeAction(accountSlug, grid.productId, ids, !lift, why), lift ? 'Se levantó la prohibición.' : 'Quedaron prohibidas en todas las ofertas.');
-                }}
-              >
-                Prohibir o permitir en todas
-              </Button>
+      {/* La pastilla elegida: qué es, cuánto paga el comprador y cuánto deja. En Manual, además, lo que se puede hacer con ella. */}
+      {pickedColumn && pickedCell && pickedOption ? (
+        <SectionCard
+          title={pickedColumn.name}
+          icon={<Tags />}
+          description={`${LAYER_LABEL[pickedColumn.layer]}, ${pickedColumn.finish && hasNoEnd(pickedColumn.finish) ? `desde el ${shortDate(pickedColumn.start, timeZone)}, sin fecha de fin` : `del ${shortDate(pickedColumn.start, timeZone)} al ${shortDate(pickedColumn.finish, timeZone)}`}. ${pickedOption.planLabel}${pickedMeasure?.measure ? `, medida ${pickedMeasure.measure}` : ''}, ${pickedOption.externalId ?? 'sin publicar'}.`}
+          action={
+            <Button size="sm" variant="ghost" access="view" onClick={() => setPick(null)}>
+              Cerrar
+            </Button>
+          }
+        >
+          <dl className="grid gap-x-6 gap-y-3 p-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
+            <div>
+              <dt className="text-xs text-muted-foreground">Estado</dt>
+              <dd className="font-medium">{pickedCell.label}</dd>
             </div>
-          </div>
-        ) : null}
-      </SectionCard>
+            <div>
+              <dt className="text-xs text-muted-foreground">El comprador paga</dt>
+              <dd className="font-medium">
+                {pickedCell.price !== null ? formatPrice(pickedCell.price) : '—'}
+                {pickedCell.discountPct !== null ? ` (${pct(pickedCell.discountPct)} de descuento)` : ''}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Deja</dt>
+              <dd className="font-medium">
+                {pct(pickedCell.marginPct)}
+                {money(pickedCell.marginPct, pickedOption.cost) ? `, ${money(pickedCell.marginPct, pickedOption.cost)}` : ''}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Precio de lista, sin ofertas</dt>
+              <dd>
+                {pickedOption.listPrice !== null ? formatPrice(pickedOption.listPrice) : 'Sin precio de lista'}
+                {pickedOption.marginList !== null ? `, deja ${pct(pickedOption.marginList)}${money(pickedOption.marginList, pickedOption.cost) ? `, ${money(pickedOption.marginList, pickedOption.cost)}` : ''}` : ''}
+              </dd>
+            </div>
+            {pickedCell.text || pickedCell.lastError || pickedColumn.note ? (
+              <p className="text-muted-foreground sm:col-span-2 lg:col-span-4">
+                {[pickedCell.text, pickedCell.lastError, pickedColumn.note].filter(Boolean).join(' ')}
+              </p>
+            ) : null}
+          </dl>
+          {manual && !compact ? (
+            <div className="flex flex-wrap items-end gap-2 border-t px-4 py-3 text-sm">
+              {pickedCell.state === 'PLANNED' && pickedCell.itemId ? (
+                <Button size="sm" access="subir" disabled={busy} onClick={() => askPreview({ itemIds: [pickedCell.itemId!], force: true })}>
+                  Prender ahora
+                </Button>
+              ) : null}
+              {pickedCell.itemId && (pickedCell.state === 'PLANNED' || pickedCell.state === 'ON' || pickedCell.state === 'SCHEDULED') ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  access="subir"
+                  disabled={busy}
+                  onClick={() => {
+                    if (!window.confirm(`Se saca ${pickedOption.externalId ?? 'esta publicación'} de «${pickedColumn.name}».${pickedCell.state === 'PLANNED' ? ' Todavía no había entrado: no va a entrar.' : ` Sale de ${grid.channelName} ahora.`}`)) return;
+                    run(() => takeOutAction(accountSlug, [pickedCell.itemId!], ''), 'Se sacó.');
+                  }}
+                >
+                  Sacar esta publicación
+                </Button>
+              ) : null}
+              {pickedActive.length > 1 ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  access="subir"
+                  disabled={busy}
+                  onClick={() => {
+                    if (!window.confirm(`Se sacan las ${pickedActive.length} publicaciones de «${pickedColumn.name}». Las que ya están en ${grid.channelName} salen ahora.`)) return;
+                    run(() => takeOutAction(accountSlug, pickedActive, ''), 'Se sacaron.');
+                  }}
+                >
+                  Sacar las {pickedActive.length} de esta promoción
+                </Button>
+              ) : null}
+              {pickedCell.state === 'FAILED' && pickedCell.itemId ? (
+                <Button size="sm" variant="outline" access="promociones" disabled={busy} onClick={() => run(() => putBackAction(accountSlug, [pickedCell.itemId!]), 'Se vuelve a intentar.')}>
+                  Volver a intentar
+                </Button>
+              ) : null}
+              <label className="ml-auto space-y-1">
+                <span className="block text-xs text-muted-foreground">Hasta cuándo va, para todas sus publicaciones</span>
+                <span className="flex gap-2">
+                  <Input className="w-40" type="date" value={until} onChange={(e) => setUntil(e.target.value)} />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    access="promociones"
+                    disabled={busy || !until}
+                    onClick={() => run(() => saveSlotAction(accountSlug, grid.productId, { slotId: pickedColumn.slotId!, finish: until }), 'Se cambió hasta cuándo va. La app la saca sola ese día.')}
+                  >
+                    Guardar
+                  </Button>
+                </span>
+              </label>
+            </div>
+          ) : null}
+        </SectionCard>
+      ) : null}
+
+      {/* Lo que el canal ofrece y todavía no está en el almanaque. */}
+      {offers.length > 0 ? (
+        <SectionCard
+          title={`Invitaciones de ${grid.channelName} que no están en el almanaque`}
+          icon={<Grid3x3 />}
+          count={offers.length}
+          collapsible
+          defaultOpen={manual && !compact}
+          description={manual ? 'Campañas a las que el canal invita a alguna publicación de este producto. Al sumarla, entran las publicaciones invitadas que dejan el piso o más.' : 'Campañas a las que el canal invita y que las reglas no incluyeron, por la receta de su ciclo de vida.'}
+        >
+          <ul className="divide-y text-sm">
+            {offers.map((c) => (
+              <li key={c.group} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5">
+                <Badge variant={c.layer === 'BASE' ? 'secondary' : c.layer === 'PEAK' ? 'outline' : 'default'}>{LAYER_LABEL[c.layer]}</Badge>
+                <span className="min-w-0 flex-1">
+                  <span className="font-medium">{c.name}</span>
+                  <span className="text-muted-foreground">
+                    {' '}
+                    · {c.campaignKind ?? 'Campaña del canal'} · {shortDate(c.start, timeZone)} a {shortDate(c.finish, timeZone)} · con la rentabilidad saludable entrarían {c.counts.in} de {c.cells.length}
+                    {c.counts.capped > 0 ? `, ${c.counts.capped} al tope` : ''}
+                  </span>
+                </span>
+                {manual && !compact ? (
+                  <Button access="promociones" size="sm" variant="outline" disabled={busy} onClick={() => run(() => saveSlotAction(accountSlug, grid.productId, { group: c.group }), 'La campaña quedó en el almanaque.')}>
+                    Sumar al almanaque
+                  </Button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </SectionCard>
+      ) : null}
 
       {log.length > 0 ? (
         <SectionCard title="Bitácora" icon={<History />} count={log.length} collapsible defaultOpen={!compact} description="Cada vez que se prendió o se apagó una oferta, lo que no se pudo y el antes y el después.">
@@ -631,108 +579,5 @@ function TagsCard({ accountSlug, grid, busy, run, runWith }: { accountSlug: stri
         </label>
       </div>
     </SectionCard>
-  );
-}
-
-function SlotRow({
-  accountSlug,
-  timeZone,
-  productId,
-  column: c,
-  editable,
-  active,
-  busy,
-  floor,
-  onPick,
-  run,
-}: {
-  accountSlug: string;
-  timeZone: string;
-  productId: string;
-  column: GridColumn;
-  // En Manual se puede sumar, cambiar o sacar una franja; en Automático el almanaque es de las reglas.
-  editable: boolean;
-  active: boolean;
-  busy: boolean;
-  floor: number;
-  onPick: () => void;
-  run: Run;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [margin, setMargin] = useState(String(c.targetMarginPct));
-  const [finish, setFinish] = useState(inputDay(c.finish, timeZone));
-  const source = c.source === 'CHANNEL' ? 'Del canal, sin franja' : c.source === 'MANUAL' ? 'A mano' : 'Almanaque';
-  const parsed = Number(margin.replace(',', '.'));
-  return (
-    <li className={cn('px-4 py-2.5', active && 'bg-secondary/60', c.cancelled && 'opacity-60')}>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-        <button type="button" onClick={onPick} className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-left text-sm" aria-pressed={active}>
-          <Badge variant={c.layer === 'BASE' ? 'secondary' : c.layer === 'PEAK' ? 'outline' : 'default'}>{LAYER_LABEL[c.layer]}</Badge>
-          <span className="font-medium">{c.name}</span>
-          <span className="text-muted-foreground">
-            {c.finish && hasNoEnd(c.finish) ? `desde el ${shortDate(c.start, timeZone)}, sin fin` : `${shortDate(c.start, timeZone)} a ${shortDate(c.finish, timeZone)}`}{c.kind === 'OWN_DISCOUNT' && c.source === 'MANUAL' ? '' : ` · busca ${pct(c.targetMarginPct)}`} · {source}
-            {c.cancelled ? ' · no va' : ''}
-          </span>
-        </button>
-        <span className="text-xs text-muted-foreground">
-          {c.counts.in} adentro o por entrar{c.counts.capped > 0 ? `, ${c.counts.capped} al tope` : ''} · {c.counts.out} afuera{c.counts.failed > 0 ? ` · ${c.counts.failed} no se pudo` : ''}
-        </span>
-        <div className={cn('flex gap-1.5', !editable && 'hidden')}>
-          {c.source === 'CHANNEL' ? (
-            <Button access="promociones" size="sm" variant="outline" disabled={busy} onClick={() => run(() => saveSlotAction(accountSlug, productId, { group: c.group }), 'La campaña quedó en el almanaque, a mano.')}>
-              Sumar al almanaque
-            </Button>
-          ) : (
-            <>
-              <Button access="promociones" size="sm" variant="ghost" disabled={busy} onClick={() => setEditing((v) => !v)}>
-                Cambiar
-              </Button>
-              {c.cancelled ? (
-                <Button access="promociones" size="sm" variant="outline" disabled={busy} onClick={() => run(() => cancelSlotAction(accountSlug, c.slotId!, false, false, ''), 'La franja vuelve al almanaque.')}>
-                  Vuelve
-                </Button>
-              ) : (
-                <Button access="promociones"
-                  size="sm"
-                  variant="outline"
-                  disabled={busy}
-                  onClick={() => {
-                    const why = window.prompt(`«${c.name}» no va: el almanaque no la vuelve a armar. Lo que ya esté prendido en el canal sigue hasta que lo saques a mano. ¿Por qué? (opcional)`);
-                    if (why === null) return;
-                    run(() => cancelSlotAction(accountSlug, c.slotId!, true, false, why), 'La franja no va.');
-                  }}
-                >
-                  No va
-                </Button>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-      {c.note ? <p className="mt-1 text-xs text-muted-foreground">{c.note}</p> : null}
-      {editing && c.slotId ? (
-        <div className="mt-2 flex flex-wrap items-end gap-3 text-sm">
-          <label className="space-y-1">
-            <span className="block text-xs text-muted-foreground">Rentabilidad buscada, en %</span>
-            <Input className="w-28" inputMode="decimal" value={margin} onChange={(e) => setMargin(e.target.value)} />
-          </label>
-          <label className="space-y-1">
-            <span className="block text-xs text-muted-foreground">Hasta</span>
-            <Input className="w-40" type="date" value={finish} onChange={(e) => setFinish(e.target.value)} />
-          </label>
-          <Button access="promociones"
-            size="sm"
-            disabled={busy || !(parsed >= floor)}
-            onClick={() => {
-              setEditing(false);
-              run(() => saveSlotAction(accountSlug, productId, { slotId: c.slotId!, targetMarginPct: parsed, finish: finish || undefined }), 'La franja quedó a mano con el cambio.');
-            }}
-          >
-            Guardar
-          </Button>
-          {!(parsed >= floor) ? <span className="text-xs text-destructive">No puede ser menor que el piso de {pct(floor)}.</span> : null}
-        </div>
-      ) : null}
-    </li>
   );
 }

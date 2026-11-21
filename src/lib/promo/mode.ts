@@ -194,6 +194,8 @@ export async function setMode(
     // Lo que el canal ya muestra queda registrado antes de cambiar, para no perderlo de vista.
     await adoptExisting(db, { accountId: args.accountId, productId: product.id, now });
     await ensureTags(db, args.accountId, product.id, now);
+    const tagged = await loadProductPromo(db, args.accountId, product.id);
+    const plan = tagged ? await plannedBy(db, args.accountId, { ...tagged, mode: 'AUTO' }, now) : { groups: new Set<string>(), base: false };
     for (const s of await manualSlots(db, product.id, now)) {
       const inside = s.items.filter((i) => i.state === 'ON' || i.state === 'SCHEDULED');
       if (inside.length === 0) {
@@ -201,11 +203,18 @@ export async function setMode(
         out.removed++;
         continue;
       }
+      // Lo que estaba por entrar en esa franja ya no entra: el plan es de las reglas.
+      await db.promotionSlotItem.deleteMany({ where: { slotId: s.id, state: 'PLANNED' } });
+      if (s.group !== null && plan.groups.has(s.group)) {
+        // La campaña que las reglas también llevan pasa a ser de ellas: lo que ya está adentro sigue y deciden el resto de las publicaciones.
+        await db.promotionSlot.update({ where: { id: s.id }, data: { source: 'PLAN' } });
+        await db.promotionSlotItem.updateMany({ where: { slotId: s.id }, data: { fixed: false } });
+        out.kept++;
+        continue;
+      }
       if (args.takeOut?.includes(s.id)) {
         out.takenOut.push(...(await takeOut(db, { accountId: args.accountId, itemIds: inside.map((i) => i.id), why: 'Se sacó al pasar a Automático', userId: args.userId, now })));
       } else out.kept++;
-      // Lo que estaba por entrar en esa franja ya no entra: el plan es de las reglas.
-      await db.promotionSlotItem.deleteMany({ where: { slotId: s.id, state: 'PLANNED' } });
     }
     await db.productPromotion.upsert({ where: { productId: product.id }, create: { productId: product.id, mode: 'AUTO', updatedById: args.userId }, update: { mode: 'AUTO', updatedById: args.userId } });
     await generatePlan(db, { accountId: args.accountId, productId: product.id, now });

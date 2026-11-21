@@ -1,7 +1,7 @@
 import type { PrismaClient } from '@/generated/prisma/client';
 import { EVENT_TIERS, LAYERS, SLOT_KINDS, layerOfType, type EventTier, type Layer, type SlotKind } from '@/domain/promo/plan';
 import { takeOut, type AppliedAction } from './apply';
-import { evaluateProduct } from './plan';
+import { evaluateProduct, evaluateSlot } from './plan';
 import { loadProductPromo } from './product';
 import { loadPromoSettings, PromoError } from './settings';
 
@@ -119,7 +119,10 @@ export async function saveManualSlot(db: Db, args: { accountId: string; input: M
     });
     id = slot.id;
   }
-  await evaluateProduct(db, { promo, settings, now });
+  // Se decide una vez cada forma de cobro con la rentabilidad de la franja, y queda con ese precio: después no se recalcula.
+  const saved = await db.promotionSlot.findUniqueOrThrow({ where: { id }, include: { items: true } });
+  await evaluateSlot(db, { slot: saved, promo, settings, now, redecide: true });
+  await db.promotionSlotItem.updateMany({ where: { slotId: id }, data: { fixed: true } });
   return id;
 }
 

@@ -1,6 +1,6 @@
 import type { PrismaClient } from '@/generated/prisma/client';
 import { planLabel } from '@/domain/pricing';
-import { OUT_REASON_LABEL, type OutReason } from '@/domain/promo/entry';
+import { marginAt, OUT_REASON_LABEL, type OptionEconomics, type OutReason } from '@/domain/promo/entry';
 import { layerOfType, type Layer, type SlotKind } from '@/domain/promo/plan';
 import { objectiveOf, type Mode, type Objective, type PromoTags, type TagGroup } from '@/domain/promo/tags';
 import { decideItem, ITEM_STATE_LABEL, type ItemState } from './plan';
@@ -58,6 +58,8 @@ export type GridOption = {
   listPrice: number | null;
   discountNow: number | null;
   marginNow: number | null;
+  // Lo que deja el precio de lista, sin ningún descuento.
+  marginList: number | null;
   cost: number | null;
   excluded: boolean;
   excludedWhy: string | null;
@@ -83,6 +85,8 @@ export type ProductGrid = {
   paused: boolean;
   // Cuándo se leyeron del canal las invitaciones de este producto: lo más viejo.
   invitationsAt: Date | null;
+  // Cuándo se armó esta vista: la línea de tiempo arranca ahí.
+  now: Date;
   measures: GridMeasure[];
   columns: GridColumn[];
 };
@@ -94,6 +98,11 @@ export function cellLabel(state: ItemState, capped: boolean, reason: OutReason |
 }
 
 const num = (v: { toString(): string } | null) => (v === null ? null : Number(v.toString()));
+
+function listMargin(o: { eco: OptionEconomics }): number | null {
+  const m = o.eco.listPrice !== null ? marginAt(o.eco, o.eco.listPrice) : null;
+  return m === null ? null : Math.round(m * 100) / 100;
+}
 
 function counts(cells: GridCell[]): GridColumn['counts'] {
   const live = (c: GridCell) => c.state === 'PLANNED' || c.state === 'SCHEDULED' || c.state === 'ON';
@@ -119,6 +128,7 @@ export async function loadProductGrid(db: Db, accountId: string, productId: stri
       listPrice: o.eco.listPrice,
       discountNow: o.discountNow,
       marginNow: o.marginNow === null ? null : Math.round(o.marginNow * 100) / 100,
+      marginList: listMargin(o),
       cost: o.eco.cost,
       excluded: o.excluded,
       excludedWhy: o.excludedWhy,
@@ -200,6 +210,7 @@ export async function loadProductGrid(db: Db, accountId: string, productId: stri
     mode: promo.mode,
     paused: settings.paused,
     invitationsAt: seenAt.length > 0 ? new Date(Math.min(...seenAt)) : settings.sweptAt,
+    now,
     measures,
     columns,
   };

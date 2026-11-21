@@ -354,6 +354,27 @@ describe.skipIf(!url)('promociones: prender y apagar según el almanaque', () =>
     await expect(clearManualPlan(db, { accountId, productId, now: day(14) })).rejects.toThrow('primero pasalo a Manual');
   });
 
+  it('al pasar a Automático, una campaña que las reglas también llevan pasa a ser de ellas: lo que ya está adentro sigue y deciden las demás publicaciones', async () => {
+    const { adoptExisting, modeConflicts, setMode } = await import('@/lib/promo/mode');
+    // En Manual, con el ciclo de vida puesto a mano en madurada, que lleva eventos. La de 12 cuotas ya está adentro; la sin cuotas está invitada.
+    await db.productPromotion.update({ where: { productId }, data: { mode: 'MANUAL', lifecycle: 'MATURE', manual: ['lifecycle'] } });
+    await invite(flat, 0);
+    await invite(twelve, 12, { status: 'active', join: null, canLeave: true, price: priceForMargin(eco(12, listOf(12)), 12) });
+    await adoptExisting(db, { accountId, productId, now });
+    const slot = await db.promotionSlot.findFirstOrThrow({ include: { items: true } });
+    expect(slot).toMatchObject({ source: 'MANUAL', group: 'DEAL:P-1' });
+    expect(slot.items.map((i) => i.publicationId)).toEqual([twelve]);
+    // Las reglas también llevan esa campaña: no hay nada que preguntar.
+    expect(await modeConflicts(db, { accountId, productId, now })).toEqual([]);
+    const r = await setMode(db, { accountId, productId, mode: 'AUTO', userId: null, now });
+    expect(r).toMatchObject({ kept: 1, removed: 0, takenOut: [] });
+    const after = await db.promotionSlot.findUniqueOrThrow({ where: { id: slot.id }, include: { items: true } });
+    expect(after.source).toBe('PLAN');
+    expect(new Map(after.items.map((i) => [i.publicationId, i.state]))).toEqual(new Map([[twelve, 'ON'], [flat, 'PLANNED']]));
+    expect(await db.promotionSlot.count({ where: { group: 'DEAL:P-1' } })).toBe(1);
+    expect(sent).toEqual([]);
+  });
+
   it('a los días mide el antes y el después y lo deja en la bitácora', async () => {
     const { generatePlan } = await import('@/lib/promo/plan');
     const { applyDue } = await import('@/lib/promo/apply');

@@ -96,6 +96,16 @@ export async function dueActions(
     const rows = await db.channelPromotionItem.findMany({ where: { group: { in: groups }, publicationId: { in: items.map((i) => i.publicationId) }, deadline: { not: null } }, select: { publicationId: true, group: true, deadline: true } });
     for (const r of rows) deadlines.set(`${r.publicationId}:${r.group}`, r.deadline!);
   }
+  // Las campañas del canal que siguen corriendo después de que termina la franja: de esas hay que salir.
+  const ended = items.filter((i) => i.slot.kind === 'CAMPAIGN' && i.slot.group && (i.state === 'ON' || i.state === 'SCHEDULED') && i.slot.finish <= now);
+  const stillIn = new Set<string>();
+  if (ended.length > 0) {
+    const rows = await db.channelPromotionItem.findMany({
+      where: { publicationId: { in: ended.map((i) => i.publicationId) }, group: { in: ended.map((i) => i.slot.group!) }, status: { in: ['active', 'scheduled'] }, canLeave: true, OR: [{ finish: null }, { finish: { gt: now } }] },
+      select: { publicationId: true, group: true },
+    });
+    for (const r of rows) stillIn.add(`${r.publicationId}:${r.group}`);
+  }
   const out: DueAction[] = [];
   // El descuento propio que le toca ahora a cada publicación: si empieza uno, el que termina no hace falta apagarlo.
   const ownStarting = new Set(items.filter((i) => i.slot.kind === 'OWN_DISCOUNT' && i.state === 'PLANNED' && !i.slot.cancelled && i.slot.start <= now && i.slot.finish > now).map((i) => i.publicationId));
@@ -113,8 +123,9 @@ export async function dueActions(
       }
       if (args.force || from <= now) out.push(actionOf(i, 'ON'));
     } else if ((i.state === 'ON' || i.state === 'SCHEDULED') && s.finish <= now) {
-      // Una campaña del canal termina sola; el descuento propio y el por cantidad hay que sacarlos.
-      if (s.kind === 'CAMPAIGN' || (s.kind === 'OWN_DISCOUNT' && ownStarting.has(i.publicationId))) continue;
+      // Una campaña del canal termina sola, salvo que la franja termine antes que la campaña; el descuento propio y el por cantidad hay que sacarlos.
+      if (s.kind === 'CAMPAIGN' && !stillIn.has(`${i.publicationId}:${s.group}`)) continue;
+      if (s.kind === 'OWN_DISCOUNT' && ownStarting.has(i.publicationId)) continue;
       out.push(actionOf(i, 'OFF'));
     }
   }
@@ -252,7 +263,8 @@ export async function applyDue(
     result.done.push({ ...act, ok: false, message: error, state: gaveUp ? 'FAILED' : (item.state as ItemState) });
   }
   // Las campañas del canal que ya terminaron quedan como terminadas, sin tocar el canal.
-  await db.promotionSlotItem.updateMany({ where: { state: { in: ['ON', 'SCHEDULED'] }, slot: { accountId: args.accountId, kind: 'CAMPAIGN', finish: { lte: now } } }, data: { state: 'ENDED', endedAt: now } });
+  const leaving = (await dueActions(db, { accountId: args.accountId, joinLeadDays: settings.rules.timing.joinLeadDays, now })).filter((d) => d.action === 'OFF' && d.kind === 'CAMPAIGN').map((d) => d.itemId);
+  await db.promotionSlotItem.updateMany({ where: { id: { notIn: leaving }, state: { in: ['ON', 'SCHEDULED'] }, slot: { accountId: args.accountId, kind: 'CAMPAIGN', finish: { lte: now } } }, data: { state: 'ENDED', endedAt: now } });
   // Las que nunca llegaron a entrar y ya pasó la fecha.
   await db.promotionSlotItem.updateMany({ where: { state: 'PLANNED', slot: { accountId: args.accountId, finish: { lte: now } } }, data: { state: 'OUT', reason: 'REJECTED', reasonText: 'Pasó la fecha sin que se prendiera.' } });
   return result;
