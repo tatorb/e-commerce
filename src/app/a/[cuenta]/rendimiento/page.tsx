@@ -90,7 +90,7 @@ function Sparkline({ weeks }: { weeks: { from: string; visits: number | null }[]
   );
 }
 
-function Figure({ label, value, change, previous }: { label: string; value: string; change?: Change | null; previous?: string }) {
+function Figure({ label, value, change, previous, compared }: { label: string; value: string; change?: Change | null; previous?: string; compared?: string }) {
   return (
     <div className="min-w-0 bg-card px-4 py-3">
       <p className="text-2xl font-bold tabular-nums leading-none">{value}</p>
@@ -98,7 +98,8 @@ function Figure({ label, value, change, previous }: { label: string; value: stri
       {previous !== undefined ? (
         <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[11px] text-muted-foreground">
           <Delta change={change ?? null} previous={previous} className="mt-0" />
-          <span>antes {previous}</span>
+          {/* compared: cuando la comparación no es de todas, los dos números que se comparan. */}
+          <span>{compared ?? `antes ${previous}`}</span>
         </p>
       ) : null}
     </div>
@@ -127,6 +128,9 @@ export default async function PerformancePage({ params, searchParams }: { params
   };
   // Lo mismo, en los días anteriores: para comparar las cifras de arriba.
   const prev = data.totals.previous;
+  // No todas tienen las visitas del período anterior: se compara entre las que sí.
+  const partial = prev.publications > 0 && prev.publications < data.totals.count - data.withoutVisits;
+  const same = `las ${num(prev.publications)} con visitas de los dos períodos`;
   const head = (sort: Sort) => ({ href: sortHref(sort), active: f.sort === sort, dir: f.dir });
 
   return (
@@ -185,11 +189,27 @@ export default async function PerformancePage({ params, searchParams }: { params
               value={num(data.totals.visits)}
               change={countChange(prev.comparableVisits, prev.visits)}
               previous={prev.visits === null ? 'sin dato' : num(prev.visits)}
+              compared={partial && prev.visits !== null && prev.comparableVisits !== null ? `${num(prev.comparableVisits)} contra ${num(prev.visits)}, en ${same}` : undefined}
             />
             <Figure label={`unidades vendidas en ${f.period} días`} value={num(data.totals.sales)} change={countChange(data.totals.sales, prev.sales)} previous={num(prev.sales)} />
-            <Figure label="conversión del grupo" value={pct(data.totals.conversion)} change={pointsChange(data.totals.conversion, prev.conversion)} previous={pct(prev.conversion)} />
+            <Figure
+              label="conversión del grupo"
+              value={pct(data.totals.conversion)}
+              change={pointsChange(partial ? prev.comparableConversion : data.totals.conversion, prev.conversion)}
+              previous={pct(prev.conversion)}
+              compared={partial && prev.conversion !== null ? `${pct(prev.comparableConversion)} contra ${pct(prev.conversion)}, en ${same}` : undefined}
+            />
           </div>
         </Card>
+
+        <p className="text-xs text-muted-foreground">
+          Cada cifra se compara con los {f.period} días anteriores.
+          {partial
+            ? ` De ${num(data.totals.count - prev.publications)} publicaciones todavía no hay visitas de esos días, porque se empezaron a leer después: las visitas y la conversión se comparan solo entre las ${num(prev.publications)} que tienen los dos períodos.`
+            : prev.publications === 0
+              ? ' Todavía no hay visitas leídas de esos días: las visitas y la conversión no se pueden comparar.'
+              : ''}
+        </p>
 
         {data.withoutVisits > 0 ? (
           <p className="text-xs text-muted-foreground">

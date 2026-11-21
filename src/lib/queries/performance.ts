@@ -254,6 +254,7 @@ export async function loadPerformance(db: Db, accountId: string, f: PerformanceF
   const comparableVisits = both.length > 0 ? both.reduce((s, r) => s + (r.visits ?? 0), 0) : null;
   const previousSales = rows.reduce((s, r) => s + r.previous.sales, 0);
   const previousConversion = both.length > 0 ? conversionPct(previousVisits, both.reduce((s, r) => s + r.previous.sales, 0)) : null;
+  const comparableConversion = both.length > 0 ? conversionPct(comparableVisits, both.reduce((s, r) => s + r.sales, 0)) : null;
   // Los datos son tan nuevos como la lectura más vieja de las dos: visitas y ventas.
   const visitsAt = publications.reduce<Date | null>((m, p) => (p.visitsReadAt && (!m || p.visitsReadAt > m) ? p.visitsReadAt : m), null);
   const salesAt = readers.reduce<Date | null>((m, r) => (r.readAt && (!m || r.readAt > m) ? r.readAt : m), null);
@@ -267,7 +268,10 @@ export async function loadPerformance(db: Db, accountId: string, f: PerformanceF
       sales: totalSales,
       conversion: conversionPct(totalVisits, totalSales),
       // comparableVisits: las visitas de ahora de las mismas publicaciones que tienen las de antes.
-      previous: { visits: previousVisits, comparableVisits, sales: previousSales, conversion: previousConversion },
+      // publications: cuántas tienen las visitas de los dos períodos. Si no son
+      // todas, las visitas y la conversión se comparan solo entre esas:
+      // comparableVisits y comparableConversion son las de ahora de esas mismas.
+      previous: { visits: previousVisits, comparableVisits, sales: previousSales, conversion: previousConversion, comparableConversion, publications: both.length },
     },
     // Cuántas todavía no tienen las visitas por día leídas.
     withoutVisits: rows.filter((r) => r.visits === null).length,
