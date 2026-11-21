@@ -3,8 +3,8 @@
 // app no tiene que ver: de cada artículo solo sale el costo, y de la ficha
 // solo los datos permitidos. Está aparte para poder probarlo solo.
 
-/** Un número de pieza para comparar: mayúsculas, sin espacios, puntos ni guiones. Igual que en la app. */
-export const normalizar = (s) => String(s ?? '').toUpperCase().replace(/[\s.\-]+/g, '');
+/** Un número de pieza para comparar: mayúsculas, sin espacios, puntos, guiones ni barras. Igual que en la app. */
+export const normalizar = (s) => String(s ?? '').toUpperCase().replace(/[\s.\-/]+/g, '');
 
 /** El código sin la medida: "SP-169 040" con medida "040" es "SP-169". Sin medida, Insur manda "-". */
 export function codigoSinMedida(codigo, medidaNombre) {

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Studio MRB · Insur → E-commerce",
   "description": "Lee el stock, el costo y la ficha de cada artículo del sistema de Insur y corrige E-commerce Studio MRB, desde tu propio Chrome.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "permissions": ["storage", "alarms", "notifications"],
   "host_permissions": ["https://e-commerce.studiomrb.com/*", "https://insurmotor.com.ar/*"],
   "background": { "service_worker": "fondo.js", "type": "module" },

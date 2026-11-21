@@ -75,6 +75,8 @@ const PRODUCT_SELECT = {
   variants: { orderBy: { position: 'asc' }, select: { sku: true, measure: true } },
   costs: { select: { key: true, cost: true } },
   stock: { select: { key: true, quantity: true } },
+  // Cuántas publicaciones tiene en el canal: entre dos productos con el mismo número de pieza, va el publicado.
+  _count: { select: { publications: { where: { externalId: { not: null } } } } },
 } as const;
 
 type ProductRow = Prisma.ProductGetPayload<{ select: typeof PRODUCT_SELECT }> & { slots: StockSlot[] };
@@ -84,7 +86,18 @@ async function loadProducts(db: Db, accountId: string) {
   const rows = await db.product.findMany({ where: { accountId, kind: 'INDIVIDUAL' }, select: PRODUCT_SELECT });
   const products = new Map<string, ProductRow>(rows.map((p) => [p.id, { ...p, slots: stockSlots(p.variants) }]));
   const slots = appSlots([...products.values()].map((p) => ({ id: p.id, partNumber: p.partNumber, slots: p.slots })));
-  return { products, slots, index: slotIndex(slots) };
+  // Con dos productos con el mismo número de pieza, se cruza con el que está
+  // publicado, si es uno solo: el otro suele ser un duplicado sin publicar. Si
+  // no se puede elegir, quedan los dos y el artículo sale dudoso.
+  const byPart = new Map<string, Set<string>>();
+  for (const s of slots) if (s.part) byPart.set(s.part, (byPart.get(s.part) ?? new Set()).add(s.productId));
+  const dropped = new Set<string>();
+  for (const ids of byPart.values()) {
+    if (ids.size < 2) continue;
+    const live = [...ids].filter((id) => (products.get(id)?._count.publications ?? 0) > 0);
+    if (live.length === 1) for (const id of ids) if (id !== live[0]) dropped.add(id);
+  }
+  return { products, slots, index: slotIndex(slots.filter((s) => !dropped.has(s.productId))) };
 }
 
 const slotKey = (productId: string, key: string) => `${productId}|${key}`;

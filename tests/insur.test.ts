@@ -136,6 +136,20 @@ describe('el cruce con Insur, sin la base', () => {
     expect(matchArticle({ code: 'ZZ-1', measureName: '-' }, twice)).toMatchObject({ kind: 'doubtful', reason: 'Hay más de un producto en la app con ese número de pieza.' });
   });
 
+  it('cuando en la medida de la ficha está escrito el SKU, la medida sale del final del SKU', () => {
+    // Como los cojinetes: número de pieza con guion, SKU con barra, y el SKU repetido en la medida.
+    const variants = ['00', '10', '20', '40', '50'].map((m) => ({ sku: `10070/4-${m}`, measure: `10070/4-${m}` }));
+    const cojinetes = slotIndex(appSlots([{ id: 'c', partNumber: '10070-4', slots: stockSlots(variants) }]));
+    const key = (i: number) => stockSlots(variants)[i].key;
+    expect(normPart('10070/4')).toBe(normPart('10070-4'));
+    expect(normalizar('10070/4-10')).toBe(normPart('10070/4-10'));
+    expect(matchArticle({ code: '10070-4 STD', measureName: 'STD' }, cojinetes)).toEqual({ kind: 'auto', productId: 'c', key: key(0) });
+    expect(matchArticle({ code: '10070-4 010', measureName: '010' }, cojinetes)).toEqual({ kind: 'auto', productId: 'c', key: key(1) });
+    expect(matchArticle({ code: '10070-4 050', measureName: '050' }, cojinetes)).toEqual({ kind: 'auto', productId: 'c', key: key(4) });
+    // La app no tiene la 0,30: dudoso, con su motivo.
+    expect(matchArticle({ code: '10070-4 030', measureName: '030' }, cojinetes)).toMatchObject({ kind: 'doubtful', reason: 'El producto de la app no tiene la medida "030".' });
+  });
+
   it('sin producto en la app', () => {
     expect(match('IN-855 0.50', '0.50')).toEqual({ kind: 'none' });
     expect(match('NO-ESTA', '-')).toEqual({ kind: 'none' });
@@ -445,6 +459,20 @@ describe.skipIf(!url)('el sistema de Insur en la base', () => {
     await run([{ id: 1, codigo: 'SP-169 STD', medida: 'STD', cba: 4, sf: 1 }, { id: 5, codigo: '00269BRG', medida: '-', cba: 2, sf: 0 }], { at: later(120) });
     expect((await stockOf(p.id)).STD).toBe(5);
     expect(await links()).toEqual({ 'SP-169 STD': 'AUTO', '00269BRG': 'DOUBTFUL' });
+  });
+
+  it('con dos productos con el mismo número de pieza, cruza con el que está publicado; si no se puede elegir, queda dudoso', async () => {
+    const live = await product('Subconjunto Tik', 'TIK2R800700', [{ sku: 'TIK-00', measure: 'STD' }, { sku: 'TIK-50', measure: '0,50 mm' }], [1, 1]);
+    const copy = await product('Subconjunto (pistones + aros) TIK2R800700', 'TIK2R800700', [], [1]);
+    const list: Sent[] = [{ id: 40, codigo: 'TIK2R800700 STD', medida: 'STD', cba: 3, sf: 0, precodigo: 'TIK2R800700' }];
+    // Ninguno publicado: no se puede elegir.
+    await run(list);
+    expect(await links()).toEqual({ 'TIK2R800700 STD': 'DOUBTFUL' });
+    expect((await doubtfulLinks(db, accountId)).links[0].candidates.map((c) => c.productId).sort()).toEqual([live.id, live.id, copy.id].sort());
+    // Uno solo publicado: va ese.
+    await db.publication.create({ data: { productId: live.id, storeId, externalId: 'MLA77', title: 'Subconjunto Tik' } });
+    await run(list, { at: later(60) });
+    expect(await db.insurArticleLink.findFirstOrThrow({ where: { insurId: 40 } })).toMatchObject({ status: 'AUTO', productId: live.id, key: live.keys[0] });
   });
 
   it('un dudoso se confirma a mano o se ignora, con vista previa; confirmado, la corrida siguiente lo corrige', async () => {

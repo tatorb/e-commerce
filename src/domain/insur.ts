@@ -6,8 +6,8 @@
 
 // ───────────────────────────── Códigos y medidas ─────────────────────────────
 
-/** Un número de pieza para comparar: mayúsculas, sin espacios, puntos ni guiones. */
-export const normPart = (s: string | null | undefined): string => (s ?? '').toUpperCase().replace(/[\s.\-]+/g, '');
+/** Un número de pieza para comparar: mayúsculas, sin espacios, puntos, guiones ni barras ("10070/4" y "10070-4" son el mismo). */
+export const normPart = (s: string | null | undefined): string => (s ?? '').toUpperCase().replace(/[\s.\-/]+/g, '');
 
 /**
  * El código de Insur separado en número de pieza y medida. Con medida, el
@@ -105,8 +105,10 @@ export function appSlots(products: AppProduct[]): AppSlot[] {
     const skus = p.slots.map((s) => s.sku);
     return p.slots.map((s) => {
       const written = (s.measure ?? '').trim();
-      // Primero la medida escrita en la ficha; si no tiene, el final del SKU.
-      const measure = written ? measureHundredths(written) : skuHundredths(s.sku, p.partNumber, skus);
+      // Primero la medida escrita en la ficha. Si no tiene, o si en la medida
+      // está escrito el SKU ("10070/4-10"), el final del SKU.
+      const isSku = written !== '' && normPart(written) === normPart(s.sku);
+      const measure = written && !isSku ? measureHundredths(written) : skuHundredths(s.sku, p.partNumber, skus);
       return { productId: p.id, key: s.key, part: normPart(p.partNumber), sku: normPart(s.sku), measure, measured };
     });
   });
