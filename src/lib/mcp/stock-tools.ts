@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { matchSlot, MAX_UNITS_PER_SALE, StockError, stockSlots, stockText } from '@/domain/stock';
 import { previewUnitsPerSale, setUnitsPerSale, type UnitsRow } from '@/lib/units-per-sale';
+import { setStockBulk, type BulkRowResult } from '@/lib/stock-bulk';
 import { setProductStock, setShowMore } from '@/lib/stock';
 import { accountBranches, branchStockText, findBranch } from '@/lib/branches';
 import { CostError, costsForClaude, loadProductCosts, setProductCosts } from '@/lib/costs';
@@ -195,4 +196,64 @@ const setUnitsPerSaleTool = defineTool({
   },
 });
 
-export const STOCK_TOOLS = [setProductStockTool, setProductCostTool, setUnitsPerSaleTool];
+const setStockBulkTool = defineTool({
+  name: 'set_stock_bulk',
+  section: 'productos',
+  title: 'Cargar el stock de muchos productos',
+  description:
+    'Carga el stock de muchos productos en una sola llamada, hasta 300 filas, cada fila con su sucursal: sirve para pasar a la app lo que dice el sistema de la tienda, depósito por depósito. Cada fila es un producto (su número de pieza o el SKU de una de sus medidas; no importan espacios, guiones ni mayúsculas), la sucursal si la cuenta tiene sucursales, la medida si el producto tiene varias y no vino por el SKU, y las unidades de esa sucursal, en la unidad en que se carga el stock (sin dividir por las unidades por venta). Lo que no viene queda como está. Si hay dos productos con el mismo código va el que está publicado; si no se puede saber, la fila vuelve con error y se carga por su publicación con set_product_stock. Los combos no llevan stock propio. Guarda todo y al final sube las cantidades al canal y revisa Flex una sola vez; lo que no entra en el tiempo lo termina la pasada de cada hora (o sync_flex_by_stock). Con solo_mostrar no guarda nada: dice qué haría cada fila, con lo que tiene hoy y lo que quedaría. Devuelve cada fila con su resultado (guardada, igual o error con el motivo). Antes de guardar, llamala con solo_mostrar, mostrale a la persona cuántas cambian y los errores, y esperá que confirme.',
+  input: z.object({
+    cuenta: accountArg,
+    filas: z
+      .array(
+        z.object({
+          producto: z.string().min(1).max(120).describe('El número de pieza del producto o el SKU de una de sus medidas.'),
+          sucursal: z.string().min(1).max(80).optional().describe('La sucursal, por su nombre. Obligatoria si la cuenta tiene más de una.'),
+          medida: z.string().min(1).max(80).optional().describe('La medida o su SKU, si el producto tiene varias y producto no es el SKU de la medida.'),
+          unidades: z.number().int().min(0).max(99_999),
+        }),
+      )
+      .min(1)
+      .max(300),
+    solo_mostrar: z.boolean().optional().describe('true: no guarda nada, solo dice qué haría cada fila.'),
+  }),
+  readOnly: false,
+  destructive: true,
+  run: async (ctx, args) => {
+    const account = await resolveAccount(ctx, args.cuenta);
+    const r = await setStockBulk(ctx.db, {
+      accountId: account.id,
+      userId: ctx.userId,
+      preview: args.solo_mostrar === true,
+      rows: args.filas.map((f) => ({ product: f.producto, branch: f.sucursal ?? null, measure: f.medida ?? null, units: f.unidades })),
+    });
+    const row = (x: BulkRowResult) => ({
+      fila: x.row,
+      producto: x.product,
+      ...(x.name ? { nombre: x.name } : {}),
+      ...(x.branch ? { sucursal: x.branch } : {}),
+      ...(x.measure ? { medida: x.measure } : {}),
+      resultado: args.solo_mostrar && x.result === 'guardada' ? 'cambiaria' : x.result,
+      ...(x.before !== undefined ? { tenia: x.before, queda: x.after } : {}),
+      ...(x.message ? { motivo: x.message } : {}),
+    });
+    // Las que quedan igual no hace falta listarlas: van solo las que cambian y las que fallan.
+    const shown = r.rows.filter((x) => x.result !== 'igual');
+    return {
+      ...(args.solo_mostrar ? { solo_mostrar: true, cambiarian: r.saved } : { guardadas: r.saved, productos_que_cambiaron: r.products }),
+      iguales: r.same,
+      con_error: r.failed,
+      filas: shown.map(row),
+      ...(r.sync
+        ? {
+            cantidades_subidas_al_canal: r.sync.sent,
+            ...(r.sync.flex?.length ? { flex_prendido_en: r.sync.flex.filter((f) => f.on).length, flex_apagado_en: r.sync.flex.filter((f) => !f.on).length } : {}),
+            ...(r.sync.failed.length > 0 ? { no_se_pudo_subir: r.sync.failed.slice(0, 20).map((f) => ({ publicacion: f.title, motivo: f.error })) } : {}),
+            ...(r.sync.pending ? { aviso: 'Quedaron cantidades o Flex por subir: lo termina la pasada de cada hora, o sync_flex_by_stock para Flex.' } : {}),
+          }
+        : {}),
+    };
+  },
+});
+
+export const STOCK_TOOLS = [setProductStockTool, setProductCostTool, setUnitsPerSaleTool, setStockBulkTool];

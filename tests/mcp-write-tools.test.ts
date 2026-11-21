@@ -62,7 +62,8 @@ describe('herramientas de escritura en la lista', () => {
     expect(tools.get('assign_sale_branch')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('set_units_per_sale')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.get('sync_flex_by_stock')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
-    expect(tools.size).toBe(121);
+    expect(tools.get('set_stock_bulk')).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+    expect(tools.size).toBe(122);
   });
 });
 

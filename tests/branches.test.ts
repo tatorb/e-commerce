@@ -23,6 +23,7 @@ const { afterBranchFlex, flexPlans, reconcileFlex, setFlexFollowsStock } = await
 const { setPublicationsFlex } = await import('@/lib/flex');
 const { recordOrder, setProductStock, loadProductStock } = await import('@/lib/stock');
 const { assignSaleBranch, salesWithoutBranch } = await import('@/lib/sale-branch');
+const { setStockBulk } = await import('@/lib/stock-bulk');
 
 const norte: BranchLike = { id: 'norte', name: 'Norte', position: 0, flex: true, main: false };
 const sur: BranchLike = { id: 'sur', name: 'Sur', position: 1, flex: false, main: false };
@@ -301,6 +302,65 @@ describe.skipIf(!url)('las sucursales en la base', () => {
     expect(off.changed).toEqual([{ publicationId: withStock.publicationId, on: false }]);
     expect(flex).toMatchObject({ MLA1: false, MLA2: false });
     expect((await flexPlans(db, [withStock.publicationId])).get(withStock.publicationId)).toMatchObject({ follows: false, reason: 'Ninguna sucursal tiene Flex: Flex se cambia a mano.' });
+  });
+
+  it('carga en tanda: muchos productos, cada uno en su sucursal, por número de pieza o por el SKU de la medida', async () => {
+    const a = await product('Bomba BA-1', 4, 'MLA1', false);
+    await db.product.update({ where: { id: a.productId }, data: { partNumber: 'BA 1-00' } });
+    const rings = await db.product.create({
+      data: {
+        accountId,
+        name: 'Aros AR-9',
+        partNumber: 'AR-9',
+        variants: { create: [{ sku: 'AR-9-STD', measure: 'STD', position: 0 }, { sku: 'AR-9-050', measure: '0.50', position: 1 }] },
+      },
+    });
+    // Dos con el mismo código, ninguno publicado: no se puede saber cuál es.
+    await db.product.createMany({ data: [{ accountId, name: 'Repetido uno', partNumber: 'DUP-1' }, { accountId, name: 'Repetido dos', partNumber: 'DUP-1' }] });
+    const north = (await saveBranch(db, { accountId, branch: { name: 'Norte', flex: true } })).branch;
+    await saveBranch(db, { accountId, branch: { name: 'Sur' } });
+    const rows = [
+      { product: 'ba1-00', branch: 'norte', units: 0 },
+      { product: 'BA 1-00', branch: 'Sur', units: 7 },
+      { product: 'AR-9-050', branch: 'Norte', units: 3 },
+      { product: 'AR-9', branch: 'Sur', measure: 'STD', units: 5 },
+      { product: 'AR-9', branch: 'Sur', units: 1 },
+      { product: 'NO-EXISTE', branch: 'Sur', units: 1 },
+      { product: 'DUP-1', branch: 'Sur', units: 1 },
+      { product: 'BA 1-00', units: 1 },
+    ];
+    // Solo mostrar: dice qué haría y no guarda nada.
+    const preview = await setStockBulk(db, { accountId, userId, rows, preview: true });
+    expect(preview).toMatchObject({ saved: 4, failed: 4, products: 0, sync: null });
+    expect(await branchStock(a.productId)).toEqual({ Norte: 4 });
+
+    const r = await setStockBulk(db, { accountId, userId, rows });
+    expect(r.rows.map((x) => [x.row, x.result, x.before ?? null, x.after ?? null])).toEqual([
+      [1, 'guardada', 4, 0],
+      [2, 'guardada', 0, 7],
+      [3, 'guardada', 0, 3],
+      [4, 'guardada', 0, 5],
+      [5, 'error', null, null],
+      [6, 'error', null, null],
+      [7, 'error', null, null],
+      [8, 'error', null, null],
+    ]);
+    expect(r.rows[4].message).toContain('El producto tiene medidas: falta la medida.');
+    expect(r.rows[5].message).toBe('No hay un producto con ese número de pieza ni con ese SKU.');
+    expect(r.rows[6].message).toContain('Hay más de un producto con ese código');
+    expect(r.rows[7].message).toContain('Falta la sucursal.');
+    expect(r.products).toBe(2);
+    expect(await branchStock(a.productId)).toEqual({ Norte: 0, Sur: 7 });
+    expect(await total(a.productId)).toBe(7);
+    expect(await branchStock(rings.id)).toEqual({ Norte: 3, Sur: 5 });
+    expect((await db.product.findUniqueOrThrow({ where: { id: rings.id } })).stockSince).not.toBeNull();
+    // Córdoba quedó en 0: Flex no se prende en esa publicación. Cargar lo mismo otra vez no cambia nada.
+    expect(flex.MLA1).toBe(false);
+    expect((await setStockBulk(db, { accountId, userId, rows: rows.slice(0, 4) })).same).toBe(4);
+    // Entra en Norte: una sola revisión de Flex al final lo prende.
+    const again = await setStockBulk(db, { accountId, userId, rows: [{ product: 'BA1-00', branch: north.name, units: 2 }] });
+    expect(again.sync?.flex).toEqual([{ publicationId: a.publicationId, on: true }]);
+    expect(flex.MLA1).toBe(true);
   });
 
   it('si el canal no deja cambiar Flex, no lo vuelve a intentar igual hasta el día siguiente', async () => {

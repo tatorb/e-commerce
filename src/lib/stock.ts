@@ -178,7 +178,12 @@ export async function syncStock(
     else result.failed.push({ publicationId: row.id, title: titleOrUntitled(row.title), error: r.error });
   }
   // Con sucursales con Flex: Flex sigue al stock de esas sucursales.
-  const flex = await syncFlex(db, { publicationIds: args.publicationIds, userId: args.userId ?? null });
+  const flex = await syncFlex(db, {
+    publicationIds: args.publicationIds,
+    userId: args.userId ?? null,
+    ...(args.budgetMs !== undefined ? { budgetMs: Math.max(0, args.budgetMs - (Date.now() - started)) } : {}),
+  });
+  if (flex.pending) result.pending = true;
   if (flex.changed.length > 0) result.flex = flex.changed;
   return result;
 }
@@ -207,7 +212,8 @@ export async function reconcileStock(db: Db, opts: { budgetMs: number }): Promis
 /** Cambia el stock de un producto. Si todavía no lo llevaba la app, empieza ahora. Después lo sube a sus publicaciones. */
 export async function setProductStock(
   db: Db,
-  args: { accountId: string; productId: string; userId: string; stock: unknown; now?: Date; branchId?: string | null },
+  // sync false: no sube nada ahora; quien llama lo sube después, todo junto.
+  args: { accountId: string; productId: string; userId: string; stock: unknown; now?: Date; branchId?: string | null; sync?: boolean },
 ): Promise<{ changed: number; sync: SyncResult }> {
   const product = await db.product.findFirst({
     where: { id: args.productId, accountId: args.accountId },
@@ -261,6 +267,7 @@ export async function setProductStock(
     events = await markStockAlarms(tx, changes, now);
   });
   await announceStockAlarms(db, events, now);
+  if (args.sync === false) return { changed, sync: { sent: 0, failed: [], pending: false } };
   const sync = await syncStock(db, {
     publicationIds: await affectedPublications(db, [product.id]),
     userId: args.userId,
