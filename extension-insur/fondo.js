@@ -116,6 +116,8 @@ async function leerListado(catalogo) {
   const candidatos = [];
   const sinProducto = [];
   let leidos = 0;
+  // Los nombres de los campos del primer artículo, sin sus valores.
+  let campos = [];
   let paginas = 1;
   let total = 0;
   for (let pagina = 0; pagina < paginas; pagina++) {
@@ -127,6 +129,7 @@ async function leerListado(catalogo) {
     if (!d || !Array.isArray(d.content)) throw new Corte('Insur respondió algo que la extensión no esperaba en el listado de artículos.');
     paginas = Number.isInteger(d.totalPages) && d.totalPages > 0 ? d.totalPages : paginas;
     total = Number.isInteger(d.totalElements) ? d.totalElements : total;
+    if (campos.length === 0 && d.content[0] && typeof d.content[0] === 'object') campos = Object.keys(d.content[0]).slice(0, 80);
     for (const articulo of d.content) {
       leidos++;
       const que = clasificar(articulo, catalogo);
@@ -138,7 +141,7 @@ async function leerListado(catalogo) {
   }
   // Una lectura a la que le falta una parte no se manda.
   if (total > 0 && leidos < total * 0.98) throw new Corte(`La lectura de Insur quedó incompleta: ${leidos} de ${total} artículos.`);
-  return { candidatos, sinProducto, leidos };
+  return { candidatos, sinProducto, leidos, campos };
 }
 
 /** Las fichas que tocan, de a una y con pausa, hasta donde dé el tiempo. Lo que no entra queda para la próxima corrida. */
@@ -187,6 +190,7 @@ async function mandar(origen, corrida, lectura, fichas, opciones, catalogo) {
     duracion_ms: ahora() - enCurso.desde,
     fichas_pendientes: fichas.pendientes,
     campos_de_la_ficha: fichas.campos,
+    campos_del_listado: lectura.campos,
     errores: [],
   });
 }

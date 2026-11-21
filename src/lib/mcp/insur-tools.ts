@@ -27,6 +27,15 @@ function runForClaude(run: InsurRunView, lists: readonly (typeof LISTS)[number][
     costos_que_cambiaron_mas_de_30_por_ciento: s.bigCosts,
     ventas_restadas: s.sales ? { ventas: s.sales.sales, unidades: s.sales.units } : null,
     fichas_que_quedaron_para_la_proxima: s.pendingFichas,
+    // Los nombres de los campos que trae Insur, sin valores: para saber qué hay, por ejemplo la moneda.
+    campos_del_listado_de_insur: s.listFields,
+    campos_de_la_ficha_de_insur: s.fichaFields,
+    costos_sospechosos_contra_el_costo_de_la_app: {
+      parecidos: s.suspiciousAgainst.near,
+      mas_de_30_por_ciento_menores: s.suspiciousAgainst.lower,
+      mas_de_30_por_ciento_mayores: s.suspiciousAgainst.higher,
+      sin_costo_en_la_app: s.suspiciousAgainst.none,
+    },
     ...(s.sync ? { subida_al_canal: { cantidades_subidas: s.sync.sent, no_se_pudo: s.sync.failed, ...(s.sync.pending ? { aviso: 'Quedaron cantidades por subir: las termina la pasada de cada hora.' } : {}) } } : {}),
     errores: run.errors,
     ...(wants('cambios')

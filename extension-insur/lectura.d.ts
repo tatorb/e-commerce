@@ -4,7 +4,7 @@ type Catalogo = { claves: Set<string>; marcas: Set<string>; cruces: Map<number, 
 export function normalizar(s: unknown): string;
 export function codigoSinMedida(codigo: unknown, medidaNombre: unknown): string;
 export function stockDe(articulo: Articulo): { cordoba: number; santaFe: number };
-export function costoDe(articulo: Articulo): { costo: number | null; sospechoso: boolean };
+export function costoDe(articulo: Articulo): { costo: number | null; sospechoso: boolean; veces: string | null };
 export function paraLaApp(articulo: Articulo, conCosto: boolean): Record<string, unknown>;
 export function clasificar(articulo: Articulo, catalogo: Catalogo): 'candidato' | 'sin_producto' | null;
 export function sinPrecios(v: unknown): unknown;

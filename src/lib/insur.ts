@@ -5,6 +5,7 @@ import {
   branchTargets,
   catalogKeys,
   checkCost,
+  COST_AGAINST_TEXT,
   depositOf,
   depositUnits,
   fichaChanges,
@@ -15,6 +16,7 @@ import {
   precodeMatches,
   slotIndex,
   stockJumps,
+  type CostAgainst,
   type FichaChange,
   type InsurFicha,
   type SlotRef,
@@ -220,11 +222,16 @@ export type InsurArticle = {
   santaFe: number;
   cost: number | null;
   suspicious: boolean;
+  // Cuántas veces el precio del proveedor es el costo, a grandes rasgos: lo calcula la extensión, sin mandar ese precio.
+  timesSupplier: string | null;
   ficha: InsurFicha | null;
 };
 
 const text = (v: unknown, max = 2000): string | null => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : typeof v === 'number' && Number.isFinite(v) ? String(v) : null);
 const cut = (s: string | null, max = 20_000) => (s === null ? null : s.slice(0, max));
+
+// Cuántas veces el precio del proveedor es el costo: solo estos tramos, para que no se pueda deducir el precio.
+const TIMES = ['hasta 2', 'entre 2 y 100', 'más de 100'];
 
 /** Los artículos como llegan de la extensión. Lo que no tiene id y código se descarta. */
 export function parseArticles(raw: unknown): InsurArticle[] {
@@ -248,6 +255,7 @@ export function parseArticles(raw: unknown): InsurArticle[] {
         santaFe: depositUnits(o.stock_santa_fe),
         cost: typeof o.costo === 'number' && Number.isFinite(o.costo) ? o.costo : null,
         suspicious: o.costo_sospechoso === true,
+        timesSupplier: TIMES.includes(String(o.costo_veces_proveedor)) ? String(o.costo_veces_proveedor) : null,
         ficha: f
           ? {
               precode: text(f.precodigo, 200),
@@ -304,6 +312,10 @@ export type RunSummary = {
   // Fichas que quedaron para la próxima corrida, y los campos que trae la ficha de Insur.
   pendingFichas: number | null;
   fichaFields: string[];
+  // Los nombres de los campos que trae el listado de Insur, sin valores.
+  listFields: string[];
+  // Los costos sospechosos, según cómo quedan contra el costo que ya tiene la app.
+  suspiciousAgainst: Record<CostAgainst, number>;
   sales: { sales: number; units: number } | null;
   sync: { sent: number; failed: number; pending: boolean } | null;
 };
@@ -321,6 +333,8 @@ const emptySummary = (): RunSummary => ({
   touched: [],
   pendingFichas: null,
   fichaFields: [],
+  listFields: [],
+  suspiciousAgainst: { near: 0, lower: 0, higher: 0, none: 0 },
   sales: null,
   sync: null,
 });
@@ -534,7 +548,14 @@ export async function receiveArticles(db: Db, args: { accountId: string; runId: 
       const measure = slotLabel(p, key);
       if (!cost.apply) {
         suspicious++;
-        push(summary.suspicious, { code: a.code, product: p.name, measure, reason: cost.reason });
+        // Sin montos: cómo queda contra el costo de la app y, a grandes rasgos, contra el precio del proveedor.
+        const notes = [cost.reason];
+        if (cost.against) {
+          summary.suspiciousAgainst[cost.against]++;
+          notes.push(COST_AGAINST_TEXT[cost.against]);
+          if (a.timesSupplier) notes.push(`El costo es ${a.timesSupplier} veces el precio del proveedor.`);
+        }
+        push(summary.suspicious, { code: a.code, product: p.name, measure, reason: notes.join(' ') });
       } else if (cost.changed) {
         costLoads[key] = cost.cost;
         costChanges++;
@@ -611,7 +632,7 @@ export async function receiveUnmatched(db: Db, args: { accountId: string; runId:
  */
 export async function closeRun(
   db: Db,
-  args: { accountId: string; runId: string; userId: string; durationMs?: number | null; pendingFichas?: number | null; fichaFields?: unknown; errors?: unknown; now?: Date },
+  args: { accountId: string; runId: string; userId: string; durationMs?: number | null; pendingFichas?: number | null; fichaFields?: unknown; listFields?: unknown; errors?: unknown; now?: Date },
 ) {
   const now = args.now ?? new Date();
   const run = await openRunRow(db, args.accountId, args.runId);
@@ -646,6 +667,7 @@ export async function closeRun(
   summary.sync = sync;
   summary.pendingFichas = typeof args.pendingFichas === 'number' && args.pendingFichas >= 0 ? Math.floor(args.pendingFichas) : null;
   summary.fichaFields = strings(args.fichaFields, 80).map((s) => s.slice(0, 60));
+  summary.listFields = strings(args.listFields, 80).map((s) => s.slice(0, 60));
   const errors = [...strings(run.errors, 200), ...strings(args.errors)];
   const done = await db.insurSyncRun.update({
     where: { id: run.id },

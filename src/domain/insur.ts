@@ -244,9 +244,26 @@ export const COST_JUMP = 0.3;
 
 export type CostCheck =
   // No se aplica: vacío, 0, negativo, o marcado como sospechoso al leerlo.
-  | { apply: false; reason: string }
+  // against: cómo queda el costo de Insur contra el que ya tiene la app, sin montos.
+  | { apply: false; reason: string; against?: CostAgainst }
   // Se aplica. changed: es distinto del que tenía. big: cambió más de 30 %.
   | { apply: true; cost: number; changed: boolean; big: boolean };
+
+/** El costo de Insur contra el de la app: parecido (hasta 30 % de diferencia), mucho menor, mucho mayor, o la app no tiene. */
+export type CostAgainst = 'near' | 'lower' | 'higher' | 'none';
+
+export function costAgainst(cost: number, current: number | null): CostAgainst {
+  if (current === null || current <= 0) return 'none';
+  if (Math.abs(cost - current) / current <= COST_JUMP) return 'near';
+  return cost < current ? 'lower' : 'higher';
+}
+
+export const COST_AGAINST_TEXT: Record<CostAgainst, string> = {
+  near: 'Es parecido al costo que ya tiene la app (hasta 30 % de diferencia).',
+  lower: 'Es más de 30 % menor que el costo que ya tiene la app.',
+  higher: 'Es más de 30 % mayor que el costo que ya tiene la app.',
+  none: 'La app no tiene un costo cargado para comparar.',
+};
 
 /**
  * Si el costo de Insur se aplica. suspicious lo calcula la extensión: el costo
@@ -256,7 +273,7 @@ export function checkCost(args: { cost: unknown; suspicious: boolean; current: n
   const cost = typeof args.cost === 'number' && Number.isFinite(args.cost) ? Math.round(args.cost * 100) / 100 : null;
   if (cost === null) return { apply: false, reason: 'Insur no tiene el costo cargado.' };
   if (cost <= 0) return { apply: false, reason: 'El costo de Insur es 0 o negativo.' };
-  if (args.suspicious) return { apply: false, reason: 'El costo de Insur es mayor que su precio del proveedor.' };
+  if (args.suspicious) return { apply: false, reason: 'El costo de Insur es mayor que su precio del proveedor.', against: costAgainst(cost, args.current) };
   const current = args.current;
   const changed = current === null || Math.round(current * 100) !== Math.round(cost * 100);
   const big = changed && current !== null && current > 0 && Math.abs(cost - current) / current > COST_JUMP;
