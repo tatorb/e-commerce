@@ -234,7 +234,8 @@ describe.skipIf(!url)('rendimiento en la base', () => {
     expect(d.rows[1].lastCorrection).toEqual({ at: ago(5), fields: expect.arrayContaining(['title', 'price']) });
     expect(d.rows[1].lastCorrection?.fields).toHaveLength(2);
     expect(d.rows[0].lastCorrection).toBeNull();
-    expect(d.totals).toEqual({ count: 2, visits: 92, sales: 2, conversion: 2.2 });
+    // Del período anterior no hay visitas leídas: no hay con qué comparar las visitas ni la conversión.
+    expect(d.totals).toEqual({ count: 2, visits: 92, sales: 2, conversion: 2.2, previous: { visits: null, comparableVisits: null, sales: 1, conversion: null } });
     expect(d.updatedAt).toEqual(ago(0.1));
     expect(d.options.brands).toEqual(['Otra marca', 'Persan']);
 

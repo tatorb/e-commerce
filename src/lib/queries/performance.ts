@@ -247,6 +247,13 @@ export async function loadPerformance(db: Db, accountId: string, f: PerformanceF
 
   const totalVisits = rows.reduce((s, r) => s + (r.visits ?? 0), 0);
   const totalSales = rows.reduce((s, r) => s + r.sales, 0);
+  // El período anterior, de las mismas publicaciones. Las visitas se comparan
+  // solo entre las que tienen el dato en los dos períodos, para que sea parejo.
+  const both = rows.filter((r) => r.visits !== null && r.previous.visits !== null);
+  const previousVisits = both.length > 0 ? both.reduce((s, r) => s + (r.previous.visits ?? 0), 0) : null;
+  const comparableVisits = both.length > 0 ? both.reduce((s, r) => s + (r.visits ?? 0), 0) : null;
+  const previousSales = rows.reduce((s, r) => s + r.previous.sales, 0);
+  const previousConversion = both.length > 0 ? conversionPct(previousVisits, both.reduce((s, r) => s + r.previous.sales, 0)) : null;
   // Los datos son tan nuevos como la lectura más vieja de las dos: visitas y ventas.
   const visitsAt = publications.reduce<Date | null>((m, p) => (p.visitsReadAt && (!m || p.visitsReadAt > m) ? p.visitsReadAt : m), null);
   const salesAt = readers.reduce<Date | null>((m, r) => (r.readAt && (!m || r.readAt > m) ? r.readAt : m), null);
@@ -254,7 +261,14 @@ export async function loadPerformance(db: Db, accountId: string, f: PerformanceF
 
   return {
     rows,
-    totals: { count: rows.length, visits: totalVisits, sales: totalSales, conversion: conversionPct(totalVisits, totalSales) },
+    totals: {
+      count: rows.length,
+      visits: totalVisits,
+      sales: totalSales,
+      conversion: conversionPct(totalVisits, totalSales),
+      // comparableVisits: las visitas de ahora de las mismas publicaciones que tienen las de antes.
+      previous: { visits: previousVisits, comparableVisits, sales: previousSales, conversion: previousConversion },
+    },
     // Cuántas todavía no tienen las visitas por día leídas.
     withoutVisits: rows.filter((r) => r.visits === null).length,
     updatedAt,

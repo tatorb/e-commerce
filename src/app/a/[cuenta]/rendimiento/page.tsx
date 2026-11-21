@@ -3,6 +3,7 @@ import { ArrowDown, ArrowUp, ExternalLink } from 'lucide-react';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Card } from '@/components/ui/card';
+import { Delta } from '@/components/performance/Delta';
 import { FilterSelect } from '@/components/performance/FilterSelect';
 import { ReadVisitsButton } from '@/components/performance/ReadVisitsButton';
 import { CHANNEL_STATUS_LABEL } from '@/domain/channel-status';
@@ -60,22 +61,6 @@ function Header({ href, active, dir, children, className }: { href: string; acti
   );
 }
 
-/** Debajo de un número: cómo cambió contra el período anterior, con flecha verde o roja. */
-function Delta({ change, previous }: { change: Change | null; previous: string }) {
-  if (!change) return <p className="mt-0.5 text-[11px] leading-tight text-muted-foreground" title="No hay datos del período anterior para comparar.">sin dato</p>;
-  const up = change.dir === 'up';
-  const down = change.dir === 'down';
-  return (
-    <p
-      className={cn('mt-0.5 inline-flex items-center gap-0.5 text-[11px] font-medium leading-tight', up && 'text-emerald-600 dark:text-emerald-400', down && 'text-red-600 dark:text-red-400', !up && !down && 'text-muted-foreground')}
-      title={`Período anterior: ${previous}`}
-    >
-      {up ? <ArrowUp className="h-3 w-3" aria-label="subió" /> : down ? <ArrowDown className="h-3 w-3" aria-label="bajó" /> : null}
-      {change.text}
-    </p>
-  );
-}
-
 /** Las visitas de las últimas semanas, en una línea chica. */
 function Sparkline({ weeks }: { weeks: { from: string; visits: number | null }[] | null }) {
   const known = (weeks ?? []).filter((w) => w.visits !== null);
@@ -105,11 +90,17 @@ function Sparkline({ weeks }: { weeks: { from: string; visits: number | null }[]
   );
 }
 
-function Figure({ label, value }: { label: string; value: string }) {
+function Figure({ label, value, change, previous }: { label: string; value: string; change?: Change | null; previous?: string }) {
   return (
     <div className="min-w-0 bg-card px-4 py-3">
       <p className="text-2xl font-bold tabular-nums leading-none">{value}</p>
       <p className="mt-1.5 text-xs text-muted-foreground">{label}</p>
+      {previous !== undefined ? (
+        <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[11px] text-muted-foreground">
+          <Delta change={change ?? null} previous={previous} className="mt-0" />
+          <span>antes {previous}</span>
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -134,6 +125,8 @@ export default async function PerformancePage({ params, searchParams }: { params
     const dir = f.sort === sort ? (f.dir === 'desc' ? 'asc' : 'desc') : sort === 'publicacion' ? 'asc' : 'desc';
     return `?${new URLSearchParams({ ...keep, orden: sort, dir }).toString()}`;
   };
+  // Lo mismo, en los días anteriores: para comparar las cifras de arriba.
+  const prev = data.totals.previous;
   const head = (sort: Sort) => ({ href: sortHref(sort), active: f.sort === sort, dir: f.dir });
 
   return (
@@ -187,9 +180,14 @@ export default async function PerformancePage({ params, searchParams }: { params
           {/* Las líneas entre las cifras son el fondo que asoma entre ellas. */}
           <div className="grid grid-cols-2 gap-px bg-border sm:grid-cols-4">
             <Figure label={data.totals.count === 1 ? 'publicación' : 'publicaciones'} value={num(data.totals.count)} />
-            <Figure label={`visitas en ${f.period} días`} value={num(data.totals.visits)} />
-            <Figure label={`unidades vendidas en ${f.period} días`} value={num(data.totals.sales)} />
-            <Figure label="conversión del grupo" value={pct(data.totals.conversion)} />
+            <Figure
+              label={`visitas en ${f.period} días`}
+              value={num(data.totals.visits)}
+              change={countChange(prev.comparableVisits, prev.visits)}
+              previous={prev.visits === null ? 'sin dato' : num(prev.visits)}
+            />
+            <Figure label={`unidades vendidas en ${f.period} días`} value={num(data.totals.sales)} change={countChange(data.totals.sales, prev.sales)} previous={num(prev.sales)} />
+            <Figure label="conversión del grupo" value={pct(data.totals.conversion)} change={pointsChange(data.totals.conversion, prev.conversion)} previous={pct(prev.conversion)} />
           </div>
         </Card>
 

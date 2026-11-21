@@ -1,3 +1,5 @@
+import { Delta } from '@/components/performance/Delta';
+import type { Change } from '@/domain/performance';
 import Link from 'next/link';
 import { AlertTriangle, Clock, ExternalLink, MessageSquareWarning, Truck } from 'lucide-react';
 import type * as React from 'react';
@@ -129,7 +131,22 @@ export function ReaderNotice({ status, timeZone }: { status: ReaderStatus[]; tim
 export const money = (n: number | null | undefined, currency = 'ARS') => formatPrice(n ?? null, currency);
 
 /** Un importe con su nombre, para los resúmenes. */
-export function Figure({ label, value, hint, tone, big }: { label: string; value: React.ReactNode; hint?: React.ReactNode; tone?: 'good' | 'bad' | 'muted'; big?: boolean }) {
+export function Figure({
+  label,
+  value,
+  hint,
+  tone,
+  big,
+  delta,
+}: {
+  label: string;
+  value: React.ReactNode;
+  hint?: React.ReactNode;
+  tone?: 'good' | 'bad' | 'muted';
+  big?: boolean;
+  // Cómo cambió contra el período anterior, y cuánto era.
+  delta?: { change: Change | null; previous: string; neutral?: boolean };
+}) {
   return (
     <div className="min-w-0 space-y-0.5">
       <p className="text-xs text-muted-foreground">{label}</p>
@@ -144,6 +161,12 @@ export function Figure({ label, value, hint, tone, big }: { label: string; value
       >
         {value}
       </p>
+      {delta ? (
+        <p className="flex flex-wrap items-center gap-x-1.5 text-[11px] text-muted-foreground">
+          <Delta change={delta.change} previous={delta.previous} neutral={delta.neutral} className="mt-0" />
+          <span>antes {delta.previous}</span>
+        </p>
+      ) : null}
       {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
     </div>
   );

@@ -4,12 +4,13 @@ import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PageBody } from '@/components/dashboard/PageBody';
 import { Card } from '@/components/ui/card';
 import { Figure, money, PeriodPicker, ReaderNotice, SaleLine, SalesHeader } from '@/components/sales/SalesParts';
-import { parsePeriod } from '@/domain/sales';
+import { amountChange, countChange } from '@/domain/performance';
+import { parsePeriod, previousPeriod } from '@/domain/sales';
 import { formatPercent } from '@/domain/money';
 import { accountForTitle, requireAccount } from '@/lib/auth/account';
 import { prisma } from '@/lib/db';
 import { plural } from '@/lib/format';
-import { dispatchDueCount, listSales, parseSaleFilter, parseShipFilter, readerStatus, SALE_FILTERS, SHIP_FILTERS } from '@/lib/sales/queries';
+import { dispatchDueCount, listSales, parseSaleFilter, parseShipFilter, readerStatus, SALE_FILTERS, salesSummary, SHIP_FILTERS } from '@/lib/sales/queries';
 import { cn } from '@/lib/utils/cn';
 
 // Ventas: la lista de las ventas de la cuenta en un período, con filtros por
@@ -35,10 +36,13 @@ export default async function SalesPage({ params, searchParams }: { params: Prom
   const ship = parseShipFilter(search.envio);
   const q = (search.q ?? '').slice(0, 100);
   const page = Math.max(1, Number(search.pagina) || 1);
-  const [list, status, due] = await Promise.all([
+  // El período anterior, con los mismos filtros, para comparar lo que suma.
+  const before = previousPeriod(period, tz);
+  const [list, status, due, was] = await Promise.all([
     listSales(prisma, account.id, { period, state, ship, q, page }),
     readerStatus(prisma, account.id),
     dispatchDueCount(prisma, account.id, now, tz),
+    salesSummary(prisma, account.id, { period: before, state, ship, q }),
   ]);
   const s = list.summary;
   const keepPeriod = { periodo: period.key === 'fechas' ? undefined : period.key, desde: period.key === 'fechas' ? period.fromDay : undefined, hasta: period.key === 'fechas' ? period.toDay : undefined };
@@ -60,10 +64,22 @@ export default async function SalesPage({ params, searchParams }: { params: Prom
         <PeriodPicker period={period} keep={{ estado: keep.estado, envio: keep.envio, q: keep.q }} />
 
         <Card className="grid grid-cols-2 gap-4 p-4 md:grid-cols-3 xl:grid-cols-6">
-          <Figure label={`Vendido · ${period.label.toLowerCase()}`} value={money(s.sold)} hint={`${plural(s.count, 'venta pagada', 'ventas pagadas')}, ${plural(s.units, 'unidad', 'unidades')}`} big />
-          <Figure label="Comisión del canal" value={money(-s.fee)} tone="muted" hint="Con el costo de las cuotas" />
-          <Figure label="Envíos a cargo" value={money(-s.shipping)} tone="muted" hint={s.shippingUnknown ? `Falta el costo de ${plural(s.shippingUnknown, 'envío', 'envíos')}` : undefined} />
-          <Figure label="Queda después del canal" value={money(s.net)} />
+          <Figure
+            label={`Vendido · ${period.label.toLowerCase()}`}
+            value={money(s.sold)}
+            hint={`${plural(s.count, 'venta pagada', 'ventas pagadas')}, ${plural(s.units, 'unidad', 'unidades')}`}
+            delta={{ change: amountChange(s.sold, was.sold), previous: `${money(was.sold)}, ${plural(was.count, 'venta', 'ventas')}` }}
+            big
+          />
+          <Figure label="Comisión del canal" value={money(-s.fee)} tone="muted" hint="Con el costo de las cuotas" delta={{ change: amountChange(s.fee, was.fee), previous: money(-was.fee), neutral: true }} />
+          <Figure
+            label="Envíos a cargo"
+            value={money(-s.shipping)}
+            tone="muted"
+            hint={s.shippingUnknown ? `Falta el costo de ${plural(s.shippingUnknown, 'envío', 'envíos')}` : undefined}
+            delta={{ change: amountChange(s.shipping, was.shipping), previous: money(-was.shipping), neutral: true }}
+          />
+          <Figure label="Queda después del canal" value={money(s.net)} delta={{ change: amountChange(s.net, was.net), previous: money(was.net) }} />
           <Figure
             label="Ganancia"
             value={s.withCost.count > 0 ? money(s.withCost.profit) : '—'}
@@ -73,14 +89,20 @@ export default async function SalesPage({ params, searchParams }: { params: Prom
                 ? `${s.withCost.marginPct !== null ? `${formatPercent(s.withCost.marginPct)} sobre el costo` : ''}${s.withoutCost > 0 ? `. ${plural(s.withoutCost, 'venta', 'ventas')} sin costo cargado` : ''}`
                 : 'Cargá el costo de reposición en cada producto'
             }
+            delta={{
+              change: s.withCost.count > 0 && was.withCost.count > 0 ? amountChange(s.withCost.profit, was.withCost.profit) : null,
+              previous: was.withCost.count > 0 ? money(was.withCost.profit) : 'sin dato',
+            }}
           />
           <Figure
             label="Canceladas"
             value={plural(s.cancelled.count, 'venta', 'ventas')}
             tone="muted"
             hint={s.claims > 0 ? `${plural(s.claims, 'reclamo', 'reclamos')} en el período` : s.pending.count > 0 ? `${plural(s.pending.count, 'sin pagar', 'sin pagar')}` : undefined}
+            delta={{ change: countChange(s.cancelled.count, was.cancelled.count), previous: String(was.cancelled.count), neutral: true }}
           />
         </Card>
+        <p className="-mt-2 text-xs text-muted-foreground">Cada cifra se compara con el período anterior: {before.label.toLowerCase()}.</p>
 
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap gap-1.5">

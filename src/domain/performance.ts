@@ -103,6 +103,15 @@ export function countChange(current: number | null, previous: number | null): Ch
   return { dir: pct > 0 ? 'up' : 'down', text: `${Math.abs(pct).toLocaleString('es-AR')} %` };
 }
 
+/** El cambio de un importe, en %, contra el valor absoluto del anterior: una ganancia puede venir de una pérdida. Null si falta alguno. */
+export function amountChange(current: number | null, previous: number | null): Change | null {
+  if (current === null || previous === null) return null;
+  if (previous === 0) return current === 0 ? { dir: 'same', text: 'igual' } : { dir: current > 0 ? 'up' : 'down', text: 'desde 0' };
+  const pct = Math.round(((current - previous) / Math.abs(previous)) * 100);
+  if (pct === 0) return { dir: 'same', text: 'igual' };
+  return { dir: pct > 0 ? 'up' : 'down', text: `${Math.abs(pct).toLocaleString('es-AR')} %` };
+}
+
 /** El cambio de la conversión, en puntos: de 2,1 % a 2,9 % son 0,8 puntos. Null si falta alguna. */
 export function pointsChange(current: number | null, previous: number | null): Change | null {
   if (current === null || previous === null) return null;

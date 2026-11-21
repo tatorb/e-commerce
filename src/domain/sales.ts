@@ -351,6 +351,31 @@ export function parsePeriod(search: { periodo?: string; desde?: string; hasta?: 
   }
 }
 
+/**
+ * El período anterior, para comparar: la misma cantidad de días justo antes.
+ * De "El mes pasado", el mes de antes; de "Este mes", los mismos días del mes pasado.
+ */
+export function previousPeriod(period: Period, timeZone: string): Period {
+  const days = Math.round((Date.parse(`${period.toDay}T00:00:00Z`) - Date.parse(`${period.fromDay}T00:00:00Z`)) / 86_400_000) + 1;
+  let fromDay = addDays(period.fromDay, -days);
+  let toDay = addDays(period.fromDay, -1);
+  if (period.key === 'mes-pasado') fromDay = addMonths(period.fromDay, -1);
+  if (period.key === 'mes') {
+    fromDay = addMonths(period.fromDay, -1);
+    // Sin pasarse del último día del mes pasado.
+    const same = addDays(fromDay, days - 1);
+    toDay = same < toDay ? same : toDay;
+  }
+  return {
+    key: 'fechas',
+    from: dayStartIn(fromDay, timeZone)!,
+    to: dayStartIn(addDays(toDay, 1), timeZone)!,
+    fromDay,
+    toDay,
+    label: fromDay === toDay ? `El ${dayText(fromDay)}` : `Del ${dayText(fromDay)} al ${dayText(toDay)}`,
+  };
+}
+
 // ───────────────────────────── Los envíos ─────────────────────────────
 
 /** Si hay que despacharlo y lo despacha la tienda: los del depósito del canal los despacha el canal. */

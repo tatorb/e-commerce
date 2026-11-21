@@ -301,6 +301,12 @@ export async function listSales(db: Db, accountId: string, f: SalesFilters) {
   return { rows, total, page, pages: Math.max(1, Math.ceil(total / take)), summary: summaryOf(everything) };
 }
 
+/** Lo que suman las ventas que coinciden con los filtros, sin la lista: para comparar con otro período. */
+export async function salesSummary(db: Db, accountId: string, f: SalesFilters): Promise<SalesSummary> {
+  const all = await db.sale.findMany({ where: where(accountId, f), select: ROW_SELECT });
+  return summaryOf(await shape(db, accountId, all, await saleParams(db, accountId)));
+}
+
 function summaryOf(rows: SaleRow[]): SalesSummary {
   return summarize(rows.map((r) => ({ state: r.state, claim: r.claim, units: r.units, money: r.money, itemsAmount: Number(r.lines.reduce((s, l) => s + l.unitPrice * l.quantity, 0)) })));
 }

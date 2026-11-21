@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { countChange, pointsChange, weeklyVisits } from '@/domain/performance';
+import { amountChange, countChange, pointsChange, weeklyVisits } from '@/domain/performance';
+import { parsePeriod, previousPeriod } from '@/domain/sales';
 
 // Rendimiento: el cambio contra el período anterior y las visitas por semana. Datos inventados.
 
@@ -33,5 +34,34 @@ describe('las visitas de las últimas 8 semanas', () => {
     expect(weeks).toHaveLength(8);
     expect(weeks.map((w) => w.visits)).toEqual([null, null, null, null, null, 14, 14, 14]);
     expect(weeks[7].from).toBe('2026-11-07');
+  });
+
+  it('el cambio de un importe se mide contra el valor absoluto del anterior', () => {
+    expect(amountChange(150, 100)).toEqual({ dir: 'up', text: '50 %' });
+    expect(amountChange(50, 100)).toEqual({ dir: 'down', text: '50 %' });
+    // De perder 100 a ganar 100 es subir.
+    expect(amountChange(100, -100)).toEqual({ dir: 'up', text: '200 %' });
+    expect(amountChange(-50, 0)).toEqual({ dir: 'down', text: 'desde 0' });
+    expect(amountChange(0, 0)).toEqual({ dir: 'same', text: 'igual' });
+    expect(amountChange(null, 10)).toBeNull();
+  });
+
+  it('el período anterior: los mismos días justo antes, o el mes de antes', () => {
+    const tz = 'America/Argentina/Buenos_Aires';
+    const now = new Date('2026-11-21T15:00:00Z');
+    const before = (search: { periodo?: string; desde?: string; hasta?: string }) => {
+      const p = previousPeriod(parsePeriod(search, now, tz), tz);
+      return [p.fromDay, p.toDay];
+    };
+    expect(before({ periodo: '7d' })).toEqual(['2026-11-08', '2026-11-14']);
+    expect(before({ periodo: '30d' })).toEqual(['2026-09-23', '2026-10-22']);
+    expect(before({ periodo: 'hoy' })).toEqual(['2026-11-20', '2026-11-20']);
+    // Este mes va contra los mismos días del mes pasado.
+    expect(before({ periodo: 'mes' })).toEqual(['2026-10-01', '2026-10-21']);
+    expect(before({ periodo: 'mes-pasado' })).toEqual(['2026-09-01', '2026-09-30']);
+    expect(before({ desde: '2026-11-10', hasta: '2026-11-12' })).toEqual(['2026-11-07', '2026-11-09']);
+    const p = previousPeriod(parsePeriod({ periodo: '7d' }, now, tz), tz);
+    expect(p.label).toBe('Del 08/11/2026 al 14/11/2026');
+    expect(p.to.toISOString()).toBe('2026-11-15T03:00:00.000Z');
   });
 });
