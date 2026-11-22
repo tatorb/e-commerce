@@ -1,7 +1,8 @@
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { finalPriceOf } from '@/domain/pricing';
 import { proposeCompetition, proposeLifecycle, type ProductFacts } from '@/domain/promo/classify';
-import { COMPETITION_LABEL, LIFECYCLE_LABEL, readTags, type Competition, type Lifecycle, type TagGroup } from '@/domain/promo/tags';
+import { COMPETITION_LABEL, LIFECYCLE_LABEL, readMode, readTags, type Competition, type Lifecycle, type Mode, type TagGroup } from '@/domain/promo/tags';
+import { COST_SELECT, costLines } from '@/lib/costs';
 import { loadPromoSettings } from './settings';
 
 // Clasificar los productos de la cuenta: la regla propone el ciclo de vida y
@@ -15,7 +16,15 @@ const DAY = 86_400_000;
 export type Classified = {
   productId: string;
   name: string;
+  // Quién arma su almanaque. En Manual las etiquetas no cambian nada hasta pasarlo a Automático.
+  mode: Mode;
   facts: ProductFacts;
+  // Por qué la regla no pudo proponerle un ciclo de vida. Vacío: se pudo.
+  unclassified: string[];
+  // Por qué no pudo decidir la competencia. Vacío: se pudo.
+  competitionUnknown: string[];
+  // Lo que le falta para que sus publicaciones puedan entrar a una oferta, aunque tenga etiquetas.
+  offerBlockers: string[];
   // Lo que propone la regla para cada grupo, y si cambia lo que tiene.
   lifecycle: { now: Lifecycle | null; proposed: Lifecycle | null; why: string; manual: boolean; changes: boolean } | null;
   competition: { now: Competition | null; proposed: Competition | null; why: string; manual: boolean; changes: boolean } | null;
@@ -39,6 +48,25 @@ async function unitsSince(db: Db, accountId: string, from: Date): Promise<Map<st
  * apply: además lo guarda en los que no están puestos a mano. Devuelve los
  * productos a los que les cambió alguna etiqueta.
  */
+/** El conteo de una clasificación: cuántos se vieron, cuántos se pudieron clasificar y cuántos no, por motivo. */
+export function classifySummary(products: Classified[]) {
+  const count = (list: string[]) => {
+    const by = new Map<string, number>();
+    for (const m of list) by.set(m, (by.get(m) ?? 0) + 1);
+    return [...by].map(([motivo, productos]) => ({ motivo, productos }));
+  };
+  return {
+    seen: products.length,
+    manual: products.filter((p) => p.mode === 'MANUAL').length,
+    auto: products.filter((p) => p.mode === 'AUTO').length,
+    classifiable: products.filter((p) => p.unclassified.length === 0).length,
+    unclassified: count(products.flatMap((p) => p.unclassified)),
+    competitionUnknown: count(products.flatMap((p) => p.competitionUnknown)),
+    // Los que no tienen costo en ninguna o en alguna medida: no pueden entrar a ofertas.
+    withoutCost: products.filter((p) => p.offerBlockers.length > 0).length,
+  };
+}
+
 export async function classifyAccount(
   db: Db,
   // includeManual: también los que están en Manual, para ponerles las etiquetas al pasarlos a Automático.
@@ -49,7 +77,8 @@ export async function classifyAccount(
   const rules = settings.rules.classify;
   const live: Prisma.PublicationWhereInput = { externalId: { not: null }, channelStatus: { notIn: ['CLOSED', 'DELETED'] }, channelCopy: { is: { missingSince: null } } };
   const products = await db.product.findMany({
-    // Las etiquetas son de los productos en Automático: en Manual el almanaque lo arma una persona y no las usa.
+    // Sin includeManual, solo los que están en Automático, que son los que usan las etiquetas para armar su almanaque.
+    // No pide costo, ni etiquetas, ni pipeline: alcanza con una publicación viva en el canal.
     where: { accountId: args.accountId, publications: { some: live }, ...(args.productIds ? { id: { in: args.productIds } } : {}), ...(args.includeManual ? {} : { promotion: { is: { mode: 'AUTO' } } }) },
     orderBy: { name: 'asc' },
     select: {
@@ -57,6 +86,7 @@ export async function classifyAccount(
       name: true,
       stockSince: true,
       promotion: true,
+      ...COST_SELECT,
       stock: { select: { quantity: true } },
       publications: {
         where: live,
@@ -128,10 +158,18 @@ export async function classifyAccount(
     const comp = proposeCompetition(facts, rules);
     // "Sin competencia" solo se pone a mano: la regla no la saca.
     const compKeeps = comp !== null && comp.value === null && tags.competition === 'NO_COMPETITION';
+    // Sin costo no se sabe cuánto deja una oferta: sus publicaciones quedan afuera de todas.
+    const costs = costLines(p).lines;
+    const missing = costs.filter((l) => l.cost === null);
+    const allMissing = missing.length > 0 && missing.length === costs.length;
     const row: Classified = {
       productId: p.id,
       name: p.name,
+      mode: readMode(p.promotion?.mode),
       facts,
+      unclassified: life ? [] : ['La tienda todavía no terminó de traer sus ventas viejas: sin eso no se sabe cuánto vendió.'],
+      competitionUnknown: comp ? [] : [facts.competitorPrice === null ? 'No tiene competidores cargados con precio.' : 'No tiene una publicación sin cuotas con precio para comparar.'],
+      offerBlockers: missing.length === 0 ? [] : [allMissing ? 'Sin costo cargado.' : `Sin costo cargado en ${missing.map((l) => l.label || 'una medida').join(', ')}.`],
       lifecycle: life ? { now: tags.lifecycle, proposed: life.value, why: life.why, manual: manual.has('lifecycle'), changes: !manual.has('lifecycle') && life.value !== tags.lifecycle } : null,
       competition: comp ? { now: tags.competition, proposed: compKeeps ? tags.competition : comp.value, why: comp.why, manual: manual.has('competition'), changes: !manual.has('competition') && !compKeeps && comp.value !== tags.competition } : null,
     };

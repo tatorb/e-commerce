@@ -305,11 +305,52 @@ describe.skipIf(!url)('promociones en la base', () => {
 
     // La regla propone el ciclo de vida, y no pisa lo puesto a mano.
     const proposed = await run('classify_promotions', { cuenta: 'prueba', todos: true });
-    expect(proposed).toMatchObject({ productos: 1, cambian: 0, guardado: false });
+    expect(proposed).toMatchObject({ conteo: { productos_vistos: 1, en_automatico: 1, en_manual: 0, clasificables: 1, no_clasificables: 0, sin_costo_no_pueden_entrar_a_ofertas: 0 }, cambian: 0, guardado: false });
     expect(proposed.propuestas[0].propone[0]).toContain('Está puesto a mano');
     // Qué competencia hay que relevar: no tiene ninguna cargada.
     const stale = await run('refresh_competitors', { cuenta: 'prueba' });
     expect(stale.productos).toEqual([expect.objectContaining({ producto: 'Subconjunto SP-9', por_que: 'No tiene competidores cargados.' })]);
+  });
+
+  it('la regla mira todos los productos con publicaciones, en Manual o en Automático, y al que no puede clasificar lo lista con el motivo', async () => {
+    process.env.DATABASE_URL ??= url;
+    const { PROMO_TOOLS } = await import('@/lib/mcp/promo-tools');
+    const tool = (name: string) => PROMO_TOOLS.find((t) => t.name === name)!;
+    await db.user.create({ data: { id: 'u1', name: 'Persona', email: 'persona@example.com' } });
+    const ctx = { db, userId: 'u1', access: { isAdmin: true, permissions: {}, accountIds: [] }, baseUrl: 'https://app.ejemplo.com' };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const run = async (name: string, args: Record<string, unknown>): Promise<any> => tool(name).run(ctx, tool(name).input.parse(args));
+    // Otro producto: nunca se tocó en Promociones (nace en Manual), sin costo, publicado hace mucho, y de la tienda no se sabe cuánto vendió.
+    const other = await db.product.create({ data: { accountId, name: 'Amortiguador AM-1', brand: 'Persan' } });
+    const pub = await db.publication.create({ data: { productId: other.id, storeId, externalId: 'MLA900', title: 'Amortiguador', price: 50_000, installments: 0, channelStatus: 'ACTIVE', createdAt: day(-200) } });
+    await db.channelCopy.create({ data: { publicationId: pub.id, readAt: now, status: 'ACTIVE', installments: 0, price: 50_000 } });
+    // Uno sin publicaciones en el canal no entra.
+    await db.product.create({ data: { accountId, name: 'Sin publicar', brand: 'Persan' } });
+
+    const all = await run('classify_promotions', { cuenta: 'prueba', todos: true });
+    expect(all.conteo).toMatchObject({ productos_vistos: 2, en_manual: 1, en_automatico: 1, clasificables: 1, no_clasificables: 1, sin_costo_no_pueden_entrar_a_ofertas: 1 });
+    expect(all.conteo.no_clasificables_por_motivo).toEqual([{ motivo: expect.stringContaining('no terminó de traer sus ventas'), productos: 1 }]);
+    expect(all.conteo.sin_poder_decidir_la_competencia).toEqual([{ motivo: 'No tiene competidores cargados con precio.', productos: 2 }]);
+    expect(all.propuestas.map((p: { producto: string }) => p.producto)).toEqual(['Amortiguador AM-1', 'Subconjunto SP-9']);
+    expect(all.propuestas[0]).toMatchObject({ modo: 'manual', no_se_pudo_clasificar: [expect.stringContaining('ventas viejas')], para_entrar_a_ofertas_falta: ['Sin costo cargado.'], cambia: false });
+    expect(all.propuestas[1]).toMatchObject({ modo: 'automatico', cambia: true });
+    expect(all.propuestas[1].no_se_pudo_clasificar).toBeUndefined();
+    // Por filtro de marca, lo mismo; y solo los que no se pudieron.
+    expect((await run('classify_promotions', { cuenta: 'prueba', filtro: { marca: 'Persan' } })).conteo.productos_vistos).toBe(2);
+    const failed = await run('classify_promotions', { cuenta: 'prueba', todos: true, solo_los_que_no_se_pudieron: true });
+    expect(failed).toMatchObject({ encontrados: 1, conteo: { productos_vistos: 2 } });
+    // De a tandas.
+    expect(await run('classify_promotions', { cuenta: 'prueba', todos: true, limite: 1 })).toMatchObject({ encontrados: 2, quedan: 1 });
+    // Solo mostrar no guarda nada.
+    expect(await db.productPromotion.findUnique({ where: { productId: other.id } })).toBeNull();
+    // Con un costo sin cargar en una sola medida, dice cuál.
+    const [, second] = await db.productVariant.findMany({ where: { productId }, orderBy: { position: 'asc' } });
+    await db.productCost.deleteMany({ where: { productId, key: variantKey(second)! } });
+    const partial = await run('classify_promotions', { cuenta: 'prueba', todos: true });
+    expect(partial.propuestas[1].para_entrar_a_ofertas_falta).toEqual(['Sin costo cargado en 0,60 mm.']);
+    // Las etiquetas a mano también llegan a un producto en Manual.
+    expect(await run('set_promotion_tags', { cuenta: 'prueba', publicaciones: [pub.id], ciclo_de_vida: 'madurada' })).toBeTruthy();
+    expect(await db.productPromotion.findUniqueOrThrow({ where: { productId: other.id } })).toMatchObject({ lifecycle: 'MATURE', mode: 'MANUAL' });
   });
 
   it('con control de stock y poco stock, no se abren ofertas nuevas en esa medida', async () => {

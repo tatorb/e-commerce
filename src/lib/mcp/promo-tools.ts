@@ -3,7 +3,7 @@ import { planLabel } from '@/domain/pricing';
 import { EVENT_TIERS, EVENT_TIER_LABEL, hasNoEnd, LAYER_LABEL } from '@/domain/promo/plan';
 import { COMPETITION_LABEL, LIFECYCLE_LABEL, OBJECTIVE_LABEL, PRIORITY_LABEL, tagsText, type Competition, type Lifecycle, type Priority, type PromoTags, type TagGroup } from '@/domain/promo/tags';
 import { applyDue, dueActions, putBack, takeOut, type AppliedAction, type DueAction } from '@/lib/promo/apply';
-import { classifiedText, classifyAccount } from '@/lib/promo/classify';
+import { classifiedText, classifyAccount, classifySummary } from '@/lib/promo/classify';
 import { cancelSlot, deleteEvent, listEvents, saveEvent, saveManualSlot } from '@/lib/promo/manual';
 import { loadLog, measureDue } from '@/lib/promo/measure';
 import { loadOverview, OVERVIEW_STATES, overviewProductIds, type OverviewFilter } from '@/lib/promo/overview';
@@ -507,12 +507,15 @@ const classify = defineTool({
   name: 'classify_promotions',
   section: 'promociones',
   title: 'Proponer las etiquetas de promociones',
-  description: `La regla propone el ciclo de vida y la competencia de cada producto y explica por qué, con los números de las reglas de la cuenta (get_promotion_settings): la antigüedad de la publicación, las ventas de 90 y de 30 días, el stock y el precio del competidor más barato contra el sin cuotas. Con solo_mostrar (lo de siempre) no cambia nada: devuelve lo propuesto y cuáles cambiarían. Con solo_mostrar: false, lo guarda en los que no están puestos a mano y rearma el almanaque de los que cambiaron. "Sin competencia", control de stock y prioridad no los propone la regla: se ponen con set_promotion_tags. ${CONFIRM}`,
+  description: `La regla propone el ciclo de vida y la competencia de cada producto y explica por qué, con los números de las reglas de la cuenta (get_promotion_settings): la antigüedad de la publicación, las ventas de 90 y de 30 días, el stock y el precio del competidor más barato contra el sin cuotas. Mira todos los productos con publicaciones activas en el canal, estén en Manual o en Automático: no hace falta costo, ni etiquetas previas, ni que estén en el pipeline. El que no se puede clasificar vuelve igual, con el motivo en no_se_pudo_clasificar. conteo dice cuántos productos se vieron, cuántos se pudieron clasificar y cuántos no por cada motivo, cuántos están en cada modo y cuántos no tienen costo. Aparte de las etiquetas, para_entrar_a_ofertas_falta dice lo que le impide a sus publicaciones entrar a una oferta (sin costo no se sabe cuánto deja). Las etiquetas solo cambian el almanaque de los productos en Automático; en uno en Manual quedan guardadas y se usan si se lo pasa a Automático (set_promotion_mode). Con solo_mostrar (lo de siempre) no cambia nada: devuelve lo propuesto y cuáles cambiarían. Con solo_mostrar: false, lo guarda en los que no están puestos a mano y rearma el almanaque de los que cambiaron y están en Automático. "Sin competencia", control de stock y prioridad no los propone la regla: se ponen con set_promotion_tags. La lista viene de a tandas: limite y desde. ${CONFIRM}`,
   input: z.object({
     cuenta: accountArg,
     ...productsArg,
     solo_mostrar: z.boolean().optional().describe('Sin decir, true: solo muestra. false = guarda lo propuesto.'),
     solo_los_que_cambian: z.boolean().optional().describe('true = devuelve solo los productos a los que les cambiaría alguna etiqueta.'),
+    solo_los_que_no_se_pudieron: z.boolean().optional().describe('true = devuelve solo los que no se pudieron clasificar o no pueden entrar a ofertas, con su motivo.'),
+    limite: z.number().int().min(1).max(200).optional().describe('Cuántos productos devolver en la lista. Sin decir, 100. El conteo es siempre de todos.'),
+    desde: z.number().int().min(0).optional().describe('Desde qué producto de la lista, para seguir.'),
   }),
   readOnly: false,
   destructive: false,
@@ -521,29 +524,48 @@ const classify = defineTool({
       const account = await resolveAccount(ctx, args.cuenta);
       const productIds = args.todos ? undefined : await resolveProducts(ctx, account, args);
       const apply = args.solo_mostrar === false;
-      const r = await classifyAccount(ctx.db, { accountId: account.id, productIds, apply });
+      const r = await classifyAccount(ctx.db, { accountId: account.id, productIds, apply, includeManual: true });
       let replanned = 0;
       if (apply) {
         const started = Date.now();
-        for (const productId of r.changed) {
+        // El almanaque de las reglas es de los productos en Automático.
+        for (const productId of r.changed.filter((id) => r.products.find((p) => p.productId === id)?.mode === 'AUTO')) {
           if (Date.now() - started > BUDGET_MS) break;
           await generatePlan(ctx.db, { accountId: account.id, productId });
           replanned++;
         }
       }
-      const shown = args.solo_los_que_cambian ? r.products.filter((p) => r.changed.includes(p.productId)) : r.products;
+      const c = classifySummary(r.products);
+      const shown = r.products.filter((p) => (!args.solo_los_que_cambian || r.changed.includes(p.productId)) && (!args.solo_los_que_no_se_pudieron || p.unclassified.length > 0 || p.offerBlockers.length > 0));
+      const from = args.desde ?? 0;
+      const limit = args.limite ?? 100;
       return {
-        productos: r.products.length,
+        conteo: {
+          productos_vistos: c.seen,
+          en_manual: c.manual,
+          en_automatico: c.auto,
+          clasificables: c.classifiable,
+          no_clasificables: c.seen - c.classifiable,
+          no_clasificables_por_motivo: c.unclassified,
+          sin_poder_decidir_la_competencia: c.competitionUnknown,
+          sin_costo_no_pueden_entrar_a_ofertas: c.withoutCost,
+        },
         cambian: r.changed.length,
         guardado: apply,
         ...(apply ? { almanaques_rearmados: replanned } : {}),
-        propuestas: shown.slice(0, 150).map((p) => ({
+        encontrados: shown.length,
+        propuestas: shown.slice(from, from + limit).map((p) => ({
           producto: p.name,
+          modo: p.mode === 'AUTO' ? 'automatico' : 'manual',
           datos: { dias_publicada: p.facts.ageDays, vendidas_90_dias: p.facts.units90, vendidas_30_dias: p.facts.units30, stock: p.facts.stock, precio_sin_cuotas: p.facts.flatPrice, competidor_mas_barato: p.facts.competitorPrice },
           propone: classifiedText(p),
+          ...(p.unclassified.length > 0 ? { no_se_pudo_clasificar: p.unclassified } : {}),
+          ...(p.competitionUnknown.length > 0 ? { competencia_sin_decidir: p.competitionUnknown } : {}),
+          ...(p.offerBlockers.length > 0 ? { para_entrar_a_ofertas_falta: p.offerBlockers } : {}),
           cambia: r.changed.includes(p.productId),
         })),
-        ...(shown.length > 150 ? { aviso: 'Hay más: pedilos por filtro.' } : {}),
+        ...(shown.length > from + limit ? { quedan: shown.length - from - limit, aviso: 'Hay más: seguí con desde.' } : {}),
+        que_hace_falta: 'Para que la regla lo vea: tener al menos una publicación activa o pausada en el canal. Para que la clasificación cambie su almanaque: estar en Automático. Para que sus publicaciones entren a una oferta: tener el costo cargado.',
       };
     }),
 });
